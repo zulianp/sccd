@@ -112,6 +112,311 @@ static void remap_idx(
         });
 }
 
+namespace sccd_detail {
+
+// Compute begin/end candidate window indices for the current AABB
+static inline void compute_candidate_window(
+    const geom_t fimin,
+    const geom_t fimax,
+    const geom_t* const SFEM_RESTRICT second_xmax,
+    const geom_t* const SFEM_RESTRICT second_xmin,
+    const size_t second_count,
+    const size_t start_guess,
+    size_t& out_begin,
+    size_t& out_end)
+{
+    size_t begin = start_guess;
+    for (; begin < second_count; ++begin) {
+        if (fimin < second_xmax[begin]) {
+            break;
+        }
+    }
+    size_t end = begin;
+    for (; end < second_count; ++end) {
+        if (fimax < second_xmin[end]) {
+            break;
+        }
+    }
+    out_begin = begin;
+    out_end = end;
+}
+
+// Replicate A (fi) box values into SoA scratch for SIMD chunk processing
+static inline void prepare_A_replicated(
+    geom_t** const SFEM_RESTRICT aabbs,
+    const size_t fi,
+    geom_t* const SFEM_RESTRICT A_minx,
+    geom_t* const SFEM_RESTRICT A_miny,
+    geom_t* const SFEM_RESTRICT A_minz,
+    geom_t* const SFEM_RESTRICT A_maxx,
+    geom_t* const SFEM_RESTRICT A_maxy,
+    geom_t* const SFEM_RESTRICT A_maxz)
+{
+    const geom_t aminx = aabbs[0][fi];
+    const geom_t aminy = aabbs[1][fi];
+    const geom_t aminz = aabbs[2][fi];
+    const geom_t amaxx = aabbs[3][fi];
+    const geom_t amaxy = aabbs[4][fi];
+    const geom_t amaxz = aabbs[5][fi];
+    for (int k = 0; k < AABB_DISJOINT_CHUNK_SIZE; ++k) {
+        A_minx[k] = aminx;
+        A_miny[k] = aminy;
+        A_minz[k] = aminz;
+        A_maxx[k] = amaxx;
+        A_maxy[k] = amaxy;
+        A_maxz[k] = amaxz;
+    }
+}
+
+// Load a block of B boxes [start, start+len) into SoA buffers
+static inline void prepare_B_block(
+    geom_t** const SFEM_RESTRICT aabbs,
+    const size_t start,
+    const size_t len,
+    geom_t* const SFEM_RESTRICT B_minx,
+    geom_t* const SFEM_RESTRICT B_miny,
+    geom_t* const SFEM_RESTRICT B_minz,
+    geom_t* const SFEM_RESTRICT B_maxx,
+    geom_t* const SFEM_RESTRICT B_maxy,
+    geom_t* const SFEM_RESTRICT B_maxz)
+{
+    for (size_t lane = 0; lane < len; ++lane) {
+        const size_t j = start + lane;
+        B_minx[lane] = aabbs[0][j];
+        B_miny[lane] = aabbs[1][j];
+        B_minz[lane] = aabbs[2][j];
+        B_maxx[lane] = aabbs[3][j];
+        B_maxy[lane] = aabbs[4][j];
+        B_maxz[lane] = aabbs[5][j];
+    }
+}
+
+// Force remaining lanes to be disjoint by setting B outside A
+static inline void tail_fill_B(
+    const geom_t amaxx0,
+    const geom_t amaxy0,
+    const geom_t amaxz0,
+    const size_t len,
+    geom_t* const SFEM_RESTRICT B_minx,
+    geom_t* const SFEM_RESTRICT B_miny,
+    geom_t* const SFEM_RESTRICT B_minz,
+    geom_t* const SFEM_RESTRICT B_maxx,
+    geom_t* const SFEM_RESTRICT B_maxy,
+    geom_t* const SFEM_RESTRICT B_maxz)
+{
+    for (size_t lane = len; lane < AABB_DISJOINT_CHUNK_SIZE; ++lane) {
+        B_minx[lane] = amaxx0 + 1;
+        B_miny[lane] = amaxy0 + 1;
+        B_minz[lane] = amaxz0 + 1;
+        B_maxx[lane] = amaxx0;
+        B_maxy[lane] = amaxy0;
+        B_maxz[lane] = amaxz0;
+    }
+}
+
+template <int nxe>
+static inline void load_ev(
+    idx_t** const SFEM_RESTRICT elements,
+    const idx_t elem_idx,
+    const size_t stride,
+    idx_t (&out)[nxe])
+{
+    for (int v = 0; v < nxe; ++v) {
+        out[v] = elements[v][elem_idx * stride];
+    }
+}
+
+template <int n1, int n2>
+static inline bool shares_vertex(const idx_t (&a)[n1], const idx_t (&b)[n2])
+{
+    for (int i = 0; i < n1; ++i) {
+        for (int j = 0; j < n2; ++j) {
+            if (a[i] == b[j]) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// -----------------------------
+// Scalar fallbacks (two lists)
+template <int F, int S>
+static inline size_t scalar_count_range_two_lists(
+    geom_t** const SFEM_RESTRICT first_aabbs,
+    const size_t fi,
+    geom_t** const SFEM_RESTRICT second_aabbs,
+    const idx_t* const SFEM_RESTRICT second_idx,
+    idx_t** const SFEM_RESTRICT second_elements,
+    const size_t second_stride,
+    const idx_t (&ev)[F],
+    const size_t begin,
+    const size_t end)
+{
+    size_t count = 0;
+    const geom_t aminx = first_aabbs[0][fi];
+    const geom_t aminy = first_aabbs[1][fi];
+    const geom_t aminz = first_aabbs[2][fi];
+    const geom_t amaxx = first_aabbs[3][fi];
+    const geom_t amaxy = first_aabbs[4][fi];
+    const geom_t amaxz = first_aabbs[5][fi];
+    for (size_t j = begin; j < end; ++j) {
+        if (disjoint(
+                aminx, aminy, aminz, amaxx, amaxy, amaxz, second_aabbs[0][j],
+                second_aabbs[1][j], second_aabbs[2][j], second_aabbs[3][j],
+                second_aabbs[4][j], second_aabbs[5][j])) {
+            continue;
+        }
+        bool share = false;
+        if constexpr (S > 1) {
+            const idx_t jidx = second_idx[j];
+            idx_t sev[S];
+            for (int v = 0; v < S; ++v) {
+                sev[v] = second_elements[v][jidx * second_stride];
+            }
+            share = shares_vertex<F, S>(ev, sev);
+        } else {
+            for (int a = 0; a < F; ++a) {
+                if (ev[a] == second_idx[j]) {
+                    share = true;
+                    break;
+                }
+            }
+        }
+        count += share ? 0 : 1;
+    }
+    return count;
+}
+
+template <int F, int S>
+static inline size_t scalar_collect_range_two_lists(
+    geom_t** const SFEM_RESTRICT first_aabbs,
+    const size_t fi,
+    const idx_t first_idxi,
+    geom_t** const SFEM_RESTRICT second_aabbs,
+    const idx_t* const SFEM_RESTRICT second_idx,
+    idx_t** const SFEM_RESTRICT second_elements,
+    const size_t second_stride,
+    const idx_t (&ev)[F],
+    const size_t begin,
+    const size_t end,
+    idx_t* const SFEM_RESTRICT first_out,
+    idx_t* const SFEM_RESTRICT second_out)
+{
+    size_t count = 0;
+    const geom_t aminx = first_aabbs[0][fi];
+    const geom_t aminy = first_aabbs[1][fi];
+    const geom_t aminz = first_aabbs[2][fi];
+    const geom_t amaxx = first_aabbs[3][fi];
+    const geom_t amaxy = first_aabbs[4][fi];
+    const geom_t amaxz = first_aabbs[5][fi];
+    for (size_t j = begin; j < end; ++j) {
+        if (disjoint(
+                aminx, aminy, aminz, amaxx, amaxy, amaxz, second_aabbs[0][j],
+                second_aabbs[1][j], second_aabbs[2][j], second_aabbs[3][j],
+                second_aabbs[4][j], second_aabbs[5][j])) {
+            continue;
+        }
+        bool share = false;
+        const idx_t jidx = second_idx[j];
+        if constexpr (S > 1) {
+            idx_t sev[S];
+            for (int v = 0; v < S; ++v) {
+                sev[v] = second_elements[v][jidx * second_stride];
+            }
+            share = shares_vertex<F, S>(ev, sev);
+        } else {
+            for (int a = 0; a < F; ++a) {
+                if (ev[a] == jidx) {
+                    share = true;
+                    break;
+                }
+            }
+        }
+        if (!share) {
+            first_out[count] = first_idxi;
+            second_out[count] = jidx;
+            count += 1;
+        }
+    }
+    return count;
+}
+
+// -----------------------------
+// Scalar fallbacks (self)
+template <int N>
+static inline size_t scalar_count_range_self(
+    geom_t** const SFEM_RESTRICT aabbs,
+    const size_t fi,
+    idx_t** const SFEM_RESTRICT elements,
+    const idx_t* const SFEM_RESTRICT idx,
+    const size_t stride,
+    const idx_t (&ev)[N],
+    const size_t begin,
+    const size_t end)
+{
+    size_t count = 0;
+    const geom_t aminx = aabbs[0][fi];
+    const geom_t aminy = aabbs[1][fi];
+    const geom_t aminz = aabbs[2][fi];
+    const geom_t amaxx = aabbs[3][fi];
+    const geom_t amaxy = aabbs[4][fi];
+    const geom_t amaxz = aabbs[5][fi];
+    for (size_t j = begin; j < end; ++j) {
+        if (disjoint(
+                aminx, aminy, aminz, amaxx, amaxy, amaxz, aabbs[0][j], aabbs[1][j],
+                aabbs[2][j], aabbs[3][j], aabbs[4][j], aabbs[5][j])) {
+            continue;
+        }
+        const idx_t jidx = idx[j];
+        idx_t sev[N];
+        load_ev<N>(elements, jidx, stride, sev);
+        const bool share = shares_vertex<N, N>(ev, sev);
+        count += share ? 0 : 1;
+    }
+    return count;
+}
+
+template <int N>
+static inline size_t scalar_collect_range_self(
+    geom_t** const SFEM_RESTRICT aabbs,
+    const size_t fi,
+    const idx_t idxi,
+    idx_t** const SFEM_RESTRICT elements,
+    const idx_t* const SFEM_RESTRICT idx,
+    const size_t stride,
+    const idx_t (&ev)[N],
+    const size_t begin,
+    const size_t end,
+    idx_t* const SFEM_RESTRICT first_out,
+    idx_t* const SFEM_RESTRICT second_out)
+{
+    size_t count = 0;
+    const geom_t aminx = aabbs[0][fi];
+    const geom_t aminy = aabbs[1][fi];
+    const geom_t aminz = aabbs[2][fi];
+    const geom_t amaxx = aabbs[3][fi];
+    const geom_t amaxy = aabbs[4][fi];
+    const geom_t amaxz = aabbs[5][fi];
+    for (size_t j = begin; j < end; ++j) {
+        if (disjoint(
+                aminx, aminy, aminz, amaxx, amaxy, amaxz, aabbs[0][j], aabbs[1][j],
+                aabbs[2][j], aabbs[3][j], aabbs[4][j], aabbs[5][j])) {
+            continue;
+        }
+        const idx_t jidx = idx[j];
+        idx_t sev[N];
+        load_ev<N>(elements, jidx, stride, sev);
+        if (!shares_vertex<N, N>(ev, sev)) {
+            first_out[count] = std::min(idxi, jidx);
+            second_out[count] = std::max(idxi, jidx);
+            count += 1;
+        }
+    }
+    return count;
+}
+
+} // namespace sccd_detail
 template <int first_nxe, int second_nxe>
 bool lean_count_overlaps(
     const int sort_axis,
@@ -172,57 +477,20 @@ bool lean_count_overlaps(
                     }
                 }
 
-                // Determine end of candidate range
+                // Determine candidate window [ni, end)
                 size_t end = ni;
-                for (; end < second_count; end++) {
-                    if (fimax < second_xmin[end]) {
-                        break;
-                    }
-                }
+                sccd_detail::compute_candidate_window(
+                    fimin, fimax, second_xmax, second_xmin, second_count, ni, ni, end);
 
                 if (ni >= end) {
                     continue;
                 }
                 // Scalar fallback for small candidate ranges
                 if (end - ni < AABB_DISJOINT_NOVECTORIZE_THRESHOLD) {
-                    size_t count = 0;
-                    for (size_t j = ni; j < end; ++j) {
-                        // AABB disjoint check (inclusive overlap)
-                        if (disjoint(
-                                fi_min[0], fi_min[1], fi_min[2], fi_max[0],
-                                fi_max[1], fi_max[2], second_aabbs[0][j],
-                                second_aabbs[1][j], second_aabbs[2][j],
-                                second_aabbs[3][j], second_aabbs[4][j],
-                                second_aabbs[5][j])) {
-                            continue;
-                        }
-                        // Shared-vertex filter
-                        bool share = false;
-                        if (second_nxe > 1) {
-                            const idx_t jidx = second_idx[j];
-                            idx_t second_ev[second_nxe];
-                            for (int v = 0; v < second_nxe; v++) {
-                                second_ev[v] =
-                                    second_elements[v][jidx * second_stride];
-                            }
-                            for (int a = 0; a < first_nxe && !share; ++a) {
-                                for (int b = 0; b < second_nxe; ++b) {
-                                    if (ev[a] == second_ev[b]) {
-                                        share = true;
-                                        break;
-                                    }
-                                }
-                            }
-                        } else {
-                            for (int a = 0; a < first_nxe; ++a) {
-                                if (ev[a] == second_idx[j]) {
-                                    share = true;
-                                    break;
-                                }
-                            }
-                        }
-                        count += share ? 0 : 1;
-                    }
+                    size_t count = sccd_detail::scalar_count_range_two_lists<
+                        first_nxe, second_nxe>(first_aabbs, fi, second_aabbs,
+                                              second_idx, second_elements,
+                                              second_stride, ev, ni, end);
                     ccdptr[fi + 1] = count;
                     continue;
                 }
@@ -238,14 +506,8 @@ bool lean_count_overlaps(
                 geom_t A_maxx[AABB_DISJOINT_CHUNK_SIZE];
                 geom_t A_maxy[AABB_DISJOINT_CHUNK_SIZE];
                 geom_t A_maxz[AABB_DISJOINT_CHUNK_SIZE];
-                for (int k = 0; k < AABB_DISJOINT_CHUNK_SIZE; ++k) {
-                    A_minx[k] = fi_min[0];
-                    A_miny[k] = fi_min[1];
-                    A_minz[k] = fi_min[2];
-                    A_maxx[k] = fi_max[0];
-                    A_maxy[k] = fi_max[1];
-                    A_maxz[k] = fi_max[2];
-                }
+                sccd_detail::prepare_A_replicated(
+                    first_aabbs, fi, A_minx, A_miny, A_minz, A_maxx, A_maxy, A_maxz);
 
                 for (; noffset < end;) {
                     const size_t chunk_len = std::min(
@@ -258,25 +520,13 @@ bool lean_count_overlaps(
                     geom_t B_maxy[AABB_DISJOINT_CHUNK_SIZE];
                     geom_t B_maxz[AABB_DISJOINT_CHUNK_SIZE];
 
-                    for (size_t lane = 0; lane < chunk_len; ++lane) {
-                        const size_t j = noffset + lane;
-                        B_minx[lane] = second_aabbs[0][j];
-                        B_miny[lane] = second_aabbs[1][j];
-                        B_minz[lane] = second_aabbs[2][j];
-                        B_maxx[lane] = second_aabbs[3][j];
-                        B_maxy[lane] = second_aabbs[4][j];
-                        B_maxz[lane] = second_aabbs[5][j];
-                    }
+                    sccd_detail::prepare_B_block(
+                        second_aabbs, noffset, chunk_len, B_minx, B_miny, B_minz,
+                        B_maxx, B_maxy, B_maxz);
                     // Tail-safe fill: force disjoint
-                    for (size_t lane = chunk_len;
-                         lane < AABB_DISJOINT_CHUNK_SIZE; ++lane) {
-                        B_minx[lane] = A_maxx[0] + 1;
-                        B_miny[lane] = A_maxy[0] + 1;
-                        B_minz[lane] = A_maxz[0] + 1;
-                        B_maxx[lane] = A_maxx[0];
-                        B_maxy[lane] = A_maxy[0];
-                        B_maxz[lane] = A_maxz[0];
-                    }
+                    sccd_detail::tail_fill_B(
+                        A_maxx[0], A_maxy[0], A_maxz[0], chunk_len, B_minx, B_miny,
+                        B_minz, B_maxx, B_maxy, B_maxz);
 
                     uint32_t dmask[AABB_DISJOINT_CHUNK_SIZE];
                     vdisjoint(
@@ -410,49 +660,11 @@ void lean_collect_overlaps(
 
                 // Scalar fallback for small candidate ranges
                 if (end - ni < AABB_DISJOINT_NOVECTORIZE_THRESHOLD) {
-                    size_t count = 0;
-                    for (size_t j = ni; j < end; ++j) {
-                        // AABB disjoint check (inclusive overlap)
-                        if (disjoint(
-                                first_aabbs[0][fi], first_aabbs[1][fi],
-                                first_aabbs[2][fi], first_aabbs[3][fi],
-                                first_aabbs[4][fi], first_aabbs[5][fi],
-                                second_aabbs[0][j], second_aabbs[1][j],
-                                second_aabbs[2][j], second_aabbs[3][j],
-                                second_aabbs[4][j], second_aabbs[5][j])) {
-                            continue;
-                        }
-                        // Shared-vertex filter
-                        bool share = false;
-                        const idx_t second_idxi = second_idx[j];
-                        if (second_nxe > 1) {
-                            idx_t second_ev[second_nxe];
-                            for (int v = 0; v < second_nxe; v++) {
-                                second_ev[v] =
-                                    second_elements[v][second_idxi * second_stride];
-                            }
-                            for (int a = 0; a < first_nxe && !share; ++a) {
-                                for (int b = 0; b < second_nxe; ++b) {
-                                    if (ev[a] == second_ev[b]) {
-                                        share = true;
-                                        break;
-                                    }
-                                }
-                            }
-                        } else {
-                            for (int a = 0; a < first_nxe; ++a) {
-                                if (ev[a] == second_idxi) {
-                                    share = true;
-                                    break;
-                                }
-                            }
-                        }
-                        if (!share) {
-                            first_local_elements[count] = first_idxi;
-                            second_local_elements[count] = second_idxi;
-                            count += 1;
-                        }
-                    }
+                    size_t count = sccd_detail::scalar_collect_range_two_lists<
+                        first_nxe, second_nxe>(
+                        first_aabbs, fi, first_idxi, second_aabbs, second_idx,
+                        second_elements, second_stride, ev, ni, end,
+                        first_local_elements, second_local_elements);
                     assert(expected_count == count);
                     continue;
                 }
@@ -468,14 +680,8 @@ void lean_collect_overlaps(
                 geom_t A_maxx[AABB_DISJOINT_CHUNK_SIZE];
                 geom_t A_maxy[AABB_DISJOINT_CHUNK_SIZE];
                 geom_t A_maxz[AABB_DISJOINT_CHUNK_SIZE];
-                for (int k = 0; k < AABB_DISJOINT_CHUNK_SIZE; ++k) {
-                    A_minx[k] = first_aabbs[0][fi];
-                    A_miny[k] = first_aabbs[1][fi];
-                    A_minz[k] = first_aabbs[2][fi];
-                    A_maxx[k] = first_aabbs[3][fi];
-                    A_maxy[k] = first_aabbs[4][fi];
-                    A_maxz[k] = first_aabbs[5][fi];
-                }
+                sccd_detail::prepare_A_replicated(
+                    first_aabbs, fi, A_minx, A_miny, A_minz, A_maxx, A_maxy, A_maxz);
 
                 for (; noffset < end;) {
                     const size_t chunk_len = std::min(
@@ -488,25 +694,13 @@ void lean_collect_overlaps(
                     geom_t B_maxy[AABB_DISJOINT_CHUNK_SIZE];
                     geom_t B_maxz[AABB_DISJOINT_CHUNK_SIZE];
 
-                    for (size_t lane = 0; lane < chunk_len; ++lane) {
-                        const size_t j = noffset + lane;
-                        B_minx[lane] = second_aabbs[0][j];
-                        B_miny[lane] = second_aabbs[1][j];
-                        B_minz[lane] = second_aabbs[2][j];
-                        B_maxx[lane] = second_aabbs[3][j];
-                        B_maxy[lane] = second_aabbs[4][j];
-                        B_maxz[lane] = second_aabbs[5][j];
-                    }
+                    sccd_detail::prepare_B_block(
+                        second_aabbs, noffset, chunk_len, B_minx, B_miny, B_minz,
+                        B_maxx, B_maxy, B_maxz);
                     // Tail-safe fill: force disjoint
-                    for (size_t lane = chunk_len;
-                         lane < AABB_DISJOINT_CHUNK_SIZE; ++lane) {
-                        B_minx[lane] = A_maxx[0] + 1;
-                        B_miny[lane] = A_maxy[0] + 1;
-                        B_minz[lane] = A_maxz[0] + 1;
-                        B_maxx[lane] = A_maxx[0];
-                        B_maxy[lane] = A_maxy[0];
-                        B_maxz[lane] = A_maxz[0];
-                    }
+                    sccd_detail::tail_fill_B(
+                        A_maxx[0], A_maxy[0], A_maxz[0], chunk_len, B_minx, B_miny,
+                        B_minz, B_maxx, B_maxy, B_maxz);
 
                     uint32_t dmask[AABB_DISJOINT_CHUNK_SIZE];
                     vdisjoint(
@@ -613,33 +807,9 @@ bool lean_count_self_overlaps(
 
                 // Scalar fallback for small candidate ranges
                 if (end - noffset < AABB_DISJOINT_NOVECTORIZE_THRESHOLD) {
-                    size_t count = 0;
-                    for (size_t j = noffset; j < end; ++j) {
-                        // AABB disjoint check (inclusive overlap)
-                        if (disjoint(
-                                aabbs[0][fi], aabbs[1][fi], aabbs[2][fi],
-                                aabbs[3][fi], aabbs[4][fi], aabbs[5][fi],
-                                aabbs[0][j], aabbs[1][j], aabbs[2][j],
-                                aabbs[3][j], aabbs[4][j], aabbs[5][j])) {
-                            continue;
-                        }
-                        // Shared-vertex filter
-                        bool share = false;
-                        const idx_t jidx = idx[j];
-                        idx_t second_ev[nxe];
-                        for (int v = 0; v < nxe; v++) {
-                            second_ev[v] = elements[v][jidx * stride];
-                        }
-                        for (int a = 0; a < nxe && !share; ++a) {
-                            for (int b = 0; b < nxe; ++b) {
-                                if (ev[a] == second_ev[b]) {
-                                    share = true;
-                                    break;
-                                }
-                            }
-                        }
-                        count += share ? 0 : 1;
-                    }
+                    size_t count =
+                        sccd_detail::scalar_count_range_self<nxe>(
+                            aabbs, fi, elements, idx, stride, ev, noffset, end);
                     ccdptr[fi + 1] = count;
                     continue;
                 }
@@ -654,15 +824,8 @@ bool lean_count_self_overlaps(
                 geom_t A_maxx[AABB_DISJOINT_CHUNK_SIZE];
                 geom_t A_maxy[AABB_DISJOINT_CHUNK_SIZE];
                 geom_t A_maxz[AABB_DISJOINT_CHUNK_SIZE];
-
-                for (int k = 0; k < AABB_DISJOINT_CHUNK_SIZE; ++k) {
-                    A_minx[k] = aabbs[0][fi];
-                    A_miny[k] = aabbs[1][fi];
-                    A_minz[k] = aabbs[2][fi];
-                    A_maxx[k] = aabbs[3][fi];
-                    A_maxy[k] = aabbs[4][fi];
-                    A_maxz[k] = aabbs[5][fi];
-                }
+                sccd_detail::prepare_A_replicated(
+                    aabbs, fi, A_minx, A_miny, A_minz, A_maxx, A_maxy, A_maxz);
 
                 for (; noffset < end;) {
                     const size_t chunk_len = std::min(
@@ -675,25 +838,13 @@ bool lean_count_self_overlaps(
                     geom_t B_maxy[AABB_DISJOINT_CHUNK_SIZE];
                     geom_t B_maxz[AABB_DISJOINT_CHUNK_SIZE];
 
-                    for (size_t lane = 0; lane < chunk_len; ++lane) {
-                        const size_t j = noffset + lane;
-                        B_minx[lane] = aabbs[0][j];
-                        B_miny[lane] = aabbs[1][j];
-                        B_minz[lane] = aabbs[2][j];
-                        B_maxx[lane] = aabbs[3][j];
-                        B_maxy[lane] = aabbs[4][j];
-                        B_maxz[lane] = aabbs[5][j];
-                    }
+                    sccd_detail::prepare_B_block(
+                        aabbs, noffset, chunk_len, B_minx, B_miny, B_minz, B_maxx,
+                        B_maxy, B_maxz);
                     // Tail-safe fill: force disjoint
-                    for (size_t lane = chunk_len;
-                         lane < AABB_DISJOINT_CHUNK_SIZE; ++lane) {
-                        B_minx[lane] = A_maxx[0] + 1;
-                        B_miny[lane] = A_maxy[0] + 1;
-                        B_minz[lane] = A_maxz[0] + 1;
-                        B_maxx[lane] = A_maxx[0];
-                        B_maxy[lane] = A_maxy[0];
-                        B_maxz[lane] = A_maxz[0];
-                    }
+                    sccd_detail::tail_fill_B(
+                        A_maxx[0], A_maxy[0], A_maxz[0], chunk_len, B_minx, B_miny,
+                        B_minz, B_maxx, B_maxy, B_maxz);
 
                     // Disjoint array mask -> per-lane skip logic
                     uint32_t mask[AABB_DISJOINT_CHUNK_SIZE];
@@ -796,37 +947,9 @@ void lean_collect_self_overlaps(
 
                 // Scalar fallback for small candidate ranges
                 if (end - noffset < AABB_DISJOINT_NOVECTORIZE_THRESHOLD) {
-                    size_t count = 0;
-                    for (size_t j = noffset; j < end; ++j) {
-                        // AABB disjoint check (inclusive overlap)
-                        if (disjoint(
-                                aabbs[0][fi], aabbs[1][fi], aabbs[2][fi],
-                                aabbs[3][fi], aabbs[4][fi], aabbs[5][fi],
-                                aabbs[0][j], aabbs[1][j], aabbs[2][j],
-                                aabbs[3][j], aabbs[4][j], aabbs[5][j])) {
-                            continue;
-                        }
-                        // Shared-vertex filter
-                        const idx_t jidx = idx[j];
-                        idx_t second_ev[nxe];
-                        for (int v = 0; v < nxe; v++) {
-                            second_ev[v] = elements[v][jidx * stride];
-                        }
-                        bool share = false;
-                        for (int a = 0; a < nxe && !share; ++a) {
-                            for (int b = 0; b < nxe; ++b) {
-                                if (ev[a] == second_ev[b]) {
-                                    share = true;
-                                    break;
-                                }
-                            }
-                        }
-                        if (!share) {
-                            first_local_elements[count] = std::min(idxi, jidx);
-                            second_local_elements[count] = std::max(idxi, jidx);
-                            count += 1;
-                        }
-                    }
+                    size_t count = sccd_detail::scalar_collect_range_self<nxe>(
+                        aabbs, fi, idxi, elements, idx, stride, ev, noffset, end,
+                        first_local_elements, second_local_elements);
                     assert(expected_count == count);
                     continue;
                 }
@@ -842,15 +965,8 @@ void lean_collect_self_overlaps(
                 geom_t A_maxx[AABB_DISJOINT_CHUNK_SIZE];
                 geom_t A_maxy[AABB_DISJOINT_CHUNK_SIZE];
                 geom_t A_maxz[AABB_DISJOINT_CHUNK_SIZE];
-
-                for (int k = 0; k < AABB_DISJOINT_CHUNK_SIZE; ++k) {
-                    A_minx[k] = aabbs[0][fi];
-                    A_miny[k] = aabbs[1][fi];
-                    A_minz[k] = aabbs[2][fi];
-                    A_maxx[k] = aabbs[3][fi];
-                    A_maxy[k] = aabbs[4][fi];
-                    A_maxz[k] = aabbs[5][fi];
-                }
+                sccd_detail::prepare_A_replicated(
+                    aabbs, fi, A_minx, A_miny, A_minz, A_maxx, A_maxy, A_maxz);
 
                 // Determine end of candidate range using original loop
                 // semantics
@@ -866,25 +982,13 @@ void lean_collect_self_overlaps(
                     geom_t B_maxy[AABB_DISJOINT_CHUNK_SIZE];
                     geom_t B_maxz[AABB_DISJOINT_CHUNK_SIZE];
 
-                    for (size_t lane = 0; lane < chunk_len; ++lane) {
-                        const size_t j = noffset + lane;
-                        B_minx[lane] = aabbs[0][j];
-                        B_miny[lane] = aabbs[1][j];
-                        B_minz[lane] = aabbs[2][j];
-                        B_maxx[lane] = aabbs[3][j];
-                        B_maxy[lane] = aabbs[4][j];
-                        B_maxz[lane] = aabbs[5][j];
-                    }
+                    sccd_detail::prepare_B_block(
+                        aabbs, noffset, chunk_len, B_minx, B_miny, B_minz, B_maxx,
+                        B_maxy, B_maxz);
                     // Tail-safe fill: force disjoint
-                    for (size_t lane = chunk_len;
-                         lane < AABB_DISJOINT_CHUNK_SIZE; ++lane) {
-                        B_minx[lane] = A_maxx[0] + 1;
-                        B_miny[lane] = A_maxy[0] + 1;
-                        B_minz[lane] = A_maxz[0] + 1;
-                        B_maxx[lane] = A_maxx[0];
-                        B_maxy[lane] = A_maxy[0];
-                        B_maxz[lane] = A_maxz[0];
-                    }
+                    sccd_detail::tail_fill_B(
+                        A_maxx[0], A_maxy[0], A_maxz[0], chunk_len, B_minx, B_miny,
+                        B_minz, B_maxx, B_maxy, B_maxz);
 
                     // Disjoint array mask -> per-lane skip logic and write
                     // pairs
