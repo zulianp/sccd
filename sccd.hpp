@@ -486,13 +486,15 @@ bool lean_count_self_overlaps(
                         B_maxz[lane] = A_maxz[0];
                     }
 
-                    // Candidate mask = not disjoint
-                    const unsigned disj_bits = vdisjoint_mask(
-                        A_minx, A_miny, A_minz, A_maxx, A_maxy, A_maxz, B_minx,
-                        B_miny, B_minz, B_maxx, B_maxy, B_maxz, chunk_len);
-                    unsigned cand_bits =
-                        ((chunk_len >= 32 ? 0xFFFFFFFFu : ((1u << chunk_len) - 1u)))
-                        & ~disj_bits;
+                    // Disjoint array mask -> candidate bitmask
+                    uint32_t mask[AABB_DISJOINT_CHUNK_SIZE];
+                    vdisjoint(
+                        A_minx, A_miny, A_minz, A_maxx, A_maxy, A_maxz, B_minx, B_miny,
+                        B_minz, B_maxx, B_maxy, B_maxz, mask);
+                    unsigned cand_bits = 0;
+                    for (size_t lane = 0; lane < chunk_len; ++lane) {
+                        cand_bits |= (mask[lane] ? 0u : (1u << lane));
+                    }
                     // Shared-vertex mask using original indices
                     const unsigned share_bits = vshare_edge_shares_vertex_mask(
                         idx, noffset, chunk_len, (int)stride,
@@ -622,13 +624,15 @@ void lean_collect_self_overlaps(
                         B_maxz[lane] = A_maxz[0];
                     }
 
-                    // Candidate mask = not disjoint
-                    const unsigned disj_bits = vdisjoint_mask(
-                        A_minx, A_miny, A_minz, A_maxx, A_maxy, A_maxz, B_minx,
-                        B_miny, B_minz, B_maxx, B_maxy, B_maxz, chunk_len);
-                    unsigned cand_bits =
-                        ((chunk_len >= 32 ? 0xFFFFFFFFu : ((1u << chunk_len) - 1u)))
-                        & ~disj_bits;
+                    // Disjoint array mask -> candidate bitmask
+                    uint32_t mask[AABB_DISJOINT_CHUNK_SIZE];
+                    vdisjoint(
+                        A_minx, A_miny, A_minz, A_maxx, A_maxy, A_maxz, B_minx, B_miny,
+                        B_minz, B_maxx, B_maxy, B_maxz, mask);
+                    unsigned cand_bits = 0;
+                    for (size_t lane = 0; lane < chunk_len; ++lane) {
+                        cand_bits |= (mask[lane] ? 0u : (1u << lane));
+                    }
 
                     // Compute share mask via SIMD helper and write valid pairs
                     const unsigned share_bits = vshare_edge_shares_vertex_mask(
