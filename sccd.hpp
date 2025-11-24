@@ -56,13 +56,8 @@ inline static bool lean_disjoint(
     const geom_t bmaxy,
     const geom_t bmaxz)
 {
-    return 
-        aminx > bmaxx |
-        aminy > bmaxy |
-        aminz > bmaxz |
-        bminx > amaxx |
-        bminy > amaxy |
-        bminz > amaxz;
+    return aminx > bmaxx | aminy > bmaxy | aminz > bmaxz | bminx > amaxx
+        | bminy > amaxy | bminz > amaxz;
 }
 
 int lean_choose_axis(const size_t n, geom_t** const SFEM_RESTRICT aabb)
@@ -141,13 +136,13 @@ bool lean_count_overlaps(
     geom_t** const SFEM_RESTRICT first_aabbs,
     idx_t* const SFEM_RESTRICT first_idx,
     const size_t first_stride,
-    idx_t** const first_elements,
+    idx_t** const SFEM_RESTRICT first_elements,
     const count_t second_count,
     geom_t** const SFEM_RESTRICT second_aabbs,
     idx_t* const SFEM_RESTRICT second_idx,
     const size_t second_stride,
-    idx_t** const second_elements,
-    size_t* const ccdptr)
+    idx_t** const SFEM_RESTRICT second_elements,
+    size_t* const SFEM_RESTRICT ccdptr)
 {
     const geom_t* const SFEM_RESTRICT first_xmin = first_aabbs[sort_axis];
     const geom_t* const SFEM_RESTRICT first_xmax = first_aabbs[3 + sort_axis];
@@ -194,56 +189,109 @@ bool lean_count_overlaps(
                     }
                 }
 
-                // Find count potential overlaps
-                size_t count = 0;
-                size_t noffset = ni;
-                for (; noffset < second_count; noffset++) {
-                    if (fimax < second_xmin[noffset]) {
+                // Determine end of candidate range
+                size_t end = ni;
+                for (; end < second_count; end++) {
+                    if (fimax < second_xmin[end]) {
                         break;
                     }
+                }
 
-                    const geom_t si_min[3] = { second_aabbs[0][noffset],
-                                               second_aabbs[1][noffset],
-                                               second_aabbs[2][noffset] };
+                if (ni >= end) {
+                    continue;
+                }
 
-                    const geom_t si_max[3] = { second_aabbs[3][noffset],
-                                               second_aabbs[4][noffset],
-                                               second_aabbs[5][noffset] };
+                // Vectorized count of potential overlaps using vdisjoint
+                size_t count = 0;
+                size_t noffset = ni;
 
-                    bool skip = false;
-                    for (int d = 0; d < 3; d++) {
-                        skip |= si_min[d] > fi_max[d] || si_max[d] < fi_min[d];
+                // Prepare repeated A values for SIMD chunk
+                geom_t A_minx[AABB_DISJOINT_CHUNK_SIZE];
+                geom_t A_miny[AABB_DISJOINT_CHUNK_SIZE];
+                geom_t A_minz[AABB_DISJOINT_CHUNK_SIZE];
+                geom_t A_maxx[AABB_DISJOINT_CHUNK_SIZE];
+                geom_t A_maxy[AABB_DISJOINT_CHUNK_SIZE];
+                geom_t A_maxz[AABB_DISJOINT_CHUNK_SIZE];
+                for (int k = 0; k < AABB_DISJOINT_CHUNK_SIZE; ++k) {
+                    A_minx[k] = fi_min[0];
+                    A_miny[k] = fi_min[1];
+                    A_minz[k] = fi_min[2];
+                    A_maxx[k] = fi_max[0];
+                    A_maxy[k] = fi_max[1];
+                    A_maxz[k] = fi_max[2];
+                }
+
+                for (; noffset < end;) {
+                    const size_t chunk_len = std::min(
+                        (size_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
+
+                    geom_t B_minx[AABB_DISJOINT_CHUNK_SIZE];
+                    geom_t B_miny[AABB_DISJOINT_CHUNK_SIZE];
+                    geom_t B_minz[AABB_DISJOINT_CHUNK_SIZE];
+                    geom_t B_maxx[AABB_DISJOINT_CHUNK_SIZE];
+                    geom_t B_maxy[AABB_DISJOINT_CHUNK_SIZE];
+                    geom_t B_maxz[AABB_DISJOINT_CHUNK_SIZE];
+
+                    for (size_t lane = 0; lane < chunk_len; ++lane) {
+                        const size_t j = noffset + lane;
+                        B_minx[lane] = second_aabbs[0][j];
+                        B_miny[lane] = second_aabbs[1][j];
+                        B_minz[lane] = second_aabbs[2][j];
+                        B_maxx[lane] = second_aabbs[3][j];
+                        B_maxy[lane] = second_aabbs[4][j];
+                        B_maxz[lane] = second_aabbs[5][j];
+                    }
+                    // Tail-safe fill: force disjoint
+                    for (size_t lane = chunk_len;
+                         lane < AABB_DISJOINT_CHUNK_SIZE; ++lane) {
+                        B_minx[lane] = A_maxx[0] + 1;
+                        B_miny[lane] = A_maxy[0] + 1;
+                        B_minz[lane] = A_maxz[0] + 1;
+                        B_maxx[lane] = A_maxx[0];
+                        B_maxy[lane] = A_maxy[0];
+                        B_maxz[lane] = A_maxz[0];
                     }
 
-                    if (!skip) {
+                    uint32_t dmask[AABB_DISJOINT_CHUNK_SIZE];
+                    vdisjoint(
+                        A_minx, A_miny, A_minz, A_maxx, A_maxy, A_maxz, B_minx,
+                        B_miny, B_minz, B_maxx, B_maxy, B_maxz, dmask);
+
+                    for (size_t lane = 0; lane < chunk_len; ++lane) {
+                        if (dmask[lane]) {
+                            continue; // disjoint
+                        }
+                        bool skip = false; // share-a-vertex
                         if (second_nxe > 1) {
+                            const idx_t jidx = second_idx[noffset + lane];
                             idx_t second_ev[second_nxe];
                             for (int v = 0; v < second_nxe; v++) {
                                 second_ev[v] =
-                                    second_elements[v][noffset * second_stride];
+                                    second_elements[v][jidx * second_stride];
                             }
-
-                            for (int first_v = 0; first_v < first_nxe;
+                            for (int first_v = 0; first_v < first_nxe && !skip;
                                  first_v++) {
                                 for (int second_v = 0; second_v < second_nxe;
                                      second_v++) {
-                                    skip = ev[first_v] == second_ev[second_v]
-                                        ? 1
-                                        : skip;
+                                    if (ev[first_v] == second_ev[second_v]) {
+                                        skip = true;
+                                        break;
+                                    }
                                 }
                             }
-
                         } else {
                             for (int first_v = 0; first_v < first_nxe;
                                  first_v++) {
-                                skip = ev[first_v] == second_idx[noffset]
-                                    ? 1
-                                    : skip;
+                                if (ev[first_v] == second_idx[noffset + lane]) {
+                                    skip = true;
+                                    break;
+                                }
                             }
                         }
+                        count += skip ? 0 : 1;
                     }
 
-                    count += skip ? 0 : 1;
+                    noffset += chunk_len;
                 }
 
                 ccdptr[fi + 1] = count;
@@ -264,13 +312,13 @@ void lean_collect_overlaps(
     geom_t** const SFEM_RESTRICT first_aabbs,
     idx_t* const SFEM_RESTRICT first_idx,
     const size_t first_stride,
-    idx_t** const
+    idx_t** SFEM_RESTRICT const
         first_elements, // first_elements are accessed through first_idx
     const count_t second_count,
     geom_t** const SFEM_RESTRICT second_aabbs,
     idx_t* const SFEM_RESTRICT second_idx,
     const size_t second_stride,
-    idx_t** const second_elements,
+    idx_t** SFEM_RESTRICT const second_elements,
     const size_t* const SFEM_RESTRICT ccdptr,
     idx_t* SFEM_RESTRICT foverlap,
     idx_t* SFEM_RESTRICT noverlap)
@@ -301,14 +349,6 @@ void lean_collect_overlaps(
                 const geom_t fimax = first_xmax[fi];
                 const idx_t first_idxi = first_idx[fi];
 
-                const geom_t fi_min[3] = { first_aabbs[0][fi],
-                                           first_aabbs[1][fi],
-                                           first_aabbs[2][fi] };
-
-                const geom_t fi_max[3] = { first_aabbs[3][fi],
-                                           first_aabbs[4][fi],
-                                           first_aabbs[5][fi] };
-
                 idx_t* SFEM_RESTRICT const first_local_elements =
                     &foverlap[ccdptr[fi]];
                 idx_t* SFEM_RESTRICT const second_local_elements =
@@ -327,62 +367,116 @@ void lean_collect_overlaps(
                     }
                 }
 
-                // Find count potential overlaps
-                size_t count = 0;
-                size_t noffset = ni;
-                for (; noffset < second_count; noffset++) {
-                    if (fimax < second_xmin[noffset]) {
+                // Determine end of candidate range
+                size_t end = ni;
+                for (; end < second_count; end++) {
+                    if (fimax < second_xmin[end]) {
                         break;
                     }
+                }
 
-                    const geom_t si_min[3] = { second_aabbs[0][noffset],
-                                               second_aabbs[1][noffset],
-                                               second_aabbs[2][noffset] };
+                if (ni >= end) {
+                    continue;
+                }
 
-                    const geom_t si_max[3] = { second_aabbs[3][noffset],
-                                               second_aabbs[4][noffset],
-                                               second_aabbs[5][noffset] };
+                // Vectorized collect of potential overlaps using vdisjoint
+                size_t count = 0;
+                size_t noffset = ni;
 
-                    bool skip = false;
-                    for (int d = 0; d < 3; d++) {
-                        skip |= si_min[d] > fi_max[d] || si_max[d] < fi_min[d];
+                // Prepare repeated A values for SIMD chunk
+                geom_t A_minx[AABB_DISJOINT_CHUNK_SIZE];
+                geom_t A_miny[AABB_DISJOINT_CHUNK_SIZE];
+                geom_t A_minz[AABB_DISJOINT_CHUNK_SIZE];
+                geom_t A_maxx[AABB_DISJOINT_CHUNK_SIZE];
+                geom_t A_maxy[AABB_DISJOINT_CHUNK_SIZE];
+                geom_t A_maxz[AABB_DISJOINT_CHUNK_SIZE];
+                for (int k = 0; k < AABB_DISJOINT_CHUNK_SIZE; ++k) {
+                    A_minx[k] = first_aabbs[0][fi];
+                    A_miny[k] = first_aabbs[1][fi];
+                    A_minz[k] = first_aabbs[2][fi];
+                    A_maxx[k] = first_aabbs[3][fi];
+                    A_maxy[k] = first_aabbs[4][fi];
+                    A_maxz[k] = first_aabbs[5][fi];
+                }
+
+                for (; noffset < end;) {
+                    const size_t chunk_len = std::min(
+                        (size_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
+
+                    geom_t B_minx[AABB_DISJOINT_CHUNK_SIZE];
+                    geom_t B_miny[AABB_DISJOINT_CHUNK_SIZE];
+                    geom_t B_minz[AABB_DISJOINT_CHUNK_SIZE];
+                    geom_t B_maxx[AABB_DISJOINT_CHUNK_SIZE];
+                    geom_t B_maxy[AABB_DISJOINT_CHUNK_SIZE];
+                    geom_t B_maxz[AABB_DISJOINT_CHUNK_SIZE];
+
+                    for (size_t lane = 0; lane < chunk_len; ++lane) {
+                        const size_t j = noffset + lane;
+                        B_minx[lane] = second_aabbs[0][j];
+                        B_miny[lane] = second_aabbs[1][j];
+                        B_minz[lane] = second_aabbs[2][j];
+                        B_maxx[lane] = second_aabbs[3][j];
+                        B_maxy[lane] = second_aabbs[4][j];
+                        B_maxz[lane] = second_aabbs[5][j];
+                    }
+                    // Tail-safe fill: force disjoint
+                    for (size_t lane = chunk_len;
+                         lane < AABB_DISJOINT_CHUNK_SIZE; ++lane) {
+                        B_minx[lane] = A_maxx[0] + 1;
+                        B_miny[lane] = A_maxy[0] + 1;
+                        B_minz[lane] = A_maxz[0] + 1;
+                        B_maxx[lane] = A_maxx[0];
+                        B_maxy[lane] = A_maxy[0];
+                        B_maxz[lane] = A_maxz[0];
                     }
 
-                    const idx_t second_idxi = second_idx[noffset];
-                    if (!skip) {
+                    uint32_t dmask[AABB_DISJOINT_CHUNK_SIZE];
+                    vdisjoint(
+                        A_minx, A_miny, A_minz, A_maxx, A_maxy, A_maxz, B_minx,
+                        B_miny, B_minz, B_maxx, B_maxy, B_maxz, dmask);
+
+                    for (size_t lane = 0; lane < chunk_len; ++lane) {
+                        if (dmask[lane]) {
+                            continue; // disjoint
+                        }
+                        bool skip = false; // share-a-vertex
+                        const size_t j = noffset + lane;
+                        const idx_t second_idxi = second_idx[j];
                         if (second_nxe > 1) {
                             idx_t second_ev[second_nxe];
                             for (int v = 0; v < second_nxe; v++) {
-                                second_ev[v] =
-                                    second_elements[v][second_idxi * second_stride];
+                                second_ev[v] = second_elements[v]
+                                                              [second_idxi
+                                                               * second_stride];
                             }
-
-                            for (int first_v = 0; first_v < first_nxe;
+                            for (int first_v = 0; first_v < first_nxe && !skip;
                                  first_v++) {
                                 for (int second_v = 0; second_v < second_nxe;
                                      second_v++) {
-                                    skip = ev[first_v] == second_ev[second_v]
-                                        ? 1
-                                        : skip;
+                                    if (ev[first_v] == second_ev[second_v]) {
+                                        skip = true;
+                                        break;
+                                    }
                                 }
                             }
-
                         } else {
                             for (int first_v = 0; first_v < first_nxe;
                                  first_v++) {
-                                skip = ev[first_v] == second_idx[noffset]
-                                    ? 1
-                                    : skip;
+                                if (ev[first_v] == second_idxi) {
+                                    skip = true;
+                                    break;
+                                }
                             }
+                        }
+
+                        if (!skip) {
+                            first_local_elements[count] = first_idxi;
+                            second_local_elements[count] = second_idxi;
+                            count += 1;
                         }
                     }
 
-                    if (!skip) {
-                        first_local_elements[count] = first_idxi;
-                        second_local_elements[count] = second_idxi;
-                    }
-
-                    count += skip ? 0 : 1;
+                    noffset += chunk_len;
                 }
 
                 assert(expected_count == count);
@@ -399,8 +493,8 @@ bool lean_count_self_overlaps(
     geom_t** const SFEM_RESTRICT aabbs,
     idx_t* const SFEM_RESTRICT idx,
     const size_t stride,
-    idx_t** const elements,
-    size_t* const ccdptr)
+    idx_t** const SFEM_RESTRICT elements,
+    size_t* const SFEM_RESTRICT ccdptr)
 {
     const geom_t* const SFEM_RESTRICT xmin = aabbs[sort_axis];
     const geom_t* const SFEM_RESTRICT xmax = aabbs[3 + sort_axis];
@@ -412,10 +506,6 @@ bool lean_count_self_overlaps(
                 const geom_t fimin = xmin[fi];
                 const geom_t fimax = xmax[fi];
                 const idx_t idxi = idx[fi];
-                const geom_t fi_min[3] = { aabbs[0][fi], aabbs[1][fi],
-                                           aabbs[2][fi] };
-                const geom_t fi_max[3] = { aabbs[3][fi], aabbs[4][fi],
-                                           aabbs[5][fi] };
 
                 idx_t ev[nxe];
                 for (int v = 0; v < nxe; v++) {
@@ -429,6 +519,20 @@ bool lean_count_self_overlaps(
                     }
                 }
 
+                // Determine end of candidate range using original loop
+                // semantics
+                size_t end = noffset;
+                for (; end < element_count; end++) {
+                    if (fimax < xmin[end]) {
+                        break;
+                    }
+                }
+
+                if (noffset >= end) {
+                    ccdptr[fi + 1] = 0;
+                    continue;
+                }
+
                 // Count potential overlaps using vectorized disjoint test
                 size_t count = 0;
 
@@ -439,26 +543,19 @@ bool lean_count_self_overlaps(
                 geom_t A_maxx[AABB_DISJOINT_CHUNK_SIZE];
                 geom_t A_maxy[AABB_DISJOINT_CHUNK_SIZE];
                 geom_t A_maxz[AABB_DISJOINT_CHUNK_SIZE];
-                for (int k = 0; k < AABB_DISJOINT_CHUNK_SIZE; ++k) {
-                    A_minx[k] = fi_min[0];
-                    A_miny[k] = fi_min[1];
-                    A_minz[k] = fi_min[2];
-                    A_maxx[k] = fi_max[0];
-                    A_maxy[k] = fi_max[1];
-                    A_maxz[k] = fi_max[2];
-                }
 
-                // Determine end of candidate range using original loop semantics
-                size_t end = noffset;
-                for (; end < element_count; end++) {
-                    if (fimax < xmin[end]) {
-                        break;
-                    }
+                for (int k = 0; k < AABB_DISJOINT_CHUNK_SIZE; ++k) {
+                    A_minx[k] = aabbs[0][fi];
+                    A_miny[k] = aabbs[1][fi];
+                    A_minz[k] = aabbs[2][fi];
+                    A_maxx[k] = aabbs[3][fi];
+                    A_maxy[k] = aabbs[4][fi];
+                    A_maxz[k] = aabbs[5][fi];
                 }
 
                 for (; noffset < end;) {
-                    const size_t chunk_len =
-                        std::min((size_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
+                    const size_t chunk_len = std::min(
+                        (size_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
 
                     geom_t B_minx[AABB_DISJOINT_CHUNK_SIZE];
                     geom_t B_miny[AABB_DISJOINT_CHUNK_SIZE];
@@ -477,7 +574,8 @@ bool lean_count_self_overlaps(
                         B_maxz[lane] = aabbs[5][j];
                     }
                     // Tail-safe fill: force disjoint
-                    for (size_t lane = chunk_len; lane < AABB_DISJOINT_CHUNK_SIZE; ++lane) {
+                    for (size_t lane = chunk_len;
+                         lane < AABB_DISJOINT_CHUNK_SIZE; ++lane) {
                         B_minx[lane] = A_maxx[0] + 1;
                         B_miny[lane] = A_maxy[0] + 1;
                         B_minz[lane] = A_maxz[0] + 1;
@@ -489,9 +587,9 @@ bool lean_count_self_overlaps(
                     // Disjoint array mask -> per-lane skip logic
                     uint32_t mask[AABB_DISJOINT_CHUNK_SIZE];
                     vdisjoint(
-                        A_minx, A_miny, A_minz, A_maxx, A_maxy, A_maxz, B_minx, B_miny,
-                        B_minz, B_maxx, B_maxy, B_maxz, mask);
-                    
+                        A_minx, A_miny, A_minz, A_maxx, A_maxy, A_maxz, B_minx,
+                        B_miny, B_minz, B_maxx, B_maxy, B_maxz, mask);
+
                     for (size_t lane = 0; lane < chunk_len; ++lane) {
                         if (mask[lane]) {
                             continue; // disjoint
@@ -551,12 +649,6 @@ void lean_collect_self_overlaps(
                 const geom_t fimax = xmax[fi];
                 const idx_t idxi = idx[fi];
 
-                const geom_t fi_min[3] = { aabbs[0][fi], aabbs[1][fi],
-                                           aabbs[2][fi] };
-
-                const geom_t fi_max[3] = { aabbs[3][fi], aabbs[4][fi],
-                                           aabbs[5][fi] };
-
                 idx_t* SFEM_RESTRICT const first_local_elements =
                     &foverlap[ccdptr[fi]];
 
@@ -587,16 +679,18 @@ void lean_collect_self_overlaps(
                 geom_t A_maxx[AABB_DISJOINT_CHUNK_SIZE];
                 geom_t A_maxy[AABB_DISJOINT_CHUNK_SIZE];
                 geom_t A_maxz[AABB_DISJOINT_CHUNK_SIZE];
+
                 for (int k = 0; k < AABB_DISJOINT_CHUNK_SIZE; ++k) {
-                    A_minx[k] = fi_min[0];
-                    A_miny[k] = fi_min[1];
-                    A_minz[k] = fi_min[2];
-                    A_maxx[k] = fi_max[0];
-                    A_maxy[k] = fi_max[1];
-                    A_maxz[k] = fi_max[2];
+                    A_minx[k] = aabbs[0][fi];
+                    A_miny[k] = aabbs[1][fi];
+                    A_minz[k] = aabbs[2][fi];
+                    A_maxx[k] = aabbs[3][fi];
+                    A_maxy[k] = aabbs[4][fi];
+                    A_maxz[k] = aabbs[5][fi];
                 }
 
-                // Determine end of candidate range using original loop semantics
+                // Determine end of candidate range using original loop
+                // semantics
                 size_t end = noffset;
                 for (; end < element_count; end++) {
                     if (fimax < xmin[end]) {
@@ -605,8 +699,8 @@ void lean_collect_self_overlaps(
                 }
 
                 for (; noffset < end;) {
-                    const size_t chunk_len =
-                        std::min((size_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
+                    const size_t chunk_len = std::min(
+                        (size_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
 
                     geom_t B_minx[AABB_DISJOINT_CHUNK_SIZE];
                     geom_t B_miny[AABB_DISJOINT_CHUNK_SIZE];
@@ -625,7 +719,8 @@ void lean_collect_self_overlaps(
                         B_maxz[lane] = aabbs[5][j];
                     }
                     // Tail-safe fill: force disjoint
-                    for (size_t lane = chunk_len; lane < AABB_DISJOINT_CHUNK_SIZE; ++lane) {
+                    for (size_t lane = chunk_len;
+                         lane < AABB_DISJOINT_CHUNK_SIZE; ++lane) {
                         B_minx[lane] = A_maxx[0] + 1;
                         B_miny[lane] = A_maxy[0] + 1;
                         B_minz[lane] = A_maxz[0] + 1;
@@ -634,11 +729,13 @@ void lean_collect_self_overlaps(
                         B_maxz[lane] = A_maxz[0];
                     }
 
-                    // Disjoint array mask -> per-lane skip logic and write pairs
+                    // Disjoint array mask -> per-lane skip logic and write
+                    // pairs
                     uint32_t mask[AABB_DISJOINT_CHUNK_SIZE];
                     vdisjoint(
-                        A_minx, A_miny, A_minz, A_maxx, A_maxy, A_maxz, B_minx, B_miny,
-                        B_minz, B_maxx, B_maxy, B_maxz, mask);
+                        A_minx, A_miny, A_minz, A_maxx, A_maxy, A_maxz, B_minx,
+                        B_miny, B_minz, B_maxx, B_maxy, B_maxz, mask);
+
                     for (size_t lane = 0; lane < chunk_len; ++lane) {
                         if (mask[lane]) {
                             continue; // disjoint
