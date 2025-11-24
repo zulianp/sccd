@@ -486,36 +486,21 @@ bool lean_count_self_overlaps(
                         B_maxz[lane] = A_maxz[0];
                     }
 
-                    uint32_t mask[AABB_DISJOINT_CHUNK_SIZE];
-                    vdisjoint(
-                        A_minx, A_miny, A_minz, A_maxx, A_maxy, A_maxz, B_minx, B_miny,
-                        B_minz, B_maxx, B_maxy, B_maxz, mask);
-
-                    for (size_t lane = 0; lane < chunk_len; ++lane) {
-                        const size_t j = noffset + lane;
-
-                        if (mask[lane]) {
-                            continue; // disjoint
-                        }
-
-                        // Shared-vertex filter using original indices
-                        idx_t second_ev[nxe];
-                        const idx_t jidx = idx[j];
-                        bool share = false;
-                        for (int v = 0; v < nxe; v++) {
-                            second_ev[v] = elements[v][jidx * stride];
-                        }
-                        for (int a = 0; a < nxe && !share; ++a) {
-                            for (int b = 0; b < nxe; ++b) {
-                                if (ev[a] == second_ev[b]) {
-                                    share = true;
-                                    break;
-                                }
-                            }
-                        }
-
-                        count += share ? 0 : 1;
-                    }
+                    // Candidate mask = not disjoint
+                    const unsigned disj_bits = vdisjoint_mask(
+                        A_minx, A_miny, A_minz, A_maxx, A_maxy, A_maxz, B_minx,
+                        B_miny, B_minz, B_maxx, B_maxy, B_maxz, chunk_len);
+                    unsigned cand_bits =
+                        ((chunk_len >= 32 ? 0xFFFFFFFFu : ((1u << chunk_len) - 1u)))
+                        & ~disj_bits;
+                    // Shared-vertex mask using original indices
+                    const unsigned share_bits = vshare_edge_shares_vertex_mask(
+                        idx, noffset, chunk_len, (int)stride,
+                        (const int*)elements[0], (const int*)elements[1],
+                        ev[0], ev[1]);
+                    // Valid = candidate and not shared
+                    unsigned valid_bits = cand_bits & ~share_bits;
+                    count += __builtin_popcount(valid_bits);
 
                     noffset += chunk_len;
                 }
@@ -637,42 +622,29 @@ void lean_collect_self_overlaps(
                         B_maxz[lane] = A_maxz[0];
                     }
 
-                    uint32_t mask[AABB_DISJOINT_CHUNK_SIZE];
-                    vdisjoint(
-                        A_minx, A_miny, A_minz, A_maxx, A_maxy, A_maxz, B_minx, B_miny,
-                        B_minz, B_maxx, B_maxy, B_maxz, mask);
+                    // Candidate mask = not disjoint
+                    const unsigned disj_bits = vdisjoint_mask(
+                        A_minx, A_miny, A_minz, A_maxx, A_maxy, A_maxz, B_minx,
+                        B_miny, B_minz, B_maxx, B_maxy, B_maxz, chunk_len);
+                    unsigned cand_bits =
+                        ((chunk_len >= 32 ? 0xFFFFFFFFu : ((1u << chunk_len) - 1u)))
+                        & ~disj_bits;
 
-                    for (size_t lane = 0; lane < chunk_len; ++lane) {
+                    // Compute share mask via SIMD helper and write valid pairs
+                    const unsigned share_bits = vshare_edge_shares_vertex_mask(
+                        idx, noffset, chunk_len, (int)stride,
+                        (const int*)elements[0], (const int*)elements[1],
+                        ev[0], ev[1]);
+                        
+                    unsigned valid_bits = cand_bits & ~share_bits;
+                    while (valid_bits) {
+                        unsigned lane = __builtin_ctz(valid_bits);
+                        valid_bits &= valid_bits - 1;
                         const size_t j = noffset + lane;
-
-                        if (mask[lane]) {
-                            continue; // disjoint
-                        }
-
-                        // Shared-vertex filter using original indices
                         const idx_t jidx = idx[j];
-                        idx_t second_ev[nxe];
-                        bool share = false;
-                        for (int v = 0; v < nxe; v++) {
-                            second_ev[v] = elements[v][jidx * stride];
-                        }
-                        for (int a = 0; a < nxe && !share; ++a) {
-                            for (int b = 0; b < nxe; ++b) {
-                                if (ev[a] == second_ev[b]) {
-                                    share = true;
-                                    break;
-                                }
-                            }
-                        }
-
-                        if (!share) {
-                            // Canonicalize by original element IDs
-                            first_local_elements[count] =
-                                std::min(idxi, jidx);
-                            second_local_elements[count] =
-                                std::max(idxi, jidx);
-                            count += 1;
-                        }
+                        first_local_elements[count] = std::min(idxi, jidx);
+                        second_local_elements[count] = std::max(idxi, jidx);
+                        count += 1;
                     }
 
                     noffset += chunk_len;
