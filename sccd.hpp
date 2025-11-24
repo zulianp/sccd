@@ -273,6 +273,65 @@ static inline bool shares_vertex(const idx_t (&a)[n1], const idx_t (&b)[n2])
     return false;
 }
 
+// In-place mask update: mark shared-vertex lanes as 1 (invalid)
+template <int F, int S>
+static inline void mask_out_shared_two_lists(
+    uint32_t* const SFEM_RESTRICT dmask,
+    const size_t chunk_len,
+    const size_t noffset,
+    const idx_t (&ev)[F],
+    const idx_t* const SFEM_RESTRICT second_idx,
+    idx_t** const SFEM_RESTRICT second_elements,
+    const size_t second_stride)
+{
+    for (size_t lane = 0; lane < chunk_len; ++lane) {
+        if(dmask[lane]) continue;
+
+        const size_t j = noffset + lane;
+        const idx_t jidx = second_idx[j];
+        int match = 0;
+        if constexpr (S > 1) {
+            idx_t sev[S];
+            for (int v = 0; v < S; ++v) {
+                sev[v] = second_elements[v][jidx * second_stride];
+            }
+            for (int a = 0; a < F; ++a) {
+                for (int b = 0; b < S; ++b) {
+                    match |= (ev[a] == sev[b]);
+                }
+            }
+        } else {
+            for (int a = 0; a < F; ++a) {
+                match |= (ev[a] == jidx);
+            }
+        }
+        dmask[lane] |= (uint32_t)match;
+    }
+}
+
+template <int N>
+static inline void mask_out_shared_self(
+    uint32_t* const SFEM_RESTRICT dmask,
+    const size_t chunk_len,
+    const size_t noffset,
+    const idx_t (&ev)[N],
+    const idx_t* const SFEM_RESTRICT idx,
+    idx_t** const SFEM_RESTRICT elements,
+    const size_t stride)
+{
+    for (size_t lane = 0; lane < chunk_len; ++lane) {
+        if (dmask[lane]) continue;
+
+        const size_t j = noffset + lane;
+        const idx_t jidx = idx[j];
+        idx_t sev[N];
+        load_ev<N>(elements, jidx, stride, sev);
+        if (shares_vertex<N, N>(ev, sev)) {
+            dmask[lane] = 1;
+        }
+    }
+}
+
 // -----------------------------
 // Scalar fallbacks (two lists)
 template <int F, int S>
@@ -351,23 +410,24 @@ static inline size_t scalar_collect_range_two_lists(
                 second_aabbs[4][j], second_aabbs[5][j])) {
             continue;
         }
-        bool share = false;
         const idx_t jidx = second_idx[j];
+        int match = 0;
         if constexpr (S > 1) {
             idx_t sev[S];
             for (int v = 0; v < S; ++v) {
                 sev[v] = second_elements[v][jidx * second_stride];
             }
-            share = shares_vertex<F, S>(ev, sev);
-        } else {
             for (int a = 0; a < F; ++a) {
-                if (ev[a] == jidx) {
-                    share = true;
-                    break;
+                for (int b = 0; b < S; ++b) {
+                    match |= (ev[a] == sev[b]);
                 }
             }
+        } else {
+            for (int a = 0; a < F; ++a) {
+                match |= (ev[a] == jidx);
+            }
         }
-        if (!share) {
+        if (!match) {
             first_out[count] = first_idxi;
             second_out[count] = jidx;
             count += 1;
@@ -548,43 +608,18 @@ bool lean_count_overlaps(
                         (size_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
 
                     uint32_t dmask[AABB_DISJOINT_CHUNK_SIZE];
+                    
                     sccd_detail::build_disjoint_mask_for_block(
                         second_aabbs, noffset, chunk_len, A_minx, A_miny, A_minz,
                         A_maxx, A_maxy, A_maxz, A_maxx[0], A_maxy[0], A_maxz[0],
                         dmask);
 
+                    sccd_detail::mask_out_shared_two_lists<first_nxe, second_nxe>(
+                        dmask, chunk_len, noffset, ev, second_idx, second_elements,
+                        second_stride);
+
                     for (size_t lane = 0; lane < chunk_len; ++lane) {
-                        if (dmask[lane]) {
-                            continue; // disjoint
-                        }
-                        bool skip = false; // share-a-vertex
-                        if (second_nxe > 1) {
-                            const idx_t jidx = second_idx[noffset + lane];
-                            idx_t second_ev[second_nxe];
-                            for (int v = 0; v < second_nxe; v++) {
-                                second_ev[v] =
-                                    second_elements[v][jidx * second_stride];
-                            }
-                            for (int first_v = 0; first_v < first_nxe && !skip;
-                                 first_v++) {
-                                for (int second_v = 0; second_v < second_nxe;
-                                     second_v++) {
-                                    if (ev[first_v] == second_ev[second_v]) {
-                                        skip = true;
-                                        break;
-                                    }
-                                }
-                            }
-                        } else {
-                            for (int first_v = 0; first_v < first_nxe;
-                                 first_v++) {
-                                if (ev[first_v] == second_idx[noffset + lane]) {
-                                    skip = true;
-                                    break;
-                                }
-                            }
-                        }
-                        count += skip ? 0 : 1;
+                        count += dmask[lane] ? 0 : 1;
                     }
 
                     noffset += chunk_len;
@@ -700,6 +735,7 @@ void lean_collect_overlaps(
                 geom_t A_maxx[AABB_DISJOINT_CHUNK_SIZE];
                 geom_t A_maxy[AABB_DISJOINT_CHUNK_SIZE];
                 geom_t A_maxz[AABB_DISJOINT_CHUNK_SIZE];
+                
                 sccd_detail::prepare_A_replicated(
                     first_aabbs, fi, A_minx, A_miny, A_minz, A_maxx, A_maxy, A_maxz);
 
@@ -713,45 +749,16 @@ void lean_collect_overlaps(
                         A_maxx, A_maxy, A_maxz, A_maxx[0], A_maxy[0], A_maxz[0],
                         dmask);
 
-                    for (size_t lane = 0; lane < chunk_len; ++lane) {
-                        if (dmask[lane]) {
-                            continue; // disjoint
-                        }
-                        bool skip = false; // share-a-vertex
-                        const size_t j = noffset + lane;
-                        const idx_t second_idxi = second_idx[j];
-                        if (second_nxe > 1) {
-                            idx_t second_ev[second_nxe];
-                            for (int v = 0; v < second_nxe; v++) {
-                                second_ev[v] = second_elements[v]
-                                                              [second_idxi
-                                                               * second_stride];
-                            }
-                            for (int first_v = 0; first_v < first_nxe && !skip;
-                                 first_v++) {
-                                for (int second_v = 0; second_v < second_nxe;
-                                     second_v++) {
-                                    if (ev[first_v] == second_ev[second_v]) {
-                                        skip = true;
-                                        break;
-                                    }
-                                }
-                            }
-                        } else {
-                            for (int first_v = 0; first_v < first_nxe;
-                                 first_v++) {
-                                if (ev[first_v] == second_idxi) {
-                                    skip = true;
-                                    break;
-                                }
-                            }
-                        }
+                    sccd_detail::mask_out_shared_two_lists<first_nxe, second_nxe>(
+                        dmask, chunk_len, noffset, ev, second_idx, second_elements,
+                        second_stride);
 
-                        if (!skip) {
-                            first_local_elements[count] = first_idxi;
-                            second_local_elements[count] = second_idxi;
-                            count += 1;
-                        }
+                    for (size_t lane = 0; lane < chunk_len; ++lane) {
+                        if (dmask[lane]) continue;
+                        const size_t j = noffset + lane;
+                        first_local_elements[count] = first_idxi;
+                        second_local_elements[count] = second_idx[j];
+                        count += 1;
                     }
 
                     noffset += chunk_len;
@@ -842,27 +849,11 @@ bool lean_count_self_overlaps(
                     sccd_detail::build_disjoint_mask_for_block(
                         aabbs, noffset, chunk_len, A_minx, A_miny, A_minz, A_maxx,
                         A_maxy, A_maxz, A_maxx[0], A_maxy[0], A_maxz[0], mask);
-
+                        
+                    sccd_detail::mask_out_shared_self<nxe>(
+                        mask, chunk_len, noffset, ev, idx, elements, stride);
                     for (size_t lane = 0; lane < chunk_len; ++lane) {
-                        if (mask[lane]) {
-                            continue; // disjoint
-                        }
-                        const size_t j = noffset + lane;
-                        const idx_t jidx = idx[j];
-                        idx_t second_ev[nxe];
-                        for (int v = 0; v < nxe; v++) {
-                            second_ev[v] = elements[v][jidx * stride];
-                        }
-                        bool share = false;
-                        for (int a = 0; a < nxe && !share; ++a) {
-                            for (int b = 0; b < nxe; ++b) {
-                                if (ev[a] == second_ev[b]) {
-                                    share = true;
-                                    break;
-                                }
-                            }
-                        }
-                        count += share ? 0 : 1;
+                        count += mask[lane] ? 0 : 1;
                     }
 
                     noffset += chunk_len;
@@ -968,34 +959,21 @@ void lean_collect_self_overlaps(
 
                     // Disjoint array mask -> per-lane skip logic and write pairs
                     uint32_t mask[AABB_DISJOINT_CHUNK_SIZE];
+
                     sccd_detail::build_disjoint_mask_for_block(
                         aabbs, noffset, chunk_len, A_minx, A_miny, A_minz, A_maxx,
                         A_maxy, A_maxz, A_maxx[0], A_maxy[0], A_maxz[0], mask);
 
+                    sccd_detail::mask_out_shared_self<nxe>(
+                        mask, chunk_len, noffset, ev, idx, elements, stride);
+
                     for (size_t lane = 0; lane < chunk_len; ++lane) {
-                        if (mask[lane]) {
-                            continue; // disjoint
-                        }
+                        if (mask[lane]) continue;
                         const size_t j = noffset + lane;
                         const idx_t jidx = idx[j];
-                        idx_t second_ev[nxe];
-                        for (int v = 0; v < nxe; v++) {
-                            second_ev[v] = elements[v][jidx * stride];
-                        }
-                        bool share = false;
-                        for (int a = 0; a < nxe && !share; ++a) {
-                            for (int b = 0; b < nxe; ++b) {
-                                if (ev[a] == second_ev[b]) {
-                                    share = true;
-                                    break;
-                                }
-                            }
-                        }
-                        if (!share) {
-                            first_local_elements[count] = std::min(idxi, jidx);
-                            second_local_elements[count] = std::max(idxi, jidx);
-                            count += 1;
-                        }
+                        first_local_elements[count] = std::min(idxi, jidx);
+                        second_local_elements[count] = std::max(idxi, jidx);
+                        count += 1;
                     }
 
                     noffset += chunk_len;
