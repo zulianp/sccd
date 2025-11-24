@@ -24,6 +24,8 @@
 #define SFEM_RESTRICT __restrict
 #endif
 
+namespace sccd {
+
 typedef float geom_t;
 
 inline static uint32_t disjoint(const geom_t aminx, const geom_t aminy,
@@ -141,5 +143,35 @@ void vdisjoint(const geom_t *const SFEM_RESTRICT aminx,
   }
 #endif
 }
+
+/**
+ * \brief Broadcast AABB at \p fi into SoA buffers sized for SIMD chunking.
+ * \param aabbs SoA AABB arrays [6][...].
+ * \param fi Index of the AABB to broadcast.
+ * \param A_minx..A_maxz Output arrays of length AABB_DISJOINT_CHUNK_SIZE.
+ */
+ static inline void vaabb_broadcast(
+    geom_t **const SFEM_RESTRICT aabbs, const size_t fi,
+    geom_t *const SFEM_RESTRICT A_minx, geom_t *const SFEM_RESTRICT A_miny,
+    geom_t *const SFEM_RESTRICT A_minz, geom_t *const SFEM_RESTRICT A_maxx,
+    geom_t *const SFEM_RESTRICT A_maxy, geom_t *const SFEM_RESTRICT A_maxz) {
+  const geom_t aminx = aabbs[0][fi];
+  const geom_t aminy = aabbs[1][fi];
+  const geom_t aminz = aabbs[2][fi];
+  const geom_t amaxx = aabbs[3][fi];
+  const geom_t amaxy = aabbs[4][fi];
+  const geom_t amaxz = aabbs[5][fi];
+  for (int k = 0; k < AABB_DISJOINT_CHUNK_SIZE; ++k) {
+    A_minx[k] = aminx;
+    A_miny[k] = aminy;
+    A_minz[k] = aminz;
+    A_maxx[k] = amaxx;
+    A_maxy[k] = amaxy;
+    A_maxz[k] = amaxz;
+  }
+}
+
+
+} // namespace sccd
 
 #endif // VAABB_H
