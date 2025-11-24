@@ -543,7 +543,6 @@ static inline size_t scalar_collect_range_self(
 
 } // namespace sccd_detail
 
-template <int first_nxe, int second_nxe>
 /**
  * \brief Count candidate overlaps between two sorted AABB lists.
  *
@@ -568,6 +567,7 @@ template <int first_nxe, int second_nxe>
  *               ccdptr[first_count] = total candidates.
  * \return True if any candidates exist.
  */
+template <int first_nxe, int second_nxe>
 bool count_overlaps(const int sort_axis, const count_t first_count,
                     geom_t **const SFEM_RESTRICT first_aabbs,
                     idx_t *const SFEM_RESTRICT first_idx,
@@ -675,7 +675,6 @@ bool count_overlaps(const int sort_axis, const count_t first_count,
   return ccdptr[first_count] > 0;
 }
 
-template <int first_nxe, int second_nxe>
 /**
  * \brief Collect candidate overlaps between two sorted AABB lists.
  *
@@ -696,6 +695,7 @@ template <int first_nxe, int second_nxe>
  * \param foverlap Output array (size ccdptr[first_count]) for first indices.
  * \param noverlap Output array (size ccdptr[first_count]) for second indices.
  */
+template <int first_nxe, int second_nxe>
 void collect_overlaps(
     const int sort_axis, const count_t first_count,
     geom_t **const SFEM_RESTRICT first_aabbs,
@@ -811,7 +811,6 @@ void collect_overlaps(
 
 // --------------------------------------
 
-template <int nxe>
 /**
  * \brief Count candidate self-overlaps (upper triangle) within one sorted AABB
  * list.
@@ -829,6 +828,7 @@ template <int nxe>
  * \param ccdptr Prefix sum array size element_count+1; filled as in the
  * two-lists case. \return True if any candidates exist.
  */
+template <int nxe>
 bool count_self_overlaps(const int sort_axis, const count_t element_count,
                          geom_t **const SFEM_RESTRICT aabbs,
                          idx_t *const SFEM_RESTRICT idx, const size_t stride,
@@ -913,7 +913,6 @@ bool count_self_overlaps(const int sort_axis, const count_t element_count,
   return ccdptr[element_count] > 0;
 }
 
-template <int nxe>
 /**
  * \brief Collect candidate self-overlap pairs using prefix offsets.
  *
@@ -929,6 +928,7 @@ template <int nxe>
  * \param foverlap Output array of first indices.
  * \param noverlap Output array of second indices.
  */
+template <int nxe>
 void collect_self_overlaps(const int sort_axis, const count_t element_count,
                            geom_t **const SFEM_RESTRICT aabbs,
                            idx_t *const SFEM_RESTRICT idx, const size_t stride,
