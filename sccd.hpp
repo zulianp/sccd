@@ -3,7 +3,8 @@
 
 /**
  * \file sccd.hpp
- * \brief SIMD-friendly AABB broad-phase helpers and lean CCD utilities (test scope).
+ * \brief SIMD-friendly AABB broad-phase helpers and lean CCD utilities (test
+ * scope).
  *
  * Provides counting and collection of candidate overlaps for two lists and
  * self-overlaps, with vectorized disjoint tests and scalar fallbacks.
@@ -22,6 +23,7 @@
 
 #include "vaabb.h"
 
+namespace sccd {
 /// Geometry scalar type used for coordinates and AABB values.
 using geom_t = float;
 /// Integer type used for element/vertex indices.
@@ -66,8 +68,8 @@ inline geom_t lean_nextafter_down(const geom_t x) {
 /**
  * \brief Choose the axis (0=x,1=y,2=z) with largest variance of AABB centers.
  * \param n Number of AABBs.
- * \param aabb SoA arrays of size 6: minx,miny,minz,maxx,maxy,maxz; each of length n.
- * \return Axis index in {0,1,2}.
+ * \param aabb SoA arrays of size 6: minx,miny,minz,maxx,maxy,maxz; each of
+ * length n. \return Axis index in {0,1,2}.
  */
 int lean_choose_axis(const size_t n, geom_t **const SFEM_RESTRICT aabb) {
   geom_t mean[3] = {0};
@@ -99,12 +101,12 @@ int lean_choose_axis(const size_t n, geom_t **const SFEM_RESTRICT aabb) {
 }
 
 /**
- * \brief Sort AABBs along \p sort_axis and permute all six SoA arrays coherently.
- * \param n Number of AABBs.
- * \param sort_axis Axis to sort by (0=x,1=y,2=z).
- * \param arrays SoA arrays [6][n]: minx,miny,minz,maxx,maxy,maxz.
- * \param idx Output permutation array of size n (initialized to 0..n-1 then sorted).
- * \param scratch Scratch buffer of length n used to permute each component.
+ * \brief Sort AABBs along \p sort_axis and permute all six SoA arrays
+ * coherently. \param n Number of AABBs. \param sort_axis Axis to sort by
+ * (0=x,1=y,2=z). \param arrays SoA arrays [6][n]:
+ * minx,miny,minz,maxx,maxy,maxz. \param idx Output permutation array of size n
+ * (initialized to 0..n-1 then sorted). \param scratch Scratch buffer of length
+ * n used to permute each component.
  *
  * Arrays must be valid and sufficiently sized. Uses parallel sort.
  */
@@ -132,7 +134,8 @@ void lean_sort_along_axis(const size_t n, const int sort_axis,
  * \brief Remap indices in-place through a permutation table.
  * \param n Number of entries.
  * \param idx Permutation table mapping old index -> new index.
- * \param remapped Array of indices to update; each entry is replaced by idx[entry].
+ * \param remapped Array of indices to update; each entry is replaced by
+ * idx[entry].
  */
 static void remap_idx(const size_t n, const idx_t *const SFEM_RESTRICT idx,
                       idx_t *const SFEM_RESTRICT remapped) {
@@ -146,7 +149,8 @@ static void remap_idx(const size_t n, const idx_t *const SFEM_RESTRICT idx,
 
 /**
  * \namespace sccd_detail
- * \brief Internal helpers for vectorized AABB disjoint tests and overlap filtering.
+ * \brief Internal helpers for vectorized AABB disjoint tests and overlap
+ * filtering.
  */
 namespace sccd_detail {
 
@@ -194,8 +198,8 @@ static inline bool shares_vertex(const idx_t (&a)[n1], const idx_t (&b)[n2]) {
  * \param second_xmax Sorted xmax array of the second list along the sort axis.
  * \param second_xmin Sorted xmin array of the second list along the sort axis.
  * \param second_count Number of AABBs in the second list.
- * \param begin In/out: advanced to first index where second_xmax[begin] > fimin.
- * \param end Out: first index where second_xmin[end] > fimax.
+ * \param begin In/out: advanced to first index where second_xmax[begin] >
+ * fimin. \param end Out: first index where second_xmin[end] > fimax.
  */
 static inline void compute_candidate_window_progressive(
     const geom_t fimin, const geom_t fimax,
@@ -215,32 +219,6 @@ static inline void compute_candidate_window_progressive(
   }
 }
 
-/**
- * \brief Broadcast AABB at \p fi into SoA buffers sized for SIMD chunking.
- * \param aabbs SoA AABB arrays [6][...].
- * \param fi Index of the AABB to broadcast.
- * \param A_minx..A_maxz Output arrays of length AABB_DISJOINT_CHUNK_SIZE.
- */
-static inline void vaabb_broadcast(
-    geom_t **const SFEM_RESTRICT aabbs, const size_t fi,
-    geom_t *const SFEM_RESTRICT A_minx, geom_t *const SFEM_RESTRICT A_miny,
-    geom_t *const SFEM_RESTRICT A_minz, geom_t *const SFEM_RESTRICT A_maxx,
-    geom_t *const SFEM_RESTRICT A_maxy, geom_t *const SFEM_RESTRICT A_maxz) {
-  const geom_t aminx = aabbs[0][fi];
-  const geom_t aminy = aabbs[1][fi];
-  const geom_t aminz = aabbs[2][fi];
-  const geom_t amaxx = aabbs[3][fi];
-  const geom_t amaxy = aabbs[4][fi];
-  const geom_t amaxz = aabbs[5][fi];
-  for (int k = 0; k < AABB_DISJOINT_CHUNK_SIZE; ++k) {
-    A_minx[k] = aminx;
-    A_miny[k] = aminy;
-    A_minz[k] = aminz;
-    A_maxx[k] = amaxx;
-    A_maxy[k] = amaxy;
-    A_maxz[k] = amaxz;
-  }
-}
 
 /**
  * \brief Load a contiguous block of B AABBs into SoA buffers.
@@ -402,8 +380,8 @@ mask_out_shared_self(uint32_t *const SFEM_RESTRICT dmask,
 // -----------------------------
 template <int F, int S>
 /**
- * \brief Scalar reference: count candidate overlaps in [begin,end) for two lists.
- * \return Number of non-disjoint, non-shared-vertex candidates.
+ * \brief Scalar reference: count candidate overlaps in [begin,end) for two
+ * lists. \return Number of non-disjoint, non-shared-vertex candidates.
  */
 static inline size_t scalar_count_range_two_lists(
     geom_t **const SFEM_RESTRICT first_aabbs, const size_t fi,
@@ -447,8 +425,8 @@ static inline size_t scalar_count_range_two_lists(
 
 template <int F, int S>
 /**
- * \brief Scalar reference: collect candidate overlaps in [begin,end) for two lists.
- * \return Number of pairs written to \p first_out and \p second_out.
+ * \brief Scalar reference: collect candidate overlaps in [begin,end) for two
+ * lists. \return Number of pairs written to \p first_out and \p second_out.
  */
 static inline size_t scalar_collect_range_two_lists(
     geom_t **const SFEM_RESTRICT first_aabbs, const size_t fi,
@@ -582,14 +560,14 @@ template <int first_nxe, int second_nxe>
  * \param sort_axis Sort axis (0=x,1=y,2=z).
  * \param first_count Number of AABBs in the first list.
  * \param first_aabbs SoA arrays [6][first_count].
- * \param first_idx Mapping from sorted position to element id for the first list.
- * \param first_stride Stride between elements in the first element arrays.
- * \param first_elements SoA element-vertex arrays for the first list.
+ * \param first_idx Mapping from sorted position to element id for the first
+ * list. \param first_stride Stride between elements in the first element
+ * arrays. \param first_elements SoA element-vertex arrays for the first list.
  * \param second_count Number of AABBs in the second list.
  * \param second_aabbs SoA arrays [6][second_count].
- * \param second_idx Mapping from sorted position to element id for the second list.
- * \param second_stride Stride between elements in the second element arrays.
- * \param second_elements SoA element-vertex arrays for the second list.
+ * \param second_idx Mapping from sorted position to element id for the second
+ * list. \param second_stride Stride between elements in the second element
+ * arrays. \param second_elements SoA element-vertex arrays for the second list.
  * \param ccdptr Prefix sum array of size first_count+1. On return:
  *               ccdptr[i+1]-ccdptr[i] = candidates for first i, and
  *               ccdptr[first_count] = total candidates.
@@ -667,7 +645,7 @@ bool lean_count_overlaps(const int sort_axis, const count_t first_count,
           alignas(64) geom_t A_maxy[AABB_DISJOINT_CHUNK_SIZE];
           alignas(64) geom_t A_maxz[AABB_DISJOINT_CHUNK_SIZE];
 
-          sccd_detail::vaabb_broadcast(first_aabbs, fi, A_minx, A_miny, A_minz,
+          vaabb_broadcast(first_aabbs, fi, A_minx, A_miny, A_minz,
                                        A_maxx, A_maxy, A_maxz);
 
           for (; noffset < end;) {
@@ -711,14 +689,14 @@ template <int first_nxe, int second_nxe>
  * \param sort_axis Sort axis (0=x,1=y,2=z).
  * \param first_count Number of AABBs in the first list.
  * \param first_aabbs SoA arrays [6][first_count].
- * \param first_idx Mapping from sorted position to element id for the first list.
- * \param first_stride Stride between elements in the first element arrays.
- * \param first_elements SoA element-vertex arrays for the first list.
+ * \param first_idx Mapping from sorted position to element id for the first
+ * list. \param first_stride Stride between elements in the first element
+ * arrays. \param first_elements SoA element-vertex arrays for the first list.
  * \param second_count Number of AABBs in the second list.
  * \param second_aabbs SoA arrays [6][second_count].
- * \param second_idx Mapping from sorted position to element id for the second list.
- * \param second_stride Stride between elements in the second element arrays.
- * \param second_elements SoA element-vertex arrays for the second list.
+ * \param second_idx Mapping from sorted position to element id for the second
+ * list. \param second_stride Stride between elements in the second element
+ * arrays. \param second_elements SoA element-vertex arrays for the second list.
  * \param ccdptr Prefix offsets from the count pass (size first_count+1).
  * \param foverlap Output array (size ccdptr[first_count]) for first indices.
  * \param noverlap Output array (size ccdptr[first_count]) for second indices.
@@ -803,7 +781,7 @@ void lean_collect_overlaps(
           alignas(64) geom_t A_maxy[AABB_DISJOINT_CHUNK_SIZE];
           alignas(64) geom_t A_maxz[AABB_DISJOINT_CHUNK_SIZE];
 
-          sccd_detail::vaabb_broadcast(first_aabbs, fi, A_minx, A_miny, A_minz,
+          vaabb_broadcast(first_aabbs, fi, A_minx, A_miny, A_minz,
                                        A_maxx, A_maxy, A_maxz);
 
           for (; noffset < end;) {
@@ -840,7 +818,8 @@ void lean_collect_overlaps(
 
 template <int nxe>
 /**
- * \brief Count candidate self-overlaps (upper triangle) within one sorted AABB list.
+ * \brief Count candidate self-overlaps (upper triangle) within one sorted AABB
+ * list.
  *
  * Excludes pairs that are axis-disjoint or share a vertex. The AABBs must be
  * sorted by \p sort_axis and \p idx maps sorted positions to element ids.
@@ -852,8 +831,8 @@ template <int nxe>
  * \param idx Mapping from sorted position to element id.
  * \param stride Stride between elements in the vertex arrays.
  * \param elements SoA element-vertex arrays.
- * \param ccdptr Prefix sum array size element_count+1; filled as in the two-lists case.
- * \return True if any candidates exist.
+ * \param ccdptr Prefix sum array size element_count+1; filled as in the
+ * two-lists case. \return True if any candidates exist.
  */
 bool lean_count_self_overlaps(const int sort_axis, const count_t element_count,
                               geom_t **const SFEM_RESTRICT aabbs,
@@ -907,7 +886,7 @@ bool lean_count_self_overlaps(const int sort_axis, const count_t element_count,
           alignas(64) geom_t A_maxx[AABB_DISJOINT_CHUNK_SIZE];
           alignas(64) geom_t A_maxy[AABB_DISJOINT_CHUNK_SIZE];
           alignas(64) geom_t A_maxz[AABB_DISJOINT_CHUNK_SIZE];
-          sccd_detail::vaabb_broadcast(aabbs, fi, A_minx, A_miny, A_minz,
+          vaabb_broadcast(aabbs, fi, A_minx, A_miny, A_minz,
                                        A_maxx, A_maxy, A_maxz);
 
           for (; noffset < end;) {
@@ -1016,7 +995,7 @@ void lean_collect_self_overlaps(const int sort_axis,
           alignas(64) geom_t A_maxy[AABB_DISJOINT_CHUNK_SIZE];
           alignas(64) geom_t A_maxz[AABB_DISJOINT_CHUNK_SIZE];
 
-          sccd_detail::vaabb_broadcast(aabbs, fi, A_minx, A_miny, A_minz,
+          vaabb_broadcast(aabbs, fi, A_minx, A_miny, A_minz,
                                        A_maxx, A_maxy, A_maxz);
 
           for (; noffset < end;) {
@@ -1050,4 +1029,5 @@ void lean_collect_self_overlaps(const int sort_axis,
       });
 }
 
+} // namespace sccd
 #endif

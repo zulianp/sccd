@@ -10,6 +10,8 @@
 
 using namespace scalable_ccd;
 
+namespace sccd {
+
 // (Ugly) Conversion between Scalable-CCD and sccd and back
 
 typedef struct SCCD {
@@ -205,5 +207,6 @@ typedef struct SCCD {
     }
   }
 } SCCD_t;
+} // namespace sccd
 
 #endif // CONVERSION_HPP
