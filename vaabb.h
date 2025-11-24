@@ -1,7 +1,16 @@
 #ifndef VAABB_H
 #define VAABB_H
 
-#include <stdint.h>
+
+#include <stdlib.h>
+#define SFEM_READ_ENV(name, conversion) \
+    do {                                \
+        char* var = getenv(#name);      \
+        if (var) {                      \
+            name = conversion(var);     \
+        }                               \
+    } while (0)
+
 
 #if defined(__AVX512F__) || defined(__AVX2__)
 #include <immintrin.h>
