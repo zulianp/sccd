@@ -144,10 +144,10 @@ typedef struct SCCD {
     size_t max_ccdptr_size = std::max(nfaces, nedges) + 1;
     ccdptr.resize(max_ccdptr_size);
 
-    sort_axis = lean_choose_axis(nnodes, vaabb);
-    lean_sort_along_axis(nfaces, sort_axis, faabb, fidx.data(), scratch.data());
-    lean_sort_along_axis(nnodes, sort_axis, vaabb, vidx.data(), scratch.data());
-    lean_sort_along_axis(nedges, sort_axis, eaabb, eidx.data(), scratch.data());
+    sort_axis = choose_axis(nnodes, vaabb);
+    sort_along_axis(nfaces, sort_axis, faabb, fidx.data(), scratch.data());
+    sort_along_axis(nnodes, sort_axis, vaabb, vidx.data(), scratch.data());
+    sort_along_axis(nedges, sort_axis, eaabb, eidx.data(), scratch.data());
 
     timer.stop();
     printf("SCCD, Sorting: %g [ms]\n", timer.getElapsedTimeInMilliSec());
@@ -156,14 +156,14 @@ typedef struct SCCD {
     // E2E
     std::fill(ccdptr.begin(), ccdptr.end(), 0);
 
-    lean_count_self_overlaps<2>(sort_axis, nedges, eaabb, eidx.data(), 2,
+    count_self_overlaps<2>(sort_axis, nedges, eaabb, eidx.data(), 2,
                                 soaedges, ccdptr.data());
 
     const size_t ee_n_intersections = ccdptr[nedges];
     e0_overlap.resize(ee_n_intersections);
     e1_overlap.resize(ee_n_intersections);
 
-    lean_collect_self_overlaps<2>(sort_axis, nedges, eaabb, eidx.data(), 2,
+    collect_self_overlaps<2>(sort_axis, nedges, eaabb, eidx.data(), 2,
                                   soaedges, ccdptr.data(), e0_overlap.data(),
                                   e1_overlap.data());
 
@@ -172,7 +172,7 @@ typedef struct SCCD {
     timer.start();
 
     // F2V
-    lean_count_overlaps<3, 1>(sort_axis, nfaces, faabb, fidx.data(), 3,
+    count_overlaps<3, 1>(sort_axis, nfaces, faabb, fidx.data(), 3,
                               soafaces, nnodes, vaabb, vidx.data(), 0, nullptr,
                               ccdptr.data());
 
@@ -181,7 +181,7 @@ typedef struct SCCD {
     foverlap.resize(fv_nintersections);
     voverlap.resize(fv_nintersections);
 
-    lean_collect_overlaps<3, 1>(sort_axis, nfaces, faabb, fidx.data(), 3,
+    collect_overlaps<3, 1>(sort_axis, nfaces, faabb, fidx.data(), 3,
                                 soafaces, nnodes, vaabb, vidx.data(), 0,
                                 nullptr, ccdptr.data(), foverlap.data(),
                                 voverlap.data());

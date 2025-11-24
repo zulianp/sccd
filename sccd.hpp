@@ -42,25 +42,21 @@ using count_t = int;
  * \param x Input value.
  * \return Next representable float greater than or equal to x.
  */
-inline geom_t lean_nextafter_up(const geom_t x) {
-  return nextafterf(x, FLT_MAX);
-}
+inline geom_t nextafter_up(const geom_t x) { return nextafterf(x, FLT_MAX); }
 
 /**
  * \brief Return the next representable value toward -infinity.
  * \param x Input value.
  * \return Next representable float less than or equal to x.
  */
-inline geom_t lean_nextafter_down(const geom_t x) {
-  return nextafterf(x, -FLT_MAX);
-}
+inline geom_t nextafter_down(const geom_t x) { return nextafterf(x, -FLT_MAX); }
 
-// inline geom_t lean_nextafter_up(const geom_t x)
+// inline geom_t nextafter_up(const geom_t x)
 // {
 //     return nextafter(x,DBL_MAX);
 // }
 
-// inline geom_t lean_nextafter_down(const geom_t x)
+// inline geom_t nextafter_down(const geom_t x)
 // {
 //     return nextafter(x, DBL_MAX);
 // }
@@ -71,7 +67,7 @@ inline geom_t lean_nextafter_down(const geom_t x) {
  * \param aabb SoA arrays of size 6: minx,miny,minz,maxx,maxy,maxz; each of
  * length n. \return Axis index in {0,1,2}.
  */
-int lean_choose_axis(const size_t n, geom_t **const SFEM_RESTRICT aabb) {
+int choose_axis(const size_t n, geom_t **const SFEM_RESTRICT aabb) {
   geom_t mean[3] = {0};
   geom_t var[3] = {0};
   for (int d = 0; d < 3; d++) {
@@ -110,10 +106,10 @@ int lean_choose_axis(const size_t n, geom_t **const SFEM_RESTRICT aabb) {
  *
  * Arrays must be valid and sufficiently sized. Uses parallel sort.
  */
-void lean_sort_along_axis(const size_t n, const int sort_axis,
-                          geom_t **const SFEM_RESTRICT arrays,
-                          idx_t *const SFEM_RESTRICT idx,
-                          geom_t *const SFEM_RESTRICT scratch) {
+void sort_along_axis(const size_t n, const int sort_axis,
+                     geom_t **const SFEM_RESTRICT arrays,
+                     idx_t *const SFEM_RESTRICT idx,
+                     geom_t *const SFEM_RESTRICT scratch) {
   for (size_t i = 0; i < n; i++) {
     idx[i] = i;
   }
@@ -218,7 +214,6 @@ static inline void compute_candidate_window_progressive(
     }
   }
 }
-
 
 /**
  * \brief Load a contiguous block of B AABBs into SoA buffers.
@@ -573,17 +568,17 @@ template <int first_nxe, int second_nxe>
  *               ccdptr[first_count] = total candidates.
  * \return True if any candidates exist.
  */
-bool lean_count_overlaps(const int sort_axis, const count_t first_count,
-                         geom_t **const SFEM_RESTRICT first_aabbs,
-                         idx_t *const SFEM_RESTRICT first_idx,
-                         const size_t first_stride,
-                         idx_t **const SFEM_RESTRICT first_elements,
-                         const count_t second_count,
-                         geom_t **const SFEM_RESTRICT second_aabbs,
-                         idx_t *const SFEM_RESTRICT second_idx,
-                         const size_t second_stride,
-                         idx_t **const SFEM_RESTRICT second_elements,
-                         size_t *const SFEM_RESTRICT ccdptr) {
+bool count_overlaps(const int sort_axis, const count_t first_count,
+                    geom_t **const SFEM_RESTRICT first_aabbs,
+                    idx_t *const SFEM_RESTRICT first_idx,
+                    const size_t first_stride,
+                    idx_t **const SFEM_RESTRICT first_elements,
+                    const count_t second_count,
+                    geom_t **const SFEM_RESTRICT second_aabbs,
+                    idx_t *const SFEM_RESTRICT second_idx,
+                    const size_t second_stride,
+                    idx_t **const SFEM_RESTRICT second_elements,
+                    size_t *const SFEM_RESTRICT ccdptr) {
   const geom_t *const SFEM_RESTRICT first_xmin = first_aabbs[sort_axis];
   const geom_t *const SFEM_RESTRICT first_xmax = first_aabbs[3 + sort_axis];
   const geom_t *const SFEM_RESTRICT second_xmin = second_aabbs[sort_axis];
@@ -645,8 +640,8 @@ bool lean_count_overlaps(const int sort_axis, const count_t first_count,
           alignas(64) geom_t A_maxy[AABB_DISJOINT_CHUNK_SIZE];
           alignas(64) geom_t A_maxz[AABB_DISJOINT_CHUNK_SIZE];
 
-          vaabb_broadcast(first_aabbs, fi, A_minx, A_miny, A_minz,
-                                       A_maxx, A_maxy, A_maxz);
+          vaabb_broadcast(first_aabbs, fi, A_minx, A_miny, A_minz, A_maxx,
+                          A_maxy, A_maxz);
 
           for (; noffset < end;) {
             const size_t chunk_len =
@@ -684,7 +679,7 @@ template <int first_nxe, int second_nxe>
 /**
  * \brief Collect candidate overlaps between two sorted AABB lists.
  *
- * Uses the prefix offsets computed by lean_count_overlaps to write pairs.
+ * Uses the prefix offsets computed by count_overlaps to write pairs.
  *
  * \param sort_axis Sort axis (0=x,1=y,2=z).
  * \param first_count Number of AABBs in the first list.
@@ -701,7 +696,7 @@ template <int first_nxe, int second_nxe>
  * \param foverlap Output array (size ccdptr[first_count]) for first indices.
  * \param noverlap Output array (size ccdptr[first_count]) for second indices.
  */
-void lean_collect_overlaps(
+void collect_overlaps(
     const int sort_axis, const count_t first_count,
     geom_t **const SFEM_RESTRICT first_aabbs,
     idx_t *const SFEM_RESTRICT first_idx, const size_t first_stride,
@@ -781,8 +776,8 @@ void lean_collect_overlaps(
           alignas(64) geom_t A_maxy[AABB_DISJOINT_CHUNK_SIZE];
           alignas(64) geom_t A_maxz[AABB_DISJOINT_CHUNK_SIZE];
 
-          vaabb_broadcast(first_aabbs, fi, A_minx, A_miny, A_minz,
-                                       A_maxx, A_maxy, A_maxz);
+          vaabb_broadcast(first_aabbs, fi, A_minx, A_miny, A_minz, A_maxx,
+                          A_maxy, A_maxz);
 
           for (; noffset < end;) {
             const size_t chunk_len =
@@ -834,12 +829,11 @@ template <int nxe>
  * \param ccdptr Prefix sum array size element_count+1; filled as in the
  * two-lists case. \return True if any candidates exist.
  */
-bool lean_count_self_overlaps(const int sort_axis, const count_t element_count,
-                              geom_t **const SFEM_RESTRICT aabbs,
-                              idx_t *const SFEM_RESTRICT idx,
-                              const size_t stride,
-                              idx_t **const SFEM_RESTRICT elements,
-                              size_t *const SFEM_RESTRICT ccdptr) {
+bool count_self_overlaps(const int sort_axis, const count_t element_count,
+                         geom_t **const SFEM_RESTRICT aabbs,
+                         idx_t *const SFEM_RESTRICT idx, const size_t stride,
+                         idx_t **const SFEM_RESTRICT elements,
+                         size_t *const SFEM_RESTRICT ccdptr) {
   const geom_t *const SFEM_RESTRICT xmin = aabbs[sort_axis];
   const geom_t *const SFEM_RESTRICT xmax = aabbs[3 + sort_axis];
 
@@ -886,8 +880,8 @@ bool lean_count_self_overlaps(const int sort_axis, const count_t element_count,
           alignas(64) geom_t A_maxx[AABB_DISJOINT_CHUNK_SIZE];
           alignas(64) geom_t A_maxy[AABB_DISJOINT_CHUNK_SIZE];
           alignas(64) geom_t A_maxz[AABB_DISJOINT_CHUNK_SIZE];
-          vaabb_broadcast(aabbs, fi, A_minx, A_miny, A_minz,
-                                       A_maxx, A_maxy, A_maxz);
+          vaabb_broadcast(aabbs, fi, A_minx, A_miny, A_minz, A_maxx, A_maxy,
+                          A_maxz);
 
           for (; noffset < end;) {
             const size_t chunk_len =
@@ -935,14 +929,13 @@ template <int nxe>
  * \param foverlap Output array of first indices.
  * \param noverlap Output array of second indices.
  */
-void lean_collect_self_overlaps(const int sort_axis,
-                                const count_t element_count,
-                                geom_t **const SFEM_RESTRICT aabbs,
-                                idx_t *const SFEM_RESTRICT idx,
-                                const size_t stride, idx_t **const elements,
-                                const size_t *const SFEM_RESTRICT ccdptr,
-                                idx_t *SFEM_RESTRICT foverlap,
-                                idx_t *SFEM_RESTRICT noverlap) {
+void collect_self_overlaps(const int sort_axis, const count_t element_count,
+                           geom_t **const SFEM_RESTRICT aabbs,
+                           idx_t *const SFEM_RESTRICT idx, const size_t stride,
+                           idx_t **const elements,
+                           const size_t *const SFEM_RESTRICT ccdptr,
+                           idx_t *SFEM_RESTRICT foverlap,
+                           idx_t *SFEM_RESTRICT noverlap) {
   const geom_t *const SFEM_RESTRICT xmin = aabbs[sort_axis];
   const geom_t *const SFEM_RESTRICT xmax = aabbs[3 + sort_axis];
 
@@ -995,8 +988,8 @@ void lean_collect_self_overlaps(const int sort_axis,
           alignas(64) geom_t A_maxy[AABB_DISJOINT_CHUNK_SIZE];
           alignas(64) geom_t A_maxz[AABB_DISJOINT_CHUNK_SIZE];
 
-          vaabb_broadcast(aabbs, fi, A_minx, A_miny, A_minz,
-                                       A_maxx, A_maxy, A_maxz);
+          vaabb_broadcast(aabbs, fi, A_minx, A_miny, A_minz, A_maxx, A_maxy,
+                          A_maxz);
 
           for (; noffset < end;) {
             const size_t chunk_len =
