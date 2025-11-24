@@ -263,40 +263,45 @@ static inline void tail_fill_B(const geom_t amaxx0, const geom_t amaxy0,
 }
 
 /**
- * \brief Build per-lane disjoint mask for a block of B against broadcast A.
+ * \brief Build per-lane disjoint mask for a block of B against a single A.
  * \param second_aabbs SoA arrays for the second list.
  * \param start First B index to test.
  * \param chunk_len Number of lanes to process (<= AABB_DISJOINT_CHUNK_SIZE).
- * \param A_minx..A_maxz Broadcast A components.
- * \param amaxx0,amaxy0,amaxz0 Max components of A used for tail fill.
+ * \param aminx Scalar A min x.
+ * \param aminy Scalar A min y.
+ * \param aminz Scalar A min z.
+ * \param amaxx Scalar A max x.
+ * \param amaxy Scalar A max y.
+ * \param amaxz Scalar A max z (also used for tail fill).
  * \param mask_out Output mask: 1=disjoint, 0=potential overlap.
  */
 static inline void build_disjoint_mask_for_block(
     geom_t **const SFEM_RESTRICT second_aabbs, const size_t start,
-    const size_t chunk_len, 
-    const geom_t *const SFEM_RESTRICT A_minx,
-    const geom_t *const SFEM_RESTRICT A_miny,
-    const geom_t *const SFEM_RESTRICT A_minz,
-    const geom_t *const SFEM_RESTRICT A_maxx,
-    const geom_t *const SFEM_RESTRICT A_maxy,
-    const geom_t *const SFEM_RESTRICT A_maxz, 
-    const geom_t amaxx0,
-    const geom_t amaxy0, 
-    const geom_t amaxz0,
-    uint32_t *const SFEM_RESTRICT mask_out) {
-  alignas(64) geom_t B_minx[AABB_DISJOINT_CHUNK_SIZE];
-  alignas(64) geom_t B_miny[AABB_DISJOINT_CHUNK_SIZE];
-  alignas(64) geom_t B_minz[AABB_DISJOINT_CHUNK_SIZE];
-  alignas(64) geom_t B_maxx[AABB_DISJOINT_CHUNK_SIZE];
-  alignas(64) geom_t B_maxy[AABB_DISJOINT_CHUNK_SIZE];
-  alignas(64) geom_t B_maxz[AABB_DISJOINT_CHUNK_SIZE];
+    const size_t chunk_len, const geom_t aminx, const geom_t aminy,
+    const geom_t aminz, const geom_t amaxx, const geom_t amaxy,
+    const geom_t amaxz, uint32_t *const SFEM_RESTRICT mask_out) {
 
-  prepare_B_block(second_aabbs, start, chunk_len, B_minx, B_miny, B_minz,
-                  B_maxx, B_maxy, B_maxz);
-  tail_fill_B(amaxx0, amaxy0, amaxz0, chunk_len, B_minx, B_miny, B_minz, B_maxx,
-              B_maxy, B_maxz);
-  vdisjoint(A_minx, A_miny, A_minz, A_maxx, A_maxy, A_maxz, B_minx, B_miny,
-            B_minz, B_maxx, B_maxy, B_maxz, mask_out);
+  if (chunk_len != AABB_DISJOINT_CHUNK_SIZE) {
+    alignas(64) geom_t B_minx[AABB_DISJOINT_CHUNK_SIZE];
+    alignas(64) geom_t B_miny[AABB_DISJOINT_CHUNK_SIZE];
+    alignas(64) geom_t B_minz[AABB_DISJOINT_CHUNK_SIZE];
+    alignas(64) geom_t B_maxx[AABB_DISJOINT_CHUNK_SIZE];
+    alignas(64) geom_t B_maxy[AABB_DISJOINT_CHUNK_SIZE];
+    alignas(64) geom_t B_maxz[AABB_DISJOINT_CHUNK_SIZE];
+
+    prepare_B_block(second_aabbs, start, chunk_len, B_minx, B_miny, B_minz,
+                    B_maxx, B_maxy, B_maxz);
+    tail_fill_B(amaxx, amaxy, amaxz, chunk_len, B_minx, B_miny, B_minz, B_maxx,
+                B_maxy, B_maxz);
+    vdisjoint_one_to_many(aminx, aminy, aminz, amaxx, amaxy, amaxz, B_minx,
+                          B_miny, B_minz, B_maxx, B_maxy, B_maxz, mask_out);
+  } else {
+    vdisjoint_one_to_many(aminx, aminy, aminz, amaxx, amaxy, amaxz,
+                          second_aabbs[0] + start, second_aabbs[1] + start,
+                          second_aabbs[2] + start, second_aabbs[3] + start,
+                          second_aabbs[4] + start, second_aabbs[5] + start,
+                          mask_out);
+  }
 }
 
 /**
@@ -637,16 +642,6 @@ bool count_overlaps(const int sort_axis, const count_t first_count,
           size_t count = 0;
           size_t noffset = ni;
 
-          alignas(64) geom_t A_minx[AABB_DISJOINT_CHUNK_SIZE];
-          alignas(64) geom_t A_miny[AABB_DISJOINT_CHUNK_SIZE];
-          alignas(64) geom_t A_minz[AABB_DISJOINT_CHUNK_SIZE];
-          alignas(64) geom_t A_maxx[AABB_DISJOINT_CHUNK_SIZE];
-          alignas(64) geom_t A_maxy[AABB_DISJOINT_CHUNK_SIZE];
-          alignas(64) geom_t A_maxz[AABB_DISJOINT_CHUNK_SIZE];
-
-          vaabb_broadcast(first_aabbs, fi, A_minx, A_miny, A_minz, A_maxx,
-                          A_maxy, A_maxz);
-
           for (; noffset < end;) {
             const size_t chunk_len =
                 std::min((size_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
@@ -654,8 +649,9 @@ bool count_overlaps(const int sort_axis, const count_t first_count,
             uint32_t dmask[AABB_DISJOINT_CHUNK_SIZE] = {0};
 
             sccd_detail::build_disjoint_mask_for_block(
-                second_aabbs, noffset, chunk_len, A_minx, A_miny, A_minz,
-                A_maxx, A_maxy, A_maxz, A_maxx[0], A_maxy[0], A_maxz[0], dmask);
+                second_aabbs, noffset, chunk_len, first_aabbs[0][fi],
+                first_aabbs[1][fi], first_aabbs[2][fi], first_aabbs[3][fi],
+                first_aabbs[4][fi], first_aabbs[5][fi], dmask);
 
             sccd_detail::mask_out_shared_two_lists<first_nxe, second_nxe>(
                 dmask, chunk_len, noffset, ev, second_idx, second_elements,
@@ -773,24 +769,15 @@ void collect_overlaps(
           size_t count = 0;
           size_t noffset = ni;
 
-          alignas(64) geom_t A_minx[AABB_DISJOINT_CHUNK_SIZE];
-          alignas(64) geom_t A_miny[AABB_DISJOINT_CHUNK_SIZE];
-          alignas(64) geom_t A_minz[AABB_DISJOINT_CHUNK_SIZE];
-          alignas(64) geom_t A_maxx[AABB_DISJOINT_CHUNK_SIZE];
-          alignas(64) geom_t A_maxy[AABB_DISJOINT_CHUNK_SIZE];
-          alignas(64) geom_t A_maxz[AABB_DISJOINT_CHUNK_SIZE];
-
-          vaabb_broadcast(first_aabbs, fi, A_minx, A_miny, A_minz, A_maxx,
-                          A_maxy, A_maxz);
-
           for (; noffset < end;) {
             const size_t chunk_len =
                 std::min((size_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
 
             uint32_t dmask[AABB_DISJOINT_CHUNK_SIZE] = {0};
             sccd_detail::build_disjoint_mask_for_block(
-                second_aabbs, noffset, chunk_len, A_minx, A_miny, A_minz,
-                A_maxx, A_maxy, A_maxz, A_maxx[0], A_maxy[0], A_maxz[0], dmask);
+                second_aabbs, noffset, chunk_len, first_aabbs[0][fi],
+                first_aabbs[1][fi], first_aabbs[2][fi], first_aabbs[3][fi],
+                first_aabbs[4][fi], first_aabbs[5][fi], dmask);
 
             sccd_detail::mask_out_shared_two_lists<first_nxe, second_nxe>(
                 dmask, chunk_len, noffset, ev, second_idx, second_elements,
@@ -878,23 +865,14 @@ bool count_self_overlaps(const int sort_axis, const count_t element_count,
 
           size_t count = 0;
 
-          alignas(64) geom_t A_minx[AABB_DISJOINT_CHUNK_SIZE];
-          alignas(64) geom_t A_miny[AABB_DISJOINT_CHUNK_SIZE];
-          alignas(64) geom_t A_minz[AABB_DISJOINT_CHUNK_SIZE];
-          alignas(64) geom_t A_maxx[AABB_DISJOINT_CHUNK_SIZE];
-          alignas(64) geom_t A_maxy[AABB_DISJOINT_CHUNK_SIZE];
-          alignas(64) geom_t A_maxz[AABB_DISJOINT_CHUNK_SIZE];
-          vaabb_broadcast(aabbs, fi, A_minx, A_miny, A_minz, A_maxx, A_maxy,
-                          A_maxz);
-
           for (; noffset < end;) {
             const size_t chunk_len =
                 std::min((size_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
 
             uint32_t mask[AABB_DISJOINT_CHUNK_SIZE] = {0};
             sccd_detail::build_disjoint_mask_for_block(
-                aabbs, noffset, chunk_len, A_minx, A_miny, A_minz, A_maxx,
-                A_maxy, A_maxz, A_maxx[0], A_maxy[0], A_maxz[0], mask);
+                aabbs, noffset, chunk_len, aabbs[0][fi], aabbs[1][fi],
+                aabbs[2][fi], aabbs[3][fi], aabbs[4][fi], aabbs[5][fi], mask);
 
             sccd_detail::mask_out_shared_self<nxe>(mask, chunk_len, noffset, ev,
                                                    idx, elements, stride);
@@ -984,17 +962,6 @@ void collect_self_overlaps(const int sort_axis, const count_t element_count,
           }
 
           size_t count = 0;
-
-          alignas(64) geom_t A_minx[AABB_DISJOINT_CHUNK_SIZE];
-          alignas(64) geom_t A_miny[AABB_DISJOINT_CHUNK_SIZE];
-          alignas(64) geom_t A_minz[AABB_DISJOINT_CHUNK_SIZE];
-          alignas(64) geom_t A_maxx[AABB_DISJOINT_CHUNK_SIZE];
-          alignas(64) geom_t A_maxy[AABB_DISJOINT_CHUNK_SIZE];
-          alignas(64) geom_t A_maxz[AABB_DISJOINT_CHUNK_SIZE];
-
-          vaabb_broadcast(aabbs, fi, A_minx, A_miny, A_minz, A_maxx, A_maxy,
-                          A_maxz);
-
           for (; noffset < end;) {
             const size_t chunk_len =
                 std::min((size_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
@@ -1002,8 +969,8 @@ void collect_self_overlaps(const int sort_axis, const count_t element_count,
             uint32_t mask[AABB_DISJOINT_CHUNK_SIZE] = {0};
 
             sccd_detail::build_disjoint_mask_for_block(
-                aabbs, noffset, chunk_len, A_minx, A_miny, A_minz, A_maxx,
-                A_maxy, A_maxz, A_maxx[0], A_maxy[0], A_maxz[0], mask);
+                aabbs, noffset, chunk_len, aabbs[0][fi], aabbs[1][fi],
+                aabbs[2][fi], aabbs[3][fi], aabbs[4][fi], aabbs[5][fi], mask);
 
             sccd_detail::mask_out_shared_self<nxe>(mask, chunk_len, noffset, ev,
                                                    idx, elements, stride);
