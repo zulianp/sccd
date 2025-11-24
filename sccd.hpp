@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <cfloat>
+#include <cstdio>
 
 #include "vaabb.h"
 
@@ -114,6 +115,33 @@ static void remap_idx(
 
 namespace sccd_detail {
 
+    template <int nxe>
+static inline void load_ev(
+    idx_t** const SFEM_RESTRICT elements,
+    const idx_t elem_idx,
+    const size_t stride,
+    idx_t (&out)[nxe])
+{
+    for (int v = 0; v < nxe; ++v) {
+        out[v] = elements[v][elem_idx * stride];
+    }
+}
+
+template <int n1, int n2>
+static inline bool shares_vertex(const idx_t (&a)[n1], const idx_t (&b)[n2])
+{
+    for (int i = 0; i < n1; ++i) {
+        for (int j = 0; j < n2; ++j) {
+            if (a[i] == b[j]) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+
+
 // Compute begin/end candidate window indices for the current AABB
 static inline void compute_candidate_window(
     const geom_t fimin,
@@ -166,7 +194,7 @@ static inline void compute_candidate_window_progressive(
 }
 
 // Replicate A (fi) box values into SoA scratch for SIMD chunk processing
-static inline void aabb_broadcast(
+static inline void vaabb_broadcast(
     geom_t** const SFEM_RESTRICT aabbs,
     const size_t fi,
     geom_t* const SFEM_RESTRICT A_minx,
@@ -189,6 +217,41 @@ static inline void aabb_broadcast(
         A_maxx[k] = amaxx;
         A_maxy[k] = amaxy;
         A_maxz[k] = amaxz;
+    }
+}
+
+// Scalar reference: build "skip" mask (1 = skip, disjoint or shares vertex)
+template <int N>
+static inline void scalar_skip_mask_self(
+    geom_t** const SFEM_RESTRICT aabbs,
+    const size_t fi,
+    const idx_t (&ev)[N],
+    idx_t** const SFEM_RESTRICT elements,
+    const idx_t* const SFEM_RESTRICT idx,
+    const size_t stride,
+    const size_t base,
+    const size_t chunk_len,
+    uint32_t* const SFEM_RESTRICT mask_out)
+{
+    const geom_t aminx = aabbs[0][fi];
+    const geom_t aminy = aabbs[1][fi];
+    const geom_t aminz = aabbs[2][fi];
+    const geom_t amaxx = aabbs[3][fi];
+    const geom_t amaxy = aabbs[4][fi];
+    const geom_t amaxz = aabbs[5][fi];
+    for (size_t lane = 0; lane < chunk_len; ++lane) {
+        const size_t j = base + lane;
+        const bool is_disjoint = disjoint(
+            aminx, aminy, aminz, amaxx, amaxy, amaxz, aabbs[0][j], aabbs[1][j],
+            aabbs[2][j], aabbs[3][j], aabbs[4][j], aabbs[5][j]);
+        if (is_disjoint) {
+            mask_out[lane] = 1u;
+            continue;
+        }
+        const idx_t jidx = idx[j];
+        idx_t sev[N];
+        load_ev<N>(elements, jidx, stride, sev);
+        mask_out[lane] = shares_vertex<N, N>(ev, sev) ? 1u : 0u;
     }
 }
 
@@ -254,12 +317,12 @@ static inline void build_disjoint_mask_for_block(
     const geom_t amaxz0,
     uint32_t* const SFEM_RESTRICT mask_out)
 {
-    geom_t B_minx[AABB_DISJOINT_CHUNK_SIZE];
-    geom_t B_miny[AABB_DISJOINT_CHUNK_SIZE];
-    geom_t B_minz[AABB_DISJOINT_CHUNK_SIZE];
-    geom_t B_maxx[AABB_DISJOINT_CHUNK_SIZE];
-    geom_t B_maxy[AABB_DISJOINT_CHUNK_SIZE];
-    geom_t B_maxz[AABB_DISJOINT_CHUNK_SIZE];
+    alignas(64) geom_t B_minx[AABB_DISJOINT_CHUNK_SIZE];
+    alignas(64) geom_t B_miny[AABB_DISJOINT_CHUNK_SIZE];
+    alignas(64) geom_t B_minz[AABB_DISJOINT_CHUNK_SIZE];
+    alignas(64) geom_t B_maxx[AABB_DISJOINT_CHUNK_SIZE];
+    alignas(64) geom_t B_maxy[AABB_DISJOINT_CHUNK_SIZE];
+    alignas(64) geom_t B_maxz[AABB_DISJOINT_CHUNK_SIZE];
 
     prepare_B_block(
         second_aabbs, start, chunk_len, B_minx, B_miny, B_minz, B_maxx, B_maxy,
@@ -272,30 +335,7 @@ static inline void build_disjoint_mask_for_block(
         B_maxx, B_maxy, B_maxz, mask_out);
 }
 
-template <int nxe>
-static inline void load_ev(
-    idx_t** const SFEM_RESTRICT elements,
-    const idx_t elem_idx,
-    const size_t stride,
-    idx_t (&out)[nxe])
-{
-    for (int v = 0; v < nxe; ++v) {
-        out[v] = elements[v][elem_idx * stride];
-    }
-}
 
-template <int n1, int n2>
-static inline bool shares_vertex(const idx_t (&a)[n1], const idx_t (&b)[n2])
-{
-    for (int i = 0; i < n1; ++i) {
-        for (int j = 0; j < n2; ++j) {
-            if (a[i] == b[j]) {
-                return true;
-            }
-        }
-    }
-    return false;
-}
 
 // In-place mask update: mark shared-vertex lanes as 1 (invalid)
 template <int F, int S>
@@ -555,6 +595,9 @@ bool lean_count_overlaps(
     const geom_t* const SFEM_RESTRICT second_xmin = second_aabbs[sort_axis];
     const geom_t* const SFEM_RESTRICT second_xmax = second_aabbs[3 + sort_axis];
 
+    // Ensure deterministic base for prefix sum (even if caller forgot)
+    ccdptr[0] = 0;
+
     if (first_xmax[first_count - 1] < second_xmin[0])
         return false;
 
@@ -603,21 +646,21 @@ bool lean_count_overlaps(
                 size_t noffset = ni;
 
                 // Prepare repeated A values for SIMD chunk
-                geom_t A_minx[AABB_DISJOINT_CHUNK_SIZE];
-                geom_t A_miny[AABB_DISJOINT_CHUNK_SIZE];
-                geom_t A_minz[AABB_DISJOINT_CHUNK_SIZE];
-                geom_t A_maxx[AABB_DISJOINT_CHUNK_SIZE];
-                geom_t A_maxy[AABB_DISJOINT_CHUNK_SIZE];
-                geom_t A_maxz[AABB_DISJOINT_CHUNK_SIZE];
+                alignas(64) geom_t A_minx[AABB_DISJOINT_CHUNK_SIZE];
+                alignas(64) geom_t A_miny[AABB_DISJOINT_CHUNK_SIZE];
+                alignas(64) geom_t A_minz[AABB_DISJOINT_CHUNK_SIZE];
+                alignas(64) geom_t A_maxx[AABB_DISJOINT_CHUNK_SIZE];
+                alignas(64) geom_t A_maxy[AABB_DISJOINT_CHUNK_SIZE];
+                alignas(64) geom_t A_maxz[AABB_DISJOINT_CHUNK_SIZE];
                 
-                sccd_detail::aabb_broadcast(
+                sccd_detail::vaabb_broadcast(
                     first_aabbs, fi, A_minx, A_miny, A_minz, A_maxx, A_maxy, A_maxz);
 
                 for (; noffset < end;) {
                     const size_t chunk_len = std::min(
                         (size_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
 
-                    uint32_t dmask[AABB_DISJOINT_CHUNK_SIZE];
+                    uint32_t dmask[AABB_DISJOINT_CHUNK_SIZE] = {0};
                     
                     sccd_detail::build_disjoint_mask_for_block(
                         second_aabbs, noffset, chunk_len, A_minx, A_miny, A_minz,
@@ -729,21 +772,21 @@ void lean_collect_overlaps(
                 size_t noffset = ni;
 
                 // Prepare repeated A values for SIMD chunk
-                geom_t A_minx[AABB_DISJOINT_CHUNK_SIZE];
-                geom_t A_miny[AABB_DISJOINT_CHUNK_SIZE];
-                geom_t A_minz[AABB_DISJOINT_CHUNK_SIZE];
-                geom_t A_maxx[AABB_DISJOINT_CHUNK_SIZE];
-                geom_t A_maxy[AABB_DISJOINT_CHUNK_SIZE];
-                geom_t A_maxz[AABB_DISJOINT_CHUNK_SIZE];
+                alignas(64) geom_t A_minx[AABB_DISJOINT_CHUNK_SIZE];
+                alignas(64) geom_t A_miny[AABB_DISJOINT_CHUNK_SIZE];
+                alignas(64) geom_t A_minz[AABB_DISJOINT_CHUNK_SIZE];
+                alignas(64) geom_t A_maxx[AABB_DISJOINT_CHUNK_SIZE];
+                alignas(64) geom_t A_maxy[AABB_DISJOINT_CHUNK_SIZE];
+                alignas(64) geom_t A_maxz[AABB_DISJOINT_CHUNK_SIZE];
                 
-                sccd_detail::aabb_broadcast(
+                sccd_detail::vaabb_broadcast(
                     first_aabbs, fi, A_minx, A_miny, A_minz, A_maxx, A_maxy, A_maxz);
 
                 for (; noffset < end;) {
                     const size_t chunk_len = std::min(
                         (size_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
 
-                    uint32_t dmask[AABB_DISJOINT_CHUNK_SIZE];
+                    uint32_t dmask[AABB_DISJOINT_CHUNK_SIZE] = {0};
                     sccd_detail::build_disjoint_mask_for_block(
                         second_aabbs, noffset, chunk_len, A_minx, A_miny, A_minz,
                         A_maxx, A_maxy, A_maxz, A_maxx[0], A_maxy[0], A_maxz[0],
@@ -784,6 +827,9 @@ bool lean_count_self_overlaps(
     const geom_t* const SFEM_RESTRICT xmin = aabbs[sort_axis];
     const geom_t* const SFEM_RESTRICT xmax = aabbs[3 + sort_axis];
 
+    // Ensure deterministic base for prefix sum (even if caller forgot)
+    ccdptr[0] = 0;
+
     tbb::parallel_for(
         tbb::blocked_range<size_t>(0, element_count),
         [&](const tbb::blocked_range<size_t>& r) {
@@ -791,6 +837,9 @@ bool lean_count_self_overlaps(
                 const geom_t fimin = xmin[fi];
                 const geom_t fimax = xmax[fi];
                 const idx_t idxi = idx[fi];
+
+                assert(idxi >= 0);
+                assert(idxi < element_count);
 
                 idx_t ev[nxe];
                 for (int v = 0; v < nxe; v++) {
@@ -820,13 +869,13 @@ bool lean_count_self_overlaps(
                 size_t count = 0;
 
                 // Prepare repeated A values for SIMD chunk
-                geom_t A_minx[AABB_DISJOINT_CHUNK_SIZE];
-                geom_t A_miny[AABB_DISJOINT_CHUNK_SIZE];
-                geom_t A_minz[AABB_DISJOINT_CHUNK_SIZE];
-                geom_t A_maxx[AABB_DISJOINT_CHUNK_SIZE];
-                geom_t A_maxy[AABB_DISJOINT_CHUNK_SIZE];
-                geom_t A_maxz[AABB_DISJOINT_CHUNK_SIZE];
-                sccd_detail::aabb_broadcast(
+                alignas(64) geom_t A_minx[AABB_DISJOINT_CHUNK_SIZE];
+                alignas(64) geom_t A_miny[AABB_DISJOINT_CHUNK_SIZE];
+                alignas(64) geom_t A_minz[AABB_DISJOINT_CHUNK_SIZE];
+                alignas(64) geom_t A_maxx[AABB_DISJOINT_CHUNK_SIZE];
+                alignas(64) geom_t A_maxy[AABB_DISJOINT_CHUNK_SIZE];
+                alignas(64) geom_t A_maxz[AABB_DISJOINT_CHUNK_SIZE];
+                sccd_detail::vaabb_broadcast(
                     aabbs, fi, A_minx, A_miny, A_minz, A_maxx, A_maxy, A_maxz);
 
                 for (; noffset < end;) {
@@ -834,7 +883,7 @@ bool lean_count_self_overlaps(
                         (size_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
 
                     // Disjoint array mask -> per-lane skip logic
-                    uint32_t mask[AABB_DISJOINT_CHUNK_SIZE];
+                    uint32_t mask[AABB_DISJOINT_CHUNK_SIZE] = {0};
                     sccd_detail::build_disjoint_mask_for_block(
                         aabbs, noffset, chunk_len, A_minx, A_miny, A_minz, A_maxx,
                         A_maxy, A_maxz, A_maxx[0], A_maxy[0], A_maxz[0], mask);
@@ -921,13 +970,13 @@ void lean_collect_self_overlaps(
                 size_t count = 0;
 
                 // Prepare repeated A values for SIMD chunk
-                geom_t A_minx[AABB_DISJOINT_CHUNK_SIZE];
-                geom_t A_miny[AABB_DISJOINT_CHUNK_SIZE];
-                geom_t A_minz[AABB_DISJOINT_CHUNK_SIZE];
-                geom_t A_maxx[AABB_DISJOINT_CHUNK_SIZE];
-                geom_t A_maxy[AABB_DISJOINT_CHUNK_SIZE];
-                geom_t A_maxz[AABB_DISJOINT_CHUNK_SIZE];
-                sccd_detail::aabb_broadcast(
+                alignas(64) geom_t A_minx[AABB_DISJOINT_CHUNK_SIZE];
+                alignas(64) geom_t A_miny[AABB_DISJOINT_CHUNK_SIZE];
+                alignas(64) geom_t A_minz[AABB_DISJOINT_CHUNK_SIZE];
+                alignas(64) geom_t A_maxx[AABB_DISJOINT_CHUNK_SIZE];
+                alignas(64) geom_t A_maxy[AABB_DISJOINT_CHUNK_SIZE];
+                alignas(64) geom_t A_maxz[AABB_DISJOINT_CHUNK_SIZE];
+                sccd_detail::vaabb_broadcast(
                     aabbs, fi, A_minx, A_miny, A_minz, A_maxx, A_maxy, A_maxz);
               
                 for (; noffset < end;) {
@@ -935,7 +984,7 @@ void lean_collect_self_overlaps(
                         (size_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
 
                     // Disjoint array mask -> per-lane skip logic and write pairs
-                    uint32_t mask[AABB_DISJOINT_CHUNK_SIZE];
+                    uint32_t mask[AABB_DISJOINT_CHUNK_SIZE] = {0};
 
                     sccd_detail::build_disjoint_mask_for_block(
                         aabbs, noffset, chunk_len, A_minx, A_miny, A_minz, A_maxx,
