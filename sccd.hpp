@@ -141,8 +141,32 @@ static inline void compute_candidate_window(
     out_end = end;
 }
 
+// Progressive window: advances 'begin' in-place and computes 'end'.
+// Semantics match the open-coded loops used in two-lists paths.
+static inline void compute_candidate_window_progressive(
+    const geom_t fimin,
+    const geom_t fimax,
+    const geom_t* const SFEM_RESTRICT second_xmax,
+    const geom_t* const SFEM_RESTRICT second_xmin,
+    const size_t second_count,
+    size_t& begin,
+    size_t& end)
+{
+    for (; begin < second_count; ++begin) {
+        if (fimin < second_xmax[begin]) {
+            break;
+        }
+    }
+    end = begin;
+    for (; end < second_count; ++end) {
+        if (fimax < second_xmin[end]) {
+            break;
+        }
+    }
+}
+
 // Replicate A (fi) box values into SoA scratch for SIMD chunk processing
-static inline void prepare_A_replicated(
+static inline void aabb_broadcast(
     geom_t** const SFEM_RESTRICT aabbs,
     const size_t fi,
     geom_t* const SFEM_RESTRICT A_minx,
@@ -552,29 +576,14 @@ bool lean_count_overlaps(
                 const geom_t fimax = first_xmax[fi];
                 const idx_t first_idxi = first_idx[fi];
 
-                const geom_t fi_min[3] = { first_aabbs[0][fi],
-                                           first_aabbs[1][fi],
-                                           first_aabbs[2][fi] };
-
-                const geom_t fi_max[3] = { first_aabbs[3][fi],
-                                           first_aabbs[4][fi],
-                                           first_aabbs[5][fi] };
-
                 idx_t ev[first_nxe];
                 for (int v = 0; v < first_nxe; v++) {
                     ev[v] = first_elements[v][first_idxi * first_stride];
                 }
 
-                for (; ni < second_count; ni++) {
-                    if (fimin < second_xmax[ni]) {
-                        break;
-                    }
-                }
-
-                // Determine candidate window [ni, end)
                 size_t end = ni;
-                sccd_detail::compute_candidate_window(
-                    fimin, fimax, second_xmax, second_xmin, second_count, ni, ni, end);
+                sccd_detail::compute_candidate_window_progressive(
+                    fimin, fimax, second_xmax, second_xmin, second_count, ni, end);
 
                 if (ni >= end) {
                     continue;
@@ -600,7 +609,8 @@ bool lean_count_overlaps(
                 geom_t A_maxx[AABB_DISJOINT_CHUNK_SIZE];
                 geom_t A_maxy[AABB_DISJOINT_CHUNK_SIZE];
                 geom_t A_maxz[AABB_DISJOINT_CHUNK_SIZE];
-                sccd_detail::prepare_A_replicated(
+                
+                sccd_detail::aabb_broadcast(
                     first_aabbs, fi, A_minx, A_miny, A_minz, A_maxx, A_maxy, A_maxz);
 
                 for (; noffset < end;) {
@@ -695,19 +705,9 @@ void lean_collect_overlaps(
                     ev[v] = first_elements[v][first_idxi * first_stride];
                 }
 
-                for (; ni < second_count; ni++) {
-                    if (fimin < second_xmax[ni]) {
-                        break;
-                    }
-                }
-
-                // Determine end of candidate range
                 size_t end = ni;
-                for (; end < second_count; end++) {
-                    if (fimax < second_xmin[end]) {
-                        break;
-                    }
-                }
+                sccd_detail::compute_candidate_window_progressive(
+                    fimin, fimax, second_xmax, second_xmin, second_count, ni, end);
 
                 if (ni >= end) {
                     continue;
@@ -736,7 +736,7 @@ void lean_collect_overlaps(
                 geom_t A_maxy[AABB_DISJOINT_CHUNK_SIZE];
                 geom_t A_maxz[AABB_DISJOINT_CHUNK_SIZE];
                 
-                sccd_detail::prepare_A_replicated(
+                sccd_detail::aabb_broadcast(
                     first_aabbs, fi, A_minx, A_miny, A_minz, A_maxx, A_maxy, A_maxz);
 
                 for (; noffset < end;) {
@@ -798,20 +798,9 @@ bool lean_count_self_overlaps(
                 }
 
                 size_t noffset = fi + 1;
-                for (; noffset < element_count; noffset++) {
-                    if (fimin < xmax[noffset]) {
-                        break;
-                    }
-                }
-
-                // Determine end of candidate range using original loop
-                // semantics
                 size_t end = noffset;
-                for (; end < element_count; end++) {
-                    if (fimax < xmin[end]) {
-                        break;
-                    }
-                }
+                sccd_detail::compute_candidate_window_progressive(
+                    fimin, fimax, xmax, xmin, element_count, noffset, end);
 
                 if (noffset >= end) {
                     ccdptr[fi + 1] = 0;
@@ -837,7 +826,7 @@ bool lean_count_self_overlaps(
                 geom_t A_maxx[AABB_DISJOINT_CHUNK_SIZE];
                 geom_t A_maxy[AABB_DISJOINT_CHUNK_SIZE];
                 geom_t A_maxz[AABB_DISJOINT_CHUNK_SIZE];
-                sccd_detail::prepare_A_replicated(
+                sccd_detail::aabb_broadcast(
                     aabbs, fi, A_minx, A_miny, A_minz, A_maxx, A_maxy, A_maxz);
 
                 for (; noffset < end;) {
@@ -852,6 +841,7 @@ bool lean_count_self_overlaps(
                         
                     sccd_detail::mask_out_shared_self<nxe>(
                         mask, chunk_len, noffset, ev, idx, elements, stride);
+                        
                     for (size_t lane = 0; lane < chunk_len; ++lane) {
                         count += mask[lane] ? 0 : 1;
                     }
@@ -890,9 +880,8 @@ void lean_collect_self_overlaps(
         [&](const tbb::blocked_range<size_t>& r) {
             for (size_t fi = r.begin(); fi < r.end(); fi++) {
                 const size_t expected_count = ccdptr[fi + 1] - ccdptr[fi];
-                if(expected_count == 0) {
-                    continue;
-                }
+                if(!expected_count) continue;
+
 
                 const geom_t fimin = xmin[fi];
                 const geom_t fimax = xmax[fi];
@@ -910,20 +899,12 @@ void lean_collect_self_overlaps(
                 }
 
                 size_t noffset = fi + 1;
-                for (; noffset < element_count; noffset++) {
-                    if (fimin < xmax[noffset]) {
-                        break;
-                    }
-                }
-
                 size_t end = noffset;
-                for (; end < element_count; end++) {
-                    if (fimax < xmin[end]) {
-                        break;
-                    }
-                }
+                sccd_detail::compute_candidate_window_progressive(
+                    fimin, fimax, xmax, xmin, element_count, noffset, end);
 
                 if(noffset >= end) {
+                    // In princpiple should never happen
                     continue;
                 }
 
@@ -937,7 +918,6 @@ void lean_collect_self_overlaps(
                 }
 
 
-                // Collect potential overlaps using vectorized disjoint test
                 size_t count = 0;
 
                 // Prepare repeated A values for SIMD chunk
@@ -947,11 +927,8 @@ void lean_collect_self_overlaps(
                 geom_t A_maxx[AABB_DISJOINT_CHUNK_SIZE];
                 geom_t A_maxy[AABB_DISJOINT_CHUNK_SIZE];
                 geom_t A_maxz[AABB_DISJOINT_CHUNK_SIZE];
-                sccd_detail::prepare_A_replicated(
+                sccd_detail::aabb_broadcast(
                     aabbs, fi, A_minx, A_miny, A_minz, A_maxx, A_maxy, A_maxz);
-
-                // Determine end of candidate range using original loop
-                // semantics
               
                 for (; noffset < end;) {
                     const size_t chunk_len = std::min(
