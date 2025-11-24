@@ -486,23 +486,33 @@ bool lean_count_self_overlaps(
                         B_maxz[lane] = A_maxz[0];
                     }
 
-                    // Disjoint array mask -> candidate bitmask
+                    // Disjoint array mask -> per-lane skip logic
                     uint32_t mask[AABB_DISJOINT_CHUNK_SIZE];
                     vdisjoint(
                         A_minx, A_miny, A_minz, A_maxx, A_maxy, A_maxz, B_minx, B_miny,
                         B_minz, B_maxx, B_maxy, B_maxz, mask);
-                    unsigned cand_bits = 0;
+                    
                     for (size_t lane = 0; lane < chunk_len; ++lane) {
-                        cand_bits |= (mask[lane] ? 0u : (1u << lane));
+                        if (mask[lane]) {
+                            continue; // disjoint
+                        }
+                        const size_t j = noffset + lane;
+                        const idx_t jidx = idx[j];
+                        idx_t second_ev[nxe];
+                        for (int v = 0; v < nxe; v++) {
+                            second_ev[v] = elements[v][jidx * stride];
+                        }
+                        bool share = false;
+                        for (int a = 0; a < nxe && !share; ++a) {
+                            for (int b = 0; b < nxe; ++b) {
+                                if (ev[a] == second_ev[b]) {
+                                    share = true;
+                                    break;
+                                }
+                            }
+                        }
+                        count += share ? 0 : 1;
                     }
-                    // Shared-vertex mask using original indices
-                    const unsigned share_bits = vshare_edge_shares_vertex_mask(
-                        idx, noffset, chunk_len, (int)stride,
-                        (const int*)elements[0], (const int*)elements[1],
-                        ev[0], ev[1]);
-                    // Valid = candidate and not shared
-                    unsigned valid_bits = cand_bits & ~share_bits;
-                    count += __builtin_popcount(valid_bits);
 
                     noffset += chunk_len;
                 }
@@ -624,31 +634,35 @@ void lean_collect_self_overlaps(
                         B_maxz[lane] = A_maxz[0];
                     }
 
-                    // Disjoint array mask -> candidate bitmask
+                    // Disjoint array mask -> per-lane skip logic and write pairs
                     uint32_t mask[AABB_DISJOINT_CHUNK_SIZE];
                     vdisjoint(
                         A_minx, A_miny, A_minz, A_maxx, A_maxy, A_maxz, B_minx, B_miny,
                         B_minz, B_maxx, B_maxy, B_maxz, mask);
-                    unsigned cand_bits = 0;
                     for (size_t lane = 0; lane < chunk_len; ++lane) {
-                        cand_bits |= (mask[lane] ? 0u : (1u << lane));
-                    }
-
-                    // Compute share mask via SIMD helper and write valid pairs
-                    const unsigned share_bits = vshare_edge_shares_vertex_mask(
-                        idx, noffset, chunk_len, (int)stride,
-                        (const int*)elements[0], (const int*)elements[1],
-                        ev[0], ev[1]);
-                        
-                    unsigned valid_bits = cand_bits & ~share_bits;
-                    while (valid_bits) {
-                        unsigned lane = __builtin_ctz(valid_bits);
-                        valid_bits &= valid_bits - 1;
+                        if (mask[lane]) {
+                            continue; // disjoint
+                        }
                         const size_t j = noffset + lane;
                         const idx_t jidx = idx[j];
-                        first_local_elements[count] = std::min(idxi, jidx);
-                        second_local_elements[count] = std::max(idxi, jidx);
-                        count += 1;
+                        idx_t second_ev[nxe];
+                        for (int v = 0; v < nxe; v++) {
+                            second_ev[v] = elements[v][jidx * stride];
+                        }
+                        bool share = false;
+                        for (int a = 0; a < nxe && !share; ++a) {
+                            for (int b = 0; b < nxe; ++b) {
+                                if (ev[a] == second_ev[b]) {
+                                    share = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (!share) {
+                            first_local_elements[count] = std::min(idxi, jidx);
+                            second_local_elements[count] = std::max(idxi, jidx);
+                            count += 1;
+                        }
                     }
 
                     noffset += chunk_len;
