@@ -296,7 +296,6 @@ static inline void build_disjoint_mask_for_block(
             B_minz, B_maxx, B_maxy, B_maxz, mask_out);
 }
 
-template <int F, int S>
 /**
  * \brief Mark lanes where A and B share a vertex (invalid pairs).
  * \tparam F Number of vertices in first element.
@@ -309,6 +308,7 @@ template <int F, int S>
  * \param second_elements SoA vertex arrays for second list.
  * \param second_stride Stride between elements in second arrays.
  */
+template <int F, int S>
 static inline void mask_out_shared_two_lists(
     uint32_t *const SFEM_RESTRICT dmask, const size_t chunk_len,
     const size_t noffset, const idx_t (&ev)[F],
@@ -340,7 +340,6 @@ static inline void mask_out_shared_two_lists(
   }
 }
 
-template <int N>
 /**
  * \brief Mark lanes where elements share a vertex in self-overlap path.
  * \tparam N Number of vertices per element.
@@ -352,6 +351,7 @@ template <int N>
  * \param elements SoA vertex arrays.
  * \param stride Stride between elements in the arrays.
  */
+template <int N>
 static inline void
 mask_out_shared_self(uint32_t *const SFEM_RESTRICT dmask,
                      const size_t chunk_len, const size_t noffset,
@@ -373,11 +373,12 @@ mask_out_shared_self(uint32_t *const SFEM_RESTRICT dmask,
 }
 
 // -----------------------------
-template <int F, int S>
+
 /**
  * \brief Scalar reference: count candidate overlaps in [begin,end) for two
  * lists. \return Number of non-disjoint, non-shared-vertex candidates.
  */
+template <int F, int S>
 static inline size_t scalar_count_range_two_lists(
     geom_t **const SFEM_RESTRICT first_aabbs, const size_t fi,
     geom_t **const SFEM_RESTRICT second_aabbs,
@@ -418,11 +419,11 @@ static inline size_t scalar_count_range_two_lists(
   return count;
 }
 
-template <int F, int S>
 /**
  * \brief Scalar reference: collect candidate overlaps in [begin,end) for two
  * lists. \return Number of pairs written to \p first_out and \p second_out.
  */
+template <int F, int S>
 static inline size_t scalar_collect_range_two_lists(
     geom_t **const SFEM_RESTRICT first_aabbs, const size_t fi,
     const idx_t first_idxi, geom_t **const SFEM_RESTRICT second_aabbs,
@@ -472,11 +473,11 @@ static inline size_t scalar_collect_range_two_lists(
 
 // -----------------------------
 
-template <int N>
 /**
  * \brief Scalar reference: count self-overlaps in [begin,end) for element i.
  * \return Number of non-disjoint, non-shared-vertex candidates with j>i.
  */
+template <int N>
 static inline size_t
 scalar_count_range_self(geom_t **const SFEM_RESTRICT aabbs, const size_t fi,
                         idx_t **const SFEM_RESTRICT elements,
@@ -505,11 +506,11 @@ scalar_count_range_self(geom_t **const SFEM_RESTRICT aabbs, const size_t fi,
   return count;
 }
 
-template <int N>
 /**
  * \brief Scalar reference: collect self-overlaps in [begin,end) for element i.
  * \return Number of pairs written to outputs, with (min(idxi,jidx), max(...)).
  */
+template <int N>
 static inline size_t scalar_collect_range_self(
     geom_t **const SFEM_RESTRICT aabbs, const size_t fi, const idx_t idxi,
     idx_t **const SFEM_RESTRICT elements, const idx_t *const SFEM_RESTRICT idx,
