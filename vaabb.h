@@ -11,7 +11,10 @@
 #endif
 
 #define AABB_DISJOINT_CHUNK_SIZE 32
+
+#ifndef SFEM_RESTRICT // defined in sccd.hpp
 #define SFEM_RESTRICT __restrict
+#endif
 
 typedef float geom_t;
 
