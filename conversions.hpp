@@ -52,6 +52,7 @@ typedef struct SCCD {
 
   std::vector<idx_t> faces;
   std::vector<idx_t> edges;
+  bool verbose{false};
 
   void init(const std::vector<AABB> &vertex_boxes,
             const std::vector<AABB> &edge_boxes,
@@ -150,7 +151,7 @@ typedef struct SCCD {
     sort_along_axis(nedges, sort_axis, eaabb, eidx.data(), scratch.data());
 
     timer.stop();
-    printf("SCCD, Sorting: %g [ms]\n", timer.getElapsedTimeInMilliSec());
+    if(verbose) printf("SCCD, Sorting: %g [ms]\n", timer.getElapsedTimeInMilliSec());
     timer.start();
 
     // E2E
@@ -168,7 +169,7 @@ typedef struct SCCD {
                                   e1_overlap.data());
 
     timer.stop();
-    printf("SCCD, E2E: %g [ms]\n", timer.getElapsedTimeInMilliSec());
+    if(verbose) printf("SCCD, E2E: %g [ms]\n", timer.getElapsedTimeInMilliSec());
     timer.start();
 
     // F2V
@@ -187,7 +188,7 @@ typedef struct SCCD {
                                 voverlap.data());
 
     timer.stop();
-    printf("SCCD, F2V: %g [ms]\n", timer.getElapsedTimeInMilliSec());
+    if(verbose) printf("SCCD, F2V: %g [ms]\n", timer.getElapsedTimeInMilliSec());
   }
 
   void finalize(std::vector<std::pair<int, int>> &vf_overlaps,
