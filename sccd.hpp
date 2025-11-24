@@ -10,6 +10,8 @@
 #include <filesystem>
 #include <cfloat>
 
+#include "vaabb.h"
+
 using geom_t = float;
 using idx_t = int;
 using count_t = int;
@@ -427,45 +429,95 @@ bool lean_count_self_overlaps(
                     }
                 }
 
-                // Count potential overlaps
+                // Count potential overlaps using vectorized disjoint test
                 size_t count = 0;
-                for (; noffset < element_count;
-                     noffset++) {
-                    if (fimax < xmin[noffset]) {
+
+                // Prepare repeated A values for SIMD chunk
+                geom_t A_minx[AABB_DISJOINT_CHUNK_SIZE];
+                geom_t A_miny[AABB_DISJOINT_CHUNK_SIZE];
+                geom_t A_minz[AABB_DISJOINT_CHUNK_SIZE];
+                geom_t A_maxx[AABB_DISJOINT_CHUNK_SIZE];
+                geom_t A_maxy[AABB_DISJOINT_CHUNK_SIZE];
+                geom_t A_maxz[AABB_DISJOINT_CHUNK_SIZE];
+                for (int k = 0; k < AABB_DISJOINT_CHUNK_SIZE; ++k) {
+                    A_minx[k] = fi_min[0];
+                    A_miny[k] = fi_min[1];
+                    A_minz[k] = fi_min[2];
+                    A_maxx[k] = fi_max[0];
+                    A_maxy[k] = fi_max[1];
+                    A_maxz[k] = fi_max[2];
+                }
+
+                // Determine end of candidate range using original loop semantics
+                size_t end = noffset;
+                for (; end < element_count; end++) {
+                    if (fimax < xmin[end]) {
                         break;
                     }
+                }
 
-                    const geom_t si_min[3] = { aabbs[0][noffset],
-                                               aabbs[1][noffset],
-                                               aabbs[2][noffset] };
+                for (; noffset < end;) {
+                    const size_t chunk_len =
+                        std::min((size_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
 
-                    const geom_t si_max[3] = { aabbs[3][noffset],
-                                               aabbs[4][noffset],
-                                               aabbs[5][noffset] };
+                    geom_t B_minx[AABB_DISJOINT_CHUNK_SIZE];
+                    geom_t B_miny[AABB_DISJOINT_CHUNK_SIZE];
+                    geom_t B_minz[AABB_DISJOINT_CHUNK_SIZE];
+                    geom_t B_maxx[AABB_DISJOINT_CHUNK_SIZE];
+                    geom_t B_maxy[AABB_DISJOINT_CHUNK_SIZE];
+                    geom_t B_maxz[AABB_DISJOINT_CHUNK_SIZE];
 
-                    bool skip = false;
-                    for (int d = 0; d < 3; d++) {
-                        skip |= si_min[d] > fi_max[d] || si_max[d] < fi_min[d];
+                    for (size_t lane = 0; lane < chunk_len; ++lane) {
+                        const size_t j = noffset + lane;
+                        B_minx[lane] = aabbs[0][j];
+                        B_miny[lane] = aabbs[1][j];
+                        B_minz[lane] = aabbs[2][j];
+                        B_maxx[lane] = aabbs[3][j];
+                        B_maxy[lane] = aabbs[4][j];
+                        B_maxz[lane] = aabbs[5][j];
+                    }
+                    // Tail-safe fill: force disjoint
+                    for (size_t lane = chunk_len; lane < AABB_DISJOINT_CHUNK_SIZE; ++lane) {
+                        B_minx[lane] = A_maxx[0] + 1;
+                        B_miny[lane] = A_maxy[0] + 1;
+                        B_minz[lane] = A_maxz[0] + 1;
+                        B_maxx[lane] = A_maxx[0];
+                        B_maxy[lane] = A_maxy[0];
+                        B_maxz[lane] = A_maxz[0];
                     }
 
-                    if (!skip) {
-                        idx_t second_ev[nxe];
-                        idx_t noffsetidx = idx[noffset];
-                        for (int v = 0; v < nxe; v++) {
-                            second_ev[v] = elements[v][noffsetidx * stride];
+                    uint32_t mask[AABB_DISJOINT_CHUNK_SIZE];
+                    vdisjoint(
+                        A_minx, A_miny, A_minz, A_maxx, A_maxy, A_maxz, B_minx, B_miny,
+                        B_minz, B_maxx, B_maxy, B_maxz, mask);
+
+                    for (size_t lane = 0; lane < chunk_len; ++lane) {
+                        const size_t j = noffset + lane;
+
+                        if (mask[lane]) {
+                            continue; // disjoint
                         }
 
-                        for (int first_v = 0; first_v < nxe; first_v++) {
-                            for (int second_v = 0; second_v < nxe;
-                                 second_v++) {
-                                skip = ev[first_v] == second_ev[second_v]
-                                    ? 1
-                                    : skip;
+                        // Shared-vertex filter using original indices
+                        idx_t second_ev[nxe];
+                        const idx_t jidx = idx[j];
+                        bool share = false;
+                        for (int v = 0; v < nxe; v++) {
+                            second_ev[v] = elements[v][jidx * stride];
+                        }
+                        for (int a = 0; a < nxe && !share; ++a) {
+                            for (int b = 0; b < nxe; ++b) {
+                                if (ev[a] == second_ev[b]) {
+                                    share = true;
+                                    break;
+                                }
                             }
                         }
+
+                        count += share ? 0 : 1;
                     }
 
-                    count += skip ? 0 : 1;
+                    noffset += chunk_len;
                 }
 
                 ccdptr[fi + 1] = count;
@@ -528,55 +580,102 @@ void lean_collect_self_overlaps(
                     }
                 }
 
-                // Find count potential overlaps
+                // Collect potential overlaps using vectorized disjoint test
                 size_t count = 0;
-                for (; noffset < element_count;
-                     noffset++) {
-                    if (fimax < xmin[noffset]) {
+
+                // Prepare repeated A values for SIMD chunk
+                geom_t A_minx[AABB_DISJOINT_CHUNK_SIZE];
+                geom_t A_miny[AABB_DISJOINT_CHUNK_SIZE];
+                geom_t A_minz[AABB_DISJOINT_CHUNK_SIZE];
+                geom_t A_maxx[AABB_DISJOINT_CHUNK_SIZE];
+                geom_t A_maxy[AABB_DISJOINT_CHUNK_SIZE];
+                geom_t A_maxz[AABB_DISJOINT_CHUNK_SIZE];
+                for (int k = 0; k < AABB_DISJOINT_CHUNK_SIZE; ++k) {
+                    A_minx[k] = fi_min[0];
+                    A_miny[k] = fi_min[1];
+                    A_minz[k] = fi_min[2];
+                    A_maxx[k] = fi_max[0];
+                    A_maxy[k] = fi_max[1];
+                    A_maxz[k] = fi_max[2];
+                }
+
+                // Determine end of candidate range using original loop semantics
+                size_t end = noffset;
+                for (; end < element_count; end++) {
+                    if (fimax < xmin[end]) {
                         break;
                     }
+                }
 
-                    const geom_t si_min[3] = { aabbs[0][noffset],
-                                               aabbs[1][noffset],
-                                               aabbs[2][noffset] };
+                for (; noffset < end;) {
+                    const size_t chunk_len =
+                        std::min((size_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
 
-                    const geom_t si_max[3] = { aabbs[3][noffset],
-                                               aabbs[4][noffset],
-                                               aabbs[5][noffset] };
+                    geom_t B_minx[AABB_DISJOINT_CHUNK_SIZE];
+                    geom_t B_miny[AABB_DISJOINT_CHUNK_SIZE];
+                    geom_t B_minz[AABB_DISJOINT_CHUNK_SIZE];
+                    geom_t B_maxx[AABB_DISJOINT_CHUNK_SIZE];
+                    geom_t B_maxy[AABB_DISJOINT_CHUNK_SIZE];
+                    geom_t B_maxz[AABB_DISJOINT_CHUNK_SIZE];
 
-                    bool skip = false;
-                    for (int d = 0; d < 3; d++) {
-                        skip |= si_min[d] > fi_max[d] || si_max[d] < fi_min[d];
+                    for (size_t lane = 0; lane < chunk_len; ++lane) {
+                        const size_t j = noffset + lane;
+                        B_minx[lane] = aabbs[0][j];
+                        B_miny[lane] = aabbs[1][j];
+                        B_minz[lane] = aabbs[2][j];
+                        B_maxx[lane] = aabbs[3][j];
+                        B_maxy[lane] = aabbs[4][j];
+                        B_maxz[lane] = aabbs[5][j];
+                    }
+                    // Tail-safe fill: force disjoint
+                    for (size_t lane = chunk_len; lane < AABB_DISJOINT_CHUNK_SIZE; ++lane) {
+                        B_minx[lane] = A_maxx[0] + 1;
+                        B_miny[lane] = A_maxy[0] + 1;
+                        B_minz[lane] = A_maxz[0] + 1;
+                        B_maxx[lane] = A_maxx[0];
+                        B_maxy[lane] = A_maxy[0];
+                        B_maxz[lane] = A_maxz[0];
                     }
 
-                    idx_t noffsetidx = idx[noffset];
-                    if (!skip) {
-                        idx_t second_ev[nxe];
-                        
+                    uint32_t mask[AABB_DISJOINT_CHUNK_SIZE];
+                    vdisjoint(
+                        A_minx, A_miny, A_minz, A_maxx, A_maxy, A_maxz, B_minx, B_miny,
+                        B_minz, B_maxx, B_maxy, B_maxz, mask);
 
-                        for (int v = 0; v < nxe; v++) {
-                            second_ev[v] = elements[v][noffsetidx * stride];
+                    for (size_t lane = 0; lane < chunk_len; ++lane) {
+                        const size_t j = noffset + lane;
+
+                        if (mask[lane]) {
+                            continue; // disjoint
                         }
 
-                        for (int first_v = 0; first_v < nxe; first_v++) {
-                            for (int second_v = 0; second_v < nxe;
-                                 second_v++) {
-                                skip = ev[first_v] == second_ev[second_v]
-                                    ? 1
-                                    : skip;
+                        // Shared-vertex filter using original indices
+                        const idx_t jidx = idx[j];
+                        idx_t second_ev[nxe];
+                        bool share = false;
+                        for (int v = 0; v < nxe; v++) {
+                            second_ev[v] = elements[v][jidx * stride];
+                        }
+                        for (int a = 0; a < nxe && !share; ++a) {
+                            for (int b = 0; b < nxe; ++b) {
+                                if (ev[a] == second_ev[b]) {
+                                    share = true;
+                                    break;
+                                }
                             }
                         }
+
+                        if (!share) {
+                            // Canonicalize by original element IDs
+                            first_local_elements[count] =
+                                std::min(idxi, jidx);
+                            second_local_elements[count] =
+                                std::max(idxi, jidx);
+                            count += 1;
+                        }
                     }
 
-                    if (!skip) {
-                    	assert(fi != noffset);
-                    	assert(idx[fi] != idx[noffset]);
-
-                        first_local_elements[count] = std::min(idxi, noffsetidx);
-                        second_local_elements[count] = std::max(idxi, noffsetidx);
-                    }
-
-                    count += skip ? 0 : 1;
+                    noffset += chunk_len;
                 }
 
                 assert(expected_count == count);
