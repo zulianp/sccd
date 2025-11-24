@@ -323,7 +323,7 @@ void lean_collect_overlaps(
                         skip |= si_min[d] > fi_max[d] || si_max[d] < fi_min[d];
                     }
 
-                    idx_t second_idxi = second_idx[noffset];
+                    const idx_t second_idxi = second_idx[noffset];
                     if (!skip) {
                         if (second_nxe > 1) {
                             idx_t second_ev[second_nxe];
