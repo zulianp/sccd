@@ -42,23 +42,6 @@ inline geom_t lean_nextafter_down(const geom_t x)
 //     return nextafter(x, DBL_MAX);
 // }
 
-inline static bool lean_disjoint(
-    const geom_t aminx,
-    const geom_t aminy,
-    const geom_t aminz,
-    const geom_t amaxx,
-    const geom_t amaxy,
-    const geom_t amaxz,
-    const geom_t bminx,
-    const geom_t bminy,
-    const geom_t bminz,
-    const geom_t bmaxx,
-    const geom_t bmaxy,
-    const geom_t bmaxz)
-{
-    return aminx > bmaxx | aminy > bmaxy | aminz > bmaxz | bminx > amaxx
-        | bminy > amaxy | bminz > amaxz;
-}
 
 int lean_choose_axis(const size_t n, geom_t** const SFEM_RESTRICT aabb)
 {
@@ -200,7 +183,49 @@ bool lean_count_overlaps(
                 if (ni >= end) {
                     continue;
                 }
-                // TODO: Check if too feww candidates for vectorization and use scalar loop instead
+                // Scalar fallback for small candidate ranges
+                if (end - ni < AABB_DISJOINT_NOVECTORIZE_THRESHOLD) {
+                    size_t count = 0;
+                    for (size_t j = ni; j < end; ++j) {
+                        // AABB disjoint check (inclusive overlap)
+                        if (disjoint(
+                                fi_min[0], fi_min[1], fi_min[2], fi_max[0],
+                                fi_max[1], fi_max[2], second_aabbs[0][j],
+                                second_aabbs[1][j], second_aabbs[2][j],
+                                second_aabbs[3][j], second_aabbs[4][j],
+                                second_aabbs[5][j])) {
+                            continue;
+                        }
+                        // Shared-vertex filter
+                        bool share = false;
+                        if (second_nxe > 1) {
+                            const idx_t jidx = second_idx[j];
+                            idx_t second_ev[second_nxe];
+                            for (int v = 0; v < second_nxe; v++) {
+                                second_ev[v] =
+                                    second_elements[v][jidx * second_stride];
+                            }
+                            for (int a = 0; a < first_nxe && !share; ++a) {
+                                for (int b = 0; b < second_nxe; ++b) {
+                                    if (ev[a] == second_ev[b]) {
+                                        share = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        } else {
+                            for (int a = 0; a < first_nxe; ++a) {
+                                if (ev[a] == second_idx[j]) {
+                                    share = true;
+                                    break;
+                                }
+                            }
+                        }
+                        count += share ? 0 : 1;
+                    }
+                    ccdptr[fi + 1] = count;
+                    continue;
+                }
 
                 // Vectorized count of potential overlaps using vdisjoint
                 size_t count = 0;
@@ -360,8 +385,6 @@ void lean_collect_overlaps(
                 idx_t* SFEM_RESTRICT const second_local_elements =
                     &noverlap[ccdptr[fi]];
 
-                
-
                 idx_t ev[first_nxe];
                 for (int v = 0; v < first_nxe; v++) {
                     ev[v] = first_elements[v][first_idxi * first_stride];
@@ -385,7 +408,54 @@ void lean_collect_overlaps(
                     continue;
                 }
 
-                // TODO: Check if too feww candidates for vectorization and use scalar loop instead
+                // Scalar fallback for small candidate ranges
+                if (end - ni < AABB_DISJOINT_NOVECTORIZE_THRESHOLD) {
+                    size_t count = 0;
+                    for (size_t j = ni; j < end; ++j) {
+                        // AABB disjoint check (inclusive overlap)
+                        if (disjoint(
+                                first_aabbs[0][fi], first_aabbs[1][fi],
+                                first_aabbs[2][fi], first_aabbs[3][fi],
+                                first_aabbs[4][fi], first_aabbs[5][fi],
+                                second_aabbs[0][j], second_aabbs[1][j],
+                                second_aabbs[2][j], second_aabbs[3][j],
+                                second_aabbs[4][j], second_aabbs[5][j])) {
+                            continue;
+                        }
+                        // Shared-vertex filter
+                        bool share = false;
+                        const idx_t second_idxi = second_idx[j];
+                        if (second_nxe > 1) {
+                            idx_t second_ev[second_nxe];
+                            for (int v = 0; v < second_nxe; v++) {
+                                second_ev[v] =
+                                    second_elements[v][second_idxi * second_stride];
+                            }
+                            for (int a = 0; a < first_nxe && !share; ++a) {
+                                for (int b = 0; b < second_nxe; ++b) {
+                                    if (ev[a] == second_ev[b]) {
+                                        share = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        } else {
+                            for (int a = 0; a < first_nxe; ++a) {
+                                if (ev[a] == second_idxi) {
+                                    share = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (!share) {
+                            first_local_elements[count] = first_idxi;
+                            second_local_elements[count] = second_idxi;
+                            count += 1;
+                        }
+                    }
+                    assert(expected_count == count);
+                    continue;
+                }
 
                 // Vectorized collect of potential overlaps using vdisjoint
                 size_t count = 0;
@@ -541,7 +611,38 @@ bool lean_count_self_overlaps(
                     continue;
                 }
 
-                // TODO: Check if too feww candidates for vectorization and use scalar loop instead
+                // Scalar fallback for small candidate ranges
+                if (end - noffset < AABB_DISJOINT_NOVECTORIZE_THRESHOLD) {
+                    size_t count = 0;
+                    for (size_t j = noffset; j < end; ++j) {
+                        // AABB disjoint check (inclusive overlap)
+                        if (disjoint(
+                                aabbs[0][fi], aabbs[1][fi], aabbs[2][fi],
+                                aabbs[3][fi], aabbs[4][fi], aabbs[5][fi],
+                                aabbs[0][j], aabbs[1][j], aabbs[2][j],
+                                aabbs[3][j], aabbs[4][j], aabbs[5][j])) {
+                            continue;
+                        }
+                        // Shared-vertex filter
+                        bool share = false;
+                        const idx_t jidx = idx[j];
+                        idx_t second_ev[nxe];
+                        for (int v = 0; v < nxe; v++) {
+                            second_ev[v] = elements[v][jidx * stride];
+                        }
+                        for (int a = 0; a < nxe && !share; ++a) {
+                            for (int b = 0; b < nxe; ++b) {
+                                if (ev[a] == second_ev[b]) {
+                                    share = true;
+                                    break;
+                                }
+                            }
+                        }
+                        count += share ? 0 : 1;
+                    }
+                    ccdptr[fi + 1] = count;
+                    continue;
+                }
 
                 // Count potential overlaps using vectorized disjoint test
                 size_t count = 0;
@@ -690,6 +791,43 @@ void lean_collect_self_overlaps(
                 }
 
                 if(noffset >= end) {
+                    continue;
+                }
+
+                // Scalar fallback for small candidate ranges
+                if (end - noffset < AABB_DISJOINT_NOVECTORIZE_THRESHOLD) {
+                    size_t count = 0;
+                    for (size_t j = noffset; j < end; ++j) {
+                        // AABB disjoint check (inclusive overlap)
+                        if (disjoint(
+                                aabbs[0][fi], aabbs[1][fi], aabbs[2][fi],
+                                aabbs[3][fi], aabbs[4][fi], aabbs[5][fi],
+                                aabbs[0][j], aabbs[1][j], aabbs[2][j],
+                                aabbs[3][j], aabbs[4][j], aabbs[5][j])) {
+                            continue;
+                        }
+                        // Shared-vertex filter
+                        const idx_t jidx = idx[j];
+                        idx_t second_ev[nxe];
+                        for (int v = 0; v < nxe; v++) {
+                            second_ev[v] = elements[v][jidx * stride];
+                        }
+                        bool share = false;
+                        for (int a = 0; a < nxe && !share; ++a) {
+                            for (int b = 0; b < nxe; ++b) {
+                                if (ev[a] == second_ev[b]) {
+                                    share = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (!share) {
+                            first_local_elements[count] = std::min(idxi, jidx);
+                            second_local_elements[count] = std::max(idxi, jidx);
+                            count += 1;
+                        }
+                    }
+                    assert(expected_count == count);
                     continue;
                 }
 
