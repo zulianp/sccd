@@ -273,13 +273,16 @@ static inline void tail_fill_B(const geom_t amaxx0, const geom_t amaxy0,
  */
 static inline void build_disjoint_mask_for_block(
     geom_t **const SFEM_RESTRICT second_aabbs, const size_t start,
-    const size_t chunk_len, const geom_t *const SFEM_RESTRICT A_minx,
+    const size_t chunk_len, 
+    const geom_t *const SFEM_RESTRICT A_minx,
     const geom_t *const SFEM_RESTRICT A_miny,
     const geom_t *const SFEM_RESTRICT A_minz,
     const geom_t *const SFEM_RESTRICT A_maxx,
     const geom_t *const SFEM_RESTRICT A_maxy,
-    const geom_t *const SFEM_RESTRICT A_maxz, const geom_t amaxx0,
-    const geom_t amaxy0, const geom_t amaxz0,
+    const geom_t *const SFEM_RESTRICT A_maxz, 
+    const geom_t amaxx0,
+    const geom_t amaxy0, 
+    const geom_t amaxz0,
     uint32_t *const SFEM_RESTRICT mask_out) {
   alignas(64) geom_t B_minx[AABB_DISJOINT_CHUNK_SIZE];
   alignas(64) geom_t B_miny[AABB_DISJOINT_CHUNK_SIZE];

@@ -150,7 +150,7 @@ void vdisjoint(const geom_t *const SFEM_RESTRICT aminx,
  * \param fi Index of the AABB to broadcast.
  * \param A_minx..A_maxz Output arrays of length AABB_DISJOINT_CHUNK_SIZE.
  */
- static inline void vaabb_broadcast(
+static inline void vaabb_broadcast(
     geom_t **const SFEM_RESTRICT aabbs, const size_t fi,
     geom_t *const SFEM_RESTRICT A_minx, geom_t *const SFEM_RESTRICT A_miny,
     geom_t *const SFEM_RESTRICT A_minz, geom_t *const SFEM_RESTRICT A_maxx,
@@ -171,6 +171,22 @@ void vdisjoint(const geom_t *const SFEM_RESTRICT aminx,
   }
 }
 
+static inline void vdisjoint_one_to_many(
+    const geom_t aminx, const geom_t aminy, const geom_t aminz,
+    const geom_t amaxx, const geom_t amaxy, const geom_t amaxz,
+    const geom_t *const SFEM_RESTRICT bminx,
+    const geom_t *const SFEM_RESTRICT bminy,
+    const geom_t *const SFEM_RESTRICT bminz,
+    const geom_t *const SFEM_RESTRICT bmaxx,
+    const geom_t *const SFEM_RESTRICT bmaxy,
+    const geom_t *const SFEM_RESTRICT bmaxz, uint32_t *SFEM_RESTRICT mask) {
+
+#pragma omp simd aligned(bminx, bminy, bminz, bmaxx, bmaxy, bmaxz, mask : 64)
+  for (int i = 0; i < AABB_DISJOINT_CHUNK_SIZE; i++) {
+    mask[i] = disjoint(aminx, aminy, aminz, amaxx, amaxy, amaxz, bminx[i],
+                       bminy[i], bminz[i], bmaxx[i], bmaxy[i], bmaxz[i]);
+  }
+}
 
 } // namespace sccd
 
