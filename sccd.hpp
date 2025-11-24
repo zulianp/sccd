@@ -200,6 +200,7 @@ bool lean_count_overlaps(
                 if (ni >= end) {
                     continue;
                 }
+                // TODO: Check if too feww candidates for vectorization and use scalar loop instead
 
                 // Vectorized count of potential overlaps using vdisjoint
                 size_t count = 0;
@@ -345,6 +346,11 @@ void lean_collect_overlaps(
             }
 
             for (size_t fi = r.begin(); fi < r.end(); fi++) {
+                const size_t expected_count = ccdptr[fi + 1] - ccdptr[fi];
+                if(expected_count == 0) {
+                    continue;
+                }
+
                 const geom_t fimin = first_xmin[fi];
                 const geom_t fimax = first_xmax[fi];
                 const idx_t first_idxi = first_idx[fi];
@@ -354,7 +360,7 @@ void lean_collect_overlaps(
                 idx_t* SFEM_RESTRICT const second_local_elements =
                     &noverlap[ccdptr[fi]];
 
-                const size_t expected_count = ccdptr[fi + 1] - ccdptr[fi];
+                
 
                 idx_t ev[first_nxe];
                 for (int v = 0; v < first_nxe; v++) {
@@ -378,6 +384,8 @@ void lean_collect_overlaps(
                 if (ni >= end) {
                     continue;
                 }
+
+                // TODO: Check if too feww candidates for vectorization and use scalar loop instead
 
                 // Vectorized collect of potential overlaps using vdisjoint
                 size_t count = 0;
@@ -533,6 +541,8 @@ bool lean_count_self_overlaps(
                     continue;
                 }
 
+                // TODO: Check if too feww candidates for vectorization and use scalar loop instead
+
                 // Count potential overlaps using vectorized disjoint test
                 size_t count = 0;
 
@@ -645,6 +655,11 @@ void lean_collect_self_overlaps(
         tbb::blocked_range<size_t>(0, element_count),
         [&](const tbb::blocked_range<size_t>& r) {
             for (size_t fi = r.begin(); fi < r.end(); fi++) {
+                const size_t expected_count = ccdptr[fi + 1] - ccdptr[fi];
+                if(expected_count == 0) {
+                    continue;
+                }
+
                 const geom_t fimin = xmin[fi];
                 const geom_t fimax = xmax[fi];
                 const idx_t idxi = idx[fi];
@@ -654,8 +669,6 @@ void lean_collect_self_overlaps(
 
                 idx_t* SFEM_RESTRICT const second_local_elements =
                     &noverlap[ccdptr[fi]];
-
-                const size_t expected_count = ccdptr[fi + 1] - ccdptr[fi];
 
                 idx_t ev[nxe];
                 for (int v = 0; v < nxe; v++) {
@@ -668,6 +681,18 @@ void lean_collect_self_overlaps(
                         break;
                     }
                 }
+
+                size_t end = noffset;
+                for (; end < element_count; end++) {
+                    if (fimax < xmin[end]) {
+                        break;
+                    }
+                }
+
+                if(noffset >= end) {
+                    continue;
+                }
+
 
                 // Collect potential overlaps using vectorized disjoint test
                 size_t count = 0;
@@ -691,13 +716,7 @@ void lean_collect_self_overlaps(
 
                 // Determine end of candidate range using original loop
                 // semantics
-                size_t end = noffset;
-                for (; end < element_count; end++) {
-                    if (fimax < xmin[end]) {
-                        break;
-                    }
-                }
-
+              
                 for (; noffset < end;) {
                     const size_t chunk_len = std::min(
                         (size_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
