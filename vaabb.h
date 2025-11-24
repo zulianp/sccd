@@ -181,11 +181,95 @@ static inline void vdisjoint_one_to_many(
     const geom_t *const SFEM_RESTRICT bmaxy,
     const geom_t *const SFEM_RESTRICT bmaxz, uint32_t *SFEM_RESTRICT mask) {
 
-#pragma omp simd aligned(bminx, bminy, bminz, bmaxx, bmaxy, bmaxz, mask : 64)
+#if defined(__AVX512F__)
+  const __m512 a_minx = _mm512_set1_ps(aminx);
+  const __m512 a_miny = _mm512_set1_ps(aminy);
+  const __m512 a_minz = _mm512_set1_ps(aminz);
+  const __m512 a_maxx = _mm512_set1_ps(amaxx);
+  const __m512 a_maxy = _mm512_set1_ps(amaxy);
+  const __m512 a_maxz = _mm512_set1_ps(amaxz);
+
+  for (int i = 0; i < AABB_DISJOINT_CHUNK_SIZE; i += 16) {
+    const __m512 b_minx = _mm512_loadu_ps(bminx + i);
+    const __m512 b_miny = _mm512_loadu_ps(bminy + i);
+    const __m512 b_minz = _mm512_loadu_ps(bminz + i);
+    const __m512 b_maxx = _mm512_loadu_ps(bmaxx + i);
+    const __m512 b_maxy = _mm512_loadu_ps(bmaxy + i);
+    const __m512 b_maxz = _mm512_loadu_ps(bmaxz + i);
+
+    __mmask16 k = _mm512_cmp_ps_mask(a_minx, b_maxx, _CMP_GT_OQ) |
+                  _mm512_cmp_ps_mask(a_miny, b_maxy, _CMP_GT_OQ) |
+                  _mm512_cmp_ps_mask(a_minz, b_maxz, _CMP_GT_OQ) |
+                  _mm512_cmp_ps_mask(b_minx, a_maxx, _CMP_GT_OQ) |
+                  _mm512_cmp_ps_mask(b_miny, a_maxy, _CMP_GT_OQ) |
+                  _mm512_cmp_ps_mask(b_minz, a_maxz, _CMP_GT_OQ);
+
+    const __m512i k_as_epi32 = _mm512_movm_epi32(k);
+    const __m512i k_01 = _mm512_srli_epi32(k_as_epi32, 31);
+    _mm512_storeu_si512((__m512i *)(mask + i), k_01);
+  }
+#elif defined(__AVX2__)
+  const __m256 a_minx = _mm256_set1_ps(aminx);
+  const __m256 a_miny = _mm256_set1_ps(aminy);
+  const __m256 a_minz = _mm256_set1_ps(aminz);
+  const __m256 a_maxx = _mm256_set1_ps(amaxx);
+  const __m256 a_maxy = _mm256_set1_ps(amaxy);
+  const __m256 a_maxz = _mm256_set1_ps(amaxz);
+
+  for (int i = 0; i < AABB_DISJOINT_CHUNK_SIZE; i += 8) {
+    const __m256 b_minx = _mm256_loadu_ps(bminx + i);
+    const __m256 b_miny = _mm256_loadu_ps(bminy + i);
+    const __m256 b_minz = _mm256_loadu_ps(bminz + i);
+    const __m256 b_maxx = _mm256_loadu_ps(bmaxx + i);
+    const __m256 b_maxy = _mm256_loadu_ps(bmaxy + i);
+    const __m256 b_maxz = _mm256_loadu_ps(bmaxz + i);
+
+    __m256 m =
+        _mm256_or_ps(_mm256_or_ps(_mm256_cmp_ps(a_minx, b_maxx, _CMP_GT_OQ),
+                                  _mm256_cmp_ps(a_miny, b_maxy, _CMP_GT_OQ)),
+                     _mm256_cmp_ps(a_minz, b_maxz, _CMP_GT_OQ));
+    m = _mm256_or_ps(m,
+                     _mm256_or_ps(_mm256_cmp_ps(b_minx, a_maxx, _CMP_GT_OQ),
+                                  _mm256_cmp_ps(b_miny, a_maxy, _CMP_GT_OQ)));
+    m = _mm256_or_ps(m, _mm256_cmp_ps(b_minz, a_maxz, _CMP_GT_OQ));
+
+    const __m256i m_i = _mm256_castps_si256(m);
+    const __m256i m_01 = _mm256_srli_epi32(m_i, 31);
+    _mm256_storeu_si256((__m256i *)(mask + i), m_01);
+  }
+#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
+  const float32x4_t a_minx = vdupq_n_f32(aminx);
+  const float32x4_t a_miny = vdupq_n_f32(aminy);
+  const float32x4_t a_minz = vdupq_n_f32(aminz);
+  const float32x4_t a_maxx = vdupq_n_f32(amaxx);
+  const float32x4_t a_maxy = vdupq_n_f32(amaxy);
+  const float32x4_t a_maxz = vdupq_n_f32(amaxz);
+
+  for (int i = 0; i < AABB_DISJOINT_CHUNK_SIZE; i += 4) {
+    const float32x4_t b_minx = vld1q_f32(bminx + i);
+    const float32x4_t b_miny = vld1q_f32(bminy + i);
+    const float32x4_t b_minz = vld1q_f32(bminz + i);
+    const float32x4_t b_maxx = vld1q_f32(bmaxx + i);
+    const float32x4_t b_maxy = vld1q_f32(bmaxy + i);
+    const float32x4_t b_maxz = vld1q_f32(bmaxz + i);
+
+    uint32x4_t m = vorrq_u32(
+        vorrq_u32(vcgtq_f32(a_minx, b_maxx), vcgtq_f32(a_miny, b_maxy)),
+        vcgtq_f32(a_minz, b_maxz));
+    m = vorrq_u32(
+        m, vorrq_u32(vcgtq_f32(b_minx, a_maxx), vcgtq_f32(b_miny, a_maxy)));
+    m = vorrq_u32(m, vcgtq_f32(b_minz, a_maxz));
+
+    const uint32x4_t m_01 = vshrq_n_u32(m, 31);
+    vst1q_u32(mask + i, m_01);
+  }
+#else
+#pragma omp simd
   for (int i = 0; i < AABB_DISJOINT_CHUNK_SIZE; i++) {
     mask[i] = disjoint(aminx, aminy, aminz, amaxx, amaxy, amaxz, bminx[i],
                        bminy[i], bminz[i], bmaxx[i], bmaxy[i], bmaxz[i]);
   }
+#endif
 }
 
 } // namespace sccd
