@@ -214,6 +214,40 @@ static inline void tail_fill_B(
     }
 }
 
+// Prepare B block (with tail fill) and compute disjoint mask in one call
+static inline void build_disjoint_mask_for_block(
+    geom_t** const SFEM_RESTRICT second_aabbs,
+    const size_t start,
+    const size_t chunk_len,
+    const geom_t* const SFEM_RESTRICT A_minx,
+    const geom_t* const SFEM_RESTRICT A_miny,
+    const geom_t* const SFEM_RESTRICT A_minz,
+    const geom_t* const SFEM_RESTRICT A_maxx,
+    const geom_t* const SFEM_RESTRICT A_maxy,
+    const geom_t* const SFEM_RESTRICT A_maxz,
+    const geom_t amaxx0,
+    const geom_t amaxy0,
+    const geom_t amaxz0,
+    uint32_t* const SFEM_RESTRICT mask_out)
+{
+    geom_t B_minx[AABB_DISJOINT_CHUNK_SIZE];
+    geom_t B_miny[AABB_DISJOINT_CHUNK_SIZE];
+    geom_t B_minz[AABB_DISJOINT_CHUNK_SIZE];
+    geom_t B_maxx[AABB_DISJOINT_CHUNK_SIZE];
+    geom_t B_maxy[AABB_DISJOINT_CHUNK_SIZE];
+    geom_t B_maxz[AABB_DISJOINT_CHUNK_SIZE];
+
+    prepare_B_block(
+        second_aabbs, start, chunk_len, B_minx, B_miny, B_minz, B_maxx, B_maxy,
+        B_maxz);
+    tail_fill_B(
+        amaxx0, amaxy0, amaxz0, chunk_len, B_minx, B_miny, B_minz, B_maxx,
+        B_maxy, B_maxz);
+    vdisjoint(
+        A_minx, A_miny, A_minz, A_maxx, A_maxy, A_maxz, B_minx, B_miny, B_minz,
+        B_maxx, B_maxy, B_maxz, mask_out);
+}
+
 template <int nxe>
 static inline void load_ev(
     idx_t** const SFEM_RESTRICT elements,
@@ -513,25 +547,11 @@ bool lean_count_overlaps(
                     const size_t chunk_len = std::min(
                         (size_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
 
-                    geom_t B_minx[AABB_DISJOINT_CHUNK_SIZE];
-                    geom_t B_miny[AABB_DISJOINT_CHUNK_SIZE];
-                    geom_t B_minz[AABB_DISJOINT_CHUNK_SIZE];
-                    geom_t B_maxx[AABB_DISJOINT_CHUNK_SIZE];
-                    geom_t B_maxy[AABB_DISJOINT_CHUNK_SIZE];
-                    geom_t B_maxz[AABB_DISJOINT_CHUNK_SIZE];
-
-                    sccd_detail::prepare_B_block(
-                        second_aabbs, noffset, chunk_len, B_minx, B_miny, B_minz,
-                        B_maxx, B_maxy, B_maxz);
-                    // Tail-safe fill: force disjoint
-                    sccd_detail::tail_fill_B(
-                        A_maxx[0], A_maxy[0], A_maxz[0], chunk_len, B_minx, B_miny,
-                        B_minz, B_maxx, B_maxy, B_maxz);
-
                     uint32_t dmask[AABB_DISJOINT_CHUNK_SIZE];
-                    vdisjoint(
-                        A_minx, A_miny, A_minz, A_maxx, A_maxy, A_maxz, B_minx,
-                        B_miny, B_minz, B_maxx, B_maxy, B_maxz, dmask);
+                    sccd_detail::build_disjoint_mask_for_block(
+                        second_aabbs, noffset, chunk_len, A_minx, A_miny, A_minz,
+                        A_maxx, A_maxy, A_maxz, A_maxx[0], A_maxy[0], A_maxz[0],
+                        dmask);
 
                     for (size_t lane = 0; lane < chunk_len; ++lane) {
                         if (dmask[lane]) {
@@ -687,25 +707,11 @@ void lean_collect_overlaps(
                     const size_t chunk_len = std::min(
                         (size_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
 
-                    geom_t B_minx[AABB_DISJOINT_CHUNK_SIZE];
-                    geom_t B_miny[AABB_DISJOINT_CHUNK_SIZE];
-                    geom_t B_minz[AABB_DISJOINT_CHUNK_SIZE];
-                    geom_t B_maxx[AABB_DISJOINT_CHUNK_SIZE];
-                    geom_t B_maxy[AABB_DISJOINT_CHUNK_SIZE];
-                    geom_t B_maxz[AABB_DISJOINT_CHUNK_SIZE];
-
-                    sccd_detail::prepare_B_block(
-                        second_aabbs, noffset, chunk_len, B_minx, B_miny, B_minz,
-                        B_maxx, B_maxy, B_maxz);
-                    // Tail-safe fill: force disjoint
-                    sccd_detail::tail_fill_B(
-                        A_maxx[0], A_maxy[0], A_maxz[0], chunk_len, B_minx, B_miny,
-                        B_minz, B_maxx, B_maxy, B_maxz);
-
                     uint32_t dmask[AABB_DISJOINT_CHUNK_SIZE];
-                    vdisjoint(
-                        A_minx, A_miny, A_minz, A_maxx, A_maxy, A_maxz, B_minx,
-                        B_miny, B_minz, B_maxx, B_maxy, B_maxz, dmask);
+                    sccd_detail::build_disjoint_mask_for_block(
+                        second_aabbs, noffset, chunk_len, A_minx, A_miny, A_minz,
+                        A_maxx, A_maxy, A_maxz, A_maxx[0], A_maxy[0], A_maxz[0],
+                        dmask);
 
                     for (size_t lane = 0; lane < chunk_len; ++lane) {
                         if (dmask[lane]) {
@@ -831,26 +837,11 @@ bool lean_count_self_overlaps(
                     const size_t chunk_len = std::min(
                         (size_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
 
-                    geom_t B_minx[AABB_DISJOINT_CHUNK_SIZE];
-                    geom_t B_miny[AABB_DISJOINT_CHUNK_SIZE];
-                    geom_t B_minz[AABB_DISJOINT_CHUNK_SIZE];
-                    geom_t B_maxx[AABB_DISJOINT_CHUNK_SIZE];
-                    geom_t B_maxy[AABB_DISJOINT_CHUNK_SIZE];
-                    geom_t B_maxz[AABB_DISJOINT_CHUNK_SIZE];
-
-                    sccd_detail::prepare_B_block(
-                        aabbs, noffset, chunk_len, B_minx, B_miny, B_minz, B_maxx,
-                        B_maxy, B_maxz);
-                    // Tail-safe fill: force disjoint
-                    sccd_detail::tail_fill_B(
-                        A_maxx[0], A_maxy[0], A_maxz[0], chunk_len, B_minx, B_miny,
-                        B_minz, B_maxx, B_maxy, B_maxz);
-
                     // Disjoint array mask -> per-lane skip logic
                     uint32_t mask[AABB_DISJOINT_CHUNK_SIZE];
-                    vdisjoint(
-                        A_minx, A_miny, A_minz, A_maxx, A_maxy, A_maxz, B_minx,
-                        B_miny, B_minz, B_maxx, B_maxy, B_maxz, mask);
+                    sccd_detail::build_disjoint_mask_for_block(
+                        aabbs, noffset, chunk_len, A_minx, A_miny, A_minz, A_maxx,
+                        A_maxy, A_maxz, A_maxx[0], A_maxy[0], A_maxz[0], mask);
 
                     for (size_t lane = 0; lane < chunk_len; ++lane) {
                         if (mask[lane]) {
@@ -975,27 +966,11 @@ void lean_collect_self_overlaps(
                     const size_t chunk_len = std::min(
                         (size_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
 
-                    geom_t B_minx[AABB_DISJOINT_CHUNK_SIZE];
-                    geom_t B_miny[AABB_DISJOINT_CHUNK_SIZE];
-                    geom_t B_minz[AABB_DISJOINT_CHUNK_SIZE];
-                    geom_t B_maxx[AABB_DISJOINT_CHUNK_SIZE];
-                    geom_t B_maxy[AABB_DISJOINT_CHUNK_SIZE];
-                    geom_t B_maxz[AABB_DISJOINT_CHUNK_SIZE];
-
-                    sccd_detail::prepare_B_block(
-                        aabbs, noffset, chunk_len, B_minx, B_miny, B_minz, B_maxx,
-                        B_maxy, B_maxz);
-                    // Tail-safe fill: force disjoint
-                    sccd_detail::tail_fill_B(
-                        A_maxx[0], A_maxy[0], A_maxz[0], chunk_len, B_minx, B_miny,
-                        B_minz, B_maxx, B_maxy, B_maxz);
-
-                    // Disjoint array mask -> per-lane skip logic and write
-                    // pairs
+                    // Disjoint array mask -> per-lane skip logic and write pairs
                     uint32_t mask[AABB_DISJOINT_CHUNK_SIZE];
-                    vdisjoint(
-                        A_minx, A_miny, A_minz, A_maxx, A_maxy, A_maxz, B_minx,
-                        B_miny, B_minz, B_maxx, B_maxy, B_maxz, mask);
+                    sccd_detail::build_disjoint_mask_for_block(
+                        aabbs, noffset, chunk_len, A_minx, A_miny, A_minz, A_maxx,
+                        A_maxy, A_maxz, A_maxx[0], A_maxy[0], A_maxz[0], mask);
 
                     for (size_t lane = 0; lane < chunk_len; ++lane) {
                         if (mask[lane]) {
