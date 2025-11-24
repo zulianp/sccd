@@ -40,6 +40,29 @@ inline geom_t lean_nextafter_down(const geom_t x)
 //     return nextafter(x, DBL_MAX);
 // }
 
+inline static bool lean_disjoint(
+    const geom_t aminx,
+    const geom_t aminy,
+    const geom_t aminz,
+    const geom_t amaxx,
+    const geom_t amaxy,
+    const geom_t amaxz,
+    const geom_t bminx,
+    const geom_t bminy,
+    const geom_t bminz,
+    const geom_t bmaxx,
+    const geom_t bmaxy,
+    const geom_t bmaxz)
+{
+    return 
+        aminx > bmaxx |
+        aminy > bmaxy |
+        aminz > bmaxz |
+        bminx > amaxx |
+        bminy > amaxy |
+        bminz > amaxz;
+}
+
 int lean_choose_axis(const size_t n, geom_t** const SFEM_RESTRICT aabb)
 {
     geom_t mean[3] = { 0 };
@@ -397,9 +420,16 @@ bool lean_count_self_overlaps(
                     ev[v] = elements[v][idxi * stride];
                 }
 
+                size_t noffset = fi + 1;
+                for (; noffset < element_count; noffset++) {
+                    if (fimin < xmax[noffset]) {
+                        break;
+                    }
+                }
+
                 // Count potential overlaps
                 size_t count = 0;
-                for (size_t noffset = fi + 1; noffset < element_count;
+                for (; noffset < element_count;
                      noffset++) {
                     if (fimax < xmin[noffset]) {
                         break;
@@ -491,9 +521,16 @@ void lean_collect_self_overlaps(
                     ev[v] = elements[v][idxi * stride];
                 }
 
+                size_t noffset = fi + 1;
+                for (; noffset < element_count; noffset++) {
+                    if (fimin < xmax[noffset]) {
+                        break;
+                    }
+                }
+
                 // Find count potential overlaps
                 size_t count = 0;
-                for (size_t noffset = fi + 1; noffset < element_count;
+                for (; noffset < element_count;
                      noffset++) {
                     if (fimax < xmin[noffset]) {
                         break;
