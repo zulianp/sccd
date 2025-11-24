@@ -48,6 +48,9 @@ typedef struct SCCD {
     std::vector<std::vector<geom_t>> edge_aabb;
     std::vector<std::vector<geom_t>> vertex_aabb;
 
+    std::vector<idx_t> faces;
+    std::vector<idx_t> edges;
+
     void init(
         const std::vector<AABB>& vertex_boxes,
         const std::vector<AABB>& edge_boxes,
@@ -109,14 +112,14 @@ typedef struct SCCD {
             }
         }
 
-        std::vector<idx_t> faces(nfaces * 3);
+        faces.resize(nfaces * 3);
         for (size_t i = 0; i < nfaces; i++) {
             for (int d = 0; d < 3; d++) {
                 faces[i * 3 + d] = face_boxes[i].vertex_ids[d];
             }
         }
 
-        std::vector<idx_t> edges(nedges * 2);
+        edges.resize(nedges * 2);
         for (size_t i = 0; i < nedges; i++) {
             for (int d = 0; d < 2; d++) {
                 edges[i * 2 + d] = edge_boxes[i].vertex_ids[d];
