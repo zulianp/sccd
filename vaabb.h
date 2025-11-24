@@ -10,7 +10,7 @@
 #include <arm_neon.h>
 #endif
 
-#define AABB_DISJOINT_CHUNK_SIZE 16
+#define AABB_DISJOINT_CHUNK_SIZE 32
 #define SFEM_RESTRICT __restrict
 
 typedef float geom_t;
