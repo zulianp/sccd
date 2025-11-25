@@ -194,7 +194,7 @@ def gen_vec_function(name, comp_exprs, extra_scalar_params):
         ]
     )
     body = []
-    body.append(f"template<typename T> void {name}({', '.join(args)}) {{")
+    body.append(f"template<typename T> static inline void {name}({', '.join(args)}) {{")
     reps, reduced = sp.cse(list(comp_exprs), symbols=sp.numbered_symbols("ssa"), optimizations="basic")
     for sym, expr in reps:
         body.append(f"  const T {str(sym)} = {ccode_custom(expr)};")
@@ -256,7 +256,7 @@ def gen_origin_function(name, is_vf):
         ]
     )
     fn = []
-    fn.append(f"template<typename T> int {name}({', '.join(args)}) {{")
+    fn.append(f"template<typename T> static inline int {name}({', '.join(args)}) {{")
     # CSE across all needed expressions
     reps, reduced = sp.cse(
         [true_tol, cond_false, cond_not_box],

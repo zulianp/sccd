@@ -91,7 +91,7 @@ def gen_numerr_function(name: str, mult_nominal: int, mult_ms: int):
     )
 
     body = []
-    body.append(f"template<typename T> void {name}({', '.join(args)}) {{")
+    body.append(f"template<typename T> static inline void {name}({', '.join(args)}) {{")
     body.append(
         f"  const T kFilter = (use_ms ? T({mult_ms}) : T({mult_nominal})) * std::numeric_limits<T>::epsilon();"
     )
