@@ -9,6 +9,7 @@ import sympy as sp
 #   - compute_edge_edge_tolerance_soa
 # using minimal SoA-style scalar inputs (xyz per point at start/end) and
 # pointer outputs (tol0, tol1, tol2).
+# Use these flags in godbolt to verify proper vectorization: -Ofast -march=skylake-avx512  -mprefer-vector-width=512
 
 
 def symbols_inputs():
