@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+
+import sympy as sp
+from sympy.printing.c import C99CodePrinter
+
+# template <bool is_vf>
+# __device__ __host__ void get_numerical_error(CCDData &data_in, bool use_ms) {
+#   Scalar filter;
+#   if (!use_ms) {
+# #ifdef SCALABLE_CCD_USE_DOUBLE
+#     if constexpr (is_vf) {
+#       filter = 6.661338147750939e-15;
+#     } else {
+#       filter = 6.217248937900877e-15;
+#     }
+# #else
+#     if constexpr (is_vf) {
+#       filter = 3.576279e-06;
+#     } else {
+#       filter = 3.337861e-06;
+#     }
+# #endif
+#   } else {
+# #ifdef SCALABLE_CCD_USE_DOUBLE
+#     if constexpr (is_vf) {
+#       filter = 7.549516567451064e-15;
+#     } else {
+#       filter = 7.105427357601002e-15;
+#     }
+# #else
+#     if constexpr (is_vf) {
+#       filter = 4.053116e-06;
+#     } else {
+#       filter = 3.814698e-06;
+#     }
+# #endif
+#   }
+
+#   const Vector3 max = data_in.v0s.cwiseAbs()
+#                           .cwiseMax(data_in.v1s.cwiseAbs())
+#                           .cwiseMax(data_in.v2s.cwiseAbs())
+#                           .cwiseMax(data_in.v3s.cwiseAbs())
+#                           .cwiseMax(data_in.v0e.cwiseAbs())
+#                           .cwiseMax(data_in.v1e.cwiseAbs())
+#                           .cwiseMax(data_in.v2e.cwiseAbs())
+#                           .cwiseMax(data_in.v3e.cwiseAbs())
+#                           .cwiseMax(Vector3::Ones());
+
+#   data_in.err = max.array() * max.array() * max.array() * filter;
+# }
+
+# --- SymPy C code generator for numerical error (per-axis) ---
+
+class SCCDPrinter(C99CodePrinter):
+    def _print_Pow(self, expr):
+        base, exp = expr.as_base_exp()
+        if exp.is_Integer:
+            n = int(exp)
+            if 2 <= n <= 9:
+                return f"sccd::pow{n}<T>({self._print(base)})"
+        return super()._print_Pow(expr)
+
+    def _print_Abs(self, expr):
+        return f"sccd::abs<T>({self._print(expr.args[0])})"
+
+    def _print_Max(self, expr):
+        args = [self._print(a) for a in expr.args]
+        acc = args[0]
+        for a in args[1:]:
+            acc = f"sccd::max<T>({acc}, {a})"
+        return acc
+
+
+_PRINTER = SCCDPrinter()
+
+def ccode_custom(expr):
+    return _PRINTER.doprint(expr)
+
+
+def geom_symbols():
+    v0sx, v0sy, v0sz = sp.symbols("v0sx v0sy v0sz", real=True)
+    v1sx, v1sy, v1sz = sp.symbols("v1sx v1sy v1sz", real=True)
+    v2sx, v2sy, v2sz = sp.symbols("v2sx v2sy v2sz", real=True)
+    v3sx, v3sy, v3sz = sp.symbols("v3sx v3sy v3sz", real=True)
+    v0ex, v0ey, v0ez = sp.symbols("v0ex v0ey v0ez", real=True)
+    v1ex, v1ey, v1ez = sp.symbols("v1ex v1ey v1ez", real=True)
+    v2ex, v2ey, v2ez = sp.symbols("v2ex v2ey v2ez", real=True)
+    v3ex, v3ey, v3ez = sp.symbols("v3ex v3ey v3ez", real=True)
+
+    v0s = (v0sx, v0sy, v0sz)
+    v1s = (v1sx, v1sy, v1sz)
+    v2s = (v2sx, v2sy, v2sz)
+    v3s = (v3sx, v3sy, v3sz)
+    v0e = (v0ex, v0ey, v0ez)
+    v1e = (v1ex, v1ey, v1ez)
+    v2e = (v2ex, v2ey, v2ez)
+    v3e = (v3ex, v3ey, v3ez)
+
+    names = [
+        "v0sx", "v0sy", "v0sz",
+        "v1sx", "v1sy", "v1sz",
+        "v2sx", "v2sy", "v2sz",
+        "v3sx", "v3sy", "v3sz",
+        "v0ex", "v0ey", "v0ez",
+        "v1ex", "v1ey", "v1ez",
+        "v2ex", "v2ey", "v2ez",
+        "v3ex", "v3ey", "v3ez",
+    ]
+    return (v0s, v1s, v2s, v3s, v0e, v1e, v2e, v3e, names)
+
+
+def axis_max_abs(points):
+    # points: list of 8 triplets
+    one = sp.Integer(1)
+    maxx = sp.Max(*([sp.Abs(p[0]) for p in points] + [one]))
+    maxy = sp.Max(*([sp.Abs(p[1]) for p in points] + [one]))
+    maxz = sp.Max(*([sp.Abs(p[2]) for p in points] + [one]))
+    return maxx, maxy, maxz
+
+
+def gen_numerr_function(name: str, mult_nominal: int, mult_ms: int):
+    v0s, v1s, v2s, v3s, v0e, v1e, v2e, v3e, arg_names = geom_symbols()
+    pts = [v0s, v1s, v2s, v3s, v0e, v1e, v2e, v3e]
+    maxx, maxy, maxz = axis_max_abs(pts)
+    errx = sp.Pow(maxx, 3)
+    erry = sp.Pow(maxy, 3)
+    errz = sp.Pow(maxz, 3)
+    exprs = [errx, erry, errz]
+
+    # Function signature
+    args = (
+        ["const int use_ms"]
+        + [f"const T {n}" for n in arg_names]
+        + [
+            "T * const SFEM_RESTRICT errx",
+            "T * const SFEM_RESTRICT erry",
+            "T * const SFEM_RESTRICT errz",
+        ]
+    )
+
+    body = []
+    body.append(f"template<typename T> void {name}({', '.join(args)}) {{")
+    body.append(
+        f"  const T kFilter = (use_ms ? T({mult_ms}) : T({mult_nominal})) * std::numeric_limits<T>::epsilon();"
+    )
+    reps, reduced = sp.cse(exprs, symbols=sp.numbered_symbols("ssa"), optimizations="basic")
+    for sym, expr in reps:
+        body.append(f"  const T {str(sym)} = {ccode_custom(expr)};")
+    body.append(f"  *errx = {ccode_custom(reduced[0])} * kFilter;")
+    body.append(f"  *erry = {ccode_custom(reduced[1])} * kFilter;")
+    body.append(f"  *errz = {ccode_custom(reduced[2])} * kFilter;")
+    body.append("}")
+    return "\n".join(body)
+
+
+if __name__ == "__main__":
+    print("/* Generated by SymPy; requires <limits> */")
+    # VF: use_ms ? 34*eps : 30*eps
+    print(gen_numerr_function("sccd_get_numerical_error_vf_soa", mult_nominal=30, mult_ms=34))
+    print()
+    # EE: use_ms ? 32*eps : 28*eps
+    print(gen_numerr_function("sccd_get_numerical_error_ee_soa", mult_nominal=28, mult_ms=32))
