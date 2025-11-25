@@ -26,7 +26,38 @@
 
 namespace sccd {
 
-typedef float geom_t;
+/// Geometry scalar type used for coordinates and AABB values.
+using geom_t = float;
+/// Integer type used for element/vertex indices.
+using idx_t = int;
+/// Integer type used for counts and prefix sums.
+using count_t = int;
+
+/**
+ * \brief Return the next representable value toward +infinity.
+ * \param x Input value.
+ * \return Next representable float greater than or equal to x.
+ */
+ inline geom_t nextafter_up(const geom_t x) { 
+  if constexpr (std::is_same<geom_t, float>::value) {
+    return nextafterf(x, FLT_MAX);
+  } else {
+    return nextafter(x, DBL_MAX);
+  }
+}
+
+/**
+ * \brief Return the next representable value toward -infinity.
+ * \param x Input value.
+ * \return Next representable float less than or equal to x.
+ */
+inline geom_t nextafter_down(const geom_t x) { 
+  if constexpr (std::is_same<geom_t, float>::value) {
+    return nextafterf(x, -FLT_MAX);
+  } else {
+    return nextafter(x, -DBL_MAX);
+  }
+}
 
 inline static uint32_t disjoint(const geom_t aminx, const geom_t aminy,
                                 const geom_t aminz, const geom_t amaxx,

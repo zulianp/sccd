@@ -52,7 +52,7 @@ typedef struct SCCD {
 
   std::vector<idx_t> faces;
   std::vector<idx_t> edges;
-  bool verbose{false};
+  bool verbose{true};
 
   void init(const std::vector<AABB> &vertex_boxes,
             const std::vector<AABB> &edge_boxes,

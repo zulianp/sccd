@@ -24,12 +24,7 @@
 #include "vaabb.h"
 
 namespace sccd {
-/// Geometry scalar type used for coordinates and AABB values.
-using geom_t = float;
-/// Integer type used for element/vertex indices.
-using idx_t = int;
-/// Integer type used for counts and prefix sums.
-using count_t = int;
+
 
 #ifndef _WIN32
 #define SFEM_RESTRICT __restrict__
@@ -37,29 +32,6 @@ using count_t = int;
 #define SFEM_RESTRICT __restrict
 #endif
 
-/**
- * \brief Return the next representable value toward +infinity.
- * \param x Input value.
- * \return Next representable float greater than or equal to x.
- */
-inline geom_t nextafter_up(const geom_t x) { return nextafterf(x, FLT_MAX); }
-
-/**
- * \brief Return the next representable value toward -infinity.
- * \param x Input value.
- * \return Next representable float less than or equal to x.
- */
-inline geom_t nextafter_down(const geom_t x) { return nextafterf(x, -FLT_MAX); }
-
-// inline geom_t nextafter_up(const geom_t x)
-// {
-//     return nextafter(x,DBL_MAX);
-// }
-
-// inline geom_t nextafter_down(const geom_t x)
-// {
-//     return nextafter(x, DBL_MAX);
-// }
 
 /**
  * \brief Choose the axis (0=x,1=y,2=z) with largest variance of AABB centers.
