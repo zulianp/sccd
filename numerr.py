@@ -3,54 +3,6 @@
 import sympy as sp
 from sympy.printing.c import C99CodePrinter
 
-# template <bool is_vf>
-# __device__ __host__ void get_numerical_error(CCDData &data_in, bool use_ms) {
-#   Scalar filter;
-#   if (!use_ms) {
-# #ifdef SCALABLE_CCD_USE_DOUBLE
-#     if constexpr (is_vf) {
-#       filter = 6.661338147750939e-15;
-#     } else {
-#       filter = 6.217248937900877e-15;
-#     }
-# #else
-#     if constexpr (is_vf) {
-#       filter = 3.576279e-06;
-#     } else {
-#       filter = 3.337861e-06;
-#     }
-# #endif
-#   } else {
-# #ifdef SCALABLE_CCD_USE_DOUBLE
-#     if constexpr (is_vf) {
-#       filter = 7.549516567451064e-15;
-#     } else {
-#       filter = 7.105427357601002e-15;
-#     }
-# #else
-#     if constexpr (is_vf) {
-#       filter = 4.053116e-06;
-#     } else {
-#       filter = 3.814698e-06;
-#     }
-# #endif
-#   }
-
-#   const Vector3 max = data_in.v0s.cwiseAbs()
-#                           .cwiseMax(data_in.v1s.cwiseAbs())
-#                           .cwiseMax(data_in.v2s.cwiseAbs())
-#                           .cwiseMax(data_in.v3s.cwiseAbs())
-#                           .cwiseMax(data_in.v0e.cwiseAbs())
-#                           .cwiseMax(data_in.v1e.cwiseAbs())
-#                           .cwiseMax(data_in.v2e.cwiseAbs())
-#                           .cwiseMax(data_in.v3e.cwiseAbs())
-#                           .cwiseMax(Vector3::Ones());
-
-#   data_in.err = max.array() * max.array() * max.array() * filter;
-# }
-
-# --- SymPy C code generator for numerical error (per-axis) ---
-
 class SCCDPrinter(C99CodePrinter):
     def _print_Pow(self, expr):
         base, exp = expr.as_base_exp()
