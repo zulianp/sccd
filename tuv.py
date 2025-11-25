@@ -185,8 +185,8 @@ def gen_vec_function(name, comp_exprs, extra_scalar_params):
     # Build signature (T for all scalars; SoA geometry; rx,ry,rz)
     _,_,_,_,_,_,_,_, geom_names = geom_symbols()
     args = (
-        [f"T {p}" for p in extra_scalar_params]
-        + [f"T {n}" for n in geom_names]
+        [f"const T {p}" for p in extra_scalar_params]
+        + [f"const T {n}" for n in geom_names]
         + [
             "T * const SFEM_RESTRICT rx",
             "T * const SFEM_RESTRICT ry",
@@ -243,14 +243,14 @@ def gen_origin_function(name, is_vf):
     # Build signature
     args = (
         [
-            "T t_l", "T t_u",
-            "T u_l", "T u_u",
-            "T v_l", "T v_u",
+            "const T t_l", "const T t_u",
+            "const T u_l", "const T u_u",
+            "const T v_l", "const T v_u",
         ]
-        + [f"T {n}" for n in geom_names]
+        + [f"const T {n}" for n in geom_names]
         + [
-            "T msx", "T msy", "T msz",
-            "T errx", "T erry", "T errz",
+            "const T msx", "const T msy", "const T msz",
+            "const T errx", "const T erry", "const T errz",
             "T * const SFEM_RESTRICT true_tol",
             "int * const SFEM_RESTRICT box_in",
         ]
