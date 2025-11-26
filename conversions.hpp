@@ -137,6 +137,64 @@ typedef struct SCCD {
     sort_axis = -1;
   }
 
+  void find_with_cell_list() {
+    Timer timer;
+
+    timer.start();
+
+    size_t max_ccdptr_size = std::max(nfaces, nedges) + 1;
+    ccdptr.resize(max_ccdptr_size);
+
+    int axes[3]; 
+    largest_variance_axes_sort(nnodes, vaabb, axes);
+
+    sort_axis = axes[0];
+    sort_along_axis(nfaces, sort_axis, faabb, fidx.data(), scratch.data());
+    sort_along_axis(nnodes, sort_axis, vaabb, vidx.data(), scratch.data());
+    sort_along_axis(nedges, sort_axis, eaabb, eidx.data(), scratch.data());
+
+    timer.stop();
+    if(verbose) printf("SCCD, Sorting: %g [ms]\n", timer.getElapsedTimeInMilliSec());
+    timer.start();
+
+    int cell_list_axis = axes[1];
+    size_t ncells = 2048; // Max amount
+    geom_t cell_min;
+    geom_t cell_size;
+    cell_list_setup(nnodes, vaabb[cell_list_axis], vaabb[cell_list_axis+3], &ncells, &cell_min, &cell_size);
+    std::vector<idx_t> cellptr(ncells + 1), bookkeeping(ncells);
+    cell_list_count(ncells, cell_min, cell_size, nnodes, vaabb[cell_list_axis], cellptr.data());
+
+    std::vector<idx_t> cellidx(cellptr[ncells]);
+    cell_list_populate(ncells, cell_min, cell_size, nnodes, vaabb[cell_list_axis], cellptr.data(), cellidx.data(), bookkeeping.data());
+
+    size_t nnz = 0;
+    size_t max_count = 0;
+    size_t min_count = cellptr[1] - cellptr[0];
+    for(size_t i = 0; i < ncells; i++) {
+      int count = cellptr[i+1] - cellptr[i];
+      nnz += count != 0;
+      max_count = std::max(max_count, (size_t)count);
+      min_count = std::min(min_count, (size_t)count);
+    }
+
+    timer.stop();
+    if(verbose) printf("SCCD, Cell List(nnz=%lu/%lu, nindices=%lu, min_count=%lu, max_count=%lu): %g [ms]\n", 
+      nnz, ncells, cellidx.size(), min_count, max_count, timer.getElapsedTimeInMilliSec());
+      timer.start();
+
+
+    // F2V
+    count_overlaps_cell_list<3, 1>(sort_axis, nfaces, faabb, fidx.data(), 3,
+                              soafaces, nnodes, vaabb, vidx.data(), 0, nullptr,
+                               cell_list_axis, ncells, cell_min, cell_size, cellptr.data(), cellidx.data(), ccdptr.data());
+
+                               timer.stop();
+                               if(verbose) printf("SCCD count cell list(%lu), F2V: %g [ms]\n", ccdptr[nfaces], timer.getElapsedTimeInMilliSec());
+
+
+  }
+
   void find() {
     Timer timer;
 

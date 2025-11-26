@@ -20,7 +20,9 @@
 #define AABB_DISJOINT_CHUNK_SIZE 32
 #define AABB_DISJOINT_NOVECTORIZE_THRESHOLD 16
 
-#ifndef SFEM_RESTRICT // defined in sccd.hpp
+#ifndef _WIN32
+#define SFEM_RESTRICT __restrict__
+#else
 #define SFEM_RESTRICT __restrict
 #endif
 

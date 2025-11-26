@@ -25,21 +25,13 @@
 
 namespace sccd {
 
-
-#ifndef _WIN32
-#define SFEM_RESTRICT __restrict__
-#else
-#define SFEM_RESTRICT __restrict
-#endif
-
-
 /**
  * \brief Choose the axis (0=x,1=y,2=z) with largest variance of AABB centers.
  * \param n Number of AABBs.
  * \param aabb SoA arrays of size 6: minx,miny,minz,maxx,maxy,maxz; each of
  * length n. \return Axis index in {0,1,2}.
  */
-int choose_axis(const size_t n, geom_t **const SFEM_RESTRICT aabb) {
+static int choose_axis(const size_t n, geom_t **const SFEM_RESTRICT aabb) {
   geom_t mean[3] = {0};
   geom_t var[3] = {0};
   for (int d = 0; d < 3; d++) {
@@ -68,6 +60,94 @@ int choose_axis(const size_t n, geom_t **const SFEM_RESTRICT aabb) {
   return fargmax;
 }
 
+static void largest_variance_axes_sort(const size_t n,
+                                       geom_t **const SFEM_RESTRICT aabb,
+                                       int *axes) {
+  geom_t mean[3] = {0};
+  geom_t var[3] = {0};
+  for (int d = 0; d < 3; d++) {
+    for (size_t i = 0; i < n; i++) {
+      const geom_t c = (aabb[d + 3][i] + aabb[d][i]) / 2;
+      mean[d] += c;
+    }
+
+    mean[d] /= n;
+    for (size_t i = 0; i < n; i++) {
+      const geom_t c = (aabb[d + 3][i] + aabb[d][i]) / 2;
+      var[d] += (c - mean[d]) * (c - mean[d]);
+    }
+  }
+
+  geom_t vars[3] = {var[0], var[1], var[2]};
+  printf("vars: %g, %g, %g\n", vars[0], vars[1], vars[2]);
+
+  axes[0] = 0;
+  axes[1] = 1;
+  axes[2] = 2;
+  std::sort(axes, axes + 3,
+            [&](const int a, const int b) { return vars[a] > vars[b]; });
+
+  printf("axes: %d, %d, %d\n", axes[0], axes[1], axes[2]);
+}
+
+static void cell_list_setup(const size_t n,
+                            const geom_t *const SFEM_RESTRICT xmin,
+                            const geom_t *const SFEM_RESTRICT xmax,
+                            size_t *const SFEM_RESTRICT inout_ncells,
+                            geom_t *const SFEM_RESTRICT cell_min,
+                            geom_t *const SFEM_RESTRICT cell_size) {
+  geom_t gmin = xmin[0];
+  geom_t gmax = xmax[0];
+  geom_t max_cell_size = xmax[0] - xmin[0];
+  for (size_t i = 0; i < n; i++) {
+    gmin = std::min(gmin, xmin[i]);
+    gmax = std::max(gmax, xmax[i]);
+    max_cell_size = std::max(max_cell_size, xmax[i] - xmin[i]);
+  }
+
+  *inout_ncells = std::min(
+      *inout_ncells,
+      std::max((size_t)1, (size_t)floor((gmax - gmin) / max_cell_size + 1e-8)));
+  *cell_min = gmin;
+  *cell_size = (gmax - gmin) /
+               *inout_ncells; // Recompute due to floating point perturbation
+}
+
+static void cell_list_count(
+    // Cell list
+    const size_t ncells, const geom_t cell_min, const geom_t cell_size,
+    // Points
+    const size_t n, const geom_t *const SFEM_RESTRICT xmin,
+    // Output
+    int *const SFEM_RESTRICT cellptr) {
+  cellptr[0] = 0;
+  for (size_t i = 0; i < n; i++) {
+    const geom_t x_i = xmin[i];
+    const int cell_idx = (x_i - cell_min) / cell_size;
+    cellptr[cell_idx + 1]++;
+  }
+
+  for (size_t i = 0; i < ncells; i++) {
+    cellptr[i + 1] += cellptr[i];
+  }
+}
+
+static void cell_list_populate(
+    // Cell list
+    const size_t ncells, const geom_t cell_min, const geom_t cell_size,
+    // Points
+    const size_t n, const geom_t *const SFEM_RESTRICT xmin,
+    const int *const SFEM_RESTRICT cellptr, idx_t *const SFEM_RESTRICT idx,
+    idx_t *const SFEM_RESTRICT bookkeeping) {
+  memset(bookkeeping, 0, sizeof(idx_t) * ncells);
+  for (size_t i = 0; i < n; i++) {
+    const geom_t x_i = xmin[i];
+    const int cell_idx = (x_i - cell_min) / cell_size;
+    assert(cell_idx >= 0 && cell_idx < ncells);
+    idx[bookkeeping[cell_idx]++] = i;
+  }
+}
+
 /**
  * \brief Sort AABBs along \p sort_axis and permute all six SoA arrays
  * coherently. \param n Number of AABBs. \param sort_axis Axis to sort by
@@ -78,10 +158,10 @@ int choose_axis(const size_t n, geom_t **const SFEM_RESTRICT aabb) {
  *
  * Arrays must be valid and sufficiently sized. Uses parallel sort.
  */
-void sort_along_axis(const size_t n, const int sort_axis,
-                     geom_t **const SFEM_RESTRICT arrays,
-                     idx_t *const SFEM_RESTRICT idx,
-                     geom_t *const SFEM_RESTRICT scratch) {
+static void sort_along_axis(const size_t n, const int sort_axis,
+                            geom_t **const SFEM_RESTRICT arrays,
+                            idx_t *const SFEM_RESTRICT idx,
+                            geom_t *const SFEM_RESTRICT scratch) {
   for (size_t i = 0; i < n; i++) {
     idx[i] = i;
   }
@@ -160,11 +240,14 @@ static inline bool shares_vertex(const idx_t (&a)[n1], const idx_t (&b)[n2]) {
 }
 
 /**
- * \brief Advance begin and compute end of candidate window along a sorted axis.
+ * \brief Advance begin and compute end of candidate window along a sorted
+ * axis.
  * \param fimin Min coordinate of first AABB on the sort axis.
  * \param fimax Max coordinate of first AABB on the sort axis.
- * \param second_xmax Sorted xmax array of the second list along the sort axis.
- * \param second_xmin Sorted xmin array of the second list along the sort axis.
+ * \param second_xmax Sorted xmax array of the second list along the sort
+ * axis.
+ * \param second_xmin Sorted xmin array of the second list along the sort
+ * axis.
  * \param second_count Number of AABBs in the second list.
  * \param begin In/out: advanced to first index where second_xmax[begin] >
  * fimin. \param end Out: first index where second_xmin[end] > fimax.
@@ -238,7 +321,8 @@ static inline void tail_fill_B(const geom_t amaxx0, const geom_t amaxy0,
  * \brief Build per-lane disjoint mask for a block of B against a single A.
  * \param second_aabbs SoA arrays for the second list.
  * \param start First B index to test.
- * \param chunk_len Number of lanes to process (<= AABB_DISJOINT_CHUNK_SIZE).
+ * \param chunk_len Number of lanes to process (<=
+ * AABB_DISJOINT_CHUNK_SIZE).
  * \param aminx Scalar A min x.
  * \param aminy Scalar A min y.
  * \param aminz Scalar A min z.
@@ -399,9 +483,53 @@ static inline size_t scalar_count_range_two_lists(
   return count;
 }
 
+template <int F, int S>
+static inline size_t scalar_count_range_two_lists_cell_list(
+    geom_t **const SFEM_RESTRICT first_aabbs, const size_t fi,
+    geom_t **const SFEM_RESTRICT second_aabbs,
+    const idx_t *const SFEM_RESTRICT second_idx,
+    idx_t **const SFEM_RESTRICT second_elements, const size_t second_stride,
+    const idx_t (&ev)[F], const size_t begin_k, const size_t end_k,
+    const idx_t *const SFEM_RESTRICT cellidx) {
+  size_t count = 0;
+  const geom_t aminx = first_aabbs[0][fi];
+  const geom_t aminy = first_aabbs[1][fi];
+  const geom_t aminz = first_aabbs[2][fi];
+  const geom_t amaxx = first_aabbs[3][fi];
+  const geom_t amaxy = first_aabbs[4][fi];
+  const geom_t amaxz = first_aabbs[5][fi];
+  for (size_t k = begin_k; k < end_k; ++k) {
+    size_t j = cellidx[k];
+    if (disjoint(aminx, aminy, aminz, amaxx, amaxy, amaxz, second_aabbs[0][j],
+                 second_aabbs[1][j], second_aabbs[2][j], second_aabbs[3][j],
+                 second_aabbs[4][j], second_aabbs[5][j])) {
+      continue;
+    }
+    bool share = false;
+    if constexpr (S > 1) {
+      const idx_t jidx = second_idx[j];
+      idx_t sev[S];
+      for (int v = 0; v < S; ++v) {
+        sev[v] = second_elements[v][jidx * second_stride];
+      }
+      share = shares_vertex<F, S>(ev, sev);
+    } else {
+      for (int a = 0; a < F; ++a) {
+        if (ev[a] == second_idx[j]) {
+          share = true;
+          break;
+        }
+      }
+    }
+    count += share ? 0 : 1;
+  }
+  return count;
+}
+
 /**
- * \brief Scalar reference: collect candidate overlaps in [begin,end) for two
- * lists. \return Number of pairs written to \p first_out and \p second_out.
+ * \brief Scalar reference: collect candidate overlaps in [begin,end) for
+ * two lists. \return Number of pairs written to \p first_out and \p
+ * second_out.
  */
 template <int F, int S>
 static inline size_t scalar_collect_range_two_lists(
@@ -454,7 +582,8 @@ static inline size_t scalar_collect_range_two_lists(
 // -----------------------------
 
 /**
- * \brief Scalar reference: count self-overlaps in [begin,end) for element i.
+ * \brief Scalar reference: count self-overlaps in [begin,end) for element
+ * i.
  * \return Number of non-disjoint, non-shared-vertex candidates with j>i.
  */
 template <int N>
@@ -487,8 +616,10 @@ scalar_count_range_self(geom_t **const SFEM_RESTRICT aabbs, const size_t fi,
 }
 
 /**
- * \brief Scalar reference: collect self-overlaps in [begin,end) for element i.
- * \return Number of pairs written to outputs, with (min(idxi,jidx), max(...)).
+ * \brief Scalar reference: collect self-overlaps in [begin,end) for element
+ * i.
+ * \return Number of pairs written to outputs, with (min(idxi,jidx),
+ * max(...)).
  */
 template <int N>
 static inline size_t scalar_collect_range_self(
@@ -963,6 +1094,149 @@ void collect_self_overlaps(const int sort_axis, const count_t element_count,
           assert(expected_count == count);
         }
       });
+}
+
+template <int first_nxe, int second_nxe>
+bool count_overlaps_cell_list(
+    const int sort_axis, const count_t first_count,
+    geom_t **const SFEM_RESTRICT first_aabbs,
+    idx_t *const SFEM_RESTRICT first_idx, const size_t first_stride,
+    idx_t **const SFEM_RESTRICT first_elements, const count_t second_count,
+    geom_t **const SFEM_RESTRICT second_aabbs,
+    idx_t *const SFEM_RESTRICT second_idx, const size_t second_stride,
+    idx_t **const SFEM_RESTRICT second_elements,
+    // Cell list
+    const int cell_list_axis, const size_t ncells, const geom_t cell_min,
+    const geom_t cell_size, const idx_t *const SFEM_RESTRICT cellptr,
+    const idx_t *const SFEM_RESTRICT cellidx,
+    size_t *const SFEM_RESTRICT ccdptr) {
+  const geom_t *const SFEM_RESTRICT first_xmin = first_aabbs[sort_axis];
+  const geom_t *const SFEM_RESTRICT first_xmax = first_aabbs[3 + sort_axis];
+  const geom_t *const SFEM_RESTRICT second_xmin = second_aabbs[sort_axis];
+  const geom_t *const SFEM_RESTRICT second_xmax = second_aabbs[3 + sort_axis];
+
+  // FIXME: `second_count` is not used. Consider removing it or validating that
+  // `cellptr[ncells]` matches the number of indices in `cellidx` (e.g., equals
+  // `second_count` when `cellidx` enumerates all second primitives).
+  // FIXME: `cellptr` stores offsets into a flattened index buffer; consider
+  // using `size_t*` rather than `idx_t*` to avoid overflow on large scenes.
+  const geom_t *const SFEM_RESTRICT cell_xmin = first_aabbs[cell_list_axis];
+  const geom_t *const SFEM_RESTRICT cell_xmax =
+      first_aabbs[3 + cell_list_axis];
+
+  ccdptr[0] = 0;
+
+  tbb::parallel_for(
+      tbb::blocked_range<size_t>(0, first_count),
+      [&](const tbb::blocked_range<size_t> &r) {
+        for (size_t fi = r.begin(); fi < r.end(); fi++) {
+          const geom_t fimin = first_xmin[fi];
+          const geom_t fimax = first_xmax[fi];
+          const idx_t first_idxi = first_idx[fi];
+          // FIXME: Ensure `first_aabbs[*]` is in the same order as `first_idx`.
+          // If AABB arrays are not permuted to the sorted order, use
+          // `first_xmin[first_idxi]` / `first_xmax[first_idxi]` instead of `[fi]`.
+
+          size_t cell_start = std::max(
+              (int)0,
+              (int)(floor((cell_xmin[fi] - cell_min) / cell_size) - 1));
+          size_t cell_end = std::min(
+              (int)ncells,
+              (int)(ceil((cell_xmax[fi] - cell_min) / cell_size) + 1));
+
+          idx_t ev[first_nxe];
+          for (int v = 0; v < first_nxe; v++) {
+            ev[v] = first_elements[v][first_idxi * first_stride];
+          }
+
+          size_t count = 0;
+          for (size_t cell_i = cell_start; cell_i < cell_end; cell_i++) {
+            size_t cell_i_begin = cellptr[cell_i];
+            size_t cell_i_end = cellptr[cell_i + 1];
+
+            size_t begin_k = cell_i_begin;
+            for (; begin_k < cell_i_end; begin_k++) {
+              const idx_t second_idxi = cellidx[begin_k];
+              // FIXME: This assumes the indices within a cell are sorted by
+              // `second_xmax` along `sort_axis`. If the cell’s subrange is only
+              // bucketed by `cell_list_axis` (not sorted by `sort_axis`), this
+              // early break may skip true overlaps. Either sort each cell’s
+              // subrange by `second_xmax` or drop this pruning.
+              if (fimin < second_xmax[second_idxi]) {
+                break;
+              }
+            }
+
+            size_t end_k = begin_k;
+            for (; end_k < cell_i_end; end_k++) {
+              const idx_t second_idxi = cellidx[end_k];
+              // FIXME: As above, this relies on `second_xmin` being nondecreasing
+              // over the cell’s subrange. If not guaranteed, this may terminate
+              // too early and miss candidates.
+              // Also confirm intended boundary semantics: change `<` to `<=` if
+              // touching intervals should be excluded.
+              if (fimax < second_xmin[second_idxi]) {
+                break;
+              }
+            }
+
+            if (begin_k >= end_k) {
+              continue;
+            }
+
+            // if (end_k - begin_k < AABB_DISJOINT_NOVECTORIZE_THRESHOLD) {
+            count +=
+                sccd_detail::scalar_count_range_two_lists_cell_list<first_nxe,
+                                                                    second_nxe>(
+                    first_aabbs, fi, second_aabbs, second_idx, second_elements,
+                    second_stride, ev, begin_k, end_k, cellidx);
+
+            // continue;
+            // }
+          }
+
+          // NOTE: `cell_end` is treated as exclusive; ensure the clamp above uses
+          // `ncells` (not `ncells - 1`) so that `cell_i + 1` remains valid when
+          // visiting the last cell.
+          // printf("cell_start: %lu, cell_end: %lu, count: %lu\n", cell_start,
+          //        (unsigned long)cell_end, (unsigned long)count);
+          ccdptr[fi + 1] = count;
+
+          // size_t noffset = ni;
+
+          // for (; noffset < end;) {
+          //     const size_t chunk_len = std::min(
+          //         (size_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
+
+          //     uint32_t dmask[AABB_DISJOINT_CHUNK_SIZE] = { 0 };
+
+          //     sccd_detail::build_disjoint_mask_for_block(
+          //         second_aabbs, noffset, chunk_len, first_aabbs[0][fi],
+          //         first_aabbs[1][fi], first_aabbs[2][fi],
+          //         first_aabbs[3][fi], first_aabbs[4][fi],
+          //         first_aabbs[5][fi], dmask);
+
+          //     sccd_detail::mask_out_shared_two_lists<
+          //         first_nxe, second_nxe>(
+          //         dmask, chunk_len, noffset, ev, second_idx,
+          //         second_elements, second_stride);
+
+          //     for (size_t lane = 0; lane < chunk_len; ++lane) {
+          //         count += dmask[lane] ? 0 : 1;
+          //     }
+
+          //     noffset += chunk_len;
+          // }
+
+          // ccdptr[fi + 1] = count;
+        }
+      });
+
+  for (size_t fi = 0; fi < first_count; fi++) {
+    ccdptr[fi + 1] += ccdptr[fi];
+  }
+
+  return ccdptr[first_count] > 0;
 }
 
 } // namespace sccd
