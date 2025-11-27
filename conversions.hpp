@@ -137,6 +137,54 @@ typedef struct SCCD {
     sort_axis = -1;
   }
 
+  void find_with_starts() {
+    Timer timer;
+
+    timer.start();
+
+    size_t max_ccdptr_size = std::max(nfaces, nedges) + 1;
+    ccdptr.resize(max_ccdptr_size);
+
+    int axes[3];
+    largest_variance_axes_sort(nnodes, vaabb, axes);
+
+    sort_axis = axes[0];
+    sort_along_axis(nfaces, sort_axis, faabb, fidx.data(), scratch.data());
+    sort_along_axis(nnodes, sort_axis, vaabb, vidx.data(), scratch.data());
+    sort_along_axis(nedges, sort_axis, eaabb, eidx.data(), scratch.data());
+
+    timer.stop();
+    if (verbose)
+      printf("SCCD, Sorting: %g [ms]\n", timer.getElapsedTimeInMilliSec());
+    timer.start();
+
+    int cell_list_axis = sort_axis;
+    size_t ncells = 1024; // Max amount
+    geom_t cell_min;
+    geom_t cell_size;
+    cell_starts_setup(nnodes, vaabb[cell_list_axis], vaabb[cell_list_axis + 3], ncells, &cell_min, &cell_size);
+    std::vector<size_t> starts(ncells);
+    cell_starts(ncells, cell_min, cell_size, nnodes, vaabb[cell_list_axis], starts.data());
+
+    timer.stop();
+    if (verbose)
+      printf("SCCD, Cell Start(%lu): %g [ms]\n",
+             ncells,
+             timer.getElapsedTimeInMilliSec());
+    timer.start();
+
+    // F2V
+    count_overlaps_with_starts<3, 1>(
+        sort_axis, nfaces, faabb, fidx.data(), 3, soafaces, nnodes, vaabb,
+        vidx.data(), 0, nullptr, ncells, cell_min, cell_size,
+        starts.data(),  ccdptr.data());
+
+    timer.stop();
+    if (verbose)
+      printf("SCCD count cell starts(%lu), F2V: %g [ms]\n", ccdptr[nfaces],
+             timer.getElapsedTimeInMilliSec());
+  }
+
   void find_with_cell_list() {
     Timer timer;
 
@@ -159,7 +207,7 @@ typedef struct SCCD {
     timer.start();
 
     int cell_list_axis = axes[1];
-    size_t ncells = 1; // Max amount
+    size_t ncells = 2048; // Max amount
     geom_t cell_min;
     geom_t cell_size;
     cell_list_setup(nnodes, vaabb[cell_list_axis], vaabb[cell_list_axis + 3],
