@@ -162,22 +162,23 @@ typedef struct SCCD {
     size_t ncells = 1024; // Max amount
     geom_t cell_min;
     geom_t cell_size;
-    cell_starts_setup(nnodes, vaabb[cell_list_axis], vaabb[cell_list_axis + 3], ncells, &cell_min, &cell_size);
+    cell_starts_setup(nnodes, vaabb[cell_list_axis], vaabb[cell_list_axis + 3],
+                      ncells, &cell_min, &cell_size);
     std::vector<size_t> starts(ncells);
-    cell_starts(ncells, cell_min, cell_size, nnodes, vaabb[cell_list_axis], starts.data());
+    cell_starts(ncells, cell_min, cell_size, nnodes, vaabb[cell_list_axis],
+                starts.data());
 
     timer.stop();
     if (verbose)
-      printf("SCCD, Cell Start(%lu): %g [ms]\n",
-             ncells,
+      printf("SCCD, Cell Start(%lu): %g [ms]\n", ncells,
              timer.getElapsedTimeInMilliSec());
     timer.start();
 
     // F2V
-    count_overlaps_with_starts<3, 1>(
-        sort_axis, nfaces, faabb, fidx.data(), 3, soafaces, nnodes, vaabb,
-        vidx.data(), 0, nullptr, ncells, cell_min, cell_size,
-        starts.data(),  ccdptr.data());
+    count_overlaps_with_starts<3, 1>(sort_axis, nfaces, faabb, fidx.data(), 3,
+                                     soafaces, nnodes, vaabb, vidx.data(), 0,
+                                     nullptr, ncells, cell_min, cell_size,
+                                     starts.data(), ccdptr.data());
 
     timer.stop();
     if (verbose)
@@ -222,17 +223,17 @@ typedef struct SCCD {
                        bookkeeping.data());
 
 #ifndef NDEBUG
-  for (size_t i = 0; i < ncells; i++) {
-    assert(cellptr[i + 1] - cellptr[i] == bookkeeping[i]);
-    idx_t prev = cellidx[cellptr[i]];
-    geom_t prev_x = vaabb[sort_axis][prev];
-    for(size_t j = cellptr[i]+1; j < cellptr[i + 1]; j++) {
-      assert(cellidx[j] > prev);
-      assert(vaabb[sort_axis][cellidx[j]] >= prev_x);
-      prev_x = vaabb[sort_axis][cellidx[j]];
-      prev = cellidx[j];
+    for (size_t i = 0; i < ncells; i++) {
+      assert(cellptr[i + 1] - cellptr[i] == bookkeeping[i]);
+      idx_t prev = cellidx[cellptr[i]];
+      geom_t prev_x = vaabb[sort_axis][prev];
+      for (size_t j = cellptr[i] + 1; j < cellptr[i + 1]; j++) {
+        assert(cellidx[j] > prev);
+        assert(vaabb[sort_axis][cellidx[j]] >= prev_x);
+        prev_x = vaabb[sort_axis][cellidx[j]];
+        prev = cellidx[j];
+      }
     }
-  }
 #endif
 
     size_t nnz = 0;
@@ -259,10 +260,41 @@ typedef struct SCCD {
         vidx.data(), 0, nullptr, cell_list_axis, ncells, cell_min, cell_size,
         cellptr.data(), cellidx.data(), ccdptr.data());
 
+    // Allocation (expensive, could be expanded dynamically in CCD)
+    const size_t fv_nintersections = ccdptr[nfaces];
+    foverlap.resize(fv_nintersections);
+    voverlap.resize(fv_nintersections);
+
+    collect_overlaps_cell_list<3, 1>(
+        sort_axis, nfaces, faabb, fidx.data(), 3, soafaces, nnodes, vaabb,
+        vidx.data(), 0, nullptr, cell_list_axis, ncells, cell_min, cell_size,
+        cellptr.data(), cellidx.data(), ccdptr.data(), foverlap.data(),
+        voverlap.data());
+
     timer.stop();
     if (verbose)
       printf("SCCD count cell list(%lu), F2V: %g [ms]\n", ccdptr[nfaces],
              timer.getElapsedTimeInMilliSec());
+    timer.start();
+
+    // E2E
+    std::fill(ccdptr.begin(), ccdptr.end(), 0);
+
+    count_self_overlaps<2>(sort_axis, nedges, eaabb, eidx.data(), 2, soaedges,
+                           ccdptr.data());
+
+    const size_t ee_n_intersections = ccdptr[nedges];
+    e0_overlap.resize(ee_n_intersections);
+    e1_overlap.resize(ee_n_intersections);
+
+    collect_self_overlaps<2>(sort_axis, nedges, eaabb, eidx.data(), 2, soaedges,
+                             ccdptr.data(), e0_overlap.data(),
+                             e1_overlap.data());
+
+    timer.stop();
+    if (verbose)
+      printf("SCCD, E2E: %g [ms]\n", timer.getElapsedTimeInMilliSec());
+    timer.start();
   }
 
   void find() {

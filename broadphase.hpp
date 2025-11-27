@@ -155,6 +155,10 @@ static void cell_starts(
       current_start = cell_idx;
     }
   }
+  // Backfill empty cells to make starts non-decreasing
+  for (size_t c = 1; c < ncells; ++c) {
+    if (starts[c] == 0) starts[c] = starts[c - 1];
+  }
 }
 
 static void cell_list_count(
@@ -541,6 +545,60 @@ static inline size_t scalar_count_range_two_lists(
   return count;
 }
 
+
+/**
+ * \brief Scalar reference: collect candidate overlaps in [begin,end) for
+ * two lists. \return Number of pairs written to \p first_out and \p
+ * second_out.
+ */
+ template <int F, int S>
+ static inline size_t scalar_collect_range_two_lists(
+     geom_t **const SFEM_RESTRICT first_aabbs, const size_t fi,
+     const idx_t first_idxi, geom_t **const SFEM_RESTRICT second_aabbs,
+     const idx_t *const SFEM_RESTRICT second_idx,
+     idx_t **const SFEM_RESTRICT second_elements, const size_t second_stride,
+     const idx_t (&ev)[F], const size_t begin, const size_t end,
+     idx_t *const SFEM_RESTRICT first_out,
+     idx_t *const SFEM_RESTRICT second_out) {
+   size_t count = 0;
+   const geom_t aminx = first_aabbs[0][fi];
+   const geom_t aminy = first_aabbs[1][fi];
+   const geom_t aminz = first_aabbs[2][fi];
+   const geom_t amaxx = first_aabbs[3][fi];
+   const geom_t amaxy = first_aabbs[4][fi];
+   const geom_t amaxz = first_aabbs[5][fi];
+   for (size_t j = begin; j < end; ++j) {
+     if (disjoint(aminx, aminy, aminz, amaxx, amaxy, amaxz, second_aabbs[0][j],
+                  second_aabbs[1][j], second_aabbs[2][j], second_aabbs[3][j],
+                  second_aabbs[4][j], second_aabbs[5][j])) {
+       continue;
+     }
+     const idx_t jidx = second_idx[j];
+     int match = 0;
+     if constexpr (S > 1) {
+       idx_t sev[S];
+       for (int v = 0; v < S; ++v) {
+         sev[v] = second_elements[v][jidx * second_stride];
+       }
+       for (int a = 0; a < F; ++a) {
+         for (int b = 0; b < S; ++b) {
+           match |= (ev[a] == sev[b]);
+         }
+       }
+     } else {
+       for (int a = 0; a < F; ++a) {
+         match |= (ev[a] == jidx);
+       }
+     }
+     if (!match) {
+       first_out[count] = first_idxi;
+       second_out[count] = jidx;
+       count += 1;
+     }
+   }
+   return count;
+ }
+
 template <int F, int S>
 static inline size_t scalar_count_range_two_lists_cell_list(
     geom_t **const SFEM_RESTRICT first_aabbs, const size_t fi,
@@ -584,58 +642,66 @@ static inline size_t scalar_count_range_two_lists_cell_list(
   return count;
 }
 
+
 /**
  * \brief Scalar reference: collect candidate overlaps in [begin,end) for
  * two lists. \return Number of pairs written to \p first_out and \p
  * second_out.
  */
-template <int F, int S>
-static inline size_t scalar_collect_range_two_lists(
-    geom_t **const SFEM_RESTRICT first_aabbs, const size_t fi,
-    const idx_t first_idxi, geom_t **const SFEM_RESTRICT second_aabbs,
-    const idx_t *const SFEM_RESTRICT second_idx,
-    idx_t **const SFEM_RESTRICT second_elements, const size_t second_stride,
-    const idx_t (&ev)[F], const size_t begin, const size_t end,
-    idx_t *const SFEM_RESTRICT first_out,
-    idx_t *const SFEM_RESTRICT second_out) {
-  size_t count = 0;
-  const geom_t aminx = first_aabbs[0][fi];
-  const geom_t aminy = first_aabbs[1][fi];
-  const geom_t aminz = first_aabbs[2][fi];
-  const geom_t amaxx = first_aabbs[3][fi];
-  const geom_t amaxy = first_aabbs[4][fi];
-  const geom_t amaxz = first_aabbs[5][fi];
-  for (size_t j = begin; j < end; ++j) {
-    if (disjoint(aminx, aminy, aminz, amaxx, amaxy, amaxz, second_aabbs[0][j],
-                 second_aabbs[1][j], second_aabbs[2][j], second_aabbs[3][j],
-                 second_aabbs[4][j], second_aabbs[5][j])) {
-      continue;
-    }
-    const idx_t jidx = second_idx[j];
-    int match = 0;
-    if constexpr (S > 1) {
-      idx_t sev[S];
-      for (int v = 0; v < S; ++v) {
-        sev[v] = second_elements[v][jidx * second_stride];
-      }
-      for (int a = 0; a < F; ++a) {
-        for (int b = 0; b < S; ++b) {
-          match |= (ev[a] == sev[b]);
-        }
-      }
-    } else {
-      for (int a = 0; a < F; ++a) {
-        match |= (ev[a] == jidx);
-      }
-    }
-    if (!match) {
-      first_out[count] = first_idxi;
-      second_out[count] = jidx;
-      count += 1;
-    }
-  }
-  return count;
-}
+ template <int F, int S>
+ static inline size_t scalar_collect_range_two_lists_cell_list(
+     geom_t **const SFEM_RESTRICT first_aabbs,  // 0
+     const size_t fi, // 1
+     const idx_t first_idxi, // 2
+     geom_t **const SFEM_RESTRICT second_aabbs, // 3
+     const idx_t *const SFEM_RESTRICT second_idx, // 4
+     idx_t **const SFEM_RESTRICT second_elements, // 5
+     const size_t second_stride, // 6
+     const idx_t (&ev)[F], // 7
+     const size_t begin_k, // 8
+     const size_t end_k, // 9
+     const idx_t *const SFEM_RESTRICT cellidx, // 10
+     idx_t *const SFEM_RESTRICT first_out, // 11
+     idx_t *const SFEM_RESTRICT second_out) { // 12
+   size_t count = 0;
+   const geom_t aminx = first_aabbs[0][fi];
+   const geom_t aminy = first_aabbs[1][fi];
+   const geom_t aminz = first_aabbs[2][fi];
+   const geom_t amaxx = first_aabbs[3][fi];
+   const geom_t amaxy = first_aabbs[4][fi];
+   const geom_t amaxz = first_aabbs[5][fi];
+   for (size_t k = begin_k; k < end_k; ++k) {
+     const size_t j = cellidx[k];
+     if (disjoint(aminx, aminy, aminz, amaxx, amaxy, amaxz, second_aabbs[0][j],
+                  second_aabbs[1][j], second_aabbs[2][j], second_aabbs[3][j],
+                  second_aabbs[4][j], second_aabbs[5][j])) {
+       continue;     }
+     const idx_t jidx = second_idx[j];
+     int match = 0;
+     if constexpr (S > 1) {
+       idx_t sev[S];
+       for (int v = 0; v < S; ++v) {
+         sev[v] = second_elements[v][jidx * second_stride];
+       }
+       for (int a = 0; a < F; ++a) {
+         for (int b = 0; b < S; ++b) {
+           match |= (ev[a] == sev[b]);
+         }
+       }
+     } else {
+       for (int a = 0; a < F; ++a) {
+         match |= (ev[a] == jidx);
+       }
+     }
+     if (!match) {
+       first_out[count] = first_idxi;
+       second_out[count] = jidx;
+       count += 1;
+     }
+   }
+   return count;
+ }
+
 
 // -----------------------------
 
@@ -1484,6 +1550,115 @@ bool count_overlaps_cell_list(
   }
 
   return ccdptr[first_count] > 0;
+}
+
+
+template <int first_nxe, int second_nxe>
+void collect_overlaps_cell_list(
+    const int sort_axis, const count_t first_count,
+    geom_t **const SFEM_RESTRICT first_aabbs,
+    idx_t *const SFEM_RESTRICT first_idx, const size_t first_stride,
+    idx_t **const SFEM_RESTRICT first_elements, const count_t second_count,
+    geom_t **const SFEM_RESTRICT second_aabbs,
+    idx_t *const SFEM_RESTRICT second_idx, const size_t second_stride,
+    idx_t **const SFEM_RESTRICT second_elements,
+    // Cell list
+    const int cell_list_axis, const size_t ncells, const geom_t cell_min,
+    const geom_t cell_size, const idx_t *const SFEM_RESTRICT cellptr,
+    const idx_t *const SFEM_RESTRICT cellidx,
+    const size_t *const SFEM_RESTRICT ccdptr, idx_t *SFEM_RESTRICT foverlap,
+    idx_t *SFEM_RESTRICT noverlap
+  ) {
+  const geom_t *const SFEM_RESTRICT first_xmin = first_aabbs[sort_axis];
+  const geom_t *const SFEM_RESTRICT first_xmax = first_aabbs[3 + sort_axis];
+  const geom_t *const SFEM_RESTRICT second_xmin = second_aabbs[sort_axis];
+  const geom_t *const SFEM_RESTRICT second_xmax = second_aabbs[3 + sort_axis];
+
+  const geom_t *const SFEM_RESTRICT cell_xmin = first_aabbs[cell_list_axis];
+  const geom_t *const SFEM_RESTRICT cell_xmax = first_aabbs[3 + cell_list_axis];
+
+  tbb::parallel_for(
+      tbb::blocked_range<size_t>(0, first_count),
+      [&](const tbb::blocked_range<size_t> &r) {
+        for (size_t fi = r.begin(); fi < r.end(); fi++) {
+          const size_t expected_count = ccdptr[fi + 1] - ccdptr[fi];
+          if (expected_count == 0) {
+            continue;
+          }
+
+          const geom_t fimin = first_xmin[fi];
+          const geom_t fimax = first_xmax[fi];
+          const idx_t first_idxi = first_idx[fi];
+
+          idx_t *SFEM_RESTRICT const first_local_elements =
+              &foverlap[ccdptr[fi]];
+          idx_t *SFEM_RESTRICT const second_local_elements =
+              &noverlap[ccdptr[fi]];
+       
+          size_t cell_start = std::max(
+              (int)0,
+              (int)(floor(nextafter_down((cell_xmin[fi] - cell_min) / cell_size) - 1)));
+          size_t cell_end = std::min(
+              (int)ncells,
+              (int)(floor(nextafter_up((cell_xmax[fi] - cell_min) / cell_size))) + 1);
+
+          idx_t ev[first_nxe];
+          for (int v = 0; v < first_nxe; v++) {
+            ev[v] = first_elements[v][first_idxi * first_stride];
+          }
+
+          size_t count = 0;
+          for (size_t cell_i = cell_start; cell_i < cell_end; cell_i++) {
+            size_t cell_i_begin = cellptr[cell_i];
+            size_t cell_i_end = cellptr[cell_i + 1];
+
+            size_t begin_k = cell_i_begin;
+            for (; begin_k < cell_i_end; begin_k++) {
+              if (fimin <= second_xmax[cellidx[begin_k]]) {
+                break;
+              }
+            }
+
+            size_t end_k = begin_k;
+            for (; end_k < cell_i_end; end_k++) {
+              if (fimax < second_xmin[cellidx[end_k]]) {
+                break;
+              }
+            }
+
+            if (begin_k >= end_k) {
+              continue;
+            }
+
+            // size_t count =
+            // sccd_detail::scalar_collect_range_two_lists<first_nxe,
+            //                                             second_nxe>(
+            //     first_aabbs, fi, first_idxi, second_aabbs, second_idx,
+            //     second_elements, second_stride, ev, ni, end,
+            //     first_local_elements, second_local_elements);
+
+            count +=
+                sccd_detail::scalar_collect_range_two_lists_cell_list<first_nxe,
+                                                                    second_nxe>(
+                    first_aabbs,  // 0
+                    fi, // 1
+                    first_idxi, // 2
+                    second_aabbs, // 3
+                    second_idx, // 4
+                    second_elements, // 5
+                    second_stride, // 6
+                    ev, // 7
+                    begin_k, // 8
+                    end_k, // 9
+                    cellidx, // 10
+                    &first_local_elements[count], // 11
+                    &second_local_elements[count]); // 12
+          }
+          assert(count == expected_count);
+        }
+      });
+
+      
 }
 
 
