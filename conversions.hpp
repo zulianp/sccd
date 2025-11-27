@@ -159,7 +159,7 @@ typedef struct SCCD {
     timer.start();
 
     int cell_list_axis = axes[1];
-    size_t ncells = 2048; // Max amount
+    size_t ncells = 1; // Max amount
     geom_t cell_min;
     geom_t cell_size;
     cell_list_setup(nnodes, vaabb[cell_list_axis], vaabb[cell_list_axis + 3],

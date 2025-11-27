@@ -150,7 +150,7 @@ static void cell_list_count(
 
   for (size_t i = 0; i < n; i++) {
     const geom_t x_i = xmin[i];
-    const int cell_idx = (x_i - cell_min) / cell_size;
+    const int cell_idx = nextafter_down((x_i - cell_min) / cell_size);
     assert(cell_idx >= 0 && cell_idx < ncells);
     cellptr[cell_idx + 1]++;
   }
@@ -170,7 +170,7 @@ static void cell_list_populate(
   memset(bookkeeping, 0, sizeof(idx_t) * ncells);
   for (size_t i = 0; i < n; i++) {
     const geom_t x_i = xmin[i];
-    const int cell_idx = (x_i - cell_min) / cell_size;
+    const int cell_idx = nextafter_down((x_i - cell_min) / cell_size);
     assert(cell_idx >= 0 && cell_idx < ncells);
     idx[cellptr[cell_idx] + bookkeeping[cell_idx]++] = i;
   }
@@ -1172,7 +1172,7 @@ bool count_overlaps_cell_list(
               (int)(floor(nextafter_down((cell_xmin[fi] - cell_min) / cell_size) - 1)));
           size_t cell_end = std::min(
               (int)ncells,
-              (int)(ceil(nextafter_up((cell_xmax[fi] - cell_min) / cell_size) + 1)));
+              (int)(floor(nextafter_up((cell_xmax[fi] - cell_min) / cell_size))) + 1);
 
           idx_t ev[first_nxe];
           for (int v = 0; v < first_nxe; v++) {
@@ -1186,7 +1186,7 @@ bool count_overlaps_cell_list(
 
             size_t begin_k = cell_i_begin;
             for (; begin_k < cell_i_end; begin_k++) {
-              if (fimin < second_xmax[cellidx[begin_k]]) {
+              if (fimin <= second_xmax[cellidx[begin_k]]) {
                 break;
               }
             }
@@ -1194,7 +1194,6 @@ bool count_overlaps_cell_list(
             size_t end_k = begin_k;
             for (; end_k < cell_i_end; end_k++) {
               if (fimax < second_xmin[cellidx[end_k]]) {
-                end_k  += 1;
                 break;
               }
             }
