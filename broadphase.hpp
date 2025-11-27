@@ -115,7 +115,25 @@ static void cell_list_setup(const size_t n,
                *inout_ncells; // Recompute due to floating point perturbation
 }
 
-static void cell_list_starts(
+static void cell_starts_setup(const size_t n,
+  const geom_t *const SFEM_RESTRICT xmin,
+  const geom_t *const SFEM_RESTRICT xmax,
+  const size_t ncells,
+  geom_t *const SFEM_RESTRICT cell_min,
+  geom_t *const SFEM_RESTRICT cell_size) {
+geom_t gmin = xmin[0];
+geom_t gmax = xmax[0];
+for (size_t i = 0; i < n; i++) {
+geom_t xmini = xmin[i] - 1e-6;
+geom_t xmaxi = xmax[i] + 1e-6;
+gmin = std::min(gmin, xmini);
+gmax = std::max(gmax, xmaxi);
+}
+*cell_min = gmin;
+*cell_size = (gmax - gmin) / ncells;
+}
+
+static void cell_starts(
   const size_t ncells, 
   const geom_t cell_min, 
   const geom_t cell_size,
@@ -1136,6 +1154,254 @@ void collect_self_overlaps(const int sort_axis, const count_t element_count,
       });
 }
 
+
+
+template <int first_nxe, int second_nxe>
+bool count_overlaps_with_starts(const int sort_axis, const count_t first_count,
+                    geom_t **const SFEM_RESTRICT first_aabbs,
+                    idx_t *const SFEM_RESTRICT first_idx,
+                    const size_t first_stride,
+                    idx_t **const SFEM_RESTRICT first_elements,
+                    const count_t second_count,
+                    geom_t **const SFEM_RESTRICT second_aabbs,
+                    idx_t *const SFEM_RESTRICT second_idx,
+                    const size_t second_stride,
+                    idx_t **const SFEM_RESTRICT second_elements,
+                    const size_t ncells, const geom_t cell_min,
+    const geom_t cell_size,
+    const size_t *const SFEM_RESTRICT starts,
+                    size_t *const SFEM_RESTRICT ccdptr) {
+  const geom_t *const SFEM_RESTRICT first_xmin = first_aabbs[sort_axis];
+  const geom_t *const SFEM_RESTRICT first_xmax = first_aabbs[3 + sort_axis];
+  const geom_t *const SFEM_RESTRICT second_xmin = second_aabbs[sort_axis];
+  const geom_t *const SFEM_RESTRICT second_xmax = second_aabbs[3 + sort_axis];
+
+  ccdptr[0] = 0;
+
+  if (first_xmax[first_count - 1] < second_xmin[0])
+    return false;
+
+  if (second_xmax[second_count - 1] < first_xmin[0])
+    return false;
+
+  tbb::parallel_for(
+      tbb::blocked_range<size_t>(0, first_count),
+      [&](const tbb::blocked_range<size_t> &r) {
+        size_t cell = std::max(0, (int)floor(nextafter_down((first_xmin[r.begin()] - cell_min) / cell_size)) - 1);
+        size_t ni = starts[cell];
+
+        for(; ni >= 0; ni--) {
+          if (first_xmin[0] < second_xmax[ni]) {
+            ni++;
+            break;
+          }
+        }
+
+#ifndef NDEBUG
+{
+    size_t test = 0;
+        for (; test < second_count; test++) {
+          if (second_xmax[test] > first_xmin[0]) {
+            break;
+          }
+        }
+
+        if(test != ni) {
+          printf("start: %lu, test: %lu, ni: %lu\n", starts[cell], test, ni);
+        }
+        assert(test == ni);
+      }
+#endif
+
+        for (size_t fi = r.begin(); fi < r.end(); fi++) {
+          const geom_t fimin = first_xmin[fi];
+          const geom_t fimax = first_xmax[fi];
+          const idx_t first_idxi = first_idx[fi];
+
+          idx_t ev[first_nxe];
+          for (int v = 0; v < first_nxe; v++) {
+            ev[v] = first_elements[v][first_idxi * first_stride];
+          }
+
+          size_t end = ni;
+          sccd_detail::compute_candidate_window_progressive(
+              fimin, fimax, second_xmax, second_xmin, second_count, ni, end);
+
+          if (ni >= end) {
+            continue;
+          }
+
+          if (end - ni < AABB_DISJOINT_NOVECTORIZE_THRESHOLD) {
+            size_t count =
+                sccd_detail::scalar_count_range_two_lists<first_nxe,
+                                                          second_nxe>(
+                    first_aabbs, fi, second_aabbs, second_idx, second_elements,
+                    second_stride, ev, ni, end);
+            ccdptr[fi + 1] = count;
+            continue;
+          }
+
+          size_t count = 0;
+          size_t noffset = ni;
+
+          for (; noffset < end;) {
+            const size_t chunk_len =
+                std::min((size_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
+
+            uint32_t dmask[AABB_DISJOINT_CHUNK_SIZE] = {0};
+
+            sccd_detail::build_disjoint_mask_for_block(
+                second_aabbs, noffset, chunk_len, first_aabbs[0][fi],
+                first_aabbs[1][fi], first_aabbs[2][fi], first_aabbs[3][fi],
+                first_aabbs[4][fi], first_aabbs[5][fi], dmask);
+
+            sccd_detail::mask_out_shared_two_lists<first_nxe, second_nxe>(
+                dmask, chunk_len, noffset, ev, second_idx, second_elements,
+                second_stride);
+
+            for (size_t lane = 0; lane < chunk_len; ++lane) {
+              count += dmask[lane] ? 0 : 1;
+            }
+
+            noffset += chunk_len;
+          }
+
+          ccdptr[fi + 1] = count;
+        }
+      });
+
+  for (size_t fi = 0; fi < first_count; fi++) {
+    ccdptr[fi + 1] += ccdptr[fi];
+  }
+
+  return ccdptr[first_count] > 0;
+}
+
+// template <int first_nxe, int second_nxe>
+// void collect_overlaps_with_starts(
+//     const int sort_axis, const count_t first_count,
+//     geom_t **const SFEM_RESTRICT first_aabbs,
+//     idx_t *const SFEM_RESTRICT first_idx, const size_t first_stride,
+//     idx_t **SFEM_RESTRICT const first_elements, const count_t second_count,
+//     geom_t **const SFEM_RESTRICT second_aabbs,
+//     idx_t *const SFEM_RESTRICT second_idx, const size_t second_stride,
+//     idx_t **SFEM_RESTRICT const second_elements,
+//     // Cell starts
+//     const size_t ncells, const geom_t cell_min,
+//     const geom_t cell_size,
+//     const size_t *const SFEM_RESTRICT starts,
+//     const size_t *const SFEM_RESTRICT ccdptr, idx_t *SFEM_RESTRICT foverlap,
+//     idx_t *SFEM_RESTRICT noverlap) {
+//   const geom_t *const SFEM_RESTRICT first_xmin = first_aabbs[sort_axis];
+//   const geom_t *const SFEM_RESTRICT first_xmax = first_aabbs[3 + sort_axis];
+//   const geom_t *const SFEM_RESTRICT second_xmin = second_aabbs[sort_axis];
+//   const geom_t *const SFEM_RESTRICT second_xmax = second_aabbs[3 + sort_axis];
+
+//   if (first_xmax[first_count - 1] < second_xmin[0])
+//     return;
+
+//   if (second_xmax[second_count - 1] < first_xmin[0])
+//     return;
+
+//   tbb::parallel_for(
+//       tbb::blocked_range<size_t>(0, first_count),
+//       [&](const tbb::blocked_range<size_t> &r) {
+      
+//         size_t cell = std::max(0, (int)floor(nextafter_down((first_xmin[r.begin()] - cell_min) / cell_size)) - 1);
+//         size_t ni = starts[cell];
+
+// #ifndef NDEBUG
+// {
+//     size_t test = 0;
+//         for (; test < second_count; test++) {
+//           if (second_xmax[test] > first_xmin[0]) {
+//             break;
+//           }
+//         }
+//         assert(test == ni);
+//       }
+// #endif
+
+
+//         for (size_t fi = r.begin(); fi < r.end(); fi++) {
+//           const size_t expected_count = ccdptr[fi + 1] - ccdptr[fi];
+//           if (expected_count == 0) {
+//             continue;
+//           }
+
+//           const geom_t fimin = first_xmin[fi];
+//           const geom_t fimax = first_xmax[fi];
+//           const idx_t first_idxi = first_idx[fi];
+
+//           idx_t *SFEM_RESTRICT const first_local_elements =
+//               &foverlap[ccdptr[fi]];
+//           idx_t *SFEM_RESTRICT const second_local_elements =
+//               &noverlap[ccdptr[fi]];
+
+//           idx_t ev[first_nxe];
+//           for (int v = 0; v < first_nxe; v++) {
+//             ev[v] = first_elements[v][first_idxi * first_stride];
+//           }
+
+//           size_t end = ni;
+//           sccd_detail::compute_candidate_window_progressive(
+//               fimin, fimax, second_xmax, second_xmin, second_count, ni, end);
+
+//           if (ni >= end) {
+//             continue;
+//           }
+
+//           if (end - ni < AABB_DISJOINT_NOVECTORIZE_THRESHOLD) {
+//             size_t count =
+//                 sccd_detail::scalar_collect_range_two_lists<first_nxe,
+//                                                             second_nxe>(
+//                     first_aabbs, fi, first_idxi, second_aabbs, second_idx,
+//                     second_elements, second_stride, ev, ni, end,
+//                     first_local_elements, second_local_elements);
+//             assert(expected_count == count);
+//             continue;
+//           }
+
+//           size_t count = 0;
+//           size_t noffset = ni;
+
+//           for (; noffset < end;) {
+//             const size_t chunk_len =
+//                 std::min((size_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
+
+//             uint32_t dmask[AABB_DISJOINT_CHUNK_SIZE] = {0};
+//             sccd_detail::build_disjoint_mask_for_block(
+//                 second_aabbs, noffset, chunk_len, first_aabbs[0][fi],
+//                 first_aabbs[1][fi], first_aabbs[2][fi], first_aabbs[3][fi],
+//                 first_aabbs[4][fi], first_aabbs[5][fi], dmask);
+
+//             sccd_detail::mask_out_shared_two_lists<first_nxe, second_nxe>(
+//                 dmask, chunk_len, noffset, ev, second_idx, second_elements,
+//                 second_stride);
+
+//             for (size_t lane = 0; lane < chunk_len; ++lane) {
+//               if (dmask[lane])
+//                 continue;
+//               const size_t j = noffset + lane;
+//               first_local_elements[count] = first_idxi;
+//               second_local_elements[count] = second_idx[j];
+//               count += 1;
+//             }
+
+//             noffset += chunk_len;
+//           }
+
+//           assert(expected_count == count);
+//         }
+//       });
+// }
+
+
+
+// -------------------------
+// Cell list version
+// -------------------------
+
 template <int first_nxe, int second_nxe>
 bool count_overlaps_cell_list(
     const int sort_axis, const count_t first_count,
@@ -1219,6 +1485,8 @@ bool count_overlaps_cell_list(
 
   return ccdptr[first_count] > 0;
 }
+
+
 
 } // namespace sccd
 #endif
