@@ -10,6 +10,8 @@
 
 using namespace scalable_ccd;
 
+#include "cell_broadphase.hpp"
+
 namespace sccd {
 
 // (Ugly) Conversion between Scalable-CCD and sccd and back
@@ -192,82 +194,90 @@ typedef struct SCCD {
   //             timer.getElapsedTimeInMilliSec());
   // }
 
-  // void find_with_cell_list() {
-  //   Timer timer;
+  void find_with_cell_list() {
+    Timer timer;
 
-  //   timer.start();
+    timer.start();
 
-  //   size_t max_ccdptr_size = std::max(nfaces, nedges) + 1;
-  //   ccdptr.resize(max_ccdptr_size);
+    size_t max_ccdptr_size = std::max(nfaces, nedges) + 1;
+    ccdptr.resize(max_ccdptr_size);
 
-  //   int axes[3];
-  //   largest_variance_axes_sort(nnodes, vaabb, axes);
+    int axes[3];
+    largest_variance_axes_sort(nnodes, vaabb, axes);
 
-  //   sort_axis = axes[0];
-  //   sort_along_axis(nfaces, sort_axis, faabb, fidx.data(), scratch.data());
-  //   sort_along_axis(nnodes, sort_axis, vaabb, vidx.data(), scratch.data());
-  //   sort_along_axis(nedges, sort_axis, eaabb, eidx.data(), scratch.data());
+    sort_axis = axes[0];
+    sort_along_axis(nfaces, sort_axis, faabb, fidx.data(), scratch.data());
+    sort_along_axis(nnodes, sort_axis, vaabb, vidx.data(), scratch.data());
+    sort_along_axis(nedges, sort_axis, eaabb, eidx.data(), scratch.data());
 
-  //   int cell_list_axis = axes[1];
-  //   size_t ncells = 2048; // Max amount
-  //   geom_t cell_min;
-  //   geom_t cell_size;
-  //   cell_list_setup(nnodes, vaabb[cell_list_axis], vaabb[cell_list_axis + 3],
-  //                   &ncells, &cell_min, &cell_size);
-  //   std::vector<idx_t> cellptr(ncells + 1), bookkeeping(ncells);
-  //   cell_list_count(ncells, cell_min, cell_size, nnodes, vaabb[cell_list_axis],
-  //                   cellptr.data());
+    int cell_list_axis = axes[1];
+    size_t ncells = 2048; // Max amount
+    geom_t cell_min;
+    geom_t cell_size;
+    cell_setup(nnodes, vaabb[cell_list_axis], vaabb[cell_list_axis + 3],
+                    &ncells, &cell_min, &cell_size);
+    std::vector<idx_t> cellptr(ncells + 1), bookkeeping(ncells);
+    cell_count(ncells, cell_min, cell_size, nnodes, vaabb[cell_list_axis],
+                    cellptr.data());
 
-  //   std::vector<idx_t> cellidx(cellptr[ncells]);
-  //   cell_list_populate(ncells, cell_min, cell_size, nnodes,
-  //                      vaabb[cell_list_axis], cellptr.data(), cellidx.data(),
-  //                      bookkeeping.data());
+    std::vector<idx_t> cellidx(cellptr[ncells]);
+    cell_populate(ncells, cell_min, cell_size, nnodes,
+                       vaabb[cell_list_axis], cellptr.data(), cellidx.data(),
+                       bookkeeping.data());
 
-  //   timer.stop();
-  //   if (verbose)
-  //     printf("SCCD(CELL), Sorting: %g [ms]\n", timer.getElapsedTimeInMilliSec());
-  //   timer.start();
+    timer.stop();
+    if (verbose)
+      printf("SCCD(CELL), Sorting: %g [ms]\n", timer.getElapsedTimeInMilliSec());
+    timer.start();
 
-  //   // E2E
-  //   std::fill(ccdptr.begin(), ccdptr.end(), 0);
+    // E2E
+    std::fill(ccdptr.begin(), ccdptr.end(), 0);
 
-  //   count_self_overlaps<2>(sort_axis, nedges, eaabb, eidx.data(), 2, soaedges,
-  //                          ccdptr.data());
+    count_self_overlaps<2>(sort_axis, nedges, eaabb, eidx.data(), 2, soaedges,
+                           ccdptr.data());
 
-  //   const size_t ee_n_intersections = ccdptr[nedges];
-  //   e0_overlap.resize(ee_n_intersections);
-  //   e1_overlap.resize(ee_n_intersections);
 
-  //   collect_self_overlaps<2>(sort_axis, nedges, eaabb, eidx.data(), 2, soaedges,
-  //                            ccdptr.data(), e0_overlap.data(),
-  //                            e1_overlap.data());
 
-  //   timer.stop();
-  //   if (verbose)
-  //     printf("SCCD, E2E: %g [ms]\n", timer.getElapsedTimeInMilliSec());
-  //   timer.start();
+    const size_t ee_n_intersections = ccdptr[nedges];
+    e0_overlap.resize(ee_n_intersections);
+    e1_overlap.resize(ee_n_intersections);
 
-  //   // F2V
-  //   count_overlaps_cell_list<3, 1>(
-  //       sort_axis, nfaces, faabb, fidx.data(), 3, soafaces, nnodes, vaabb,
-  //       vidx.data(), 0, nullptr, cell_list_axis, ncells, cell_min, cell_size,
-  //       cellptr.data(), cellidx.data(), ccdptr.data());
+    collect_self_overlaps<2>(sort_axis, nedges, eaabb, eidx.data(), 2, soaedges,
+                             ccdptr.data(), e0_overlap.data(),
+                             e1_overlap.data());
 
-  //   // Allocation (expensive, could be expanded dynamically in CCD)
-  //   const size_t fv_nintersections = ccdptr[nfaces];
-  //   foverlap.resize(fv_nintersections);
-  //   voverlap.resize(fv_nintersections);
+    timer.stop();
+    if (verbose)
+      printf("SCCD, E2E: %g [ms]\n", timer.getElapsedTimeInMilliSec());
+    timer.start();
 
-  //   collect_overlaps_cell_list<3, 1>(
-  //       sort_axis, nfaces, faabb, fidx.data(), 3, soafaces, nnodes, vaabb,
-  //       vidx.data(), 0, nullptr, cell_list_axis, ncells, cell_min, cell_size,
-  //       cellptr.data(), cellidx.data(), ccdptr.data(), foverlap.data(),
-  //       voverlap.data());
 
-  //   timer.stop();
-  //   if (verbose)
-  //     printf("SCCD(CELL), F2V: %g [ms]\n", timer.getElapsedTimeInMilliSec());
-  // }
+    Timer co;
+    co.start();
+    // F2V
+    cell_count_overlaps<3, 1>(
+        sort_axis, nfaces, faabb, fidx.data(), 3, soafaces, nnodes, vaabb,
+        vidx.data(), 0, nullptr, cell_list_axis, ncells, cell_min, cell_size,
+        cellptr.data(), cellidx.data(), ccdptr.data());
+
+    co.stop();
+    printf("SCCD(CELL): F2V Count %g [ms]\n", co.getElapsedTimeInMilliSec());
+
+    // Allocation (expensive, could be expanded dynamically in CCD)
+    const size_t fv_nintersections = ccdptr[nfaces];
+    foverlap.resize(fv_nintersections);
+    voverlap.resize(fv_nintersections);
+
+    cell_collect_overlaps<3, 1>(
+        sort_axis, nfaces, faabb, fidx.data(), 3, soafaces, nnodes, vaabb,
+        vidx.data(), 0, nullptr, cell_list_axis, ncells, cell_min, cell_size,
+        cellptr.data(), cellidx.data(), ccdptr.data(), foverlap.data(),
+        voverlap.data());
+
+    timer.stop();
+    if (verbose)
+      printf("SCCD(CELL), F2V: %g [ms]\n", timer.getElapsedTimeInMilliSec());
+  }
 
   void find() {
     Timer timer;
@@ -306,14 +316,21 @@ typedef struct SCCD {
       printf("SCCD, E2E: %g [ms]\n", timer.getElapsedTimeInMilliSec());
     timer.start();
 
+    Timer co;
+    co.start();
     // F2V
     count_overlaps<3, 1>(sort_axis, nfaces, faabb, fidx.data(), 3, soafaces,
                          nnodes, vaabb, vidx.data(), 0, nullptr, ccdptr.data());
+
+    co.stop();
+    printf("SCCD: F2V Count %g [ms]\n", co.getElapsedTimeInMilliSec());
 
     // Allocation (expensive, could be expanded dynamically in CCD)
     const size_t fv_nintersections = ccdptr[nfaces];
     foverlap.resize(fv_nintersections);
     voverlap.resize(fv_nintersections);
+
+ 
 
     collect_overlaps<3, 1>(sort_axis, nfaces, faabb, fidx.data(), 3, soafaces,
                            nnodes, vaabb, vidx.data(), 0, nullptr,
