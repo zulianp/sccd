@@ -5,10 +5,10 @@
 
 namespace sccd {
 
-namespace sccd_details {
+namespace sccd_detail {
 
 template <int F, int S>
-static inline void mask_out_shared_two_lists_cell_list(
+static inline void cell_mask_out_shared_two_lists(
     uint32_t *const SFEM_RESTRICT dmask, const size_t chunk_len,
     const size_t noffset, const idx_t (&ev)[F],
     const idx_t *const SFEM_RESTRICT second_idx,
@@ -41,7 +41,7 @@ static inline void mask_out_shared_two_lists_cell_list(
 }
 
 template <int F, int S>
-static inline size_t scalar_count_range_two_lists_cell_list(
+static inline size_t cell_scalar_count_range_two_lists(
     geom_t **const SFEM_RESTRICT first_aabbs, const size_t fi,
     geom_t **const SFEM_RESTRICT second_aabbs,
     const idx_t *const SFEM_RESTRICT second_idx,
@@ -89,7 +89,7 @@ static inline size_t scalar_count_range_two_lists_cell_list(
  * second_out.
  */
 template <int F, int S>
-static inline size_t scalar_collect_range_two_lists_cell_list(
+static inline size_t cell_scalar_collect_range_two_lists(
     geom_t **const SFEM_RESTRICT first_aabbs,    // 0
     const size_t fi,                             // 1
     const idx_t first_idxi,                      // 2
@@ -145,7 +145,7 @@ static inline size_t scalar_collect_range_two_lists_cell_list(
 
 } // namespace sccd_details
 
-static void cell_list_setup(const size_t n,
+static void cell_setup(const size_t n,
                             const geom_t *const SFEM_RESTRICT xmin,
                             const geom_t *const SFEM_RESTRICT xmax,
                             size_t *const SFEM_RESTRICT inout_ncells,
@@ -213,7 +213,7 @@ static void cell_starts(const size_t ncells, const geom_t cell_min,
   }
 }
 
-static void cell_list_count(
+static void cell_count(
     // Cell list
     const size_t ncells, const geom_t cell_min, const geom_t cell_size,
     // Points
@@ -234,7 +234,7 @@ static void cell_list_count(
   }
 }
 
-static void cell_list_populate(
+static void cell_populate(
     // Cell list
     const size_t ncells, const geom_t cell_min, const geom_t cell_size,
     // Points
@@ -264,7 +264,7 @@ static void cell_list_populate(
 
 
 template <int first_nxe, int second_nxe>
-bool count_overlaps_cell_list(
+bool cell_count_overlaps(
     const int sort_axis, const count_t first_count,
     geom_t **const SFEM_RESTRICT first_aabbs,
     idx_t *const SFEM_RESTRICT first_idx, const size_t first_stride,
@@ -332,7 +332,7 @@ bool count_overlaps_cell_list(
             }
 
             if (end_k - begin_k < AABB_DISJOINT_NOVECTORIZE_THRESHOLD) {
-              count += sccd_detail::scalar_count_range_two_lists_cell_list<
+              count += sccd_detail::cell_scalar_count_range_two_lists<
                   first_nxe, second_nxe>(
                   first_aabbs, fi, second_aabbs, second_idx, second_elements,
                   second_stride, ev, begin_k, end_k, cellidx);
@@ -376,7 +376,7 @@ bool count_overlaps_cell_list(
                                     B_minx, B_miny, B_minz, B_maxx, B_maxy,
                                     B_maxz, dmask);
 
-              sccd_detail::mask_out_shared_two_lists_cell_list<first_nxe,
+              sccd_detail::cell_mask_out_shared_two_lists<first_nxe,
                                                                second_nxe>(
                   dmask, chunk_len, begin_k, ev, second_idx, second_elements,
                   second_stride, cellidx);
@@ -401,7 +401,7 @@ bool count_overlaps_cell_list(
 }
 
 template <int first_nxe, int second_nxe>
-void collect_overlaps_cell_list(
+void cell_collect_overlaps(
     const int sort_axis, const count_t first_count,
     geom_t **const SFEM_RESTRICT first_aabbs,
     idx_t *const SFEM_RESTRICT first_idx, const size_t first_stride,
@@ -478,7 +478,7 @@ void collect_overlaps_cell_list(
               continue;
             }
 
-            count += sccd_detail::scalar_collect_range_two_lists_cell_list<
+            count += sccd_detail::cell_scalar_collect_range_two_lists<
                 first_nxe,
                 second_nxe>(first_aabbs,                    // 0
                             fi,                             // 1
@@ -622,3 +622,5 @@ bool count_overlaps_with_starts(
 }
 
 } // namespace sccd
+
+#endif //CELL_BROADPHASE_HPP
