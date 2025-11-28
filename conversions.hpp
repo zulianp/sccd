@@ -215,19 +215,19 @@ typedef struct SCCD {
     geom_t cell_min;
     geom_t cell_size;
     cell_setup(nnodes, vaabb[cell_list_axis], vaabb[cell_list_axis + 3],
-                    &ncells, &cell_min, &cell_size);
+               &ncells, &cell_min, &cell_size);
     std::vector<idx_t> cellptr(ncells + 1), bookkeeping(ncells);
     cell_count(ncells, cell_min, cell_size, nnodes, vaabb[cell_list_axis],
-                    cellptr.data());
+               cellptr.data());
 
     std::vector<idx_t> cellidx(cellptr[ncells]);
-    cell_populate(ncells, cell_min, cell_size, nnodes,
-                       vaabb[cell_list_axis], cellptr.data(), cellidx.data(),
-                       bookkeeping.data());
+    cell_populate(ncells, cell_min, cell_size, nnodes, vaabb[cell_list_axis],
+                  cellptr.data(), cellidx.data(), bookkeeping.data());
 
     timer.stop();
     if (verbose)
-      printf("SCCD(CELL), Sorting: %g [ms]\n", timer.getElapsedTimeInMilliSec());
+      printf("SCCD(CELL), Sorting: %g [ms]\n",
+             timer.getElapsedTimeInMilliSec());
     timer.start();
 
     // E2E
@@ -235,8 +235,6 @@ typedef struct SCCD {
 
     count_self_overlaps<2>(sort_axis, nedges, eaabb, eidx.data(), 2, soaedges,
                            ccdptr.data());
-
-
 
     const size_t ee_n_intersections = ccdptr[nedges];
     e0_overlap.resize(ee_n_intersections);
@@ -251,14 +249,13 @@ typedef struct SCCD {
       printf("SCCD, E2E: %g [ms]\n", timer.getElapsedTimeInMilliSec());
     timer.start();
 
-
     Timer co;
     co.start();
     // F2V
-    cell_count_overlaps<3, 1>(
-        sort_axis, nfaces, faabb, fidx.data(), 3, soafaces, nnodes, vaabb,
-        vidx.data(), 0, nullptr, cell_list_axis, ncells, cell_min, cell_size,
-        cellptr.data(), cellidx.data(), ccdptr.data());
+    cell_count_overlaps<3, 1>(sort_axis, nfaces, faabb, fidx.data(), 3,
+                              soafaces, nnodes, vaabb, vidx.data(), 0, nullptr,
+                              cell_list_axis, ncells, cell_min, cell_size,
+                              cellptr.data(), cellidx.data(), ccdptr.data());
 
     co.stop();
     printf("SCCD(CELL): F2V Count %g [ms]\n", co.getElapsedTimeInMilliSec());
@@ -279,7 +276,7 @@ typedef struct SCCD {
       printf("SCCD(CELL), F2V: %g [ms]\n", timer.getElapsedTimeInMilliSec());
   }
 
-  void find() {
+  void broad_phase() {
     Timer timer;
 
     timer.start();
@@ -330,8 +327,6 @@ typedef struct SCCD {
     foverlap.resize(fv_nintersections);
     voverlap.resize(fv_nintersections);
 
- 
-
     collect_overlaps<3, 1>(sort_axis, nfaces, faabb, fidx.data(), 3, soafaces,
                            nnodes, vaabb, vidx.data(), 0, nullptr,
                            ccdptr.data(), foverlap.data(), voverlap.data());
@@ -341,8 +336,9 @@ typedef struct SCCD {
       printf("SCCD, F2V: %g [ms]\n", timer.getElapsedTimeInMilliSec());
   }
 
-  void finalize(std::vector<std::pair<int, int>> &vf_overlaps,
-                std::vector<std::pair<int, int>> &ee_overlaps) {
+  void
+  export_broadphase_results(std::vector<std::pair<int, int>> &vf_overlaps,
+                            std::vector<std::pair<int, int>> &ee_overlaps) {
     const size_t fv_nintersections = foverlap.size();
     vf_overlaps.resize(fv_nintersections);
     for (ptrdiff_t i = 0; i < fv_nintersections; i++) {
@@ -357,6 +353,16 @@ typedef struct SCCD {
       ee_overlaps[i].second = e1_overlap[i];
     }
   }
+
+  void narrow_phase() {
+    // TODO
+  }
+
+  void export_narrowphase_results(
+      std::vector<std::tuple<int, int, Scalar>> &collisions) {
+    // TODO
+  }
+
 } SCCD_t;
 } // namespace sccd
 
