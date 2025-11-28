@@ -45,9 +45,11 @@ t, u, v = sp.symbols('t u v')
 theta = sp.Matrix(3, 1, [t, u, v])
 
 p0 = (1 - t) * sv + t * ev
+
 p1 = (1 - t) * s1 + t * e1
 p2 = (1 - t) * s2 + t * e2
 p3 = (1 - t) * s3 + t * e3
+
 p4 = (1 - t) * s4 + t * e4
 
 
@@ -76,6 +78,8 @@ vf_Hessian   = simplify(vf_gradient.jacobian(theta))
 # 2) check if it is a zero
 # 3) check if t,u,v are valid
 # 4) if 2 and 3 are true t is the local impact time
+
+
 
 # ----------------------------------------------
 # EE
