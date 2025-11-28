@@ -11,6 +11,7 @@
 using namespace scalable_ccd;
 
 #include "cell_broadphase.hpp"
+#include "narrowphase.hpp"
 
 namespace sccd {
 
@@ -28,6 +29,18 @@ typedef struct SCCD {
 
   idx_t *soafaces[3];
   idx_t *soaedges[2];
+
+  // Mesh data
+  std::vector<geom_t> x0;
+  std::vector<geom_t> y0;
+  std::vector<geom_t> z0;
+
+  std::vector<geom_t> x1;
+  std::vector<geom_t> y1;
+  std::vector<geom_t> z1;
+
+  // Time of Impact
+  std::vector<geom_t> vf_toi;
 
   // FV overalps
   std::vector<idx_t> foverlap;
@@ -354,8 +367,53 @@ typedef struct SCCD {
     }
   }
 
-  void narrow_phase() {
-    // TODO
+  void init_point_data(
+    const Eigen::MatrixXd &v0, const Eigen::MatrixXd &v1) {
+    
+    x0.resize(v0.rows());
+    y0.resize(v0.rows());
+    z0.resize(v0.rows());
+
+    x1.resize(v1.rows());
+    y1.resize(v1.rows());
+    z1.resize(v1.rows());
+
+    tbb::parallel_for(
+        tbb::blocked_range<long>(0, v0.rows()),
+        [&](const tbb::blocked_range<long>& r) {
+            for (long i = r.begin(); i < r.end(); i++) {
+                auto row0 = v0.row(i);
+                auto row1 = v1.row(i);
+
+                x0[i] = row0[0];
+                y0[i] = row0[1];
+                z0[i] = row0[2];
+
+                x1[i] = row1[0];
+                y1[i] = row1[1];
+                z1[i] = row1[2];
+            }
+        });
+  }
+
+  geom_t narrow_phase() {
+
+    geom_t *v0[3] = { x0.data(), y0.data(), z0.data() };
+    geom_t *v1[3] = { x1.data(), y1.data(), z1.data() };
+
+    vf_toi.resize(voverlap.size());
+
+    return sccd::narrow_phase_vf<3, geom_t>(
+      voverlap.size(),
+      voverlap.data(),
+      foverlap.data(),
+      // Geometric data
+      v0,
+      v1,
+      3,
+      soafaces,
+      // Output
+      vf_toi.data());
   }
 
   void export_narrowphase_results(
