@@ -155,13 +155,13 @@ def generate_c_code(name,objective, gradient, Hessian):
     # Common header and typedef
     header = []
     header.append("/* Auto-generated with SymPy (CSE + pow expansion) */")
-    header.append("")
+    header.append("#include \"smath.hpp\"")
 
     # Argument list shared by all functions
     args = (
-        "const T sv0[3], const T s1[3], const T s2[3], "
+        "const T sv[3], const T s1[3], const T s2[3], "
         "const T s3[3], const T s4[3], "
-        "const T ev0[3], const T e1[3], const T e2[3], "
+        "const T ev[3], const T e1[3], const T e2[3], "
         "const T e3[3], const T e4[3], "
         "const T t, const T u, const T v"
     )

@@ -1,12 +1,17 @@
-// #ifndef NARROWPHASE_HPP
-// #define NARROWPHASE_HPP
+#ifndef NARROWPHASE_HPP
+#define NARROWPHASE_HPP
+
+#include "vaabb.h"
+
+#include "roots.hpp"
+
 
 // // #include "snumerr.hpp"
 // // #include "snumtol.hpp"
 // // #include "stuv.hpp"
 // // #include <limits>
 
-// // namespace sccd {
+namespace sccd {
 
 // // enum class CCDStepResult {
 // //   Continue = 0,
@@ -55,4 +60,41 @@
 // //   }
 // // }
 
-// // } // namespace sccd
+
+	//         const DeviceMatrix<Scalar>& d_vertices_t0,
+	//         const DeviceMatrix<Scalar>& d_vertices_t1,
+	//         const DeviceMatrix<int>& d_edges,
+	//         const DeviceMatrix<int>& d_faces,
+	//         const std::shared_ptr<DeviceAABBs> d_vertex_boxes,
+	//         const std::shared_ptr<DeviceAABBs> d_edge_boxes,
+	//         const std::shared_ptr<DeviceAABBs> d_face_boxes,
+	//         const Scalar min_distance,
+	//         const int max_iterations,
+	//         const Scalar tolerance,
+	//         const bool allow_zero_toi,
+	// #ifdef SCALABLE_CCD_TOI_PER_QUERY
+	//         std::vector<std::tuple<int, int, Scalar>>& collisions,
+
+	template<int nxe>
+	geom_t narrow_phase_vf(
+		const size_t noverlaps,
+		const idx_t * const SFEM_RESTRICT voveralp,
+		const idx_t * const SFEM_RESTRICT foveralp,
+		// Geometric data
+		geom_t **const SFEM_RESTRICT v0, 
+		geom_t **const SFEM_RESTRICT v1,
+		idx_t **const SFEM_RESTRICT faces,
+		// Output
+		geom_t * const SFEM_RESTRICT toi)
+	{
+		for(size_t i = 0; i < noverlaps; i++) {
+			const idx_t vi = voveralp[i];
+			const idx_t fi = foveralp[i];
+
+
+		}
+	}
+
+} // namespace sccd
+
+#endif 
