@@ -8,6 +8,7 @@ from sympy import RootOf, Symbol, sympify
 
 
 _ROOT_PATTERN = re.compile(r"Root\[(.*?&),\s*(\d+),\s*0\]", re.DOTALL)
+_QNUM_PATTERN = re.compile(r"_q(\d+)_")
 
 
 def _root_to_sympy_str(expr_str: str) -> str:
@@ -104,7 +105,7 @@ def _wl_to_sympy(obj: Any) -> Any:
     return sympify(obj)
 
 
-def read_wxf_roots(archive_path: str) -> List[Dict[str, float]]:
+def read_wxf_roots(archive_path: str) -> Dict[int, Dict[str, float]]:
     """
     Given a .tar.gz archive containing .wxf Mathematica files, read every file,
     interpret the rules for t, a, and b, and return them as numeric values.
@@ -117,16 +118,22 @@ def read_wxf_roots(archive_path: str) -> List[Dict[str, float]]:
             "Reading .wxf files requires the 'wolframclient' package."
         ) from exc
 
-    roots: List[Dict[str, float]] = []
+    roots_by_query: Dict[int, Dict[str, float]] = {}
     with tarfile.open(archive_path, mode="r:gz") as tar:
         for member in tar:
             if not (member.isfile() and member.name.endswith(".wxf")):
                 continue
+            # Extract query number from member name: ..._q<number>_...
+            m = _QNUM_PATTERN.search(member.name)
+            if not m:
+                continue
+            qnum = int(m.group(1))
             fileobj = tar.extractfile(member)
             if fileobj is None:
                 continue
             data = fileobj.read()
             deserialized = binary_deserialize(data)
+            roots_in_member: List[Dict[str, float]] = []
             for root_expr in deserialized:
                 values: Dict[str, float] = {}
                 for key, val in _iter_rules(root_expr):
@@ -136,8 +143,12 @@ def read_wxf_roots(archive_path: str) -> List[Dict[str, float]]:
                         if num is not None:
                             values[key_lower] = num
                 if {"t", "a", "b"} <= set(values):
-                    roots.append(values)
-    return roots
+                    roots_in_member.append(values)
+            if roots_in_member:
+                # Pick earliest t root for this query
+                best = min(roots_in_member, key=lambda r: r["t"])
+                roots_by_query[qnum] = best
+    return roots_by_query
 
 
 if __name__ == "__main__":
@@ -148,8 +159,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     roots = read_wxf_roots(sys.argv[1])
-    idx = 0
-    for root in roots:
-        print(f'{idx}) {root["t"]}, {root["a"]}, {root["b"]}')
+    for q in sorted(roots.keys()):
+        root = roots[q]
+        print(f'q{q}) {root["t"]}, {root["a"]}, {root["b"]}')
         print()
-        idx += 1
