@@ -14,14 +14,14 @@ if __name__ == "__main__":
     # root_file  = "data/armadillo-rollers/roots/5vf_roots.tar.gz"
     # mma_bool_file = "data/armadillo-rollers/mma_bool/5vf_mma_bool.json"
 
-    query_file = "data/armadillo-rollers/queries/20vf.csv"
-    root_file  = "data/armadillo-rollers/roots/20vf_roots.tar.gz"
-    mma_bool_file = "data/armadillo-rollers/mma_bool/20vf_mma_bool.json"
+    query_file = "data/armadillo-rollers/queries/74vf.csv"
+    root_file  = "data/armadillo-rollers/roots/74vf_roots.tar.gz"
+    mma_bool_file = "data/armadillo-rollers/mma_bool/74vf_mma_bool.json"
     query_data = read_queries.read_queries(query_file)
     root_data = read_wxf.read_wxf_roots(root_file)
     mma_bool_data = read_mma.read_mma_bool(mma_bool_file)
 
-    root_count = 0
+
     for i in range(len(query_data["v_t0"][0])):
         sv_3d = [ query_data["v_t0"][0][i], query_data["v_t0"][1][i], query_data["v_t0"][2][i]]
         s1_3d = [ query_data["f0_t0"][0][i], query_data["f0_t0"][1][i], query_data["f0_t0"][2][i]]
@@ -34,13 +34,14 @@ if __name__ == "__main__":
         found = find_root_vf(1000, 1e-6, sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d)
 
         if found[0] == mma_bool_data[i]:
-            t_diff = abs(found[1] - root_data[root_count]["t"])
-            a_diff = abs(found[2] - root_data[root_count]["a"])
-            b_diff = abs(found[3] - root_data[root_count]["b"])
-            if t_diff > 1e-5 or a_diff > 1e-5 or b_diff > 1e-5:
-                print(f'{i}) {found[1:]} != ({root_data[root_count]["t"]}, {root_data[root_count]["a"]}, {root_data[root_count]["b"]})')
-                print(f't_diff: {t_diff}, a_diff: {a_diff}, b_diff: {b_diff}')
-            root_count += 1
+
+            if found[0]:
+                t_diff = abs(found[1] - root_data[i]["t"])
+                a_diff = abs(found[2] - root_data[i]["a"])
+                b_diff = abs(found[3] - root_data[i]["b"])
+                if t_diff > 1e-6 or a_diff > 1e-6 or b_diff > 1e-6:
+                    print(f'{i}) {found[1:]} != ({root_data[i]["t"]}, {root_data[i]["a"]}, {root_data[i]["b"]})')
+                    print(f't_diff: {t_diff}, a_diff: {a_diff}, b_diff: {b_diff}')
         else:
             print(f'{i}) {found} != {mma_bool_data[i]}')
 
