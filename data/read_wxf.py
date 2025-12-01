@@ -148,8 +148,8 @@ if __name__ == "__main__":
         sys.exit(1)
 
     roots = read_wxf_roots(sys.argv[1])
-    print(roots)
+    idx = 0
     for root in roots:
-        print(root)
-        print(root["t"], root["a"], root["b"])
+        print(f'{idx}) {root["t"]}, {root["a"]}, {root["b"]}')
         print()
+        idx += 1
