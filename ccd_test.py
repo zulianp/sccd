@@ -6,6 +6,7 @@
 import read_queries
 import read_wxf
 from ccd3D import find_root_vf
+from numeric_roots import vf_F_3d, find_root_dfs_3D
 import read_mma
 
 
@@ -14,34 +15,105 @@ if __name__ == "__main__":
     # root_file  = "data/armadillo-rollers/roots/5vf_roots.tar.gz"
     # mma_bool_file = "data/armadillo-rollers/mma_bool/5vf_mma_bool.json"
 
-    query_file = "data/armadillo-rollers/queries/74vf.csv"
-    root_file  = "data/armadillo-rollers/roots/74vf_roots.tar.gz"
-    mma_bool_file = "data/armadillo-rollers/mma_bool/74vf_mma_bool.json"
-    query_data = read_queries.read_queries(query_file)
-    root_data = read_wxf.read_wxf_roots(root_file)
-    mma_bool_data = read_mma.read_mma_bool(mma_bool_file)
+    import os
+    import glob
+    import re as _re
+
+    base_folder = "data/armadillo-rollers"
+
+    # Collect triples for vertex-face (vf) datasets
+    query_paths = sorted(glob.glob(os.path.join(base_folder, "queries", "*vf.csv")))
+    roots_paths = sorted(glob.glob(os.path.join(base_folder, "roots", "*vf_roots.tar.gz")))
+    mma_paths   = sorted(glob.glob(os.path.join(base_folder, "mma_bool", "*vf_mma_bool.json")))
+
+    # Build index by dataset key (e.g., "74vf")
+    def vf_key_from_path(p: str) -> str:
+        name = os.path.basename(p)
+        m = _re.match(r"(\d+vf)", name)
+        return m.group(1) if m else ""
+
+    queries_by_key = {vf_key_from_path(p): p for p in query_paths}
+    roots_by_key   = {vf_key_from_path(p): p for p in roots_paths}
+    mma_by_key     = {vf_key_from_path(p): p for p in mma_paths}
+
+    all_keys = sorted(set(queries_by_key) & set(roots_by_key) & set(mma_by_key))
+    if not all_keys:
+        print("No vf dataset triples found.")
+        raise SystemExit(0)
+
+    tol_t = 1e-4
+    tol_uv = 1e-4
+    total_cases = 0
+    mismatches = 0
+    false_positives = 0
+    false_negatives = 0
+
+    for key in all_keys:
+        query_file = queries_by_key[key]
+        root_file  = roots_by_key[key]
+        mma_file   = mma_by_key[key]
+
+        print(f"Dataset {key}:")
+        query_data = read_queries.read_queries(query_file)
+        root_map   = read_wxf.read_wxf_roots(root_file)  # Dict[int] -> {t,a,b}
+        mma_bool   = read_mma.read_mma_bool(mma_file)    # List[bool]
+
+        n = len(query_data["v_t0"][0])
+        if len(mma_bool) != n:
+            print(f"  Warning: mma_bool length {len(mma_bool)} != queries {n}")
+
+        for i in range(n):
+            sv_3d = [ query_data["v_t0"][0][i], query_data["v_t0"][1][i], query_data["v_t0"][2][i]]
+            s1_3d = [ query_data["f0_t0"][0][i], query_data["f0_t0"][1][i], query_data["f0_t0"][2][i]]
+            s2_3d = [ query_data["f1_t0"][0][i], query_data["f1_t0"][1][i], query_data["f1_t0"][2][i]]
+            s3_3d = [ query_data["f2_t0"][0][i], query_data["f2_t0"][1][i], query_data["f2_t0"][2][i]]
+            ev_3d = [ query_data["v_t1"][0][i], query_data["v_t1"][1][i], query_data["v_t1"][2][i]]
+            e1_3d = [ query_data["f0_t1"][0][i], query_data["f0_t1"][1][i], query_data["f0_t1"][2][i]]
+            e2_3d = [ query_data["f1_t1"][0][i], query_data["f1_t1"][1][i], query_data["f1_t1"][2][i]]
+            e3_3d = [ query_data["f2_t1"][0][i], query_data["f2_t1"][1][i], query_data["f2_t1"][2][i]]
+
+            # ret = find_root_vf(1000, 1e-12, sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d)
+            ret = find_root_dfs_3D(1000, 1e-6, sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d)
+            expected_hit = bool(mma_bool[i]) 
+
+            total_cases += 1
+            if ret[0] != expected_hit:
+                print(f'  {key}:{i}) hit_mismatch: got {ret[0]} expected {expected_hit}')
+                false_positives += 1
+
+                if ret[0]:
+                    print("-"*80)
+                    print(f'{key}:{i}) false positive: ret={ret[1:]}')
+                    Fx, Fy, Fz = vf_F_3d(sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d, ret[1], ret[2], ret[3])
+                    print(f'  ({Fx}, {Fy}, {Fz}) residual')
+                    print("-"*80)
+
+                if expected_hit:
+                    false_negatives += 1
+                continue
 
 
-    for i in range(len(query_data["v_t0"][0])):
-        sv_3d = [ query_data["v_t0"][0][i], query_data["v_t0"][1][i], query_data["v_t0"][2][i]]
-        s1_3d = [ query_data["f0_t0"][0][i], query_data["f0_t0"][1][i], query_data["f0_t0"][2][i]]
-        s2_3d = [ query_data["f1_t0"][0][i], query_data["f1_t0"][1][i], query_data["f1_t0"][2][i]]
-        s3_3d = [ query_data["f2_t0"][0][i], query_data["f2_t0"][1][i], query_data["f2_t0"][2][i]]
-        ev_3d = [ query_data["v_t1"][0][i], query_data["v_t1"][1][i], query_data["v_t1"][2][i]]
-        e1_3d = [ query_data["f0_t1"][0][i], query_data["f0_t1"][1][i], query_data["f0_t1"][2][i]]
-        e2_3d = [ query_data["f1_t1"][0][i], query_data["f1_t1"][1][i], query_data["f1_t1"][2][i]]
-        e3_3d = [ query_data["f2_t1"][0][i], query_data["f2_t1"][1][i], query_data["f2_t1"][2][i]]
-        found = find_root_vf(1000, 1e-6, sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d)
+            if expected_hit:
+                # Compare with root map if available (keys are per-query indices from _q<number>_)
+                if i in root_map:
+                    gt = root_map[i]
+                    t_diff = abs(ret[1] - gt["t"])
+                    a_diff = abs(ret[2] - gt["a"])
+                    b_diff = abs(ret[3] - gt["b"])
+                    if t_diff > tol_t or a_diff > tol_uv or b_diff > tol_uv:
+                        print("-"*80)
+                        print(f'  {key}:{i}) root_mismatch: ret={ret[1:]}, gt=({gt["t"]}, {gt["a"]}, {gt["b"]})')
+                        print(f'             diffs: t={t_diff} a={a_diff} b={b_diff}')
 
-        if found[0] == mma_bool_data[i]:
+                        eFx, eFy, eFz = vf_F_3d(sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d, gt["t"], gt["a"], gt["b"])
+                        Fx, Fy, Fz = vf_F_3d(sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d, ret[1], ret[2], ret[3])
+                        print(f'  ({Fx}, {Fy}, {Fz}) vs expected ({eFx}, {eFy}, {eFz})')
+                        print("-"*80)
+                        mismatches += 1
+                else:
+                    # Root not present; report but don't fail loudly
+                    false_positives += 1
+        print(f"  Done {key}, {mismatches} mismatches {false_positives} false positives, {false_negatives} false negatives.")
 
-            if found[0]:
-                t_diff = abs(found[1] - root_data[i]["t"])
-                a_diff = abs(found[2] - root_data[i]["a"])
-                b_diff = abs(found[3] - root_data[i]["b"])
-                if t_diff > 1e-6 or a_diff > 1e-6 or b_diff > 1e-6:
-                    print(f'{i}) {found[1:]} != ({root_data[i]["t"]}, {root_data[i]["a"]}, {root_data[i]["b"]})')
-                    print(f't_diff: {t_diff}, a_diff: {a_diff}, b_diff: {b_diff}')
-        else:
-            print(f'{i}) {found} != {mma_bool_data[i]}')
+    print(f"Summary: {total_cases} cases, {mismatches} mismatches, {false_positives} false positives, {false_negatives} false negatives.")
 

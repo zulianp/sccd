@@ -1,12 +1,20 @@
 #!/usr/bin/env python3
 
+import numpy as np
 from math import floor
 from typing import Tuple, Optional
 
+try:
+    from numba import njit
+    def myjit(f): return njit(f, fastmath=True, boundscheck=False, nogil=True)
+except:
+    print("Could not find numba")
+    def myjit(f): return f
+
 # Keep chunk size similar to C++ heuristic
-ROOT_FINDING_CHUNK_SIZE = 4096
+ROOT_FINDING_CHUNK_SIZE = 4*4096
 
-
+@myjit
 def _vf_F_2d(sv_2d, s1_2d, s2_2d, s3_2d, ev_2d, e1_2d, e2_2d, e3_2d, tt, uu, vv):
     """
     2D version of the vertex-face residual:
@@ -27,7 +35,7 @@ def _vf_F_2d(sv_2d, s1_2d, s2_2d, s3_2d, ev_2d, e1_2d, e2_2d, e3_2d, tt, uu, vv)
 
     return (vx - fx, vy - fy)
 
-
+@myjit
 def _sample_Fvf_component_2d(
     n_t, n_u, n_v,
     t_stride, u_stride,
@@ -55,7 +63,7 @@ def _sample_Fvf_component_2d(
                 F[idx] = Fx if comp == 0 else Fy
     return F
 
-
+@myjit
 def _detect_zero_cells_2d(n_t, n_u, n_v, t_stride, u_stride, Fx, Fy, tol, contains_zero):
     """
     For each 3D cell (8 corners) check whether 0 is contained in the interval
@@ -87,7 +95,7 @@ def _detect_zero_cells_2d(n_t, n_u, n_v, t_stride, u_stride, Fx, Fy, tol, contai
                 has_zero_fy = (fy_min <= tol) and (fy_max >= -tol)
                 contains_zero[cell_idx] &= int(has_zero_fx and has_zero_fy)
 
-
+@myjit
 def find_root_2d(
     _max_iter: int,
     tol: float,
@@ -279,6 +287,7 @@ def visualize_Fvf_xy_2d(
 # 2D CCD (point vs line segment) utilities and visualization
 ############################################################
 
+@myjit
 def _vl_F_2d(sv_2d, s1_2d, s2_2d, ev_2d, e1_2d, e2_2d, tt, uu):
     """
     2D vertex-line residual:
@@ -299,7 +308,7 @@ def _vl_F_2d(sv_2d, s1_2d, s2_2d, ev_2d, e1_2d, e2_2d, tt, uu):
     ey = (1.0 - uu) * e1y + uu * e2y
     return (vx - ex, vy - ey)
 
-
+@myjit
 def _sample_Fvl_component_2d(
     n_t,
     n_u,
@@ -356,7 +365,7 @@ def _detect_zero_cells_2d_line(n_t, n_u, t_stride, Fx, Fy, tol, contains_zero):
             has_zero_fy = (fy_min <= tol) and (fy_max >= -tol)
             contains_zero[cell_idx] &= int(has_zero_fx and has_zero_fy)
 
-
+@myjit
 def find_root_line_2d(
     _max_iter: int,
     tol: float,
@@ -593,8 +602,8 @@ def visualize_Fvl_norm_tu_2d(
 ############################################################
 # 3D CCD (point vs triangle) utilities and visualization
 ############################################################
-
-def _vf_F_3d(sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d, tt, uu, vv):
+@myjit
+def vf_F_3d(sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d, tt, uu, vv):
     """
     3D vertex-face residual:
       F(t,u,v) = V(t) - ((1-u-v) * V1(t) + u * V2(t) + v * V3(t))
@@ -622,7 +631,7 @@ def _vf_F_3d(sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d, tt, uu, vv)
     fz = o * f1z + uu * f2z + vv * f3z
     return (vx - fx, vy - fy, vz - fz)
 
-
+@myjit
 def _sample_Fvf_component_3d(
     n_t, n_u, n_v,
     t_stride, u_stride,
@@ -646,13 +655,13 @@ def _sample_Fvf_component_3d(
             for vi in range(n_v + 1):
                 v_val = v_start + vi * v_step
                 idx = base_u + vi
-                Fx, Fy, Fz = _vf_F_3d(
+                Fx, Fy, Fz = vf_F_3d(
                     sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d, t_val, u_val, v_val
                 )
                 F[idx] = Fx if comp == 0 else (Fy if comp == 1 else Fz)
     return F
 
-
+@myjit
 def _detect_zero_cells_3d(n_t, n_u, n_v, t_stride, u_stride, Fx, Fy, Fz, tol, contains_zero):
     """
     For each 3D cell (8 corners) check whether 0 is contained in the interval
@@ -681,7 +690,7 @@ def _detect_zero_cells_3d(n_t, n_u, n_v, t_stride, u_stride, Fx, Fy, Fz, tol, co
                 has_zero_z = (min(zs) <= tol) and (max(zs) >= -tol)
                 contains_zero[cell_idx] &= int(has_zero_x and has_zero_y and has_zero_z)
 
-
+@myjit
 def _project_uv_simplex(u: float, v: float):
     """
     Project (u,v) onto the 2-simplex S = {u>=0, v>=0, u+v<=1} in L2 sense.
@@ -698,12 +707,11 @@ def _project_uv_simplex(u: float, v: float):
     v_proj = 1.0 - u_proj
     return u_proj, v_proj
 
-
 def _refine_vf_root_3d(
     sv_3d, s1_3d, s2_3d, s3_3d,
     ev_3d, e1_3d, e2_3d, e3_3d,
     t_init: float, u_init: float, v_init: float,
-    max_iter: int = 25, tol_f: float = 1e-10
+    max_iter: int = 25, tol_f: float = 1e-8
 ):
     """
     Gauss-Newton refinement with simple backtracking and projection to [0,1]xS.
@@ -712,7 +720,7 @@ def _refine_vf_root_3d(
     import numpy as np
 
     def F_eval(t, u, v):
-        Fx, Fy, Fz = _vf_F_3d(sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d, t, u, v)
+        Fx, Fy, Fz = vf_F_3d(sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d, t, u, v)
         return np.array([Fx, Fy, Fz], dtype=float)
 
     x = np.array([t_init, u_init, v_init], dtype=float)
@@ -766,6 +774,150 @@ def _refine_vf_root_3d(
     ok = F_final <= tol_f
     return ok, float(x[0]), float(x[1]), float(x[2]), float(F_final)
 
+
+def find_root_dfs_3D(
+    _max_iter: int,
+    tol: float,
+    sv_3d, s1_3d, s2_3d, s3_3d,
+    ev_3d, e1_3d, e2_3d, e3_3d
+) -> Tuple[bool, Optional[float], Optional[float], Optional[float]]:
+    """
+    Narrow-phase root search for 3D vertex-face CCD using interval tests on Fx,Fy,Fz.
+    Returns (found, t, u, v). If not found, remaining values are None.
+    """
+    import math
+
+    # Choose a cubic grid sized by ROOT_FINDING_CHUNK_SIZE
+    side = max(4, int(round(ROOT_FINDING_CHUNK_SIZE ** (1.0 / 3.0))))
+    while (side ** 3) > ROOT_FINDING_CHUNK_SIZE and side > 2:
+        side -= 1
+
+    t_n = side
+    u_n = side
+    v_n = side
+    t_min = 0.0
+    u_min = 0.0
+    v_min = 0.0
+    t_max = 1.0
+    u_max = 1.0
+    v_max = 1.0
+    t_h = (t_max - t_min) / t_n
+    u_h = (u_max - u_min) / u_n
+    v_h = (v_max - v_min) / v_n
+
+    t_stride = (u_n + 1) * (v_n + 1)
+    u_stride = (v_n + 1)
+
+    Fx = _sample_Fvf_component_3d(
+        t_n, u_n, v_n, t_stride, u_stride, t_min, u_min, v_min, t_h, u_h, v_h,
+        0, sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d
+    )
+    Fy = _sample_Fvf_component_3d(
+        t_n, u_n, v_n, t_stride, u_stride, t_min, u_min, v_min, t_h, u_h, v_h,
+        1, sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d
+    )
+    Fz = _sample_Fvf_component_3d(
+        t_n, u_n, v_n, t_stride, u_stride, t_min, u_min, v_min, t_h, u_h, v_h,
+        2, sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d
+    )
+
+    contains_zero = [1] * (t_n * u_n * v_n)
+    _detect_zero_cells_3d(t_n, u_n, v_n, t_stride, u_stride, Fx, Fy, Fz, tol, contains_zero)
+
+    def _cell_has_zero(t0, t1, u0, u1, v0, v1):
+        if (max(0.0, u0) + max(0.0, v0)) > 1.0 + 1e-8:
+            return False
+        fx_min = fy_min = fz_min = 1e30
+        fx_max = fy_max = fz_max = -1e30
+        for tt in (t0, t1):
+            for uu in (u0, u1):
+                for vv in (v0, v1):
+                    fx, fy, fz = vf_F_3d(
+                        sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d, tt, uu, vv
+                    )
+                    fx_min = fx if fx < fx_min else fx_min
+                    fy_min = fy if fy < fy_min else fy_min
+                    fz_min = fz if fz < fz_min else fz_min
+                    fx_max = fx if fx > fx_max else fx_max
+                    fy_max = fy if fy > fy_max else fy_max
+                    fz_max = fz if fz > fz_max else fz_max
+        return (fx_min <= tol and fx_max >= -tol) and (fy_min <= tol and fy_max >= -tol) and (fz_min <= tol and fz_max >= -tol)
+
+    seeds = []
+    for ti in range(t_n):
+        for ui in range(u_n):
+            u0 = u_min + ui * u_h
+            for vi in range(v_n):
+                cell_idx = ti * u_n * v_n + ui * v_n + vi
+                if not contains_zero[cell_idx]:
+                    continue
+                v0 = v_min + vi * v_h
+                if (u0 + v0) > 1.0 + 1e-8:
+                    continue
+
+                seeds.append((t_min + ti * t_h, t_min + (ti + 1) * t_h, u0, u0 + u_h, v0, v0 + v_h, 0))
+
+    if not seeds:
+        return (False, None, None, None)
+
+    seeds.sort(key=lambda s: s[0])
+    stack = seeds[::-1]  # pop prefers small t first
+    min_dim = max(1e-6, tol * 10.0)
+
+    max_depth = 100
+
+    while stack:
+        t0, t1, u0, u1, v0, v1, depth = stack.pop()
+        if (max(0.0, u0) + max(0.0, v0)) > 1.0 + 1e-8:
+            continue
+
+        tc = 0.5 * (t0 + t1)
+        uc = 0.5 * (u0 + u1)
+        vc = 0.5 * (v0 + v1)
+
+        fn_center = None
+        if uc >= -1e-8 and vc >= -1e-8 and (uc + vc) <= 1.0 + 1e-8:
+            fx_c, fy_c, fz_c = vf_F_3d(
+                sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d, tc, uc, vc
+            )
+            fn_center = math.sqrt(fx_c * fx_c + fy_c * fy_c + fz_c * fz_c)
+            if fn_center <= tol:
+                ok_ref, tr, ur, vr, fnr = _refine_vf_root_3d(sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d, tc, uc, vc, max_iter=100, tol_f=max(1e-10, tol * 1e-2))
+                if ok_ref:
+                    return (True, tr, ur, vr)
+                else:
+                    continue
+                # return (True, tc, uc, vc)
+
+        size = max(t1 - t0, u1 - u0, v1 - v0)
+        if size <= min_dim or depth >= _max_iter:
+            continue
+
+        tm = 0.5 * (t0 + t1)
+        um = 0.5 * (u0 + u1)
+        vm = 0.5 * (v0 + v1)
+
+        subcells = (
+            (t0, tm, u0, um, v0, vm),
+            (t0, tm, u0, um, vm, v1),
+            (t0, tm, um, u1, v0, vm),
+            (t0, tm, um, u1, vm, v1),
+            (tm, t1, u0, um, v0, vm),
+            (tm, t1, u0, um, vm, v1),
+            (tm, t1, um, u1, v0, vm),
+            (tm, t1, um, u1, vm, v1),
+        )
+        next_depth = depth + 1
+        if next_depth >= max_depth:
+            break
+
+        for t0s, t1s, u0s, u1s, v0s, v1s in subcells:
+            if _cell_has_zero(t0s, t1s, u0s, u1s, v0s, v1s):
+                stack.append((t0s, t1s, u0s, u1s, v0s, v1s, next_depth))
+
+    return (False, None, None, None)
+
+@myjit
 def find_root_vf_3d(
     _max_iter: int,
     tol: float,
@@ -816,15 +968,16 @@ def find_root_vf_3d(
     total = 1
     tot_inv = invx * invy * invz
     for idx in order:
-        N[idx] = max(2, int(floor((base / float(total)) * (invs[idx] / max(1e-12, tot_inv)) ** (1.0 / (3 - order.index(idx))))))
+        N[idx] = max(8 if idx == 0 else 2, int(floor((base / float(total)) * (invs[idx] / max(1e-12, tot_inv)) ** (1.0 / (3 - order.index(idx))))))
         total *= N[idx]
         tot_inv = max(1e-12, tot_inv / invs[idx])
     while total > ROOT_FINDING_CHUNK_SIZE:
         # reduce the largest dimension
         i = N.index(max(N))
         if N[i] > 2:
+            total //= N[i]
             N[i] -= 1
-            total -= 1  # approximate
+            total *= N[i]
         else:
             break
 
@@ -855,6 +1008,9 @@ def find_root_vf_3d(
     contains_zero = [1] * (t_n * u_n * v_n)
     _detect_zero_cells_3d(t_n, u_n, v_n, t_stride, u_stride, Fx, Fy, Fz, tol, contains_zero)
 
+    # print(f'Nt = {Nt}, Nu = {Nu}, Nv = {Nv}')
+    # print(f'potential roots {np.sum(contains_zero)}')
+
     # Build seed list from all cells:
     # - Priority 0: cells that pass interval zero test
     # - Priority 1: remaining cells, sorted by center ||F|| value
@@ -865,15 +1021,21 @@ def find_root_vf_3d(
         for ui in range(u_n):
             for vi in range(v_n):
                 cell_idx = ti * u_n * v_n + ui * v_n + vi
+                if not contains_zero[cell_idx]:
+                    continue
                 t_c = t_min + (ti + 0.5) * t_h
                 u_c = u_min + (ui + 0.5) * u_h
                 v_c = v_min + (vi + 0.5) * v_h
+
+                # print(f'{t_c}, {u_c}, {v_c}')
+                
                 if (u_c + v_c) > 1.0 + 1e-8:
                     u_c, v_c = _project_uv_simplex(u_c, v_c)
-                Fx_c, Fy_c, Fz_c = _vf_F_3d(sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d, t_c, u_c, v_c)
+                
+                Fx_c, Fy_c, Fz_c = vf_F_3d(sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d, t_c, u_c, v_c)
                 fn_c = _math_np_seed.sqrt(Fx_c * Fx_c + Fy_c * Fy_c + Fz_c * Fz_c)
-                priority = 0 if contains_zero[cell_idx] else 1
-                seeds.append((priority, fn_c, ti, ui, vi, t_c, u_c, v_c))
+
+                seeds.append((t_c, fn_c, ti, ui, vi, t_c, u_c, v_c))
 
     # Sort seeds: priority first, then by smallest ||F|| at center
     seeds.sort(key=lambda x: (x[0], x[1]))
@@ -886,10 +1048,10 @@ def find_root_vf_3d(
         _prio, _fnc, ti, ui, vi, t_current, u_current, v_current = seeds[k]
         ok_ref, tr, ur, vr, fnr = _refine_vf_root_3d(
             sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d,
-            t_current, u_current, v_current, max_iter=40, tol_f=max(1e-10, tol * 1e-2)
+            t_current, u_current, v_current, max_iter=100, tol_f=max(1e-10, tol * 1e-2)
         )
         if ok_ref and 0.0 <= tr <= 1.0 and ur >= -1e-8 and vr >= -1e-8 and (ur + vr) <= 1.0 + 1e-8:
-            if (not found_any) or (tr < best_t - 1e-12) or (abs(tr - best_t) <= 1e-12 and fnr < (best_fn or 1e9)):
+            if (not found_any) or (tr < best_t):
                 found_any = True
                 best_t, best_u, best_v, best_fn = tr, ur, vr, fnr
     if not found_any:
@@ -1164,5 +1326,3 @@ def visualize_scene_vf_3d(
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
-
-
