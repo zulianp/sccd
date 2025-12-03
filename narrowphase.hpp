@@ -4,15 +4,19 @@
 #include <tbb/parallel_for.h>
 
 #include "vaabb.h"
-
+#include "assert.h"
 #include "roots.hpp"
 
+// #define TIGHT_INCLUSION_ORACLE
+#ifdef TIGHT_INCLUSION_ORACLE
 #include "tight_inclusion/ccd.hpp"
 #include "tight_inclusion/interval_root_finder.hpp"
 #include <Eigen/Dense>
+#endif
 
 namespace sccd {
 
+#ifdef TIGHT_INCLUSION_ORACLE
 bool barycentricTriangle3D(
     const ticcd::Vector3& A,
     const ticcd::Vector3& B,
@@ -63,6 +67,8 @@ bool isInsideTriangle(
         && (lambda.array() <= ticcd::Scalar(1) + tol).all()
         && std::abs(lambda.sum() - ticcd::Scalar(1)) <= ticcd::Scalar(1e-6);
 }
+
+#endif
 
 template <typename T>
 bool find_root_newton(
@@ -463,6 +469,8 @@ bool find_root(
     return found;
 }
 
+#
+#ifdef TIGHT_INCLUSION_ORACLE
 template <typename T>
 bool find_root_oracle(
     const int max_iter,
@@ -530,6 +538,9 @@ bool find_root_oracle(
     return test_ok;
 }
 
+// #define TEST_ORACLE
+#endif
+
 template <int nxe, typename T>
 T narrow_phase_vf(
     const size_t noverlaps,
@@ -579,8 +590,8 @@ T narrow_phase_vf(
         double u = 0;
         double v = 0;
 
-#define TEST_ORACLE 0
-#if TEST_ORACLE
+
+#ifdef TEST_ORACLE
         double t_oracle = 0;
         double u_oracle = 0;
         double v_oracle = 0;
@@ -592,7 +603,7 @@ T narrow_phase_vf(
                 100, 1e-10, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v)) {
             toi[i] = t;
             min_t = sccd::min<T>(t, min_t);
-#if TEST_ORACLE
+#ifdef TEST_ORACLE
             if (!test_ok) {
                 printf(
                     "RF(Ours: (%g, %g, %g))\n", double(t), double(u),
@@ -603,7 +614,7 @@ T narrow_phase_vf(
 
         } else {
             toi[i] = infty;
-#if TEST_ORACLE
+#ifdef TEST_ORACLE
             if (test_ok) {
                 printf(
                     "Missed root: (%g, %g, %g) == (%g, %g, %g)\n", t_oracle,

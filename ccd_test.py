@@ -8,13 +8,9 @@ import read_wxf
 from ccd3D import find_root_vf
 from numeric_roots import vf_F_3d, find_root_dfs_3D
 import read_mma
-
+import sccd_py
 
 if __name__ == "__main__":
-    # query_file = "data/armadillo-rollers/queries/5vf.csv"
-    # root_file  = "data/armadillo-rollers/roots/5vf_roots.tar.gz"
-    # mma_bool_file = "data/armadillo-rollers/mma_bool/5vf_mma_bool.json"
-
     import os
     import glob
     import re as _re
@@ -72,8 +68,8 @@ if __name__ == "__main__":
             e2_3d = [ query_data["f1_t1"][0][i], query_data["f1_t1"][1][i], query_data["f1_t1"][2][i]]
             e3_3d = [ query_data["f2_t1"][0][i], query_data["f2_t1"][1][i], query_data["f2_t1"][2][i]]
 
-            # ret = find_root_vf(1000, 1e-12, sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d)
-            ret = find_root_dfs_3D(1000, 1e-6, sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d)
+            # ret = find_root_dfs_3D(1000, 1e-6, sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d)
+            ret = sccd_py.find_root_vf_d(1000, 1e-6, sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d)
             expected_hit = bool(mma_bool[i]) 
 
             total_cases += 1
@@ -90,6 +86,7 @@ if __name__ == "__main__":
 
                 if expected_hit:
                     false_negatives += 1
+                    assert False
                 continue
 
 
@@ -113,7 +110,7 @@ if __name__ == "__main__":
                 else:
                     # Root not present; report but don't fail loudly
                     false_positives += 1
-        print(f"  Done {key}, {mismatches} mismatches {false_positives} false positives, {false_negatives} false negatives.")
 
+        print(f"  Done {key}, {mismatches} mismatches {false_positives} false positives, {false_negatives} false negatives.")
     print(f"Summary: {total_cases} cases, {mismatches} mismatches, {false_positives} false positives, {false_negatives} false negatives.")
 
