@@ -70,6 +70,7 @@ _lib.sccd_find_root_vf_f.argtypes = [
 ]
 _lib.sccd_find_root_vf_f.restype = ct.c_int
 
+
 _lib.sccd_find_root_vf_d.argtypes = [
     ct.c_int, ct.c_double,
     ct.POINTER(ct.c_double), ct.POINTER(ct.c_double), ct.POINTER(ct.c_double), ct.POINTER(ct.c_double),
@@ -78,6 +79,14 @@ _lib.sccd_find_root_vf_d.argtypes = [
 ]
 _lib.sccd_find_root_vf_d.restype = ct.c_int
 
+# Bisection
+_lib.sccd_find_root_bisection_vf_d.argtypes = [
+    ct.c_int, ct.c_double,
+    ct.POINTER(ct.c_double), ct.POINTER(ct.c_double), ct.POINTER(ct.c_double), ct.POINTER(ct.c_double),
+    ct.POINTER(ct.c_double), ct.POINTER(ct.c_double), ct.POINTER(ct.c_double), ct.POINTER(ct.c_double),
+    ct.POINTER(ct.c_double), ct.POINTER(ct.c_double), ct.POINTER(ct.c_double)
+]
+_lib.sccd_find_root_bisection_vf_d.restype = ct.c_int
 
 def _as_arr3_f(xs: Iterable[float]) -> Tuple[ct.Array,]:
     a = (ct.c_float * 3)(*list(xs))
@@ -134,6 +143,32 @@ def find_root_vf_d(
     u = ct.c_double(u0)
     v = ct.c_double(v0)
     ok = _lib.sccd_find_root_vf_d(
+        int(max_iter), float(tol),
+        svp, s1p, s2p, s3p, evp, e1p, e2p, e3p,
+        ct.byref(t), ct.byref(u), ct.byref(v)
+    )
+    return (bool(ok), float(t.value), float(u.value), float(v.value))
+
+
+def find_root_bisection_vf_d(
+    max_iter: int,
+    tol: float,
+    sv, s1, s2, s3,
+    ev, e1, e2, e3,
+    t0: float = 0.0, u0: float = 0.0, v0: float = 0.0
+) -> Tuple[bool, float, float, float]:
+    svp = _as_arr3_d(sv)[0]
+    s1p = _as_arr3_d(s1)[0]
+    s2p = _as_arr3_d(s2)[0]
+    s3p = _as_arr3_d(s3)[0]
+    evp = _as_arr3_d(ev)[0]
+    e1p = _as_arr3_d(e1)[0]
+    e2p = _as_arr3_d(e2)[0]
+    e3p = _as_arr3_d(e3)[0]
+    t = ct.c_double(t0)
+    u = ct.c_double(u0)
+    v = ct.c_double(v0)
+    ok = _lib.sccd_find_root_bisection_vf_d(
         int(max_iter), float(tol),
         svp, s1p, s2p, s3p, evp, e1p, e2p, e3p,
         ct.byref(t), ct.byref(u), ct.byref(v)
