@@ -67,10 +67,10 @@ v3t = p3
 
 # Root for vertex face collision
 vf_F = pt - ((1 - u - v) * v1t + u * v2t + v * v3t)
-vf_dFdt = vf_F.jacobian(theta)
+# vf_dFdt = vf_F.jacobian(theta)
 
 # Least-square solution
-vf_objective = simplify(vf_F.T * vf_F)
+vf_objective = simplify(sp.Rational(1, 2) * vf_F.T * vf_F)
 vf_gradient  = simplify(vf_objective.jacobian(theta))
 vf_Hessian   = simplify(vf_gradient.jacobian(theta))
 
@@ -98,7 +98,7 @@ ee_F = ((1 - u) * p1t + u * p2t) - ((1 - v) * p3t + v * p4t)
 ee_dFdt = ee_F.jacobian(theta)
 
 # Least-square solution
-ee_objective = simplify(ee_F.T * ee_F)
+ee_objective = simplify(sp.Rational(1, 2) *ee_F.T * ee_F)
 ee_gradient  = simplify(ee_objective.jacobian(theta))
 ee_Hessian   = simplify(ee_gradient.jacobian(theta))
 
