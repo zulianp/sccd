@@ -3,6 +3,10 @@
 
 #include <stdlib.h>
 #include <float.h>
+#include <math.h>
+#include <assert.h>
+
+#include "smath.hpp"
 
 #define SFEM_READ_ENV(name, conversion)                                        \
     do {                                                                       \
