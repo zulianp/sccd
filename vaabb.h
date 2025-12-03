@@ -2,6 +2,8 @@
 #define VAABB_H
 
 #include <stdlib.h>
+#include <float.h>
+
 #define SFEM_READ_ENV(name, conversion)                                        \
     do {                                                                       \
         char* var = getenv(#name);                                             \
