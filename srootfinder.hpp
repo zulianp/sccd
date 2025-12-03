@@ -6,8 +6,11 @@
 #include <type_traits>
 #include <vector>
 
-#include "roots.hpp"
+
 #include "vaabb.h"
+
+#include "roots.hpp"
+#include "snumtol.hpp"
 
 namespace sccd {
 
@@ -24,6 +27,27 @@ namespace sccd {
         u_proj = sccd::min<T>(static_cast<T>(1), sccd::max<T>(0, u_proj));
         v = static_cast<T>(1) - u_proj;
         u = u_proj;
+    }
+
+    template <typename T>
+    inline void diff_vf(const T sv[3],
+                        const T s1[3],
+                        const T s2[3],
+                        const T s3[3],
+                        const T ev[3],
+                        const T e1[3],
+                        const T e2[3],
+                        const T e3[3],
+                        const T &t,
+                        const T &u,
+                        const T &v,
+                        T *const SFEM_RESTRICT diff) {
+        T t0 = (1 - t);
+        T t1 = t;
+        T o = (1 - u - v);
+        for (int d = 0; d < 3; d++) {
+            diff[d] = t0 * sv[d] + t1 * ev[d] - (o * s1[d] + u * s2[d] + v * s3[d]);
+        }
     }
 
     template <typename T>
@@ -47,7 +71,6 @@ namespace sccd {
         }
         return sqrt(diff[0] * diff[0] + diff[1] * diff[1] + diff[2] * diff[2]);
     }
-
 
     template <typename T>
     bool find_root_newton(const int max_iter,
@@ -92,8 +115,7 @@ namespace sccd {
                 project_uv_simplex<T>(cand_u, cand_v);
 
                 T fnext = 0;
-                vf_objective<T>(
-                    sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, cand_t, cand_u, cand_v, &fnext);
+                vf_objective<T>(sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, cand_t, cand_u, cand_v, &fnext);
 
                 if (fnext < best_f) {
                     best_t = cand_t;
@@ -118,8 +140,8 @@ namespace sccd {
             }
 
             if (!improved) {
-              break;
-          }
+                break;
+            }
         }
 
         return false;
@@ -210,7 +232,6 @@ namespace sccd {
             }
         }
     }
-
 
 #define ROOT_FINDING_CHUNK_SIZE 729
 
@@ -362,8 +383,6 @@ namespace sccd {
                         T v_current = v_h * v_i + v_min;
 
                         if (u_h + v_h > 1 + tol) continue;
-                        // bool ok = true;
-
                         bool ok = find_root_newton<T>(
                             max_iter, tol, sv, s1, s2, s3, ev, e1, e2, e3, t_current, u_current, v_current);
 
@@ -402,27 +421,38 @@ namespace sccd {
             T vl, vu;
         };
 
-        auto eval_axis = [&](const int axis, const T tt, T uu, T vv) -> T {
-            // Clamp to stay within the valid barycentric simplex
-            if (uu + vv > T(1)) {
-                if (uu > vv) {
-                    uu = T(1) - vv;
-                } else {
-                    vv = T(1) - uu;
-                }
-            }
+        // Compute per-axis tolerances (matching snumtol.hpp signature)
+        T tol0 = tol, tol1 = tol, tol2 = tol;
+        compute_face_vertex_tolerance_soa<T>(tol,
+                                             sv[0],
+                                             sv[1],
+                                             sv[2],
+                                             s1[0],
+                                             s1[1],
+                                             s1[2],
+                                             s2[0],
+                                             s2[1],
+                                             s2[2],
+                                             s3[0],
+                                             s3[1],
+                                             s3[2],
+                                             ev[0],
+                                             ev[1],
+                                             ev[2],
+                                             e1[0],
+                                             e1[1],
+                                             e1[2],
+                                             e2[0],
+                                             e2[1],
+                                             e2[2],
+                                             e3[0],
+                                             e3[1],
+                                             e3[2],
+                                             &tol0,
+                                             &tol1,
+                                             &tol2);
 
-            const T t0 = T(1) - tt;
-            const T t1 = tt;
-            const T one_minus_uv = T(1) - uu - vv;
-
-            const T face0 = one_minus_uv * s1[axis] + uu * s2[axis] + vv * s3[axis];
-            const T face1 = one_minus_uv * e1[axis] + uu * e2[axis] + vv * e3[axis];
-
-            const T vx = t0 * sv[axis] + t1 * ev[axis];
-            const T fx = t0 * face0 + t1 * face1;
-            return vx - fx;
-        };
+        printf("tol %f -> tol0: %f, tol1: %f, tol2: %f\n", tol, tol0, tol1, tol2);
 
         // Depth-first stack
         std::vector<Box> stack;
@@ -430,15 +460,10 @@ namespace sccd {
         stack.push_back({T(0), T(1), T(0), T(1), T(0), T(1)});
 
         int iter = 0;
-
         while (!stack.empty() && iter < max_iter) {
             Box box = stack.back();
             stack.pop_back();
             ++iter;
-
-            if (box.ul + box.vl > T(1) + tol) {
-                continue;
-            }
 
             T fmin[3] = {std::numeric_limits<T>::max(), std::numeric_limits<T>::max(), std::numeric_limits<T>::max()};
             T fmax[3] = {
@@ -449,31 +474,39 @@ namespace sccd {
                 const T uu_ = (corner & 2) ? box.uu : box.ul;
                 const T vv_ = (corner & 4) ? box.vu : box.vl;
 
-                const T fx = eval_axis(0, tt, uu_, vv_);
-                const T fy = eval_axis(1, tt, uu_, vv_);
-                const T fz = eval_axis(2, tt, uu_, vv_);
+                T F[3];
+                diff_vf<T>(sv, s1, s2, s3, ev, e1, e2, e3, tt, uu_, vv_, F);
 
-                fmin[0] = sccd::min(fmin[0], fx);
-                fmin[1] = sccd::min(fmin[1], fy);
-                fmin[2] = sccd::min(fmin[2], fz);
+                fmin[0] = sccd::min(fmin[0], F[0]);
+                fmin[1] = sccd::min(fmin[1], F[1]);
+                fmin[2] = sccd::min(fmin[2], F[2]);
 
-                fmax[0] = sccd::max(fmax[0], fx);
-                fmax[1] = sccd::max(fmax[1], fy);
-                fmax[2] = sccd::max(fmax[2], fz);
+                fmax[0] = sccd::max(fmax[0], F[0]);
+                fmax[1] = sccd::max(fmax[1], F[1]);
+                fmax[2] = sccd::max(fmax[2], F[2]);
             }
 
-            const bool intersects = (fmin[0] <= tol && fmax[0] >= -tol) && (fmin[1] <= tol && fmax[1] >= -tol) &&
-                                    (fmin[2] <= tol && fmax[2] >= -tol);
+            const bool intersects = (fmin[0] <= tol0 && fmax[0] >= -tol0) && (fmin[1] <= tol1 && fmax[1] >= -tol1) &&
+                                    (fmin[2] <= tol2 && fmax[2] >= -tol2);
 
             if (!intersects) {
+                // printf("NO INTERSECTION: Iteration %d\n", iter);
+                // printf("BOX: (%f, %f, %f, %f, %f, %f)\n", box.tl, box.tu, box.ul, box.uu, box.vl, box.vu);
+                // printf("fmin: (%f, %f, %f), fmax: (%f, %f, %f)\n", fmin[0], fmin[1], fmin[2], fmax[0], fmax[1], fmax[2]);
+                // printf("--------------------------------\n");
                 continue;
+            } else {
+              printf("INTERSECTION: Iteration %d/%d\n", iter, max_iter);
+              printf("BOX: (%f, %f, %f, %f, %f, %f)\n", box.tl, box.tu, box.ul, box.uu, box.vl, box.vu);
+              printf("fmin: (%f, %f, %f), fmax: (%f, %f, %f)\n", fmin[0], fmin[1], fmin[2], fmax[0], fmax[1], fmax[2]);
+              printf("--------------------------------\n");
             }
 
             const T dt = box.tu - box.tl;
             const T du = box.uu - box.ul;
             const T dv = box.vu - box.vl;
 
-            const bool small_enough = dt <= tol && du <= tol && dv <= tol;
+            const bool small_enough = dt <= 10 * tol0 && du <= 10 * tol1 && dv <= 10 * tol2;
 
             if (small_enough) {
                 T tt = (box.tl + box.tu) * T(0.5);
@@ -491,7 +524,18 @@ namespace sccd {
                     v = v_candidate;
                     return true;
                 }
-                continue;
+
+                t = t_candidate;
+                u = u_candidate;
+                v = v_candidate;
+
+                if (t >= -tol0 && t <= 1 + tol0 && u >= -tol1 && v >= -tol2 && u + v <= 1 + tol1 + tol2) {
+                    // t = t_candidate;
+                    // u = u_candidate;
+                    // v = v_candidate;
+                    return true;
+                }
+                // continue;
             }
 
             // Split along the widest dimension to reduce volume fast
@@ -515,9 +559,9 @@ namespace sccd {
                 const T mid = (box.ul + box.uu) * T(0.5);
                 Box upper = box;
                 upper.ul = mid;
-                if (upper.ul + upper.vl <= T(1) + tol) {
+                // if (upper.ul + upper.vl <= tol1 + tol2) {
                     stack.push_back(upper);
-                }
+                // }
 
                 Box lower = box;
                 lower.uu = mid;
@@ -526,9 +570,9 @@ namespace sccd {
                 const T mid = (box.vl + box.vu) * T(0.5);
                 Box upper = box;
                 upper.vl = mid;
-                if (upper.ul + upper.vl <= T(1) + tol) {
+                // if (upper.ul + upper.vl <= tol1 + tol2) {
                     stack.push_back(upper);
-                }
+                // }
 
                 Box lower = box;
                 lower.vu = mid;
