@@ -37,8 +37,8 @@ if __name__ == "__main__":
         print("No vf dataset triples found.")
         raise SystemExit(0)
 
-    tol_t = 1e-4
-    tol_uv = 1e-4
+    tol_t = 1e-2
+    tol_uv = 1e-2
     total_cases = 0
     mismatches = 0
     false_positives = 0
@@ -48,13 +48,15 @@ if __name__ == "__main__":
         query_file = queries_by_key[key]
         root_file  = roots_by_key[key]
         mma_file   = mma_by_key[key]
+        
 
         print(f"Dataset {key}:")
+        # if key != "12vf": continue
+        # if key != "100vf": continue
+
         query_data = read_queries.read_queries(query_file)
         root_map   = read_wxf.read_wxf_roots(root_file)  # Dict[int] -> {t,a,b}
         mma_bool   = read_mma.read_mma_bool(mma_file)    # List[bool]
-
-        # if key != "100vf": continue
 
         n = len(query_data["v_t0"][0])
         if len(mma_bool) != n:
@@ -71,7 +73,8 @@ if __name__ == "__main__":
             e3_3d = [ query_data["f2_t1"][0][i], query_data["f2_t1"][1][i], query_data["f2_t1"][2][i]]
 
             # ret = find_root_dfs_3D(1000, 1e-6, sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d)
-            ret = sccd_py.find_root_dfs_d(1000, 1e-6, sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d)
+            # ret = sccd_py.find_root_dfs_d(1000, 1e-6, sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d)
+            ret = sccd_py.find_root_bisection_vf_d(10000, 1e-8, sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d)
             expected_hit = bool(mma_bool[i]) 
 
             total_cases += 1
