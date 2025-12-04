@@ -2,6 +2,8 @@
 
 set -e
 
+source data/venv/bin/activate 
+
 cd build
 make -j8
 
