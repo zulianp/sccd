@@ -10,6 +10,8 @@ from numeric_roots import vf_F_3d, find_root_dfs_3D
 import read_mma
 import sccd_py
 
+import time
+
 if __name__ == "__main__":
     import os
     import glob
@@ -51,6 +53,7 @@ if __name__ == "__main__":
         
 
         print(f"Dataset {key}:")
+        
         # if key != "12vf": continue
         # if key != "100vf": continue
 
@@ -62,6 +65,7 @@ if __name__ == "__main__":
         if len(mma_bool) != n:
             print(f"  Warning: mma_bool length {len(mma_bool)} != queries {n}")
 
+        time_start = time.perf_counter()
         for i in range(n):
             sv_3d = [ query_data["v_t0"][0][i], query_data["v_t0"][1][i], query_data["v_t0"][2][i]]
             s1_3d = [ query_data["f0_t0"][0][i], query_data["f0_t0"][1][i], query_data["f0_t0"][2][i]]
@@ -119,6 +123,7 @@ if __name__ == "__main__":
                     # Root not present; report but don't fail loudly
                     false_positives += 1
 
-        print(f"  Done {key}, {mismatches} mismatches {false_positives} false positives, {false_negatives} false negatives.")
+        time_end = time.perf_counter()
+        print(f"  Done {key}, {mismatches} mismatches {false_positives} false positives, {false_negatives} false negatives. Time: {time_end - time_start} [s] Queries/s: {n / (time_end - time_start)}")
     print(f"Summary: {total_cases} cases, {mismatches} mismatches, {false_positives} false positives, {false_negatives} false negatives.")
 
