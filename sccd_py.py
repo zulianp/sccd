@@ -242,7 +242,8 @@ def find_root_dfs_f(
     e2p = _as_arr3_f(e2)[0]
     e3p = _as_arr3_f(e3)[0]
     t = ct.c_float(t0)
-
+    u = ct.c_float(u0)
+    v = ct.c_float(v0)
     ok = _lib.sccd_find_root_dfs_f(
         int(max_iter), float(tol),
         svp, s1p, s2p, s3p, evp, e1p, e2p, e3p,
