@@ -7,6 +7,8 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+#include <iostream>
+#include <ostream>
 
 #include "vaabb.h"
 
@@ -47,7 +49,11 @@ namespace sccd {
         T t1 = t;
         T o = (1 - u - v);
         for (int d = 0; d < 3; d++) {
-            diff[d] = t0 * sv[d] + t1 * ev[d] - (o * s1[d] + u * s2[d] + v * s3[d]);
+            T v =  t0 * sv[d] + t1 * ev[d];
+            T f0 =  t0 * (o * s1[d] + u * s2[d] + v * s3[d]);
+            T f1 =  t1 * (o * e1[d] + u * e2[d] + v * e3[d]);
+            T f = f0 + f1;
+            diff[d] = v - f;
         }
     }
 
@@ -63,13 +69,8 @@ namespace sccd {
                           T &t,
                           T &u,
                           T &v) {
-        T t0 = (1 - t);
-        T t1 = t;
-        T o = (1 - u - v);
-        T diff[3];
-        for (int d = 0; d < 3; d++) {
-            diff[d] = t0 * sv[d] + t1 * ev[d] - (o * s1[d] + u * s2[d] + v * s3[d]);
-        }
+                            T diff[3];
+       diff_vf(sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, diff);
         return sqrt(diff[0] * diff[0] + diff[1] * diff[1] + diff[2] * diff[2]);
     }
 
@@ -149,6 +150,28 @@ namespace sccd {
     }
 
     template <typename T>
+    inline static void codomain_box_soa(const int n,
+                                        const T *const SFEM_RESTRICT F000,
+                                        const T *const SFEM_RESTRICT F001,
+                                        const T *const SFEM_RESTRICT F010,
+                                        const T *const SFEM_RESTRICT F011,
+                                        const T *const SFEM_RESTRICT F100,
+                                        const T *const SFEM_RESTRICT F101,
+                                        const T *const SFEM_RESTRICT F110,
+                                        const T *const SFEM_RESTRICT F111,
+                                        const T tol,
+                                        T *const SFEM_RESTRICT fmin,
+                                        T *const SFEM_RESTRICT fmax) {
+        for (int k = 0; k < n; k++) {
+            fmin[k] = sccd::min(sccd::min(sccd::min(F000[k], F001[k]), sccd::min(F010[k], F011[k])),
+                                sccd::min(sccd::min(F100[k], F101[k]), sccd::min(F110[k], F111[k])));
+
+            fmax[k] = sccd::max(sccd::max(sccd::max(F000[k], F001[k]), sccd::max(F010[k], F011[k])),
+                                sccd::max(sccd::max(F100[k], F101[k]), sccd::max(F110[k], F111[k])));
+        }
+    }
+
+    template <typename T>
     inline static void detect_zero_soa(const int n,
                                        const T *const SFEM_RESTRICT F000,
                                        const T *const SFEM_RESTRICT F001,
@@ -225,10 +248,16 @@ namespace sccd {
                     const T t = start_a + a * ha;
                     const T u = start_b + b * hb;
                     const T v = start_c + c * hc;
-                    const T t0 = (1 - t);
-                    const T t1 = t;
-                    const T o = (1 - u - v);
-                    F[idx] = t0 * sv + t1 * ev - (o * s1 + u * s2 + v * s3);
+                    // const T t0 = (1 - t);
+                    // const T t1 = t;
+                    // const T o = (1 - u - v);
+                    // F[idx] = t0 * sv + t1 * ev - (o * s1 + u * s2 + v * s3);
+
+                    const T vv = (ev - sv) * t + sv;
+                    const T t0 = (e1 - s1) * t + s1;
+                    const T t1 = (e2 - s2) * t + s2;
+                    const T t2 = (e3 - s3) * t + s3;
+                    F[idx] = vv - (t1 - t0) * u - (t2 - t0) * v - t0;
                 }
             }
         }
@@ -401,6 +430,10 @@ namespace sccd {
 
         return found;
     }
+    template <typename T>
+    bool sum_less_than_one(const T u, const T v) {
+        return u + v <= 1. / (1. - DBL_EPSILON);
+    };
 
     template <typename T>
     bool find_root_bisection(const int max_iter,
@@ -416,10 +449,137 @@ namespace sccd {
                              T &t,
                              T &u,
                              T &v) {
+        struct Interval {
+            T lower, upper;
+            bool is_terminal() const { return lower >= upper; }
+        };
+
         struct Box {
-            T tl, tu;
-            T ul, uu;
-            T vl, vu;
+            Interval tuv[3];
+            int depth{0};
+
+            Box() = default;
+            Box(Interval t, Interval u, Interval v, int depth) : tuv{t, u, v}, depth(depth) {}
+            bool is_terminal() const { return tuv[0].is_terminal() || tuv[1].is_terminal() || tuv[2].is_terminal(); }
+            bool smaller_than_tol(const T tol0, const T tol1, const T tol2) const {
+                return tuv[0].upper - tuv[0].lower <= tol0 && tuv[1].upper - tuv[1].lower <= tol1 &&
+                       tuv[2].upper - tuv[2].lower <= tol2;
+            }
+
+            void print() const {
+                std::cout << "Box: t: [" << tuv[0].lower << ", " << tuv[0].upper << "], u: [" << tuv[1].lower << ", " << tuv[1].upper << "], v: [" << tuv[2].lower << ", " << tuv[2].upper << "], depth: " << depth << std::endl;
+            }
+
+            bool is_at_depth_limit(const int max_iter) const { return depth >= max_iter; }
+
+            int widest_dimension() const {
+                const T dt = tuv[0].upper - tuv[0].lower;
+                const T du = tuv[1].upper - tuv[1].lower;
+                const T dv = tuv[2].upper - tuv[2].lower;
+                if (du > dt && du >= dv) {
+                    return 1;
+                } else if (dv > dt && dv > du) {
+                    return 2;
+                }
+                return 0;
+            }
+
+            bool bisect(int split_dim, const T toi, std::vector<Box> &stack) const {
+                std::pair<Interval, Interval> split_intervals{
+                    Interval{tuv[split_dim].lower, (tuv[split_dim].lower + tuv[split_dim].upper) * T(0.5)}, 
+                    Interval{(tuv[split_dim].lower + tuv[split_dim].upper) * T(0.5), tuv[split_dim].upper}
+                };
+
+                if(split_intervals.first.is_terminal() || split_intervals.second.is_terminal()) {
+                    return true;
+                }
+
+                stack.push_back(*this);
+                stack.back().tuv[split_dim] = split_intervals.first;
+                stack.back().depth++;
+
+                if (split_dim == 0) {
+                    // if(split_intervals.second.lower < toi) {
+                    stack.push_back(*this);
+                    stack.back().tuv[split_dim] = split_intervals.second;
+                    stack.back().depth++;
+                    // }
+                } else {
+                    if (split_dim == 1) {
+                        if (sum_less_than_one(split_intervals.first.lower, tuv[2].lower)) {
+                            stack.push_back(*this);
+                            stack.back().tuv[split_dim] = split_intervals.second;
+                            stack.back().depth++;
+                        }
+                    } else if (split_dim == 2) {
+                        if (sum_less_than_one(split_intervals.second.lower, tuv[1].lower)) {
+                            stack.push_back(*this);
+                            stack.back().tuv[split_dim] = split_intervals.second;
+                            stack.back().depth++;
+                        }
+                    }
+                }
+
+                return false;
+            }
+        };
+
+        auto codomain_box = [=](const Box &domain, Box &codomain) -> void {
+            codomain.tuv[0].lower = std::numeric_limits<T>::max();
+            codomain.tuv[0].upper = std::numeric_limits<T>::lowest();
+            codomain.tuv[1].lower = std::numeric_limits<T>::max();
+            codomain.tuv[1].upper = std::numeric_limits<T>::lowest();
+            codomain.tuv[2].lower = std::numeric_limits<T>::max();
+            codomain.tuv[2].upper = std::numeric_limits<T>::lowest();
+
+            for(int i = 0; i < 8; i++) {
+               const T t = (i & 1) ? domain.tuv[0].upper : domain.tuv[0].lower;
+               const T u = (i & 2) ? domain.tuv[1].upper : domain.tuv[1].lower;
+               const T v = (i & 4) ? domain.tuv[2].upper : domain.tuv[2].lower;
+
+                T F[3];
+                diff_vf(sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, F);
+
+                codomain.tuv[0].lower = sccd::min(codomain.tuv[0].lower, F[0]);
+                codomain.tuv[0].upper = sccd::max(codomain.tuv[0].upper, F[0]);
+                codomain.tuv[1].lower = sccd::min(codomain.tuv[1].lower, F[1]);
+                codomain.tuv[1].upper = sccd::max(codomain.tuv[1].upper, F[1]);
+                codomain.tuv[2].lower = sccd::min(codomain.tuv[2].lower, F[2]);
+                codomain.tuv[2].upper = sccd::max(codomain.tuv[2].upper, F[2]);
+            }
+        };
+
+        auto contains_origin = [&](const Box &box, T &true_tol, bool &inside_box) -> bool {
+            Box codomain;
+            codomain_box(box, codomain);
+
+            printf("----------\n");
+            printf("Domain\n");
+            box.print();
+            printf("Codomain\n");
+            codomain.print();
+            printf("----------\n");
+
+            for(int i = 0; i < 3; i++) {
+                if(codomain.tuv[i].lower > tol || codomain.tuv[i].upper < -tol) {
+                    printf("REJECTED\n");
+                    return false;
+                }
+            }
+
+            inside_box = true;
+            for(int i = 0; i < 3; i++) {
+                if(codomain.tuv[i].lower < tol || codomain.tuv[i].upper > -tol) {
+                    inside_box = false;
+                }
+            }
+
+            printf("ACCEPTED\n");
+
+          
+
+            true_tol = sccd::max(sccd::max(codomain.tuv[0].upper - codomain.tuv[0].lower, codomain.tuv[1].upper - codomain.tuv[1].lower), codomain.tuv[2].upper - codomain.tuv[2].lower);
+            return true;
         };
 
         // Compute per-axis tolerances (matching snumtol.hpp signature)
@@ -455,195 +615,270 @@ namespace sccd {
 
         printf("tol %f -> tol0: %f, tol1: %f, tol2: %f\n", tol, tol0, tol1, tol2);
 
-        // Depth-first stack
         std::vector<Box> stack;
-        stack.reserve(max_iter * 2 + 8);
-        stack.push_back({T(0), T(1), T(0), T(1), T(0), T(1)});
+        stack.reserve(1024);
+        stack.push_back(Box(Interval{T(0), T(1)}, Interval{T(0), T(1)}, Interval{T(0), T(1)}, 0));
 
-        int iter = 0;
-        while (!stack.empty() && iter < max_iter) {
+        T toi = 0;
+        while (!stack.empty()) {
             Box box = stack.back();
             stack.pop_back();
-            ++iter;
 
-            // Quick rectangle-simplex disjoint test for the (u,v) slice
-            const bool disjoint_simplex = (box.ul >= T(1) && box.uu >= T(1)) || (box.vl >= T(1) && box.vu >= T(1)) ||
-                                          ((box.ul + box.vl > T(1)) && (box.ul + box.vu > T(1)) &&
-                                           (box.uu + box.vl > T(1)) && (box.uu + box.vu > T(1)));
-            if (disjoint_simplex) {
-                continue;
-            }
-
-            T fmin[3] = {std::numeric_limits<T>::max(), std::numeric_limits<T>::max(), std::numeric_limits<T>::max()};
-            T fmax[3] = {
-                std::numeric_limits<T>::lowest(), std::numeric_limits<T>::lowest(), std::numeric_limits<T>::lowest()};
-
-            auto inside_simplex = [](const T u, const T v) -> bool {
-                return (u >= T(0) && v >= T(0) && u + v <= T(1));
-            };
-            auto inside_rect = [&](T u, T v) { return (u >= box.ul && u <= box.uu && v >= box.vl && v <= box.vu); };
-
-            std::vector<std::pair<T, T>> uv_samples;
-            uv_samples.reserve(12);
-            auto add_uv = [&](T u, T v) {
-                const T eps = T(1e-12);
-                for (const auto &p : uv_samples) {
-                    if (sccd::abs<T>(p.first - u) <= eps && sccd::abs<T>(p.second - v) <= eps) return;
-                }
-                uv_samples.emplace_back(u, v);
-            };
-
-            const T uvals[2] = {box.ul, box.uu};
-            const T vvals[2] = {box.vl, box.vu};
-            // Rectangle corners inside simplex
-            for (int iu = 0; iu < 2; ++iu) {
-                for (int iv = 0; iv < 2; ++iv) {
-                    const T u = uvals[iu];
-                    const T v = vvals[iv];
-                    if (inside_simplex(u, v)) add_uv(u, v);
-                }
-            }
-            // Intersections with u+v=1 on edges
-            for (int iu = 0; iu < 2; ++iu) {
-                const T u = uvals[iu];
-                const T v_int = T(1) - u;
-                if (v_int >= box.vl && v_int <= box.vu) add_uv(u, v_int);
-            }
-            for (int iv = 0; iv < 2; ++iv) {
-                const T v = vvals[iv];
-                const T u_int = T(1) - v;
-                if (u_int >= box.ul && u_int <= box.uu) add_uv(u_int, v);
-            }
-            // Triangle vertices inside rectangle
-            if (inside_rect(T(0), T(0))) add_uv(T(0), T(0));
-            if (inside_rect(T(1), T(0))) add_uv(T(1), T(0));
-            if (inside_rect(T(0), T(1))) add_uv(T(0), T(1));
-            // Fallback: project rectangle corners
-            if (uv_samples.empty()) {
-                for (int iu = 0; iu < 2; ++iu) {
-                    for (int iv = 0; iv < 2; ++iv) {
-                        T u = uvals[iu];
-                        T v = vvals[iv];
-                        project_uv_simplex<T>(u, v);
-                        add_uv(u, v);
-                    }
-                }
-            }
-
-            auto eval_at_t = [&](const T tt) {
-                for (const auto &uv : uv_samples) {
-                    const T u = uv.first;
-                    const T v = uv.second;
-                    T Fv[3];
-                    diff_vf<T>(sv, s1, s2, s3, ev, e1, e2, e3, tt, u, v, Fv);
-                    fmin[0] = sccd::min(fmin[0], Fv[0]);
-                    fmin[1] = sccd::min(fmin[1], Fv[1]);
-                    fmin[2] = sccd::min(fmin[2], Fv[2]);
-                    fmax[0] = sccd::max(fmax[0], Fv[0]);
-                    fmax[1] = sccd::max(fmax[1], Fv[1]);
-                    fmax[2] = sccd::max(fmax[2], Fv[2]);
-                }
-            };
-            eval_at_t(box.tl);
-            eval_at_t(box.tu);
-
-            const bool intersects = (fmin[0] <= tol0 && fmax[0] >= -tol0) && (fmin[1] <= tol1 && fmax[1] >= -tol1) &&
-                                    (fmin[2] <= tol2 && fmax[2] >= -tol2);
-
-            if (!intersects) {
-                // printf("NO INTERSECTION: Iteration %d\n", iter);
-                // printf("BOX: (%f, %f, %f, %f, %f, %f)\n", box.tl, box.tu, box.ul, box.uu, box.vl, box.vu);
-                // printf("fmin: (%f, %f, %f), fmax: (%f, %f, %f)\n", fmin[0], fmin[1], fmin[2], fmax[0], fmax[1],
-                // fmax[2]); printf("--------------------------------\n");
-                continue;
-            } else {
-                printf("INTERSECTION: Iteration %d/%d\n", iter, max_iter);
-                printf("BOX: (%f, %f, %f, %f, %f, %f)\n", box.tl, box.tu, box.ul, box.uu, box.vl, box.vu);
-                printf(
-                    "fmin: (%f, %f, %f), fmax: (%f, %f, %f)\n", fmin[0], fmin[1], fmin[2], fmax[0], fmax[1], fmax[2]);
-                printf("--------------------------------\n");
-            }
-
-            const T dt = box.tu - box.tl;
-            const T du = box.uu - box.ul;
-            const T dv = box.vu - box.vl;
-
-            const bool small_enough = dt <= 10 * tol0 && du <= 10 * tol1 && dv <= 10 * tol2;
-
-            if (small_enough) {
-                T tt = (box.tl + box.tu) * T(0.5);
-                T uu = (box.ul + box.uu) * T(0.5);
-                T vv = (box.vl + box.vu) * T(0.5);
-
-                T t_candidate = tt;
-                T u_candidate = uu;
-                T v_candidate = vv;
-
-                if (find_root_newton<T>(
-                        max_iter, tol, sv, s1, s2, s3, ev, e1, e2, e3, t_candidate, u_candidate, v_candidate)) {
-                    t = t_candidate;
-                    u = u_candidate;
-                    v = v_candidate;
+            T true_tol = tol;
+            bool inside_box = false;
+            if (contains_origin(box, true_tol, inside_box)) {
+                // Condition 1: the domain is smaller than the tolerance.
+                if (box.smaller_than_tol(tol0, tol1, tol2)) {
+                    t = box.tuv[0].lower;
+                    u = box.tuv[1].lower;
+                    v = box.tuv[2].lower;
                     return true;
                 }
 
-                // Only accept midpoint if residual is small
-                {
-                    T Fmid[3];
-                    diff_vf<T>(sv, s1, s2, s3, ev, e1, e2, e3, t_candidate, u_candidate, v_candidate, Fmid);
-                    const T fn = sccd::abs<T>(Fmid[0]) + sccd::abs<T>(Fmid[1]) + sccd::abs<T>(Fmid[2]);
-                    if (fn <= (tol0 + tol1 + tol2)) {
-                        t = t_candidate;
-                        u = u_candidate;
-                        v = v_candidate;
-                        return true;
-                    }
+                // Condition 2: the box is inside the epsilon box
+                if (inside_box) {
+                    t = box.tuv[0].lower;
+                    u = box.tuv[1].lower;
+                    v = box.tuv[2].lower;
+                    return true;
                 }
 
-                // continue to split
-            }
+                // Condition 3: real tolerance is smaller than the int tolerance
+                if (true_tol < tol && box.tuv[0].lower > 0) {
+                    t = box.tuv[0].lower;
+                    u = box.tuv[1].lower;
+                    v = box.tuv[2].lower;
+                    return true;
+                }
 
-            // Split along the widest dimension to reduce volume fast
-            int split_dim = 0;
-            if (du > dt && du >= dv) {
-                split_dim = 1;
-            } else if (dv > dt && dv > du) {
-                split_dim = 2;
-            }
+                if (box.is_terminal()) {
+                    printf("Box is terminal!\n");
+                    continue;
+                }
 
-            if (split_dim == 0) {
-                const T mid = (box.tl + box.tu) * T(0.5);
-                Box upper = box;
-                upper.tl = mid;
-                Box lower = box;
-                lower.tu = mid;
-
-                stack.push_back(upper);
-                stack.push_back(lower);
-            } else if (split_dim == 1) {
-                const T mid = (box.ul + box.uu) * T(0.5);
-                Box upper = box;
-                upper.ul = mid;
-                // if (upper.ul + upper.vl <= tol1 + tol2) {
-                stack.push_back(upper);
-                // }
-
-                Box lower = box;
-                lower.uu = mid;
-                stack.push_back(lower);
-            } else {
-                const T mid = (box.vl + box.vu) * T(0.5);
-                Box upper = box;
-                upper.vl = mid;
-                // if (upper.ul + upper.vl <= tol1 + tol2) {
-                stack.push_back(upper);
-                // }
-
-                Box lower = box;
-                lower.vu = mid;
-                stack.push_back(lower);
+                // Split the box along the widest dimension
+                int split_dim = box.widest_dimension();
+                if (box.bisect(split_dim, toi, stack)) {
+                    t = box.tuv[0].lower;
+                    u = box.tuv[1].lower;
+                    v = box.tuv[2].lower;
+                    return true;
+                }
+            }  else {
+                // printf("Box does not contain origin!\n"); 
+                // box.print();
+                // Box codomain;
+                // codomain_box(box, codomain);
+                // codomain.print();
+                continue;
             }
         }
+        // // Depth-first stack
+        // std::vector<Box> stack;
+        // stack.reserve(max_iter * 2 + 8);
+        // stack.push_back({T(0), T(1), T(0), T(1), T(0), T(1), 0});
+
+        // while (!stack.empty()) {
+        //     Box box = stack.back();
+        //     stack.pop_back();
+
+        //     // Quick rectangle-simplex disjoint test for the (u,v) slice
+        //     const T eps_simplex = tol * static_cast<T>(2);
+        //     const bool disjoint_simplex =
+        //         (box.ul >= T(1) + eps_simplex && box.uu >= T(1) + eps_simplex) ||
+        //         (box.vl >= T(1) + eps_simplex && box.vu >= T(1) + eps_simplex) ||
+        //         ((box.ul + box.vl > T(1) + eps_simplex) && (box.ul + box.vu > T(1) + eps_simplex) &&
+        //          (box.uu + box.vl > T(1) + eps_simplex) && (box.uu + box.vu > T(1) + eps_simplex));
+        //     if (disjoint_simplex) {
+        //         continue;
+        //     }
+
+        //     T fmin[3] = {std::numeric_limits<T>::max(), std::numeric_limits<T>::max(),
+        //     std::numeric_limits<T>::max()}; T fmax[3] = {
+        //         std::numeric_limits<T>::lowest(), std::numeric_limits<T>::lowest(),
+        //         std::numeric_limits<T>::lowest()};
+
+        //     auto inside_simplex = [](const T u, const T v) -> bool {
+        //         return (u >= T(0) && v >= T(0) && u + v <= T(1));
+        //     };
+        //     auto inside_rect = [&](T u, T v) { return (u >= box.ul && u <= box.uu && v >= box.vl && v <= box.vu); };
+
+        //     std::vector<std::pair<T, T>> uv_samples;
+        //     uv_samples.reserve(12);
+        //     auto add_uv = [&](T u, T v) {
+        //         const T eps = T(1e-12);
+        //         for (const auto &p : uv_samples) {
+        //             if (sccd::abs<T>(p.first - u) <= eps && sccd::abs<T>(p.second - v) <= eps) return;
+        //         }
+        //         uv_samples.emplace_back(u, v);
+        //     };
+
+        //     const T uvals[2] = {box.ul, box.uu};
+        //     const T vvals[2] = {box.vl, box.vu};
+        //     // Rectangle corners inside simplex
+        //     for (int iu = 0; iu < 2; ++iu) {
+        //         for (int iv = 0; iv < 2; ++iv) {
+        //             const T u = uvals[iu];
+        //             const T v = vvals[iv];
+        //             if (inside_simplex(u, v)) add_uv(u, v);
+        //         }
+        //     }
+        //     // Intersections with u+v=1 on edges
+        //     for (int iu = 0; iu < 2; ++iu) {
+        //         const T u = uvals[iu];
+        //         const T v_int = T(1) - u;
+        //         if (v_int >= box.vl && v_int <= box.vu) add_uv(u, v_int);
+        //     }
+        //     for (int iv = 0; iv < 2; ++iv) {
+        //         const T v = vvals[iv];
+        //         const T u_int = T(1) - v;
+        //         if (u_int >= box.ul && u_int <= box.uu) add_uv(u_int, v);
+        //     }
+        //     // Triangle vertices inside rectangle
+        //     if (inside_rect(T(0), T(0))) add_uv(T(0), T(0));
+        //     if (inside_rect(T(1), T(0))) add_uv(T(1), T(0));
+        //     if (inside_rect(T(0), T(1))) add_uv(T(0), T(1));
+        //     // Fallback: project rectangle corners
+        //     if (uv_samples.empty()) {
+        //         for (int iu = 0; iu < 2; ++iu) {
+        //             for (int iv = 0; iv < 2; ++iv) {
+        //                 T u = uvals[iu];
+        //                 T v = vvals[iv];
+        //                 project_uv_simplex<T>(u, v);
+        //                 add_uv(u, v);
+        //             }
+        //         }
+        //     }
+
+        //     auto eval_at_t = [&](const T tt) {
+        //         for (const auto &uv : uv_samples) {
+        //             const T u = uv.first;
+        //             const T v = uv.second;
+        //             T Fv[3];
+        //             diff_vf<T>(sv, s1, s2, s3, ev, e1, e2, e3, tt, u, v, Fv);
+        //             fmin[0] = sccd::min(fmin[0], Fv[0]);
+        //             fmin[1] = sccd::min(fmin[1], Fv[1]);
+        //             fmin[2] = sccd::min(fmin[2], Fv[2]);
+        //             fmax[0] = sccd::max(fmax[0], Fv[0]);
+        //             fmax[1] = sccd::max(fmax[1], Fv[1]);
+        //             fmax[2] = sccd::max(fmax[2], Fv[2]);
+        //         }
+        //     };
+        //     eval_at_t(box.tl);
+        //     eval_at_t(box.tu);
+
+        //     const bool intersects = (fmin[0] <= tol0 && fmax[0] >= -tol0) && (fmin[1] <= tol1 && fmax[1] >= -tol1) &&
+        //                             (fmin[2] <= tol2 && fmax[2] >= -tol2);
+
+        //     if (!intersects) {
+        //         // Still subdivide to avoid missing roots due to overly aggressive interval culling
+        //         // if (box.depth < max_iter) {
+        //         //     const int next_depth = box.depth + 1;
+        //         //     const T mid_t = (box.tl + box.tu) * T(0.5);
+        //         //     const T mid_u = (box.ul + box.uu) * T(0.5);
+        //         //     const T mid_v = (box.vl + box.vu) * T(0.5);
+
+        //         //     // Split along widest dimension to reduce volume fast
+        //         //     const T dt = box.tu - box.tl;
+        //         //     const T du = box.uu - box.ul;
+        //         //     const T dv = box.vu - box.vl;
+        //         //     int split_dim = 0;
+        //         //     if (du > dt && du >= dv) {
+        //         //         split_dim = 1;
+        //         //     } else if (dv > dt && dv > du) {
+        //         //         split_dim = 2;
+        //         //     }
+
+        //         //     if (split_dim == 0) {
+        //         //         stack.push_back({mid_t, box.tu, box.ul, box.uu, box.vl, box.vu, next_depth});
+        //         //         stack.push_back({box.tl, mid_t, box.ul, box.uu, box.vl, box.vu, next_depth});
+        //         //     } else if (split_dim == 1) {
+        //         //         stack.push_back({box.tl, box.tu, mid_u, box.uu, box.vl, box.vu, next_depth});
+        //         //         stack.push_back({box.tl, box.tu, box.ul, mid_u, box.vl, box.vu, next_depth});
+        //         //     } else {
+        //         //         stack.push_back({box.tl, box.tu, box.ul, box.uu, mid_v, box.vu, next_depth});
+        //         //         stack.push_back({box.tl, box.tu, box.ul, box.uu, box.vl, mid_v, next_depth});
+        //         //     }
+        //         // }
+        //         continue;
+        //     }
+
+        //     const T dt = box.tu - box.tl;
+        //     const T du = box.uu - box.ul;
+        //     const T dv = box.vu - box.vl;
+
+        //     const bool small_enough = dt <= 10 * tol0 && du <= 10 * tol1 && dv <= 10 * tol2;
+        //     const bool at_depth_limit = box.depth >= max_iter;
+        //     const bool terminal = small_enough || at_depth_limit;
+
+        //     printf("terminal: %d, %f, %f, %f,%f, %f, %f\n", terminal, box.tl, box.ul, box.vl, box.tu, box.uu,
+        //     box.vu);
+
+        //     if (terminal) {
+        //         T tt = (box.tl + box.tu) * T(0.5);
+        //         T uu = (box.ul + box.uu) * T(0.5);
+        //         T vv = (box.vl + box.vu) * T(0.5);
+
+        //         // Only accept midpoint if residual is small
+        //         {
+        //             T Fmid[3];
+        //             diff_vf<T>(sv, s1, s2, s3, ev, e1, e2, e3, tt, uu, vv, Fmid);
+        //             const T fn = sccd::abs<T>(Fmid[0]) + sccd::abs<T>(Fmid[1]) + sccd::abs<T>(Fmid[2]);
+        //             if (fn <= (tol0 + tol1 + tol2)) {
+        //                 t = tt;
+        //                 u = uu;
+        //                 v = vv;
+        //                 return true;
+        //             }
+        //         }
+        //     }
+
+        //     // Split along the widest dimension to reduce volume fast
+        //     int split_dim = 0;
+        //     if (du > dt && du >= dv) {
+        //         split_dim = 1;
+        //     } else if (dv > dt && dv > du) {
+        //         split_dim = 2;
+        //     }
+
+        //     if (box.depth < max_iter) {
+        //         const int next_depth = box.depth + 1;
+        //         if (split_dim == 0) {
+        //             const T mid = (box.tl + box.tu) * T(0.5);
+        //             Box upper = box;
+        //             upper.tl = mid;
+        //             upper.depth = next_depth;
+        //             Box lower = box;
+        //             lower.tu = mid;
+        //             lower.depth = next_depth;
+
+        //             stack.push_back(upper);
+        //             stack.push_back(lower);
+        //         } else if (split_dim == 1) {
+        //             const T mid = (box.ul + box.uu) * T(0.5);
+        //             Box upper = box;
+        //             upper.ul = mid;
+        //             upper.depth = next_depth;
+        //             stack.push_back(upper);
+
+        //             Box lower = box;
+        //             lower.uu = mid;
+        //             lower.depth = next_depth;
+        //             stack.push_back(lower);
+        //         } else {
+        //             const T mid = (box.vl + box.vu) * T(0.5);
+        //             Box upper = box;
+        //             upper.vl = mid;
+        //             upper.depth = next_depth;
+        //             stack.push_back(upper);
+
+        //             Box lower = box;
+        //             lower.vu = mid;
+        //             lower.depth = next_depth;
+        //             stack.push_back(lower);
+        //         }
+        //     }
+        // }
 
         return false;
     }
@@ -1028,21 +1263,20 @@ namespace sccd {
         return false;
     }
 
-
     template <typename T>
     bool find_root_dfs(const int max_iter,
-                         const T tol,
-                         const T sv[3],
-                         const T s1[3],
-                         const T s2[3],
-                         const T s3[3],
-                         const T ev[3],
-                         const T e1[3],
-                         const T e2[3],
-                         const T e3[3],
-                         T &t,
-                         T &u,
-                         T &v) {
+                       const T tol,
+                       const T sv[3],
+                       const T s1[3],
+                       const T s2[3],
+                       const T s3[3],
+                       const T ev[3],
+                       const T e1[3],
+                       const T e2[3],
+                       const T e3[3],
+                       T &t,
+                       T &u,
+                       T &v) {
         // Depth-first root search mirroring find_root_dfs_3D in numeric_roots.py
         auto eval_F = [&](const T tt, const T uu, const T vv, T &fx, T &fy, T &fz) {
             const T t0 = static_cast<T>(1) - tt;
@@ -1072,8 +1306,9 @@ namespace sccd {
             fz = vz - fz_face;
         };
 
-        int side = std::max<int>(4, static_cast<int>(std::round(
-                                       std::pow(static_cast<T>(ROOT_FINDING_CHUNK_SIZE), static_cast<T>(1.0 / 3.0)))));
+        int side = std::max<int>(
+            4,
+            static_cast<int>(std::round(std::pow(static_cast<T>(ROOT_FINDING_CHUNK_SIZE), static_cast<T>(1.0 / 3.0)))));
         while ((side * side * side) > ROOT_FINDING_CHUNK_SIZE && side > 2) {
             --side;
         }
@@ -1357,17 +1592,18 @@ namespace sccd {
             const T uc = static_cast<T>(0.5) * (cell.u0 + cell.u1);
             const T vc = static_cast<T>(0.5) * (cell.v0 + cell.v1);
 
-                if (uc >= static_cast<T>(-1e-8) && vc >= static_cast<T>(-1e-8) &&
-                    (uc + vc) <= static_cast<T>(1) + static_cast<T>(1e-8)) {
-                    T fx_c, fy_c, fz_c;
-                    eval_F(tc, uc, vc, fx_c, fy_c, fz_c);
-                    const T fn_center = std::sqrt(fx_c * fx_c + fy_c * fy_c + fz_c * fz_c);
-                    if (fn_center <= tol) {
+            if (uc >= static_cast<T>(-1e-8) && vc >= static_cast<T>(-1e-8) &&
+                (uc + vc) <= static_cast<T>(1) + static_cast<T>(1e-8)) {
+                T fx_c, fy_c, fz_c;
+                eval_F(tc, uc, vc, fx_c, fy_c, fz_c);
+                const T fn_center = std::sqrt(fx_c * fx_c + fy_c * fy_c + fz_c * fz_c);
+                if (fn_center <= tol) {
                     T t_candidate = tc;
                     T u_candidate = uc;
                     T v_candidate = vc;
                     if (refine_root(t_candidate, u_candidate, v_candidate) ||
-                        find_root_newton<T>(100, refine_tol, sv, s1, s2, s3, ev, e1, e2, e3, t_candidate, u_candidate, v_candidate)) {
+                        find_root_newton<T>(
+                            100, refine_tol, sv, s1, s2, s3, ev, e1, e2, e3, t_candidate, u_candidate, v_candidate)) {
                         t = t_candidate;
                         u = u_candidate;
                         v = v_candidate;
@@ -1408,7 +1644,7 @@ namespace sccd {
         }
 
         return false;
-                         }
+    }
 
 }  // namespace sccd
 
