@@ -248,11 +248,6 @@ namespace sccd {
                     const T t = start_a + a * ha;
                     const T u = start_b + b * hb;
                     const T v = start_c + c * hc;
-                    // const T t0 = (1 - t);
-                    // const T t1 = t;
-                    // const T o = (1 - u - v);
-                    // F[idx] = t0 * sv + t1 * ev - (o * s1 + u * s2 + v * s3);
-
                     const T vv = (ev - sv) * t + sv;
                     const T t0 = (e1 - s1) * t + s1;
                     const T t1 = (e2 - s2) * t + s2;
@@ -661,10 +656,13 @@ namespace sccd {
                 // Split the box along the widest dimension
                 int split_dim = box.widest_dimension();
                 if (box.bisect(split_dim, toi, stack)) {
+                    // Split box too small
                     t = box.tuv[0].lower;
                     u = box.tuv[1].lower;
                     v = box.tuv[2].lower;
                     toi = sccd::min(toi, min_t);
+                    found_root = true;
+                    continue;
                 }
             }
         }

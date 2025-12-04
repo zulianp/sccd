@@ -73,7 +73,7 @@ if __name__ == "__main__":
             e3_3d = [ query_data["f2_t1"][0][i], query_data["f2_t1"][1][i], query_data["f2_t1"][2][i]]
 
             # ret = find_root_dfs_3D(1000, 1e-6, sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d)
-            # ret = sccd_py.find_root_dfs_d(1000, 1e-6, sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d)
+            # ret = sccd_py.find_root_vf_d(1000, 1e-6, sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d)
             ret = sccd_py.find_root_bisection_vf_d(10000, 1e-8, sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d)
             expected_hit = bool(mma_bool[i]) 
 
