@@ -1150,33 +1150,43 @@ namespace sccd {
                     JTF[c] = J[0][c] * F0[0] + J[1][c] * F0[1] + J[2][c] * F0[2];
                 }
 
-                const T det = JTJ[0][0] * (JTJ[1][1] * JTJ[2][2] - JTJ[1][2] * JTJ[2][1]) -
-                              JTJ[0][1] * (JTJ[1][0] * JTJ[2][2] - JTJ[1][2] * JTJ[2][0]) +
-                              JTJ[0][2] * (JTJ[1][0] * JTJ[2][1] - JTJ[1][1] * JTJ[2][0]);
+                const T lambda = static_cast<T>(1e-12);
+                JTJ[0][0] += lambda;
+                JTJ[1][1] += lambda;
+                JTJ[2][2] += lambda;
 
-                T p[3] = {0, 0, 0};
-                if (sccd::abs(det) > static_cast<T>(1e-16)) {
-                    // Inverse via adjugate
-                    T inv[3][3];
-                    inv[0][0] = (JTJ[1][1] * JTJ[2][2] - JTJ[1][2] * JTJ[2][1]) / det;
-                    inv[0][1] = (JTJ[0][2] * JTJ[2][1] - JTJ[0][1] * JTJ[2][2]) / det;
-                    inv[0][2] = (JTJ[0][1] * JTJ[1][2] - JTJ[0][2] * JTJ[1][1]) / det;
-                    inv[1][0] = (JTJ[1][2] * JTJ[2][0] - JTJ[1][0] * JTJ[2][2]) / det;
-                    inv[1][1] = (JTJ[0][0] * JTJ[2][2] - JTJ[0][2] * JTJ[2][0]) / det;
-                    inv[1][2] = (JTJ[0][2] * JTJ[1][0] - JTJ[0][0] * JTJ[1][2]) / det;
-                    inv[2][0] = (JTJ[1][0] * JTJ[2][1] - JTJ[1][1] * JTJ[2][0]) / det;
-                    inv[2][1] = (JTJ[0][1] * JTJ[2][0] - JTJ[0][0] * JTJ[2][1]) / det;
-                    inv[2][2] = (JTJ[0][0] * JTJ[1][1] - JTJ[0][1] * JTJ[1][0]) / det;
+                // Solve JTJ p = -JTF (Gaussian elimination with partial pivoting)
+                T A[3][4] = {{JTJ[0][0], JTJ[0][1], JTJ[0][2], -JTF[0]},
+                             {JTJ[1][0], JTJ[1][1], JTJ[1][2], -JTF[1]},
+                             {JTJ[2][0], JTJ[2][1], JTJ[2][2], -JTF[2]}};
 
-                    for (int i = 0; i < 3; ++i) {
-                        p[i] = -(inv[i][0] * JTF[0] + inv[i][1] * JTF[1] + inv[i][2] * JTF[2]);
+                for (int col = 0; col < 3; ++col) {
+                    int pivot = col;
+                    T max_abs = sccd::abs(A[col][col]);
+                    for (int r = col + 1; r < 3; ++r) {
+                        const T a = sccd::abs(A[r][col]);
+                        if (a > max_abs) {
+                            max_abs = a;
+                            pivot = r;
+                        }
                     }
-                } else {
-                    // Gradient descent fallback
-                    p[0] = -(J[0][0] * F0[0] + J[1][0] * F0[1] + J[2][0] * F0[2]);
-                    p[1] = -(J[0][1] * F0[0] + J[1][1] * F0[1] + J[2][1] * F0[2]);
-                    p[2] = -(J[0][2] * F0[0] + J[1][2] * F0[1] + J[2][2] * F0[2]);
+                    if (max_abs < static_cast<T>(1e-20)) continue;
+                    if (pivot != col) {
+                        for (int c = col; c < 4; ++c) std::swap(A[col][c], A[pivot][c]);
+                    }
+                    const T inv_p = static_cast<T>(1) / A[col][col];
+                    for (int c = col; c < 4; ++c) A[col][c] *= inv_p;
+                    for (int r = 0; r < 3; ++r) {
+                        if (r == col) continue;
+                        const T factor = A[r][col];
+                        if (factor == static_cast<T>(0)) continue;
+                        for (int c = col; c < 4; ++c) {
+                            A[r][c] -= factor * A[col][c];
+                        }
+                    }
                 }
+
+                T p[3] = {A[0][3], A[1][3], A[2][3]};
 
                 T alpha = static_cast<T>(1);
                 bool improved = false;
@@ -1356,7 +1366,8 @@ namespace sccd {
                     T t_candidate = tc;
                     T u_candidate = uc;
                     T v_candidate = vc;
-                    if (refine_root(t_candidate, u_candidate, v_candidate)) {
+                    if (refine_root(t_candidate, u_candidate, v_candidate) ||
+                        find_root_newton<T>(100, refine_tol, sv, s1, s2, s3, ev, e1, e2, e3, t_candidate, u_candidate, v_candidate)) {
                         t = t_candidate;
                         u = u_candidate;
                         v = v_candidate;
