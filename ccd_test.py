@@ -54,6 +54,8 @@ if __name__ == "__main__":
         root_map   = read_wxf.read_wxf_roots(root_file)  # Dict[int] -> {t,a,b}
         mma_bool   = read_mma.read_mma_bool(mma_file)    # List[bool]
 
+        # if key != "100vf": continue
+
         n = len(query_data["v_t0"][0])
         if len(mma_bool) != n:
             print(f"  Warning: mma_bool length {len(mma_bool)} != queries {n}")
@@ -69,7 +71,7 @@ if __name__ == "__main__":
             e3_3d = [ query_data["f2_t1"][0][i], query_data["f2_t1"][1][i], query_data["f2_t1"][2][i]]
 
             # ret = find_root_dfs_3D(1000, 1e-6, sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d)
-            ret = sccd_py.find_root_bisection_vf_d(1000, 1e-6, sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d)
+            ret = sccd_py.find_root_dfs_d(1000, 1e-6, sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d)
             expected_hit = bool(mma_bool[i]) 
 
             total_cases += 1
@@ -85,6 +87,9 @@ if __name__ == "__main__":
                     print("-"*80)
 
                 if expected_hit:
+                    gt = root_map[i]
+                    eFx, eFy, eFz = vf_F_3d(sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d, gt["t"], gt["a"], gt["b"])
+                    print(f'{key}:{i}) false negative: ret={ret[1:]}, gt=({gt["t"]}, {gt["a"]}, {gt["b"]}), F=({eFx}, {eFy}, {eFz})')
                     false_negatives += 1
                     assert False
                 continue

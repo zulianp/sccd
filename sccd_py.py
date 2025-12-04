@@ -4,6 +4,9 @@ ctypes wrapper for the sccd shared library.
 Exports:
   - find_root_vf_f(...)
   - find_root_vf_d(...)
+  - find_root_bisection_vf_d(...)
+  - find_root_check_vf_f(...)
+  - find_root_check_vf_d(...)
 """
 from __future__ import annotations
 
@@ -11,6 +14,17 @@ import os
 import sys
 import ctypes as ct
 from typing import Iterable, Tuple
+
+def _setup_vf_prototype(func_name: str, float_type):
+    """Setup argtypes and restype for a vertex-face root finder function."""
+    func = getattr(_lib, func_name)
+    func.argtypes = [
+        ct.c_int, float_type,
+        ct.POINTER(float_type), ct.POINTER(float_type), ct.POINTER(float_type), ct.POINTER(float_type),
+        ct.POINTER(float_type), ct.POINTER(float_type), ct.POINTER(float_type), ct.POINTER(float_type),
+        ct.POINTER(float_type), ct.POINTER(float_type), ct.POINTER(float_type)
+    ]
+    func.restype = ct.c_int
 
 
 def _load_library() -> ct.CDLL:
@@ -61,33 +75,6 @@ def _load_library() -> ct.CDLL:
 
 _lib = _load_library()
 
-# Prototypes
-_lib.sccd_find_root_vf_f.argtypes = [
-    ct.c_int, ct.c_float,
-    ct.POINTER(ct.c_float), ct.POINTER(ct.c_float), ct.POINTER(ct.c_float), ct.POINTER(ct.c_float),
-    ct.POINTER(ct.c_float), ct.POINTER(ct.c_float), ct.POINTER(ct.c_float), ct.POINTER(ct.c_float),
-    ct.POINTER(ct.c_float), ct.POINTER(ct.c_float), ct.POINTER(ct.c_float)
-]
-_lib.sccd_find_root_vf_f.restype = ct.c_int
-
-
-_lib.sccd_find_root_vf_d.argtypes = [
-    ct.c_int, ct.c_double,
-    ct.POINTER(ct.c_double), ct.POINTER(ct.c_double), ct.POINTER(ct.c_double), ct.POINTER(ct.c_double),
-    ct.POINTER(ct.c_double), ct.POINTER(ct.c_double), ct.POINTER(ct.c_double), ct.POINTER(ct.c_double),
-    ct.POINTER(ct.c_double), ct.POINTER(ct.c_double), ct.POINTER(ct.c_double)
-]
-_lib.sccd_find_root_vf_d.restype = ct.c_int
-
-# Bisection
-_lib.sccd_find_root_bisection_vf_d.argtypes = [
-    ct.c_int, ct.c_double,
-    ct.POINTER(ct.c_double), ct.POINTER(ct.c_double), ct.POINTER(ct.c_double), ct.POINTER(ct.c_double),
-    ct.POINTER(ct.c_double), ct.POINTER(ct.c_double), ct.POINTER(ct.c_double), ct.POINTER(ct.c_double),
-    ct.POINTER(ct.c_double), ct.POINTER(ct.c_double), ct.POINTER(ct.c_double)
-]
-_lib.sccd_find_root_bisection_vf_d.restype = ct.c_int
-
 def _as_arr3_f(xs: Iterable[float]) -> Tuple[ct.Array,]:
     a = (ct.c_float * 3)(*list(xs))
     return a,
@@ -98,6 +85,8 @@ def _as_arr3_d(xs: Iterable[float]) -> Tuple[ct.Array,]:
     return a,
 
 
+# find_root_vf_f
+_setup_vf_prototype("sccd_find_root_vf_f", ct.c_float)
 def find_root_vf_f(
     max_iter: int,
     tol: float,
@@ -124,6 +113,8 @@ def find_root_vf_f(
     return (bool(ok), float(t.value), float(u.value), float(v.value))
 
 
+# find_root_vf_d
+_setup_vf_prototype("sccd_find_root_vf_d", ct.c_double)
 def find_root_vf_d(
     max_iter: int,
     tol: float,
@@ -150,6 +141,8 @@ def find_root_vf_d(
     return (bool(ok), float(t.value), float(u.value), float(v.value))
 
 
+# find_root_bisection_vf_d
+_setup_vf_prototype("sccd_find_root_bisection_vf_d", ct.c_double)
 def find_root_bisection_vf_d(
     max_iter: int,
     tol: float,
@@ -175,6 +168,113 @@ def find_root_bisection_vf_d(
     )
     return (bool(ok), float(t.value), float(u.value), float(v.value))
 
+
+# find_root_check_vf_f
+_setup_vf_prototype("sccd_find_root_check_vf_f", ct.c_float)
+def find_root_check_vf_f(
+    max_iter: int,
+    tol: float,
+    sv, s1, s2, s3,
+    ev, e1, e2, e3,
+    t0: float = 0.0, u0: float = 0.0, v0: float = 0.0
+) -> Tuple[bool, float, float, float]:
+    svp = _as_arr3_f(sv)[0]
+    s1p = _as_arr3_f(s1)[0]
+    s2p = _as_arr3_f(s2)[0]
+    s3p = _as_arr3_f(s3)[0]
+    evp = _as_arr3_f(ev)[0]
+    e1p = _as_arr3_f(e1)[0]
+    e2p = _as_arr3_f(e2)[0]
+    e3p = _as_arr3_f(e3)[0]
+    t = ct.c_float(t0)
+    u = ct.c_float(u0)
+    v = ct.c_float(v0)
+    ok = _lib.sccd_find_root_check_vf_f(
+        int(max_iter), float(tol),
+        svp, s1p, s2p, s3p, evp, e1p, e2p, e3p,
+        ct.byref(t), ct.byref(u), ct.byref(v)
+    )
+    return (bool(ok), float(t.value), float(u.value), float(v.value))
+
+
+# find_root_check_vf_d
+_setup_vf_prototype("sccd_find_root_check_vf_d", ct.c_double)
+def find_root_check_vf_d(
+    max_iter: int,
+    tol: float,
+    sv, s1, s2, s3,
+    ev, e1, e2, e3,
+    t0: float = 0.0, u0: float = 0.0, v0: float = 0.0
+) -> Tuple[bool, float, float, float]:
+    svp = _as_arr3_d(sv)[0]
+    s1p = _as_arr3_d(s1)[0]
+    s2p = _as_arr3_d(s2)[0]
+    s3p = _as_arr3_d(s3)[0]
+    evp = _as_arr3_d(ev)[0]
+    e1p = _as_arr3_d(e1)[0]
+    e2p = _as_arr3_d(e2)[0]
+    e3p = _as_arr3_d(e3)[0]
+    t = ct.c_double(t0)
+    u = ct.c_double(u0)
+    v = ct.c_double(v0)
+    ok = _lib.sccd_find_root_check_vf_d(
+        int(max_iter), float(tol),
+        svp, s1p, s2p, s3p, evp, e1p, e2p, e3p,
+        ct.byref(t), ct.byref(u), ct.byref(v)
+    )
+    return (bool(ok), float(t.value), float(u.value), float(v.value))
+
+
+_setup_vf_prototype("sccd_find_root_dfs_f", ct.c_float)
+def find_root_dfs_f(
+    max_iter: int,
+    tol: float,
+    sv, s1, s2, s3,
+    ev, e1, e2, e3,
+    t0: float = 0.0, u0: float = 0.0, v0: float = 0.0
+) -> Tuple[bool, float, float, float]:
+    svp = _as_arr3_f(sv)[0]
+    s1p = _as_arr3_f(s1)[0]
+    s2p = _as_arr3_f(s2)[0]
+    s3p = _as_arr3_f(s3)[0]
+    evp = _as_arr3_f(ev)[0]
+    e1p = _as_arr3_f(e1)[0]
+    e2p = _as_arr3_f(e2)[0]
+    e3p = _as_arr3_f(e3)[0]
+    t = ct.c_float(t0)
+
+    ok = _lib.sccd_find_root_dfs_f(
+        int(max_iter), float(tol),
+        svp, s1p, s2p, s3p, evp, e1p, e2p, e3p,
+        ct.byref(t), ct.byref(u), ct.byref(v)
+    )
+    return (bool(ok), float(t.value), float(u.value), float(v.value))
+
+_setup_vf_prototype("sccd_find_root_dfs_d", ct.c_double)
+def find_root_dfs_d(
+    max_iter: int,
+    tol: float,
+    sv, s1, s2, s3,
+    ev, e1, e2, e3,
+    t0: float = 0.0, u0: float = 0.0, v0: float = 0.0
+) -> Tuple[bool, float, float, float]:
+    svp = _as_arr3_d(sv)[0]
+    s1p = _as_arr3_d(s1)[0]
+    s2p = _as_arr3_d(s2)[0]
+    s3p = _as_arr3_d(s3)[0]
+    evp = _as_arr3_d(ev)[0]
+    e1p = _as_arr3_d(e1)[0]
+    e2p = _as_arr3_d(e2)[0]
+    e3p = _as_arr3_d(e3)[0]
+    t = ct.c_double(t0)
+    u = ct.c_double(u0)
+    v = ct.c_double(v0)
+    ok = _lib.sccd_find_root_dfs_d(
+        int(max_iter), float(tol),
+        svp, s1p, s2p, s3p, evp, e1p, e2p, e3p,
+        ct.byref(t), ct.byref(u), ct.byref(v)
+    )
+    return (bool(ok), float(t.value), float(u.value), float(v.value))
 
 if __name__ == "__main__":
     # Quick smoke test (will not guarantee correctness)
