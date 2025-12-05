@@ -3,12 +3,12 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 #include <limits>
+#include <ostream>
 #include <type_traits>
 #include <utility>
 #include <vector>
-#include <iostream>
-#include <ostream>
 
 #include "vaabb.h"
 
@@ -49,9 +49,9 @@ namespace sccd {
         T t1 = t;
         T o = (1 - u - v);
         for (int d = 0; d < 3; d++) {
-            T v_pos =  t0 * sv[d] + t1 * ev[d];
-            T f0 =  t0 * (o * s1[d] + u * s2[d] + v * s3[d]);
-            T f1 =  t1 * (o * e1[d] + u * e2[d] + v * e3[d]);
+            T v_pos = t0 * sv[d] + t1 * ev[d];
+            T f0 = t0 * (o * s1[d] + u * s2[d] + v * s3[d]);
+            T f1 = t1 * (o * e1[d] + u * e2[d] + v * e3[d]);
             T f = f0 + f1;
             diff[d] = v_pos - f;
         }
@@ -69,8 +69,8 @@ namespace sccd {
                           T &t,
                           T &u,
                           T &v) {
-                            T diff[3];
-       diff_vf(sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, diff);
+        T diff[3];
+        diff_vf(sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, diff);
         return sqrt(diff[0] * diff[0] + diff[1] * diff[1] + diff[2] * diff[2]);
     }
 
@@ -431,6 +431,85 @@ namespace sccd {
     };
 
     template <typename T>
+    struct Interval {
+        T lower, upper;
+        bool is_terminal() const { return lower >= upper; }
+    };
+
+    template <typename T>
+    struct Box {
+        using Interval = sccd::Interval<T>;
+        Interval tuv[3];
+        int depth{0};
+
+        Box() = default;
+        Box(Interval t, Interval u, Interval v, int depth) : tuv{t, u, v}, depth(depth) {}
+        bool is_terminal() const { return tuv[0].is_terminal() || tuv[1].is_terminal() || tuv[2].is_terminal(); }
+        bool smaller_than_tol(const T tol0, const T tol1, const T tol2) const {
+            return tuv[0].upper - tuv[0].lower <= tol0 && tuv[1].upper - tuv[1].lower <= tol1 &&
+                   tuv[2].upper - tuv[2].lower <= tol2;
+        }
+
+        void print() const {
+            std::cout << "Box: t: [" << tuv[0].lower << ", " << tuv[0].upper << "], u: [" << tuv[1].lower << ", "
+                      << tuv[1].upper << "], v: [" << tuv[2].lower << ", " << tuv[2].upper << "], depth: " << depth
+                      << std::endl;
+        }
+
+        bool is_at_depth_limit(const int max_iter) const { return depth >= max_iter; }
+
+        int widest_dimension() const {
+            const T dt = tuv[0].upper - tuv[0].lower;
+            const T du = tuv[1].upper - tuv[1].lower;
+            const T dv = tuv[2].upper - tuv[2].lower;
+            if (du > dt && du >= dv) {
+                return 1;
+            } else if (dv > dt && dv > du) {
+                return 2;
+            }
+            return 0;
+        }
+
+        bool bisect(int split_dim, const T toi, std::vector<Box> &stack) const {
+            std::pair<Interval, Interval> split_intervals{
+                Interval{tuv[split_dim].lower, (tuv[split_dim].lower + tuv[split_dim].upper) * T(0.5)},
+                Interval{(tuv[split_dim].lower + tuv[split_dim].upper) * T(0.5), tuv[split_dim].upper}};
+
+            if (split_intervals.first.is_terminal() || split_intervals.second.is_terminal()) {
+                return true;
+            }
+
+            stack.push_back(*this);
+            stack.back().tuv[split_dim] = split_intervals.first;
+            stack.back().depth++;
+
+            if (split_dim == 0) {
+                if (split_intervals.second.lower < toi) {
+                    stack.push_back(*this);
+                    stack.back().tuv[split_dim] = split_intervals.second;
+                    stack.back().depth++;
+                }
+            } else {
+                if (split_dim == 1) {
+                    if (sum_less_than_one(split_intervals.first.lower, tuv[2].lower)) {
+                        stack.push_back(*this);
+                        stack.back().tuv[split_dim] = split_intervals.second;
+                        stack.back().depth++;
+                    }
+                } else if (split_dim == 2) {
+                    if (sum_less_than_one(split_intervals.second.lower, tuv[1].lower)) {
+                        stack.push_back(*this);
+                        stack.back().tuv[split_dim] = split_intervals.second;
+                        stack.back().depth++;
+                    }
+                }
+            }
+
+            return false;
+        }
+    };
+
+    template <typename T>
     bool find_root_bisection(const int max_iter,
                              const T tol,
                              const T sv[3],
@@ -444,80 +523,8 @@ namespace sccd {
                              T &t,
                              T &u,
                              T &v) {
-        struct Interval {
-            T lower, upper;
-            bool is_terminal() const { return lower >= upper; }
-        };
-
-        struct Box {
-            Interval tuv[3];
-            int depth{0};
-
-            Box() = default;
-            Box(Interval t, Interval u, Interval v, int depth) : tuv{t, u, v}, depth(depth) {}
-            bool is_terminal() const { return tuv[0].is_terminal() || tuv[1].is_terminal() || tuv[2].is_terminal(); }
-            bool smaller_than_tol(const T tol0, const T tol1, const T tol2) const {
-                return tuv[0].upper - tuv[0].lower <= tol0 && tuv[1].upper - tuv[1].lower <= tol1 &&
-                       tuv[2].upper - tuv[2].lower <= tol2;
-            }
-
-            void print() const {
-                std::cout << "Box: t: [" << tuv[0].lower << ", " << tuv[0].upper << "], u: [" << tuv[1].lower << ", " << tuv[1].upper << "], v: [" << tuv[2].lower << ", " << tuv[2].upper << "], depth: " << depth << std::endl;
-            }
-
-            bool is_at_depth_limit(const int max_iter) const { return depth >= max_iter; }
-
-            int widest_dimension() const {
-                const T dt = tuv[0].upper - tuv[0].lower;
-                const T du = tuv[1].upper - tuv[1].lower;
-                const T dv = tuv[2].upper - tuv[2].lower;
-                if (du > dt && du >= dv) {
-                    return 1;
-                } else if (dv > dt && dv > du) {
-                    return 2;
-                }
-                return 0;
-            }
-
-            bool bisect(int split_dim, const T toi, std::vector<Box> &stack) const {
-                std::pair<Interval, Interval> split_intervals{
-                    Interval{tuv[split_dim].lower, (tuv[split_dim].lower + tuv[split_dim].upper) * T(0.5)},
-                    Interval{(tuv[split_dim].lower + tuv[split_dim].upper) * T(0.5), tuv[split_dim].upper}
-                };
-
-                if(split_intervals.first.is_terminal() || split_intervals.second.is_terminal()) {
-                    return true;
-                }
-
-                stack.push_back(*this);
-                stack.back().tuv[split_dim] = split_intervals.first;
-                stack.back().depth++;
-
-                if (split_dim == 0) {
-                    if(split_intervals.second.lower < toi) {
-                        stack.push_back(*this);
-                        stack.back().tuv[split_dim] = split_intervals.second;
-                        stack.back().depth++;
-                    }
-                } else {
-                    if (split_dim == 1) {
-                        if (sum_less_than_one(split_intervals.first.lower, tuv[2].lower)) {
-                            stack.push_back(*this);
-                            stack.back().tuv[split_dim] = split_intervals.second;
-                            stack.back().depth++;
-                        }
-                    } else if (split_dim == 2) {
-                        if (sum_less_than_one(split_intervals.second.lower, tuv[1].lower)) {
-                            stack.push_back(*this);
-                            stack.back().tuv[split_dim] = split_intervals.second;
-                            stack.back().depth++;
-                        }
-                    }
-                }
-
-                return false;
-            }
-        };
+        using Box = sccd::Box<T>;
+        using Interval = sccd::Interval<T>;
 
         auto codomain_box = [=](const Box &domain, Box &codomain) -> void {
             codomain.tuv[0].lower = std::numeric_limits<T>::max();
@@ -527,10 +534,10 @@ namespace sccd {
             codomain.tuv[2].lower = std::numeric_limits<T>::max();
             codomain.tuv[2].upper = std::numeric_limits<T>::lowest();
 
-            for(int i = 0; i < 8; i++) {
-               const T t = (i & 1) ? domain.tuv[0].upper : domain.tuv[0].lower;
-               const T u = (i & 2) ? domain.tuv[1].upper : domain.tuv[1].lower;
-               const T v = (i & 4) ? domain.tuv[2].upper : domain.tuv[2].lower;
+            for (int i = 0; i < 8; i++) {
+                const T t = (i & 1) ? domain.tuv[0].upper : domain.tuv[0].lower;
+                const T u = (i & 2) ? domain.tuv[1].upper : domain.tuv[1].lower;
+                const T v = (i & 4) ? domain.tuv[2].upper : domain.tuv[2].lower;
 
                 T F[3];
                 diff_vf(sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, F);
@@ -548,20 +555,22 @@ namespace sccd {
             Box codomain;
             codomain_box(box, codomain);
 
-            for(int i = 0; i < 3; i++) {
-                if(codomain.tuv[i].lower > tol || codomain.tuv[i].upper < -tol) {
+            for (int i = 0; i < 3; i++) {
+                if (codomain.tuv[i].lower > tol || codomain.tuv[i].upper < -tol) {
                     return false;
                 }
             }
 
             inside_box = true;
-            for(int i = 0; i < 3; i++) {
-                if(codomain.tuv[i].lower < tol || codomain.tuv[i].upper > -tol) {
+            for (int i = 0; i < 3; i++) {
+                if (codomain.tuv[i].lower < tol || codomain.tuv[i].upper > -tol) {
                     inside_box = false;
                 }
             }
 
-            true_tol = sccd::max(sccd::max(codomain.tuv[0].upper - codomain.tuv[0].lower, codomain.tuv[1].upper - codomain.tuv[1].lower), codomain.tuv[2].upper - codomain.tuv[2].lower);
+            true_tol = sccd::max(
+                sccd::max(codomain.tuv[0].upper - codomain.tuv[0].lower, codomain.tuv[1].upper - codomain.tuv[1].lower),
+                codomain.tuv[2].upper - codomain.tuv[2].lower);
             return true;
         };
 
@@ -603,16 +612,18 @@ namespace sccd {
         stack.push_back(Box(Interval{T(0), T(1)}, Interval{T(0), T(1)}, Interval{T(0), T(1)}, 0));
 
         T toi = 1;
+
         bool found_root = false;
         while (!stack.empty()) {
             Box box = stack.back();
             stack.pop_back();
 
-            if(box.tuv[0].lower > toi) {
+            if (box.tuv[0].lower > toi) {
                 continue;
             }
 
-            T min_t = sccd::min(toi, box.tuv[0].lower);;
+            T min_t = sccd::min(toi, box.tuv[0].lower);
+            ;
 
             T true_tol = tol;
             bool inside_box = false;
@@ -1051,6 +1062,624 @@ namespace sccd {
         return false;
     }
 
+    // template <typename T>
+    // bool find_root_dfs(const int max_iter,
+    //                    const T tol,
+    //                    const T sv[3],
+    //                    const T s1[3],
+    //                    const T s2[3],
+    //                    const T s3[3],
+    //                    const T ev[3],
+    //                    const T e1[3],
+    //                    const T e2[3],
+    //                    const T e3[3],
+    //                    T &t,
+    //                    T &u,
+    //                    T &v) {
+    //     // Depth-first root search mirroring find_root_dfs_3D in numeric_roots.py
+    //     auto eval_F = [&](const T tt, const T uu, const T vv, T &fx, T &fy, T &fz) {
+    //         const T t0 = static_cast<T>(1) - tt;
+    //         const T t1 = tt;
+    //         const T o = static_cast<T>(1) - uu - vv;
+
+    //         const T vx = t0 * sv[0] + t1 * ev[0];
+    //         const T vy = t0 * sv[1] + t1 * ev[1];
+    //         const T vz = t0 * sv[2] + t1 * ev[2];
+
+    //         const T f1x = t0 * s1[0] + t1 * e1[0];
+    //         const T f1y = t0 * s1[1] + t1 * e1[1];
+    //         const T f1z = t0 * s1[2] + t1 * e1[2];
+    //         const T f2x = t0 * s2[0] + t1 * e2[0];
+    //         const T f2y = t0 * s2[1] + t1 * e2[1];
+    //         const T f2z = t0 * s2[2] + t1 * e2[2];
+    //         const T f3x = t0 * s3[0] + t1 * e3[0];
+    //         const T f3y = t0 * s3[1] + t1 * e3[1];
+    //         const T f3z = t0 * s3[2] + t1 * e3[2];
+
+    //         const T fx_face = o * f1x + uu * f2x + vv * f3x;
+    //         const T fy_face = o * f1y + uu * f2y + vv * f3y;
+    //         const T fz_face = o * f1z + uu * f2z + vv * f3z;
+
+    //         fx = vx - fx_face;
+    //         fy = vy - fy_face;
+    //         fz = vz - fz_face;
+    //     };
+
+    //     int side = std::max<int>(
+    //         4,
+    //         static_cast<int>(std::round(std::pow(static_cast<T>(ROOT_FINDING_CHUNK_SIZE), static_cast<T>(1.0
+    //         / 3.0)))));
+    //     while ((side * side * side) > ROOT_FINDING_CHUNK_SIZE && side > 2) {
+    //         --side;
+    //     }
+
+    //     const int t_n = side;
+    //     const int u_n = side;
+    //     const int v_n = side;
+
+    //     const T t_min = static_cast<T>(0);
+    //     const T u_min = static_cast<T>(0);
+    //     const T v_min = static_cast<T>(0);
+    //     const T t_max = static_cast<T>(1);
+    //     const T u_max = static_cast<T>(1);
+    //     const T v_max = static_cast<T>(1);
+
+    //     const T t_h = (t_max - t_min) / static_cast<T>(t_n);
+    //     const T u_h = (u_max - u_min) / static_cast<T>(u_n);
+    //     const T v_h = (v_max - v_min) / static_cast<T>(v_n);
+
+    //     const int t_stride = (u_n + 1) * (v_n + 1);
+    //     const int u_stride = (v_n + 1);
+    //     const int total_samples = (t_n + 1) * (u_n + 1) * (v_n + 1);
+
+    //     std::vector<T> Fx(total_samples);
+    //     std::vector<T> Fy(total_samples);
+    //     std::vector<T> Fz(total_samples);
+
+    //     auto refine_root = [&](T &tt, T &uu, T &vv) -> bool {
+    //         auto eval = [&](const T t_eval, const T u_eval, const T v_eval, T out[3]) {
+    //             eval_F(t_eval, u_eval, v_eval, out[0], out[1], out[2]);
+    //         };
+
+    //         tt = sccd::min<T>(static_cast<T>(1), sccd::max<T>(static_cast<T>(0), tt));
+    //         project_uv_simplex<T>(uu, vv);
+
+    //         const int refine_max_iter = 100;
+    //         const T tol_f = sccd::max<T>(static_cast<T>(1e-10), tol * static_cast<T>(1e-2));
+
+    //         T x[3] = {tt, uu, vv};
+    //         for (int iter = 0; iter < refine_max_iter; ++iter) {
+    //             T F0[3];
+    //             eval(x[0], x[1], x[2], F0);
+    //             const T fn = std::sqrt(F0[0] * F0[0] + F0[1] * F0[1] + F0[2] * F0[2]);
+    //             if (fn <= tol_f) {
+    //                 tt = x[0];
+    //                 uu = x[1];
+    //                 vv = x[2];
+    //                 return true;
+    //             }
+
+    //             const T eps_t = static_cast<T>(1e-7);
+    //             const T eps_u = static_cast<T>(1e-7);
+    //             const T eps_v = static_cast<T>(1e-7);
+
+    //             T Ft[3], Fu[3], Fv[3];
+    //             eval(sccd::min<T>(static_cast<T>(1), x[0] + eps_t), x[1], x[2], Ft);
+    //             eval(x[0], x[1] + eps_u, x[2], Fu);
+    //             eval(x[0], x[1], x[2] + eps_v, Fv);
+
+    //             T J[3][3];
+    //             for (int r = 0; r < 3; ++r) {
+    //                 J[r][0] = (Ft[r] - F0[r]) / eps_t;
+    //                 J[r][1] = (Fu[r] - F0[r]) / eps_u;
+    //                 J[r][2] = (Fv[r] - F0[r]) / eps_v;
+    //             }
+
+    //             // Normal equations: (J^T J) p = -J^T F0
+    //             T JTJ[3][3] = {{0, 0, 0}, {0, 0, 0}, {0, 0, 0}};
+    //             T JTF[3] = {0, 0, 0};
+    //             for (int c = 0; c < 3; ++c) {
+    //                 for (int r = 0; r < 3; ++r) {
+    //                     JTJ[c][r] = J[0][c] * J[0][r] + J[1][c] * J[1][r] + J[2][c] * J[2][r];
+    //                 }
+    //                 JTF[c] = J[0][c] * F0[0] + J[1][c] * F0[1] + J[2][c] * F0[2];
+    //             }
+
+    //             const T lambda = static_cast<T>(1e-12);
+    //             JTJ[0][0] += lambda;
+    //             JTJ[1][1] += lambda;
+    //             JTJ[2][2] += lambda;
+
+    //             // Solve JTJ p = -JTF (Gaussian elimination with partial pivoting)
+    //             T A[3][4] = {{JTJ[0][0], JTJ[0][1], JTJ[0][2], -JTF[0]},
+    //                          {JTJ[1][0], JTJ[1][1], JTJ[1][2], -JTF[1]},
+    //                          {JTJ[2][0], JTJ[2][1], JTJ[2][2], -JTF[2]}};
+
+    //             for (int col = 0; col < 3; ++col) {
+    //                 int pivot = col;
+    //                 T max_abs = sccd::abs(A[col][col]);
+    //                 for (int r = col + 1; r < 3; ++r) {
+    //                     const T a = sccd::abs(A[r][col]);
+    //                     if (a > max_abs) {
+    //                         max_abs = a;
+    //                         pivot = r;
+    //                     }
+    //                 }
+    //                 if (max_abs < static_cast<T>(1e-20)) continue;
+    //                 if (pivot != col) {
+    //                     for (int c = col; c < 4; ++c) std::swap(A[col][c], A[pivot][c]);
+    //                 }
+    //                 const T inv_p = static_cast<T>(1) / A[col][col];
+    //                 for (int c = col; c < 4; ++c) A[col][c] *= inv_p;
+    //                 for (int r = 0; r < 3; ++r) {
+    //                     if (r == col) continue;
+    //                     const T factor = A[r][col];
+    //                     if (factor == static_cast<T>(0)) continue;
+    //                     for (int c = col; c < 4; ++c) {
+    //                         A[r][c] -= factor * A[col][c];
+    //                     }
+    //                 }
+    //             }
+
+    //             T p[3] = {A[0][3], A[1][3], A[2][3]};
+
+    //             T alpha = static_cast<T>(1);
+    //             bool improved = false;
+    //             for (int ls = 0; ls < 12; ++ls) {
+    //                 T xn[3] = {x[0] + alpha * p[0], x[1] + alpha * p[1], x[2] + alpha * p[2]};
+    //                 xn[0] = sccd::min<T>(static_cast<T>(1), sccd::max<T>(static_cast<T>(0), xn[0]));
+    //                 project_uv_simplex<T>(xn[1], xn[2]);
+
+    //                 T F1[3];
+    //                 eval(xn[0], xn[1], xn[2], F1);
+    //                 const T fn1 = std::sqrt(F1[0] * F1[0] + F1[1] * F1[1] + F1[2] * F1[2]);
+    //                 if (fn1 < fn) {
+    //                     x[0] = xn[0];
+    //                     x[1] = xn[1];
+    //                     x[2] = xn[2];
+    //                     improved = true;
+    //                     break;
+    //                 }
+    //                 alpha *= static_cast<T>(0.5);
+    //             }
+
+    //             if (!improved) {
+    //                 break;
+    //             }
+    //         }
+
+    //         T F_final[3];
+    //         eval(x[0], x[1], x[2], F_final);
+    //         const T fn_final = std::sqrt(F_final[0] * F_final[0] + F_final[1] * F_final[1] + F_final[2] *
+    //         F_final[2]); tt = x[0]; uu = x[1]; vv = x[2]; return fn_final <= sccd::max<T>(static_cast<T>(1e-10), tol
+    //         * static_cast<T>(1e-2));
+    //     };
+
+    //     for (int ti = 0; ti <= t_n; ++ti) {
+    //         const T tt = t_min + static_cast<T>(ti) * t_h;
+    //         const int base_t = ti * t_stride;
+    //         for (int ui = 0; ui <= u_n; ++ui) {
+    //             const T uu = u_min + static_cast<T>(ui) * u_h;
+    //             const int base_u = base_t + ui * u_stride;
+    //             for (int vi = 0; vi <= v_n; ++vi) {
+    //                 const T vv = v_min + static_cast<T>(vi) * v_h;
+    //                 const int idx = base_u + vi;
+    //                 T fx, fy, fz;
+    //                 eval_F(tt, uu, vv, fx, fy, fz);
+    //                 Fx[idx] = fx;
+    //                 Fy[idx] = fy;
+    //                 Fz[idx] = fz;
+    //             }
+    //         }
+    //     }
+
+    //     std::vector<int> contains_zero(t_n * u_n * v_n, 1);
+    //     for (int ti = 0; ti < t_n; ++ti) {
+    //         for (int ui = 0; ui < u_n; ++ui) {
+    //             for (int vi = 0; vi < v_n; ++vi) {
+    //                 const int cell_idx = ti * u_n * v_n + ui * v_n + vi;
+    //                 const int i0 = ti * t_stride + ui * u_stride + vi;
+    //                 const int i1 = i0 + 1;
+    //                 const int i2 = i0 + u_stride;
+    //                 const int i3 = i2 + 1;
+    //                 const int i4 = i0 + t_stride;
+    //                 const int i5 = i1 + t_stride;
+    //                 const int i6 = i2 + t_stride;
+    //                 const int i7 = i3 + t_stride;
+
+    //                 const T xs[8] = {Fx[i0], Fx[i1], Fx[i2], Fx[i3], Fx[i4], Fx[i5], Fx[i6], Fx[i7]};
+    //                 const T ys[8] = {Fy[i0], Fy[i1], Fy[i2], Fy[i3], Fy[i4], Fy[i5], Fy[i6], Fy[i7]};
+    //                 const T zs[8] = {Fz[i0], Fz[i1], Fz[i2], Fz[i3], Fz[i4], Fz[i5], Fz[i6], Fz[i7]};
+
+    //                 const T fx_min = sccd::array_min<T>(8, xs);
+    //                 const T fx_max = sccd::array_max<T>(8, xs);
+    //                 const T fy_min = sccd::array_min<T>(8, ys);
+    //                 const T fy_max = sccd::array_max<T>(8, ys);
+    //                 const T fz_min = sccd::array_min<T>(8, zs);
+    //                 const T fz_max = sccd::array_max<T>(8, zs);
+
+    //                 const bool has_zero_x = (fx_min <= tol) && (fx_max >= -tol);
+    //                 const bool has_zero_y = (fy_min <= tol) && (fy_max >= -tol);
+    //                 const bool has_zero_z = (fz_min <= tol) && (fz_max >= -tol);
+    //                 contains_zero[cell_idx] = has_zero_x && has_zero_y && has_zero_z;
+    //             }
+    //         }
+    //     }
+
+    //     auto cell_has_zero = [&](const T t0, const T t1, const T u0, const T u1, const T v0, const T v1) -> bool {
+    //         if ((sccd::max<T>(static_cast<T>(0), u0) + sccd::max<T>(static_cast<T>(0), v0)) >
+    //             static_cast<T>(1) + static_cast<T>(1e-8)) {
+    //             return false;
+    //         }
+
+    //         T fx_min = std::numeric_limits<T>::max();
+    //         T fy_min = std::numeric_limits<T>::max();
+    //         T fz_min = std::numeric_limits<T>::max();
+    //         T fx_max = std::numeric_limits<T>::lowest();
+    //         T fy_max = std::numeric_limits<T>::lowest();
+    //         T fz_max = std::numeric_limits<T>::lowest();
+
+    //         for (const T tt : {t0, t1}) {
+    //             for (const T uu : {u0, u1}) {
+    //                 for (const T vv : {v0, v1}) {
+    //                     T fx, fy, fz;
+    //                     eval_F(tt, uu, vv, fx, fy, fz);
+    //                     fx_min = sccd::min<T>(fx_min, fx);
+    //                     fy_min = sccd::min<T>(fy_min, fy);
+    //                     fz_min = sccd::min<T>(fz_min, fz);
+    //                     fx_max = sccd::max<T>(fx_max, fx);
+    //                     fy_max = sccd::max<T>(fy_max, fy);
+    //                     fz_max = sccd::max<T>(fz_max, fz);
+    //                 }
+    //             }
+    //         }
+
+    //         const bool has_x = (fx_min <= tol) && (fx_max >= -tol);
+    //         const bool has_y = (fy_min <= tol) && (fy_max >= -tol);
+    //         const bool has_z = (fz_min <= tol) && (fz_max >= -tol);
+    //         return has_x && has_y && has_z;
+    //     };
+
+    //     struct Cell {
+    //         T t0, t1, u0, u1, v0, v1;
+    //         int depth;
+    //     };
+
+    //     std::vector<Cell> seeds;
+    //     seeds.reserve(static_cast<size_t>(t_n * u_n * v_n));
+    //     for (int ti = 0; ti < t_n; ++ti) {
+    //         for (int ui = 0; ui < u_n; ++ui) {
+    //             const T u0 = u_min + static_cast<T>(ui) * u_h;
+    //             for (int vi = 0; vi < v_n; ++vi) {
+    //                 const int cell_idx = ti * u_n * v_n + ui * v_n + vi;
+    //                 if (!contains_zero[cell_idx]) continue;
+    //                 const T v0 = v_min + static_cast<T>(vi) * v_h;
+    //                 if ((u0 + v0) > static_cast<T>(1) + static_cast<T>(1e-8)) continue;
+
+    //                 const T t0 = t_min + static_cast<T>(ti) * t_h;
+    //                 seeds.push_back({t0, t0 + t_h, u0, u0 + u_h, v0, v0 + v_h, 0});
+    //             }
+    //         }
+    //     }
+
+    //     if (seeds.empty()) {
+    //         return false;
+    //     }
+
+    //     std::sort(seeds.begin(), seeds.end(), [](const Cell &a, const Cell &b) { return a.t0 < b.t0; });
+    //     std::vector<Cell> stack;
+    //     stack.reserve(seeds.size());
+    //     for (auto it = seeds.rbegin(); it != seeds.rend(); ++it) {
+    //         stack.push_back(*it);
+    //     }
+
+    //     const T min_dim = sccd::max<T>(static_cast<T>(1e-6), tol * static_cast<T>(10));
+    //     const int max_depth = 100;
+    //     const T refine_tol = sccd::max<T>(static_cast<T>(1e-10), tol * static_cast<T>(1e-2));
+
+    //     while (!stack.empty()) {
+    //         Cell cell = stack.back();
+    //         stack.pop_back();
+
+    //         if ((sccd::max<T>(static_cast<T>(0), cell.u0) + sccd::max<T>(static_cast<T>(0), cell.v0)) >
+    //             static_cast<T>(1) + static_cast<T>(1e-8)) {
+    //             continue;
+    //         }
+
+    //         const T tc = static_cast<T>(0.5) * (cell.t0 + cell.t1);
+    //         const T uc = static_cast<T>(0.5) * (cell.u0 + cell.u1);
+    //         const T vc = static_cast<T>(0.5) * (cell.v0 + cell.v1);
+
+    //         if (uc >= static_cast<T>(-1e-8) && vc >= static_cast<T>(-1e-8) &&
+    //             (uc + vc) <= static_cast<T>(1) + static_cast<T>(1e-8)) {
+    //             T fx_c, fy_c, fz_c;
+    //             eval_F(tc, uc, vc, fx_c, fy_c, fz_c);
+    //             const T fn_center = std::sqrt(fx_c * fx_c + fy_c * fy_c + fz_c * fz_c);
+    //             if (fn_center <= tol) {
+    //                 T t_candidate = tc;
+    //                 T u_candidate = uc;
+    //                 T v_candidate = vc;
+    //                 if (refine_root(t_candidate, u_candidate, v_candidate) ||
+    //                     find_root_newton<T>(
+    //                         100, refine_tol, sv, s1, s2, s3, ev, e1, e2, e3, t_candidate, u_candidate, v_candidate))
+    //                         {
+    //                     t = t_candidate;
+    //                     u = u_candidate;
+    //                     v = v_candidate;
+    //                     return true;
+    //                 } else {
+    //                     continue;
+    //                 }
+    //             }
+    //         }
+
+    //         const T size = sccd::max<T>(cell.t1 - cell.t0, sccd::max<T>(cell.u1 - cell.u0, cell.v1 - cell.v0));
+    //         if (size <= min_dim || cell.depth >= max_iter) {
+    //             continue;
+    //         }
+
+    //         const T tm = static_cast<T>(0.5) * (cell.t0 + cell.t1);
+    //         const T um = static_cast<T>(0.5) * (cell.u0 + cell.u1);
+    //         const T vm = static_cast<T>(0.5) * (cell.v0 + cell.v1);
+
+    //         const Cell subcells[8] = {{cell.t0, tm, cell.u0, um, cell.v0, vm, cell.depth + 1},
+    //                                   {cell.t0, tm, cell.u0, um, vm, cell.v1, cell.depth + 1},
+    //                                   {cell.t0, tm, um, cell.u1, cell.v0, vm, cell.depth + 1},
+    //                                   {cell.t0, tm, um, cell.u1, vm, cell.v1, cell.depth + 1},
+    //                                   {tm, cell.t1, cell.u0, um, cell.v0, vm, cell.depth + 1},
+    //                                   {tm, cell.t1, cell.u0, um, vm, cell.v1, cell.depth + 1},
+    //                                   {tm, cell.t1, um, cell.u1, cell.v0, vm, cell.depth + 1},
+    //                                   {tm, cell.t1, um, cell.u1, vm, cell.v1, cell.depth + 1}};
+
+    //         if (cell.depth + 1 >= max_depth) {
+    //             break;
+    //         }
+
+    //         for (const Cell &sub : subcells) {
+    //             if (cell_has_zero(sub.t0, sub.t1, sub.u0, sub.u1, sub.v0, sub.v1)) {
+    //                 stack.push_back(sub);
+    //             }
+    //         }
+    //     }
+
+    //     return false;
+    // }
+
+    template <int NT, int NU, int NV, typename T>
+    inline static void grid_sample_Fvf(const T start_t,
+                                       const T start_u,
+                                       const T start_v,
+                                       const T ht,
+                                       const T hu,
+                                       const T hv,
+                                       const T sv,
+                                       const T ev,
+                                       const T s1,
+                                       const T s2,
+                                       const T s3,
+                                       const T e1,
+                                       const T e2,
+                                       const T e3,
+                                       T *const SFEM_RESTRICT F) {
+        static constexpr int STRIDE_T = (NU + 1) * (NV + 1);
+        static constexpr int STRIDE_U = (NV + 1);
+
+        for (int a = 0; a <= NT; a++) {
+            for (int b = 0; b <= NU; b++) {
+                for (int c = 0; c <= NV; c++) {
+                    const int idx = a * STRIDE_T + b * STRIDE_U + c;
+                    const T t = start_t + a * ht;
+                    const T u = start_u + b * hu;
+                    const T v = start_v + c * hv;
+
+                    const T vertex = (ev - sv) * t + sv;
+                    const T t0 = (e1 - s1) * t + s1;
+                    const T t1 = (e2 - s2) * t + s2;
+                    const T t2 = (e3 - s3) * t + s3;
+
+                    const T face = (t1 - t0) * u + (t2 - t0) * v + t0; 
+                    F[idx] = vertex - face;
+
+                    // T t0 = (1 - t);
+                    // T t1 = t;
+                    // T o = (1-u-v);
+                    // T v_pos = t0 * sv + t1 * ev;
+                    // T f0 = t0 * (o * s1 + u * s2 + v * s3);
+                    // T f1 = t1 * (o * e1 + u * e2 + v * e3);
+                    // T f = f0 + f1;
+                    // T diff = v_pos - f;
+                    // F[idx] = diff;
+                    
+                }
+            }
+        }
+    }
+
+    template <int NT, int NU, int NV, typename T>
+    inline static void grid_zero_and_accept(const T *const SFEM_RESTRICT F,
+                                            const T tol,
+                                            const T adaptive_tol,
+                                            uint8_t *const SFEM_RESTRICT contains_origin,
+                                            uint8_t *const SFEM_RESTRICT accept) {
+        static constexpr int STIDE_T = (NU + 1) * (NV + 1);
+        static constexpr int STIDE_U = (NV + 1);
+
+        for (int a = 0; a < NT; a++) {
+            for (int b = 0; b < NU; b++) {
+                const int i0 = a * STIDE_T + b * STIDE_U;
+                const int i1 = a * STIDE_T + b * STIDE_U + 1;
+                const int i2 = a * STIDE_T + (b + 1) * STIDE_U;
+                const int i3 = a * STIDE_T + (b + 1) * STIDE_U + 1;
+                const int i4 = (a + 1) * STIDE_T + b * STIDE_U;
+                const int i5 = (a + 1) * STIDE_T + b * STIDE_U + 1;
+                const int i6 = (a + 1) * STIDE_T + (b + 1) * STIDE_U;
+                const int i7 = (a + 1) * STIDE_T + (b + 1) * STIDE_U + 1;
+
+                const T *const SFEM_RESTRICT F000 = &F[i0];
+                const T *const SFEM_RESTRICT F001 = &F[i1];
+                const T *const SFEM_RESTRICT F010 = &F[i2];
+                const T *const SFEM_RESTRICT F011 = &F[i3];
+                const T *const SFEM_RESTRICT F100 = &F[i4];
+                const T *const SFEM_RESTRICT F101 = &F[i5];
+                const T *const SFEM_RESTRICT F110 = &F[i6];
+                const T *const SFEM_RESTRICT F111 = &F[i7];
+
+                const int cell_offset = a * NU * NV + b * NV;
+                uint8_t *const SFEM_RESTRICT contains_origin_cell = &contains_origin[cell_offset];
+                uint8_t *const SFEM_RESTRICT accept_cell = &accept[cell_offset];
+
+                for (int c = 0; c < NV; c++) {
+                    const T fmin = sccd::min(sccd::min(sccd::min(F000[c], F001[c]), sccd::min(F010[c], F011[c])),
+                                             sccd::min(sccd::min(F100[c], F101[c]), sccd::min(F110[c], F111[c])));
+
+                    const T fmax = sccd::max(sccd::max(sccd::max(F000[c], F001[c]), sccd::max(F010[c], F011[c])),
+                                             sccd::max(sccd::max(F100[c], F101[c]), sccd::max(F110[c], F111[c])));
+
+
+
+                    contains_origin_cell[c] &= (fmin <= tol) & (fmax >= -tol);  // AND) for all dims
+                    bool cond1 = (fmax - fmin <= adaptive_tol);                 // AND) The domain is smaller than the tolerance.
+                    bool cond2 = !((fmin < tol) | (fmax > -tol));               // AND) The box is inside the epsilon box
+                    bool cond3 = (fmax - fmin < tol);                           // OR) Real tolerance is smaller than the int tolerance
+                    bool cond4 = (fmin >= fmax);                                // AND) The interval is terminal
+
+                    uint8_t cond_mask = (cond1 ? (1 & accept_cell[c]) : 0) ;
+                    cond_mask |= (cond2 ? (2 & accept_cell[c]) : 0);
+                    cond_mask |= (cond3 ? 4 : 0);
+                    cond_mask |= (cond4 ? (8 & accept_cell[c])  : 0);
+
+                    printf("(%d %d %d) %d (%g %g)\n", a, b, c, contains_origin_cell[c], fmin, fmax);
+
+                    accept_cell[c] = cond_mask & (contains_origin_cell[c] ? 0xf : 0);
+                }
+            }
+        }
+    }
+
+    template <int NT, int NU, int NV, typename T>
+    inline bool grid_search(const sccd::Box<T> &domain,
+                            const T tol,
+                            const T tols[3],
+                            const T sv[3],
+                            const T s1[3],
+                            const T s2[3],
+                            const T s3[3],
+                            const T ev[3],
+                            const T e1[3],
+                            const T e2[3],
+                            const T e3[3],
+                            T &toi,  // In/Out
+                            T &u,
+                            T &v,
+                            std::vector<sccd::Box<T>> &stack) {
+        static constexpr int N_nodes = (NT + 1) * (NU + 1) * (NV + 1);
+        static constexpr int N_cells = NT * NU * NV;
+        static constexpr int STRIDE_T = (NU + 1) * (NV + 1);
+        static constexpr int STRIDE_U = (NV + 1);
+
+        const T t_min = domain.tuv[0].lower;
+        const T u_min = domain.tuv[1].lower;
+        const T v_min = domain.tuv[2].lower;
+        const T t_max = domain.tuv[0].upper;
+        const T u_max = domain.tuv[1].upper;
+        const T v_max = domain.tuv[2].upper;
+        const T t_h = (t_max - t_min) / NT;
+        const T u_h = (u_max - u_min) / NU;
+        const T v_h = (v_max - v_min) / NV;
+
+        // 1) Generate F_grid
+        T F[3][N_nodes];
+        grid_sample_Fvf<NT, NU, NV, T>(
+            t_min, u_min, v_min, t_h, u_h, v_h, sv[0], s1[0], s2[0], s3[0], ev[0], e1[0], e2[0], e3[0], F[0]);
+
+        grid_sample_Fvf<NT, NU, NV, T>(
+            t_min, u_min, v_min, t_h, u_h, v_h, sv[1], s1[1], s2[1], s3[1], ev[1], e1[1], e2[1], e3[1], F[1]);
+
+        grid_sample_Fvf<NT, NU, NV, T>(
+            t_min, u_min, v_min, t_h, u_h, v_h, sv[2], s1[2], s2[2], s3[2], ev[2], e1[2], e2[2], e3[2], F[2]);
+
+        // 2) Find cells containing zeros and check for acceptability
+        uint8_t contains_zero_and_refine[N_cells];
+        uint8_t accept[N_cells];
+        for (int i = 0; i < N_cells; i++) {
+            contains_zero_and_refine[i] = true;
+            accept[i] = 0xf;
+        }
+
+        grid_zero_and_accept<NT, NU, NV, T>(F[0], tol, tols[0], contains_zero_and_refine, accept);
+        grid_zero_and_accept<NT, NU, NV, T>(F[1], tol, tols[1], contains_zero_and_refine, accept);
+        grid_zero_and_accept<NT, NU, NV, T>(F[2], tol, tols[2], contains_zero_and_refine, accept);
+
+        bool found = false;
+
+        printf("---------------------\n");
+        domain.print();
+        for (int a = 0; a < NT; a++) {
+            for (int b = 0; b < NU; b++) {
+                for (int c = 0; c < NV; c++) {
+                    int idx = a * NU * NV + b * NV + c;
+                    // printf("(%d, %d) ", contains_zero_and_refine[idx], accept[idx]);
+                    printf("%d  ", contains_zero_and_refine[idx]);
+                }
+                printf("\n");
+            }
+            printf("\n");
+        }
+        printf("---------------------\n");
+
+        // 3) Find earilest toi and schedule for refinement
+        for (int a = 0; a < NT; a++) {
+            const T t0 = t_min + a * t_h;
+            if (t0 > toi) continue;
+
+            for (int b = 0; b < NU; b++) {
+                for (int c = 0; c < NV; c++) {
+                    const int i = a * NU * NV + b * NV + c;
+                    if (accept[i]) {
+                        toi = t0;
+                        u = u_min + b * u_h;
+                        v = v_min + c * v_h;
+                        found = true;
+                        contains_zero_and_refine[i] = false;
+                    }
+                }
+            }
+        }
+
+        // Create new boxes
+        for (int a = 0; a < NT; a++) {
+            for (int b = 0; b < NU; b++) {
+                for (int c = 0; c < NV; c++) {
+                    const int i = a * NU * NV + b * NV + c;
+                    if (contains_zero_and_refine[i] && !accept[i]) {
+                        const T tt_min = t_min + a * t_h;
+                        const T uu_min = u_min + b * u_h;
+                        const T vv_min = v_min + c * v_h;
+
+                        const T tt_max = t_min + (a + 1) * t_h;
+                        const T uu_max = u_min + (b + 1) * u_h;
+                        const T vv_max = v_min + (c + 1) * v_h;
+
+                        if (uu_min + vv_min >= 1 + tol || tt_min >= toi) {
+                            continue;
+                        }
+
+                        Box<T> box({tt_min, tt_max}, {uu_min, uu_max}, {vv_min, vv_max}, domain.depth + 1);
+
+                        int split_dim = box.widest_dimension();
+                        box.bisect(split_dim, toi, stack);
+
+                        printf(">\n");
+                        box.print();
+                    }
+                }
+            }
+        }
+        printf("---------------------\n");
+
+        return found;
+    }
+
     template <typename T>
     bool find_root_dfs(const int max_iter,
                        const T tol,
@@ -1065,375 +1694,61 @@ namespace sccd {
                        T &t,
                        T &u,
                        T &v) {
-        // Depth-first root search mirroring find_root_dfs_3D in numeric_roots.py
-        auto eval_F = [&](const T tt, const T uu, const T vv, T &fx, T &fy, T &fz) {
-            const T t0 = static_cast<T>(1) - tt;
-            const T t1 = tt;
-            const T o = static_cast<T>(1) - uu - vv;
+        using Box = sccd::Box<T>;
+        using Interval = sccd::Interval<T>;
 
-            const T vx = t0 * sv[0] + t1 * ev[0];
-            const T vy = t0 * sv[1] + t1 * ev[1];
-            const T vz = t0 * sv[2] + t1 * ev[2];
+        // Compute per-axis tolerances (matching snumtol.hpp signature)
+        T tols[3];
+        compute_face_vertex_tolerance_soa<T>(tol,
+                                             sv[0],
+                                             sv[1],
+                                             sv[2],
+                                             s1[0],
+                                             s1[1],
+                                             s1[2],
+                                             s2[0],
+                                             s2[1],
+                                             s2[2],
+                                             s3[0],
+                                             s3[1],
+                                             s3[2],
+                                             ev[0],
+                                             ev[1],
+                                             ev[2],
+                                             e1[0],
+                                             e1[1],
+                                             e1[2],
+                                             e2[0],
+                                             e2[1],
+                                             e2[2],
+                                             e3[0],
+                                             e3[1],
+                                             e3[2],
+                                             &tols[0],
+                                             &tols[1],
+                                             &tols[2]);
 
-            const T f1x = t0 * s1[0] + t1 * e1[0];
-            const T f1y = t0 * s1[1] + t1 * e1[1];
-            const T f1z = t0 * s1[2] + t1 * e1[2];
-            const T f2x = t0 * s2[0] + t1 * e2[0];
-            const T f2y = t0 * s2[1] + t1 * e2[1];
-            const T f2z = t0 * s2[2] + t1 * e2[2];
-            const T f3x = t0 * s3[0] + t1 * e3[0];
-            const T f3y = t0 * s3[1] + t1 * e3[1];
-            const T f3z = t0 * s3[2] + t1 * e3[2];
+        t = 1;
+        u = 0;
+        v = 0;
 
-            const T fx_face = o * f1x + uu * f2x + vv * f3x;
-            const T fy_face = o * f1y + uu * f2y + vv * f3y;
-            const T fz_face = o * f1z + uu * f2z + vv * f3z;
-
-            fx = vx - fx_face;
-            fy = vy - fy_face;
-            fz = vz - fz_face;
-        };
-
-        int side = std::max<int>(
-            4,
-            static_cast<int>(std::round(std::pow(static_cast<T>(ROOT_FINDING_CHUNK_SIZE), static_cast<T>(1.0 / 3.0)))));
-        while ((side * side * side) > ROOT_FINDING_CHUNK_SIZE && side > 2) {
-            --side;
-        }
-
-        const int t_n = side;
-        const int u_n = side;
-        const int v_n = side;
-
-        const T t_min = static_cast<T>(0);
-        const T u_min = static_cast<T>(0);
-        const T v_min = static_cast<T>(0);
-        const T t_max = static_cast<T>(1);
-        const T u_max = static_cast<T>(1);
-        const T v_max = static_cast<T>(1);
-
-        const T t_h = (t_max - t_min) / static_cast<T>(t_n);
-        const T u_h = (u_max - u_min) / static_cast<T>(u_n);
-        const T v_h = (v_max - v_min) / static_cast<T>(v_n);
-
-        const int t_stride = (u_n + 1) * (v_n + 1);
-        const int u_stride = (v_n + 1);
-        const int total_samples = (t_n + 1) * (u_n + 1) * (v_n + 1);
-
-        std::vector<T> Fx(total_samples);
-        std::vector<T> Fy(total_samples);
-        std::vector<T> Fz(total_samples);
-
-        auto refine_root = [&](T &tt, T &uu, T &vv) -> bool {
-            auto eval = [&](const T t_eval, const T u_eval, const T v_eval, T out[3]) {
-                eval_F(t_eval, u_eval, v_eval, out[0], out[1], out[2]);
-            };
-
-            tt = sccd::min<T>(static_cast<T>(1), sccd::max<T>(static_cast<T>(0), tt));
-            project_uv_simplex<T>(uu, vv);
-
-            const int refine_max_iter = 100;
-            const T tol_f = sccd::max<T>(static_cast<T>(1e-10), tol * static_cast<T>(1e-2));
-
-            T x[3] = {tt, uu, vv};
-            for (int iter = 0; iter < refine_max_iter; ++iter) {
-                T F0[3];
-                eval(x[0], x[1], x[2], F0);
-                const T fn = std::sqrt(F0[0] * F0[0] + F0[1] * F0[1] + F0[2] * F0[2]);
-                if (fn <= tol_f) {
-                    tt = x[0];
-                    uu = x[1];
-                    vv = x[2];
-                    return true;
-                }
-
-                const T eps_t = static_cast<T>(1e-7);
-                const T eps_u = static_cast<T>(1e-7);
-                const T eps_v = static_cast<T>(1e-7);
-
-                T Ft[3], Fu[3], Fv[3];
-                eval(sccd::min<T>(static_cast<T>(1), x[0] + eps_t), x[1], x[2], Ft);
-                eval(x[0], x[1] + eps_u, x[2], Fu);
-                eval(x[0], x[1], x[2] + eps_v, Fv);
-
-                T J[3][3];
-                for (int r = 0; r < 3; ++r) {
-                    J[r][0] = (Ft[r] - F0[r]) / eps_t;
-                    J[r][1] = (Fu[r] - F0[r]) / eps_u;
-                    J[r][2] = (Fv[r] - F0[r]) / eps_v;
-                }
-
-                // Normal equations: (J^T J) p = -J^T F0
-                T JTJ[3][3] = {{0, 0, 0}, {0, 0, 0}, {0, 0, 0}};
-                T JTF[3] = {0, 0, 0};
-                for (int c = 0; c < 3; ++c) {
-                    for (int r = 0; r < 3; ++r) {
-                        JTJ[c][r] = J[0][c] * J[0][r] + J[1][c] * J[1][r] + J[2][c] * J[2][r];
-                    }
-                    JTF[c] = J[0][c] * F0[0] + J[1][c] * F0[1] + J[2][c] * F0[2];
-                }
-
-                const T lambda = static_cast<T>(1e-12);
-                JTJ[0][0] += lambda;
-                JTJ[1][1] += lambda;
-                JTJ[2][2] += lambda;
-
-                // Solve JTJ p = -JTF (Gaussian elimination with partial pivoting)
-                T A[3][4] = {{JTJ[0][0], JTJ[0][1], JTJ[0][2], -JTF[0]},
-                             {JTJ[1][0], JTJ[1][1], JTJ[1][2], -JTF[1]},
-                             {JTJ[2][0], JTJ[2][1], JTJ[2][2], -JTF[2]}};
-
-                for (int col = 0; col < 3; ++col) {
-                    int pivot = col;
-                    T max_abs = sccd::abs(A[col][col]);
-                    for (int r = col + 1; r < 3; ++r) {
-                        const T a = sccd::abs(A[r][col]);
-                        if (a > max_abs) {
-                            max_abs = a;
-                            pivot = r;
-                        }
-                    }
-                    if (max_abs < static_cast<T>(1e-20)) continue;
-                    if (pivot != col) {
-                        for (int c = col; c < 4; ++c) std::swap(A[col][c], A[pivot][c]);
-                    }
-                    const T inv_p = static_cast<T>(1) / A[col][col];
-                    for (int c = col; c < 4; ++c) A[col][c] *= inv_p;
-                    for (int r = 0; r < 3; ++r) {
-                        if (r == col) continue;
-                        const T factor = A[r][col];
-                        if (factor == static_cast<T>(0)) continue;
-                        for (int c = col; c < 4; ++c) {
-                            A[r][c] -= factor * A[col][c];
-                        }
-                    }
-                }
-
-                T p[3] = {A[0][3], A[1][3], A[2][3]};
-
-                T alpha = static_cast<T>(1);
-                bool improved = false;
-                for (int ls = 0; ls < 12; ++ls) {
-                    T xn[3] = {x[0] + alpha * p[0], x[1] + alpha * p[1], x[2] + alpha * p[2]};
-                    xn[0] = sccd::min<T>(static_cast<T>(1), sccd::max<T>(static_cast<T>(0), xn[0]));
-                    project_uv_simplex<T>(xn[1], xn[2]);
-
-                    T F1[3];
-                    eval(xn[0], xn[1], xn[2], F1);
-                    const T fn1 = std::sqrt(F1[0] * F1[0] + F1[1] * F1[1] + F1[2] * F1[2]);
-                    if (fn1 < fn) {
-                        x[0] = xn[0];
-                        x[1] = xn[1];
-                        x[2] = xn[2];
-                        improved = true;
-                        break;
-                    }
-                    alpha *= static_cast<T>(0.5);
-                }
-
-                if (!improved) {
-                    break;
-                }
-            }
-
-            T F_final[3];
-            eval(x[0], x[1], x[2], F_final);
-            const T fn_final = std::sqrt(F_final[0] * F_final[0] + F_final[1] * F_final[1] + F_final[2] * F_final[2]);
-            tt = x[0];
-            uu = x[1];
-            vv = x[2];
-            return fn_final <= sccd::max<T>(static_cast<T>(1e-10), tol * static_cast<T>(1e-2));
-        };
-
-        for (int ti = 0; ti <= t_n; ++ti) {
-            const T tt = t_min + static_cast<T>(ti) * t_h;
-            const int base_t = ti * t_stride;
-            for (int ui = 0; ui <= u_n; ++ui) {
-                const T uu = u_min + static_cast<T>(ui) * u_h;
-                const int base_u = base_t + ui * u_stride;
-                for (int vi = 0; vi <= v_n; ++vi) {
-                    const T vv = v_min + static_cast<T>(vi) * v_h;
-                    const int idx = base_u + vi;
-                    T fx, fy, fz;
-                    eval_F(tt, uu, vv, fx, fy, fz);
-                    Fx[idx] = fx;
-                    Fy[idx] = fy;
-                    Fz[idx] = fz;
-                }
-            }
-        }
-
-        std::vector<int> contains_zero(t_n * u_n * v_n, 1);
-        for (int ti = 0; ti < t_n; ++ti) {
-            for (int ui = 0; ui < u_n; ++ui) {
-                for (int vi = 0; vi < v_n; ++vi) {
-                    const int cell_idx = ti * u_n * v_n + ui * v_n + vi;
-                    const int i0 = ti * t_stride + ui * u_stride + vi;
-                    const int i1 = i0 + 1;
-                    const int i2 = i0 + u_stride;
-                    const int i3 = i2 + 1;
-                    const int i4 = i0 + t_stride;
-                    const int i5 = i1 + t_stride;
-                    const int i6 = i2 + t_stride;
-                    const int i7 = i3 + t_stride;
-
-                    const T xs[8] = {Fx[i0], Fx[i1], Fx[i2], Fx[i3], Fx[i4], Fx[i5], Fx[i6], Fx[i7]};
-                    const T ys[8] = {Fy[i0], Fy[i1], Fy[i2], Fy[i3], Fy[i4], Fy[i5], Fy[i6], Fy[i7]};
-                    const T zs[8] = {Fz[i0], Fz[i1], Fz[i2], Fz[i3], Fz[i4], Fz[i5], Fz[i6], Fz[i7]};
-
-                    const T fx_min = sccd::array_min<T>(8, xs);
-                    const T fx_max = sccd::array_max<T>(8, xs);
-                    const T fy_min = sccd::array_min<T>(8, ys);
-                    const T fy_max = sccd::array_max<T>(8, ys);
-                    const T fz_min = sccd::array_min<T>(8, zs);
-                    const T fz_max = sccd::array_max<T>(8, zs);
-
-                    const bool has_zero_x = (fx_min <= tol) && (fx_max >= -tol);
-                    const bool has_zero_y = (fy_min <= tol) && (fy_max >= -tol);
-                    const bool has_zero_z = (fz_min <= tol) && (fz_max >= -tol);
-                    contains_zero[cell_idx] = has_zero_x && has_zero_y && has_zero_z;
-                }
-            }
-        }
-
-        auto cell_has_zero = [&](const T t0, const T t1, const T u0, const T u1, const T v0, const T v1) -> bool {
-            if ((sccd::max<T>(static_cast<T>(0), u0) + sccd::max<T>(static_cast<T>(0), v0)) >
-                static_cast<T>(1) + static_cast<T>(1e-8)) {
-                return false;
-            }
-
-            T fx_min = std::numeric_limits<T>::max();
-            T fy_min = std::numeric_limits<T>::max();
-            T fz_min = std::numeric_limits<T>::max();
-            T fx_max = std::numeric_limits<T>::lowest();
-            T fy_max = std::numeric_limits<T>::lowest();
-            T fz_max = std::numeric_limits<T>::lowest();
-
-            for (const T tt : {t0, t1}) {
-                for (const T uu : {u0, u1}) {
-                    for (const T vv : {v0, v1}) {
-                        T fx, fy, fz;
-                        eval_F(tt, uu, vv, fx, fy, fz);
-                        fx_min = sccd::min<T>(fx_min, fx);
-                        fy_min = sccd::min<T>(fy_min, fy);
-                        fz_min = sccd::min<T>(fz_min, fz);
-                        fx_max = sccd::max<T>(fx_max, fx);
-                        fy_max = sccd::max<T>(fy_max, fy);
-                        fz_max = sccd::max<T>(fz_max, fz);
-                    }
-                }
-            }
-
-            const bool has_x = (fx_min <= tol) && (fx_max >= -tol);
-            const bool has_y = (fy_min <= tol) && (fy_max >= -tol);
-            const bool has_z = (fz_min <= tol) && (fz_max >= -tol);
-            return has_x && has_y && has_z;
-        };
-
-        struct Cell {
-            T t0, t1, u0, u1, v0, v1;
-            int depth;
-        };
-
-        std::vector<Cell> seeds;
-        seeds.reserve(static_cast<size_t>(t_n * u_n * v_n));
-        for (int ti = 0; ti < t_n; ++ti) {
-            for (int ui = 0; ui < u_n; ++ui) {
-                const T u0 = u_min + static_cast<T>(ui) * u_h;
-                for (int vi = 0; vi < v_n; ++vi) {
-                    const int cell_idx = ti * u_n * v_n + ui * v_n + vi;
-                    if (!contains_zero[cell_idx]) continue;
-                    const T v0 = v_min + static_cast<T>(vi) * v_h;
-                    if ((u0 + v0) > static_cast<T>(1) + static_cast<T>(1e-8)) continue;
-
-                    const T t0 = t_min + static_cast<T>(ti) * t_h;
-                    seeds.push_back({t0, t0 + t_h, u0, u0 + u_h, v0, v0 + v_h, 0});
-                }
-            }
-        }
-
-        if (seeds.empty()) {
-            return false;
-        }
-
-        std::sort(seeds.begin(), seeds.end(), [](const Cell &a, const Cell &b) { return a.t0 < b.t0; });
-        std::vector<Cell> stack;
-        stack.reserve(seeds.size());
-        for (auto it = seeds.rbegin(); it != seeds.rend(); ++it) {
-            stack.push_back(*it);
-        }
-
-        const T min_dim = sccd::max<T>(static_cast<T>(1e-6), tol * static_cast<T>(10));
-        const int max_depth = 100;
-        const T refine_tol = sccd::max<T>(static_cast<T>(1e-10), tol * static_cast<T>(1e-2));
-
+        bool found = false;
+        std::vector<Box> stack;
+        stack.reserve(1024);
+        stack.push_back(Box(Interval{T(0), T(1)}, Interval{T(0), T(1)}, Interval{T(0), T(1)}, 0));
+        bool found_root = false;
         while (!stack.empty()) {
-            Cell cell = stack.back();
+            Box box = stack.back();
             stack.pop_back();
 
-            if ((sccd::max<T>(static_cast<T>(0), cell.u0) + sccd::max<T>(static_cast<T>(0), cell.v0)) >
-                static_cast<T>(1) + static_cast<T>(1e-8)) {
+            if (box.tuv[0].lower > t) {
                 continue;
             }
 
-            const T tc = static_cast<T>(0.5) * (cell.t0 + cell.t1);
-            const T uc = static_cast<T>(0.5) * (cell.u0 + cell.u1);
-            const T vc = static_cast<T>(0.5) * (cell.v0 + cell.v1);
-
-            if (uc >= static_cast<T>(-1e-8) && vc >= static_cast<T>(-1e-8) &&
-                (uc + vc) <= static_cast<T>(1) + static_cast<T>(1e-8)) {
-                T fx_c, fy_c, fz_c;
-                eval_F(tc, uc, vc, fx_c, fy_c, fz_c);
-                const T fn_center = std::sqrt(fx_c * fx_c + fy_c * fy_c + fz_c * fz_c);
-                if (fn_center <= tol) {
-                    T t_candidate = tc;
-                    T u_candidate = uc;
-                    T v_candidate = vc;
-                    if (refine_root(t_candidate, u_candidate, v_candidate) ||
-                        find_root_newton<T>(
-                            100, refine_tol, sv, s1, s2, s3, ev, e1, e2, e3, t_candidate, u_candidate, v_candidate)) {
-                        t = t_candidate;
-                        u = u_candidate;
-                        v = v_candidate;
-                        return true;
-                    } else {
-                        continue;
-                    }
-                }
-            }
-
-            const T size = sccd::max<T>(cell.t1 - cell.t0, sccd::max<T>(cell.u1 - cell.u0, cell.v1 - cell.v0));
-            if (size <= min_dim || cell.depth >= max_iter) {
-                continue;
-            }
-
-            const T tm = static_cast<T>(0.5) * (cell.t0 + cell.t1);
-            const T um = static_cast<T>(0.5) * (cell.u0 + cell.u1);
-            const T vm = static_cast<T>(0.5) * (cell.v0 + cell.v1);
-
-            const Cell subcells[8] = {{cell.t0, tm, cell.u0, um, cell.v0, vm, cell.depth + 1},
-                                      {cell.t0, tm, cell.u0, um, vm, cell.v1, cell.depth + 1},
-                                      {cell.t0, tm, um, cell.u1, cell.v0, vm, cell.depth + 1},
-                                      {cell.t0, tm, um, cell.u1, vm, cell.v1, cell.depth + 1},
-                                      {tm, cell.t1, cell.u0, um, cell.v0, vm, cell.depth + 1},
-                                      {tm, cell.t1, cell.u0, um, vm, cell.v1, cell.depth + 1},
-                                      {tm, cell.t1, um, cell.u1, cell.v0, vm, cell.depth + 1},
-                                      {tm, cell.t1, um, cell.u1, vm, cell.v1, cell.depth + 1}};
-
-            if (cell.depth + 1 >= max_depth) {
-                break;
-            }
-
-            for (const Cell &sub : subcells) {
-                if (cell_has_zero(sub.t0, sub.t1, sub.u0, sub.u1, sub.v0, sub.v1)) {
-                    stack.push_back(sub);
-                }
-            }
+            found |= grid_search<2, 2, 2, T>(box, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack);
         }
 
-        return false;
+        return found;
     }
-
 }  // namespace sccd
-
 #endif  // S_ROOT_FINDER_HPP

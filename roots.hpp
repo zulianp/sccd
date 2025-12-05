@@ -1,5 +1,7 @@
 // VF
 /* Auto-generated with SymPy (CSE + pow expansion) */
+#ifndef ROOTS_HPP
+#define ROOTS_HPP
 
 #include "smath.hpp"
 
@@ -554,3 +556,6 @@ static inline void ee_all(const T sv[3],
     out_H[7] = ssa36;
     out_H[8] = (sccd::pow2<T>(ssa30) + sccd::pow2<T>(ssa31) + sccd::pow2<T>(ssa32)) * (t * t);
 }
+
+
+#endif
