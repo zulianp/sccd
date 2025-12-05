@@ -1548,7 +1548,7 @@ namespace sccd {
                     cond_mask |= (cond3 ? 4 : 0);
                     cond_mask |= (cond4 ? (8 & accept_cell[c])  : 0);
 
-                    printf("(%d %d %d) %d (%g %g)\n", a, b, c, contains_origin_cell[c], fmin, fmax);
+                    // printf("(%d %d %d) %d (%g %g)\n", a, b, c, contains_origin_cell[c], fmin, fmax);
 
                     accept_cell[c] = cond_mask & (contains_origin_cell[c] ? 0xf : 0);
                 }
@@ -1590,13 +1590,13 @@ namespace sccd {
         // 1) Generate F_grid
         T F[3][N_nodes];
         grid_sample_Fvf<NT, NU, NV, T>(
-            t_min, u_min, v_min, t_h, u_h, v_h, sv[0], s1[0], s2[0], s3[0], ev[0], e1[0], e2[0], e3[0], F[0]);
+            t_min, u_min, v_min, t_h, u_h, v_h, sv[0], ev[0], s1[0], s2[0], s3[0], e1[0], e2[0], e3[0], F[0]);
 
         grid_sample_Fvf<NT, NU, NV, T>(
-            t_min, u_min, v_min, t_h, u_h, v_h, sv[1], s1[1], s2[1], s3[1], ev[1], e1[1], e2[1], e3[1], F[1]);
+            t_min, u_min, v_min, t_h, u_h, v_h, sv[1], ev[1], s1[1], s2[1], s3[1], e1[1], e2[1], e3[1], F[1]);
 
         grid_sample_Fvf<NT, NU, NV, T>(
-            t_min, u_min, v_min, t_h, u_h, v_h, sv[2], s1[2], s2[2], s3[2], ev[2], e1[2], e2[2], e3[2], F[2]);
+            t_min, u_min, v_min, t_h, u_h, v_h, sv[2], ev[2], s1[2], s2[2], s3[2], e1[2], e2[2], e3[2], F[2]);
 
         // 2) Find cells containing zeros and check for acceptability
         uint8_t contains_zero_and_refine[N_cells];
@@ -1612,20 +1612,20 @@ namespace sccd {
 
         bool found = false;
 
-        printf("---------------------\n");
-        domain.print();
-        for (int a = 0; a < NT; a++) {
-            for (int b = 0; b < NU; b++) {
-                for (int c = 0; c < NV; c++) {
-                    int idx = a * NU * NV + b * NV + c;
-                    // printf("(%d, %d) ", contains_zero_and_refine[idx], accept[idx]);
-                    printf("%d  ", contains_zero_and_refine[idx]);
-                }
-                printf("\n");
-            }
-            printf("\n");
-        }
-        printf("---------------------\n");
+        // printf("---------------------\n");
+        // domain.print();
+        // for (int a = 0; a < NT; a++) {
+        //     for (int b = 0; b < NU; b++) {
+        //         for (int c = 0; c < NV; c++) {
+        //             int idx = a * NU * NV + b * NV + c;
+        //             // printf("(%d, %d) ", contains_zero_and_refine[idx], accept[idx]);
+        //             printf("%d  ", contains_zero_and_refine[idx]);
+        //         }
+        //         printf("\n");
+        //     }
+        //     printf("\n");
+        // }
+        // printf("---------------------\n");
 
         // 3) Find earilest toi and schedule for refinement
         for (int a = 0; a < NT; a++) {
@@ -1669,13 +1669,13 @@ namespace sccd {
                         int split_dim = box.widest_dimension();
                         box.bisect(split_dim, toi, stack);
 
-                        printf(">\n");
-                        box.print();
+                        // printf(">\n");
+                        // box.print();
                     }
                 }
             }
         }
-        printf("---------------------\n");
+        // printf("---------------------\n");
 
         return found;
     }
@@ -1745,7 +1745,7 @@ namespace sccd {
                 continue;
             }
 
-            found |= grid_search<2, 2, 2, T>(box, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack);
+            found |= grid_search<2, 4, 4, T>(box, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack);
         }
 
         return found;
