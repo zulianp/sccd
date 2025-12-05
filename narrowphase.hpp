@@ -197,11 +197,11 @@ T narrow_phase_vf(
         double u_oracle = 0;
         double v_oracle = 0;
         bool test_ok = find_root_oracle<double>(
-            1000, 1e-10, sv, s1, s2, s3, ev, e1, e2, e3, t_oracle, u_oracle,
+            1000, 1e-6, sv, s1, s2, s3, ev, e1, e2, e3, t_oracle, u_oracle,
             v_oracle);
 #endif
-        if (find_root<double>(
-                100, 1e-10, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v)) {
+        if (find_root_bisection<double>(
+                400, 1e-10, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v)) {
             toi[i] = t;
             min_t = sccd::min<T>(t, min_t);
 #ifdef TEST_ORACLE
