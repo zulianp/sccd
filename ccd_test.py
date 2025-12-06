@@ -12,6 +12,17 @@ import sccd_py
 
 import time
 
+class Stats:
+    def __init__(self):
+        self.num_collision = 0
+        self.num_nocollision = 0
+        self.time_collision = 0
+        self.time_nocollision = 0
+
+    def print(self):
+        print(f'YES: {self.num_collision}, {self.time_collision} [s], {self.num_collision/(self.time_collision + 1e-16)} QPS')
+        print(f'NO:  {self.num_nocollision}, {self.time_nocollision} [s], {self.num_nocollision/(self.time_collision + 1e-16)} QPS')
+
 if __name__ == "__main__":
     import os
     import glob
@@ -69,6 +80,9 @@ if __name__ == "__main__":
         total_time = 0
         min_toi = 10000
         min_toi_expected = 10000
+
+        stats = Stats()
+
         for i in range(n):
             sv_3d = [ query_data["v_t0"][0][i], query_data["v_t0"][1][i], query_data["v_t0"][2][i]]
             s1_3d = [ query_data["f0_t0"][0][i], query_data["f0_t0"][1][i], query_data["f0_t0"][2][i]]
@@ -85,6 +99,13 @@ if __name__ == "__main__":
             time_end = time.perf_counter()
             total_time += time_end - time_start
             expected_hit = bool(mma_bool[i]) 
+
+            if ret[0]:
+                stats.time_collision += time_end - time_start
+                stats.num_collision += 1
+            else:
+                stats.time_nocollision += time_end - time_start
+                stats.num_nocollision += 1
 
             if ret[0]:
                 min_toi = min(min_toi, ret[1])
@@ -134,5 +155,6 @@ if __name__ == "__main__":
 
         
         print(f"  Done {key}, {mismatches} mismatches {false_positives} false positives, {false_negatives} false negatives. Time: {total_time} [s] Queries/s: {n / (total_time)}, Min TOI {min_toi} (Expected: {min_toi_expected})")
+        stats.print()
     print(f"Summary: {total_cases} cases, {mismatches} mismatches, {false_positives} false positives, {false_negatives} false negatives.")
 
