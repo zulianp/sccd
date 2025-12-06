@@ -83,7 +83,9 @@ if __name__ == "__main__":
 
         stats = Stats()
 
+        print("Started!")
         for i in range(n):
+            # print(f"{i}/{n})")
             sv_3d = [ query_data["v_t0"][0][i], query_data["v_t0"][1][i], query_data["v_t0"][2][i]]
             s1_3d = [ query_data["f0_t0"][0][i], query_data["f0_t0"][1][i], query_data["f0_t0"][2][i]]
             s2_3d = [ query_data["f1_t0"][0][i], query_data["f1_t0"][1][i], query_data["f1_t0"][2][i]]
@@ -94,8 +96,9 @@ if __name__ == "__main__":
             e3_3d = [ query_data["f2_t1"][0][i], query_data["f2_t1"][1][i], query_data["f2_t1"][2][i]]
 
             time_start = time.perf_counter()
-            ret = sccd_py.find_root_vf_d(1000, 1e-12, sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d)
-            # ret = sccd_py.find_root_bisection_vf_d(10000, 1e-10, sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d)
+            ret = sccd_py.find_root_vf_d(16, 1e-12, sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d)
+            # ret = sccd_py.find_root_bisection_vf_d(15 * 4**3, 1e-12, sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d)
+            # ret = sccd_py.find_root_tight_inclusion_vf_d(10000, 1e-6, sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d)
             time_end = time.perf_counter()
             total_time += time_end - time_start
             expected_hit = bool(mma_bool[i]) 
@@ -112,12 +115,12 @@ if __name__ == "__main__":
 
             total_cases += 1
             if ret[0] != expected_hit:
-                print(f'  {key}:{i}) hit_mismatch: got {ret[0]} expected {expected_hit}')
+                print(f'  {key}:{i}/{n}) hit_mismatch: got {ret[0]} expected {expected_hit}')
                 false_positives += 1
 
                 if ret[0]:
                     print("-"*80)
-                    print(f'{key}:{i}) false positive: ret={ret[1:]}')
+                    print(f'{key}:{i}/{n}) false positive: ret={ret[1:]}')
                     Fx, Fy, Fz = vf_F_3d(sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d, ret[1], ret[2], ret[3])
                     print(f'  ({Fx}, {Fy}, {Fz}) residual')
                     print("-"*80)
@@ -125,11 +128,10 @@ if __name__ == "__main__":
                 if expected_hit:
                     gt = root_map[i]
                     eFx, eFy, eFz = vf_F_3d(sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d, gt["t"], gt["a"], gt["b"])
-                    print(f'{key}:{i}) false negative: ret={ret[1:]}, gt=({gt["t"]}, {gt["a"]}, {gt["b"]}), F=({eFx}, {eFy}, {eFz})')
+                    print(f'{key}:{i}/{n}) false negative: ret={ret[1:]}, gt=({gt["t"]}, {gt["a"]}, {gt["b"]}), F=({eFx}, {eFy}, {eFz})')
                     false_negatives += 1
                     assert False
                 continue
-
 
             if expected_hit:
                 # Compare with root map if available (keys are per-query indices from _q<number>_)
@@ -141,8 +143,8 @@ if __name__ == "__main__":
                     min_toi_expected = min(min_toi_expected, gt["t"])
                     if t_diff > tol_t or a_diff > tol_uv or b_diff > tol_uv:
                         print("-"*80)
-                        print(f'  {key}:{i}) root_mismatch: ret={ret[1:]}, gt=({gt["t"]}, {gt["a"]}, {gt["b"]})')
-                        print(f'             diffs: t={t_diff} a={a_diff} b={b_diff}')
+                        print(f'  {key}:{i}/{n}) root_mismatch: ret={ret[1:]}, gt=({gt["t"]}, {gt["a"]}, {gt["b"]})')
+                        print(f'             diffs: t={t_diff} u={a_diff} v={b_diff}')
 
                         eFx, eFy, eFz = vf_F_3d(sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d, gt["t"], gt["a"], gt["b"])
                         Fx, Fy, Fz = vf_F_3d(sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d, ret[1], ret[2], ret[3])
@@ -154,7 +156,8 @@ if __name__ == "__main__":
                     false_positives += 1
 
         
-        print(f"  Done {key}, {mismatches} mismatches {false_positives} false positives, {false_negatives} false negatives. Time: {total_time} [s] Queries/s: {n / (total_time)}, Min TOI {min_toi} (Expected: {min_toi_expected})")
+        print(f"  Done {key}, {mismatches} mismatches {false_positives} false positives, {false_negatives} false negatives. Time: {total_time} [s] Queries/s: {n / (total_time)}");
+        print(f"  Min TOI {min_toi} (Conservative? {min_toi <= min_toi_expected} Expected: {min_toi_expected})")
         stats.print()
     print(f"Summary: {total_cases} cases, {mismatches} mismatches, {false_positives} false positives, {false_negatives} false negatives.")
 
