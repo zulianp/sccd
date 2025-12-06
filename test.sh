@@ -11,7 +11,8 @@ make -j8
 # datasets=(armadillo-rollers cloth-ball cloth-funnel puffer-ball rod-twist n-body-simulation)
 
 db_dir="data"
-datasets=(armadillo-rollers)
+# datasets=(armadillo-rollers)
+datasets=(n-body-simulation)
 
 cd -
 
