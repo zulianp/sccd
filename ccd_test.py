@@ -67,6 +67,8 @@ if __name__ == "__main__":
             print(f"  Warning: mma_bool length {len(mma_bool)} != queries {n}")
 
         total_time = 0
+        min_toi = 10000
+        min_toi_expected = 10000
         for i in range(n):
             sv_3d = [ query_data["v_t0"][0][i], query_data["v_t0"][1][i], query_data["v_t0"][2][i]]
             s1_3d = [ query_data["f0_t0"][0][i], query_data["f0_t0"][1][i], query_data["f0_t0"][2][i]]
@@ -78,11 +80,14 @@ if __name__ == "__main__":
             e3_3d = [ query_data["f2_t1"][0][i], query_data["f2_t1"][1][i], query_data["f2_t1"][2][i]]
 
             time_start = time.perf_counter()
-            ret = sccd_py.find_root_vf_d(1000, 1e-10, sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d)
+            ret = sccd_py.find_root_vf_d(1000, 1e-12, sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d)
             # ret = sccd_py.find_root_bisection_vf_d(10000, 1e-10, sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d)
             time_end = time.perf_counter()
             total_time += time_end - time_start
             expected_hit = bool(mma_bool[i]) 
+
+            if ret[0]:
+                min_toi = min(min_toi, ret[1])
 
             total_cases += 1
             if ret[0] != expected_hit:
@@ -112,6 +117,7 @@ if __name__ == "__main__":
                     t_diff = abs(ret[1] - gt["t"])
                     a_diff = abs(ret[2] - gt["a"])
                     b_diff = abs(ret[3] - gt["b"])
+                    min_toi_expected = min(min_toi_expected, gt["t"])
                     if t_diff > tol_t or a_diff > tol_uv or b_diff > tol_uv:
                         print("-"*80)
                         print(f'  {key}:{i}) root_mismatch: ret={ret[1:]}, gt=({gt["t"]}, {gt["a"]}, {gt["b"]})')
@@ -127,6 +133,6 @@ if __name__ == "__main__":
                     false_positives += 1
 
         
-        print(f"  Done {key}, {mismatches} mismatches {false_positives} false positives, {false_negatives} false negatives. Time: {total_time} [s] Queries/s: {n / (total_time)}")
+        print(f"  Done {key}, {mismatches} mismatches {false_positives} false positives, {false_negatives} false negatives. Time: {total_time} [s] Queries/s: {n / (total_time)}, Min TOI {min_toi} (Expected: {min_toi_expected})")
     print(f"Summary: {total_cases} cases, {mismatches} mismatches, {false_positives} false positives, {false_negatives} false negatives.")
 
