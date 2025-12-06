@@ -15,7 +15,138 @@
 #include "roots.hpp"
 #include "snumtol.hpp"
 
+// #define SCCD_ENABLE_TIGHT_INCLUSION
+#ifdef SCCD_ENABLE_TIGHT_INCLUSION
+#include <Eigen/Dense>
+#include "tight_inclusion/ccd.hpp"
+#include "tight_inclusion/interval_root_finder.hpp"
+#endif
+
 namespace sccd {
+
+#ifdef SCCD_ENABLE_TIGHT_INCLUSION
+    bool barycentric_triangle_3d(const ticcd::Vector3 &A,
+                               const ticcd::Vector3 &B,
+                               const ticcd::Vector3 &C,
+                               const ticcd::Vector3 &P,
+                               double &u,
+                               double &v) {
+        using std::abs;
+
+        ticcd::Vector3 e1 = B - A;
+        ticcd::Vector3 e2 = C - A;
+        ticcd::Vector3 n = e1.cross(e2).eval();
+
+        ticcd::Vector3 dir = P - A;
+        double dist = n.dot(dir);
+        if (dist * dist > 1e-5) {
+            return false;
+        }
+
+        // Compute local coordinates u and v: (P - A) = u * (B - A) + v * (C - A)
+        // Solve: dir = u * e1 + v * e2
+        // Using dot product method (more numerically stable):
+        // dir · e1 = u * (e1 · e1) + v * (e2 · e1)
+        // dir · e2 = u * (e1 · e2) + v * (e2 · e2)
+        double d00 = e1.dot(e1);
+        double d01 = e1.dot(e2);
+        double d11 = e2.dot(e2);
+        double d20 = dir.dot(e1);
+        double d21 = dir.dot(e2);
+
+        double denom = d00 * d11 - d01 * d01;
+        if (abs(denom) < 1e-10) {
+            // Degenerate triangle
+            return false;
+        }
+
+        u = (d11 * d20 - d01 * d21) / denom;
+        v = (d00 * d21 - d01 * d20) / denom;
+
+        return true;
+    }
+
+    bool isInsideTriangle(const ticcd::Vector3 &lambda, ticcd::Scalar tol = ticcd::Scalar(1e-6)) {
+        return (lambda.array() >= -tol).all() && (lambda.array() <= ticcd::Scalar(1) + tol).all() &&
+               std::abs(lambda.sum() - ticcd::Scalar(1)) <= ticcd::Scalar(1e-6);
+    }
+
+    template <typename T>
+    bool find_root_tight_inclusion(const int max_iter,
+                          const T atol,
+                          const T sv[3],
+                          const T s1[3],
+                          const T s2[3],
+                          const T s3[3],
+                          const T ev[3],
+                          const T e1[3],
+                          const T e2[3],
+                          const T e3[3],
+                          T &t,
+                          T &u,
+                          T &v) {
+        ticcd::Vector3 v_t0(sv[0], sv[1], sv[2]);
+        ticcd::Vector3 f0_t0(s1[0], s1[1], s1[2]);
+        ticcd::Vector3 f1_t0(s2[0], s2[1], s2[2]);
+        ticcd::Vector3 f2_t0(s3[0], s3[1], s3[2]);
+
+        ticcd::Vector3 v_t1(ev[0], ev[1], ev[2]);
+        ticcd::Vector3 f0_t1(e1[0], e1[1], e1[2]);
+        ticcd::Vector3 f1_t1(e2[0], e2[1], e2[2]);
+        ticcd::Vector3 f2_t1(e3[0], e3[1], e3[2]);
+
+        ticcd::Array3 tol(atol, atol, atol);
+        ticcd::Array3 err(1e-10, 1e-10, 1e-10);
+
+        ticcd::Scalar ms = 0;
+        ticcd::Scalar max_time = 1;
+        ticcd::Scalar toi = 1;
+        ticcd::Scalar output_tolerance = 1e-6;
+        bool no_zero_toi = false;
+
+        bool test_ok = ticcd::vertexFaceCCD(v_t0,
+                                            f0_t0,
+                                            f1_t0,
+                                            f2_t0,
+                                            v_t1,
+                                            f0_t1,
+                                            f1_t1,
+                                            f2_t1,
+                                            err,
+                                            ms,
+                                            toi,
+                                            atol,
+                                            1,
+                                            max_iter,
+                                            output_tolerance,
+                                            no_zero_toi,
+                                            ticcd::CCDRootFindingMethod::BREADTH_FIRST_SEARCH);
+
+        // double u0 = -1, v0 = -1;
+        // double discrepancy = -1;
+        // if (test_ok) {
+        //     auto f0 = f0_t0 * (1 - toi) + toi * (f0_t1);
+        //     auto f1 = f1_t0 * (1 - toi) + toi * (f1_t1);
+        //     auto f2 = f2_t0 * (1 - toi) + toi * (f2_t1);
+        //     auto pt = (1 - toi) * v_t0 + toi * v_t1;
+
+        //     const bool inplane = barycentric_triangle_3d(f0.eval(), f1.eval(), f2.eval(), pt.eval(), u0, v0);
+        //     assert(inplane);
+
+        //     test_ok = (u0 >= -1e-8 && v0 >= -1e-8 && u0 + v0 <= 1 + 1e-8 && toi >= -1e-8 && toi <= 1 + 1e-8);
+
+        //     auto pt_rec = (1 - u0 - v0) * f0 + u0 * f1 + v0 * f2;
+        //     auto diff = pt_rec - pt;
+
+        //     discrepancy = diff.dot(diff);
+        //     t = toi;
+        //     u = u0;
+        //     v = v0;
+        // }
+        return test_ok;
+    }
+
+#endif
 
     template <typename T>
     inline void project_uv_simplex(T &u, T &v) {
@@ -149,7 +280,6 @@ namespace sccd {
         return false;
     }
 
-   
     template <typename T>
     bool sum_less_than_one(const T u, const T v) {
         return u + v <= 1. / (1. - DBL_EPSILON);
@@ -438,7 +568,7 @@ namespace sccd {
                     const T t1 = (e2 - s2) * t + s2;
                     const T t2 = (e3 - s3) * t + s3;
 
-                    const T face = (t1 - t0) * u + (t2 - t0) * v + t0; 
+                    const T face = (t1 - t0) * u + (t2 - t0) * v + t0;
                     F[idx] = vertex - face;
 
                     // T t0 = (1 - t);
@@ -450,7 +580,6 @@ namespace sccd {
                     // T f = f0 + f1;
                     // T diff = v_pos - f;
                     // F[idx] = diff;
-                    
                 }
             }
         }
@@ -496,18 +625,16 @@ namespace sccd {
                     const T fmax = sccd::max(sccd::max(sccd::max(F000[c], F001[c]), sccd::max(F010[c], F011[c])),
                                              sccd::max(sccd::max(F100[c], F101[c]), sccd::max(F110[c], F111[c])));
 
-
-
                     contains_origin_cell[c] &= (fmin <= tol) & (fmax >= -tol);  // AND) for all dims
-                    bool cond1 = (fmax - fmin <= adaptive_tol);                 // AND) The domain is smaller than the tolerance.
-                    bool cond2 = !((fmin < tol) | (fmax > -tol));               // AND) The box is inside the epsilon box
-                    bool cond3 = (fmax - fmin < tol);                           // OR) Real tolerance is smaller than the int tolerance
-                    bool cond4 = (fmin >= fmax);                                // AND) The interval is terminal
+                    bool cond1 = (fmax - fmin <= adaptive_tol);    // AND) The domain is smaller than the tolerance.
+                    bool cond2 = !((fmin < tol) | (fmax > -tol));  // AND) The box is inside the epsilon box
+                    bool cond3 = (fmax - fmin < tol);  // OR) Real tolerance is smaller than the int tolerance
+                    bool cond4 = (fmin >= fmax);       // AND) The interval is terminal
 
-                    uint8_t cond_mask = (cond1 ? (1 & accept_cell[c]) : 0) ;
+                    uint8_t cond_mask = (cond1 ? (1 & accept_cell[c]) : 0);
                     cond_mask |= (cond2 ? (2 & accept_cell[c]) : 0);
                     cond_mask |= (cond3 ? 4 : 0);
-                    cond_mask |= (cond4 ? (8 & accept_cell[c])  : 0);
+                    cond_mask |= (cond4 ? (8 & accept_cell[c]) : 0);
 
                     // printf("(%d %d %d) %d (%g %g)\n", a, b, c, contains_origin_cell[c], fmin, fmax);
 
@@ -622,19 +749,19 @@ namespace sccd {
 
     template <typename T>
     bool find_root_grid(const int max_iter,
-                       const T tol,
-                       const T sv[3],
-                       const T s1[3],
-                       const T s2[3],
-                       const T s3[3],
-                       const T ev[3],
-                       const T e1[3],
-                       const T e2[3],
-                       const T e3[3],
-                       T &t,
-                       T &u,
-                       T &v,
-                       std::vector<Box<T>> &stack) {
+                        const T tol,
+                        const T sv[3],
+                        const T s1[3],
+                        const T s2[3],
+                        const T s3[3],
+                        const T ev[3],
+                        const T e1[3],
+                        const T e2[3],
+                        const T e3[3],
+                        T &t,
+                        T &u,
+                        T &v,
+                        std::vector<Box<T>> &stack) {
         using Box = sccd::Box<T>;
         using Interval = sccd::Interval<T>;
 
@@ -693,4 +820,5 @@ namespace sccd {
         return found;
     }
 }  // namespace sccd
+
 #endif  // S_ROOT_FINDER_HPP
