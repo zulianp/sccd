@@ -16,8 +16,13 @@ if __name__ == "__main__":
     import os
     import glob
     import re as _re
+    import sys
 
-    base_folder = "data/armadillo-rollers"
+    if len(sys.argv) != 2:
+        print(f"usage {sys.argv[0]} <data-set>")
+        exit(1) 
+
+    base_folder = sys.argv[1]
 
     # Collect triples for vertex-face (vf) datasets
     query_paths = sorted(glob.glob(os.path.join(base_folder, "queries", "*vf.csv")))
