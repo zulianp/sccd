@@ -51,12 +51,8 @@ if __name__ == "__main__":
         root_file  = roots_by_key[key]
         mma_file   = mma_by_key[key]
         
-
         print(f"Dataset {key}:")
         
-        # if key != "12vf": continue
-        # if key != "100vf": continue
-
         query_data = read_queries.read_queries(query_file)
         root_map   = read_wxf.read_wxf_roots(root_file)  # Dict[int] -> {t,a,b}
         mma_bool   = read_mma.read_mma_bool(mma_file)    # List[bool]
@@ -65,7 +61,7 @@ if __name__ == "__main__":
         if len(mma_bool) != n:
             print(f"  Warning: mma_bool length {len(mma_bool)} != queries {n}")
 
-        time_start = time.perf_counter()
+        total_time = 0
         for i in range(n):
             sv_3d = [ query_data["v_t0"][0][i], query_data["v_t0"][1][i], query_data["v_t0"][2][i]]
             s1_3d = [ query_data["f0_t0"][0][i], query_data["f0_t0"][1][i], query_data["f0_t0"][2][i]]
@@ -76,9 +72,11 @@ if __name__ == "__main__":
             e2_3d = [ query_data["f1_t1"][0][i], query_data["f1_t1"][1][i], query_data["f1_t1"][2][i]]
             e3_3d = [ query_data["f2_t1"][0][i], query_data["f2_t1"][1][i], query_data["f2_t1"][2][i]]
 
-            ret = sccd_py.find_root_dfs_d(1000, 1e-10, sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d)
-            # ret = sccd_py.find_root_vf_d(1000, 1e-6, sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d)
+            time_start = time.perf_counter()
+            ret = sccd_py.find_root_vf_d(1000, 1e-10, sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d)
             # ret = sccd_py.find_root_bisection_vf_d(10000, 1e-10, sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d)
+            time_end = time.perf_counter()
+            total_time += time_end - time_start
             expected_hit = bool(mma_bool[i]) 
 
             total_cases += 1
@@ -123,7 +121,7 @@ if __name__ == "__main__":
                     # Root not present; report but don't fail loudly
                     false_positives += 1
 
-        time_end = time.perf_counter()
-        print(f"  Done {key}, {mismatches} mismatches {false_positives} false positives, {false_negatives} false negatives. Time: {time_end - time_start} [s] Queries/s: {n / (time_end - time_start)}")
+        
+        print(f"  Done {key}, {mismatches} mismatches {false_positives} false positives, {false_negatives} false negatives. Time: {total_time} [s] Queries/s: {n / (total_time)}")
     print(f"Summary: {total_cases} cases, {mismatches} mismatches, {false_positives} false positives, {false_negatives} false negatives.")
 
