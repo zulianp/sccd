@@ -4,6 +4,7 @@ project(sccd LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+
 # Library
 add_library(sccd SHARED sccd.cpp)
 target_include_directories(sccd PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

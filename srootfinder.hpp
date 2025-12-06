@@ -102,7 +102,7 @@ namespace sccd {
         ticcd::Scalar max_time = 1;
         ticcd::Scalar toi = 1;
         ticcd::Scalar output_tolerance = 1e-6;
-        bool no_zero_toi = false;
+        bool no_zero_toi = true;
 
         bool test_ok = ticcd::vertexFaceCCD(v_t0,
                                             f0_t0,
@@ -296,6 +296,10 @@ namespace sccd {
         using Interval = sccd::Interval<T>;
         Interval tuv[3];
         int depth{0};
+
+        friend bool operator<(const Box &l, const Box &r) {
+            return l.tuv[0].lower < r.tuv[0].lower;
+        }
 
         Box() = default;
         Box(Interval t, Interval u, Interval v, int depth) : tuv{t, u, v}, depth(depth) {}
@@ -517,6 +521,8 @@ namespace sccd {
                     found_root = true;
                     continue;
                 }
+
+                if(box.depth > max_iter) continue;
 
                 // Split the box along the widest dimension
                 int split_dim = box.widest_dimension();
@@ -801,8 +807,6 @@ namespace sccd {
         v = 0;
 
         bool found = false;
-        // std::vector<Box> stack;
-        // stack.reserve(1024);
         stack.clear();
         stack.push_back(Box(Interval{T(0), T(1)}, Interval{T(0), T(1)}, Interval{T(0), T(1)}, 0));
         bool found_root = false;
@@ -810,11 +814,28 @@ namespace sccd {
             Box box = stack.back();
             stack.pop_back();
 
+            if(box.depth > max_iter) {
+                // // Mid-point approximation
+                // const T approx = (box.tuv[0].lower + box.tuv[0].upper) / 2;
+
+                // Conservative approximation
+                const T approx = box.tuv[0].lower;
+                if(approx < t) {
+                    t = approx;
+                    u = (box.tuv[1].lower + box.tuv[1].upper)/2;
+                    v = (box.tuv[2].lower + box.tuv[2].upper)/2;
+                    found = true;
+                }
+                continue;
+            }
+
             if (box.tuv[0].lower > t) {
                 continue;
             }
 
-            found |= grid_search<2, 4, 4, T>(box, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack);
+            found |= grid_search<3, 3, 3, T>(box, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack);
+
+            // std::sort(stack.begin(), stack.end());
         }
 
         return found;

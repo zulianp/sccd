@@ -24,6 +24,9 @@ namespace sccd {
         const T infty = 100000;
         T min_t = infty;
 
+        int USE_TI = 0;
+        SFEM_READ_ENV(USE_TI, atoi);
+
         tbb::parallel_for(tbb::blocked_range<size_t>(0, noverlaps), [&](const tbb::blocked_range<size_t>& r) {
             std::vector<Box<double>> stack;
             for (size_t i = r.begin(); i < r.end(); i++) {
@@ -48,27 +51,31 @@ namespace sccd {
                 double t = 0;
                 double u = 0;
                 double v = 0;
-                double tol = 1e-6;
-                int max_iter = 4000;
+                double tol = 1e-12;
+                int max_iter = 16;
 
 #ifdef SCCD_ENABLE_TIGHT_INCLUSION
 #warning "SCCD_ENABLE_TIGHT_INCLUSION"
-                if (find_root_tight_inclusion<double>(max_iter, tol, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v)) {
-                    toi[i] = t;
-                    min_t = sccd::min<T>(t, min_t);
-                } else {
-                    toi[i] = infty;
+                if (USE_TI) {
+                    if (find_root_tight_inclusion<double>(
+                            max_iter * 1000, tol, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v)) {
+                        toi[i] = t;
+                        min_t = sccd::min<T>(t, min_t);
+                    } else {
+                        toi[i] = infty;
+                    }
+                    continue;
                 }
-#else
-                if (find_root_grid<double>(max_iter, tol, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack)) 
-                // if (find_root_bisection<double>(4000, 1e-10, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v)) 
+#endif
+                if (find_root_grid<double>(max_iter, tol, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack))
+                // if (find_root_bisection<double>(max_iter * 3*3*3, tol, sv,
+                // s1, s2, s3, ev, e1, e2, e3, t, u, v))
                 {
                     toi[i] = t;
                     min_t = sccd::min<T>(t, min_t);
                 } else {
                     toi[i] = infty;
                 }
-#endif
             }
         });
 
