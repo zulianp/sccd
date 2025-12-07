@@ -23,6 +23,8 @@ if __name__ == "__main__":
     time = table["time"]
 
     diff = expected_toi - toi
+    normalization = expected_toi + 1e-12
+    diff /= normalization
 
     print(f'Mean:   {np.mean(diff)}')
     print(f'Std:    {np.std(diff)}')
@@ -30,26 +32,27 @@ if __name__ == "__main__":
     print(f'Max:    {np.max(diff)}')
     print(f'Median: {np.median(diff)}')
 
-    # TODO create a histogram of the difference semilogy
     plt.hist(diff, bins=100, log=True)
-    plt.ylabel("Frequency")
-    plt.xlabel("Difference Between Expected TOI and TOI")
-    plt.title("Time of Impact (TOI) Difference Histogram")
+    plt.ylabel("Count")
+    plt.xlabel("Relative Difference Between Expected TOI and TOI")
     plt.savefig(f"{name}_diff_histogram.pdf")
     plt.close()
     # plt.show()
 
     ind = np.argsort(expected_toi)
     # plt.semilogy(diff)
-    normalization = expected_toi[ind] + 1e-12
+
     
-    plt.plot(expected_toi[ind], toi[ind]/normalization, label="TOI")
-    plt.plot(expected_toi[ind], expected_toi[ind]/normalization, label="Expected TOI")
-    # plt.plot(diff[ind]/normalization, label="Difference")
+    
+    plt.plot(expected_toi[ind], toi[ind]/normalization[ind], '.', label="TOI", alpha=0.2)
+    plt.plot([np.min(expected_toi), np.max(expected_toi)], [1, 1], '-', color="red", linewidth=1.0, label="Reference")
+
+    # plt.plot(expected_toi[ind], expected_toi[ind]/normalization[ind], '.', label="Expected TOI", alpha=0.2)
+
     plt.legend()
     plt.yscale("log")
-    plt.ylabel("Difference Between Expected TOI and TOI")
-    plt.xlabel("Query (sorted by Expected TOI)")
+    plt.ylabel("Relative TOI (1 is reference)")
+    plt.xlabel("Time of Impact (Expected TOI)")
     plt.title("Time of Impact (TOI) Difference")
     plt.savefig(f"{name}_diff.pdf")
     # plt.show()
