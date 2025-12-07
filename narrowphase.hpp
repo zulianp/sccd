@@ -27,7 +27,7 @@ namespace sccd {
         int USE_TI = 0;
         SFEM_READ_ENV(USE_TI, atoi);
 
-        int SCCD_MAX_ITER = 15;
+        int SCCD_MAX_ITER = 12;
         SFEM_READ_ENV(SCCD_MAX_ITER, atoi);
 
         double tol = 1e-12;
@@ -103,7 +103,7 @@ namespace sccd {
         int USE_TI = 0;
         SFEM_READ_ENV(USE_TI, atoi);
 
-        int SCCD_MAX_ITER = 15;
+        int SCCD_MAX_ITER = 12;
         SFEM_READ_ENV(SCCD_MAX_ITER, atoi);
 
         double tol = 1e-12;

@@ -110,7 +110,7 @@ int sccd_find_root_rotate_vf_f(int max_iter,
 }
 
 #ifdef SCCD_ENABLE_TIGHT_INCLUSION
-int sccd_find_root_tight_inclusion_vf_vf_d(int max_iter,
+int sccd_find_root_tight_inclusion_vf_d(int max_iter,
                                            double tol,
                                            const double sv[3],
                                            const double s1[3],
@@ -124,6 +124,22 @@ int sccd_find_root_tight_inclusion_vf_vf_d(int max_iter,
                                            double* u,
                                            double* v) {
     return sccd::find_root_tight_inclusion_vf<double>(max_iter, tol, sv, s1, s2, s3, ev, e1, e2, e3, *t, *u, *v);
+}
+
+int sccd_find_root_tight_inclusion_ee_d(int max_iter,
+                                        double tol,
+                                        const double s0[3],
+                                        const double s1[3],
+                                        const double s2[3],
+                                        const double s3[3],
+                                        const double e0[3],
+                                        const double e1[3],
+                                        const double e2[3],
+                                        const double e3[3],
+                                        double* t,
+                                        double* u,
+                                        double* v) {
+    return sccd::find_root_tight_inclusion_ee<double>(max_iter, tol, s0, s1, s2, s3, e0, e1, e2, e3, *t, *u, *v);
 }
 #endif
 
