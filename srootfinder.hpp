@@ -26,11 +26,11 @@ namespace sccd {
 
 #ifdef SCCD_ENABLE_TIGHT_INCLUSION
     bool barycentric_triangle_3d(const ticcd::Vector3 &A,
-                               const ticcd::Vector3 &B,
-                               const ticcd::Vector3 &C,
-                               const ticcd::Vector3 &P,
-                               double &u,
-                               double &v) {
+                                 const ticcd::Vector3 &B,
+                                 const ticcd::Vector3 &C,
+                                 const ticcd::Vector3 &P,
+                                 double &u,
+                                 double &v) {
         using std::abs;
 
         ticcd::Vector3 e1 = B - A;
@@ -72,19 +72,19 @@ namespace sccd {
     }
 
     template <typename T>
-    bool find_root_tight_inclusion(const int max_iter,
-                          const T atol,
-                          const T sv[3],
-                          const T s1[3],
-                          const T s2[3],
-                          const T s3[3],
-                          const T ev[3],
-                          const T e1[3],
-                          const T e2[3],
-                          const T e3[3],
-                          T &t,
-                          T &u,
-                          T &v) {
+    bool find_root_tight_inclusion_vf(const int max_iter,
+                                      const T atol,
+                                      const T sv[3],
+                                      const T s1[3],
+                                      const T s2[3],
+                                      const T s3[3],
+                                      const T ev[3],
+                                      const T e1[3],
+                                      const T e2[3],
+                                      const T e3[3],
+                                      T &t,
+                                      T &u,
+                                      T &v) {
         ticcd::Vector3 v_t0(sv[0], sv[1], sv[2]);
         ticcd::Vector3 f0_t0(s1[0], s1[1], s1[2]);
         ticcd::Vector3 f1_t0(s2[0], s2[1], s2[2]);
@@ -104,23 +104,23 @@ namespace sccd {
         ticcd::Scalar output_tolerance = 1e-6;
         bool no_zero_toi = true;
 
-        bool test_ok = ticcd::vertexFaceCCD(v_t0,
-                                            f0_t0,
-                                            f1_t0,
-                                            f2_t0,
-                                            v_t1,
-                                            f0_t1,
-                                            f1_t1,
-                                            f2_t1,
-                                            err,
-                                            ms,
-                                            toi,
-                                            atol,
-                                            1,
-                                            max_iter,
-                                            output_tolerance,
-                                            no_zero_toi,
-                                            ticcd::CCDRootFindingMethod::BREADTH_FIRST_SEARCH);
+        return ticcd::vertexFaceCCD(v_t0,
+                                    f0_t0,
+                                    f1_t0,
+                                    f2_t0,
+                                    v_t1,
+                                    f0_t1,
+                                    f1_t1,
+                                    f2_t1,
+                                    err,
+                                    ms,
+                                    toi,
+                                    atol,
+                                    1,
+                                    max_iter,
+                                    output_tolerance,
+                                    no_zero_toi,
+                                    ticcd::CCDRootFindingMethod::BREADTH_FIRST_SEARCH);
 
         // double u0 = -1, v0 = -1;
         // double discrepancy = -1;
@@ -143,7 +143,56 @@ namespace sccd {
         //     u = u0;
         //     v = v0;
         // }
-        return test_ok;
+    }
+
+    template <typename T>
+    bool find_root_tight_inclusion_ee(const int max_iter,
+                                      const T atol,
+                                      const T s1[3],
+                                      const T s2[3],
+                                      const T s3[3],
+                                      const T s4[3],
+                                      const T e1[3],
+                                      const T e2[3],
+                                      const T e3[3],
+                                      const T e4[3],
+                                      T &t,
+                                      T &u,
+                                      T &v) {
+        ticcd::Vector3 e1_t0(s1[0], s1[1], s1[2]);
+        ticcd::Vector3 e2_t0(s2[0], s2[1], s2[2]);
+        ticcd::Vector3 e3_t0(s3[0], s3[1], s3[2]);
+        ticcd::Vector3 e4_t0(s4[0], s4[1], s4[2]);
+
+        ticcd::Vector3 e1_t1(e1[0], e1[1], e1[2]);
+        ticcd::Vector3 e2_t1(e2[0], e2[1], e2[2]);
+        ticcd::Vector3 e3_t1(e3[0], e3[1], e3[2]);
+        ticcd::Vector3 e4_t1(e4[0], e4[1], e4[2]);
+        ticcd::Array3 tol(atol, atol, atol);
+        ticcd::Array3 err(1e-10, 1e-10, 1e-10);
+
+        ticcd::Scalar ms = 0;
+        ticcd::Scalar max_time = 1;
+        ticcd::Scalar toi = 1;
+        ticcd::Scalar output_tolerance = 1e-6;
+        bool no_zero_toi = true;
+        return ticcd::edgeEdgeCCD(e1_t0,
+                                  e2_t0,
+                                  e3_t0,
+                                  e4_t0,
+                                  e1_t1,
+                                  e2_t1,
+                                  e3_t1,
+                                  e4_t1,
+                                  err,
+                                  ms,
+                                  toi,
+                                  atol,
+                                  1,
+                                  max_iter,
+                                  output_tolerance,
+                                  no_zero_toi,
+                                  ticcd::CCDRootFindingMethod::BREADTH_FIRST_SEARCH);
     }
 
 #endif
@@ -297,9 +346,7 @@ namespace sccd {
         Interval tuv[3];
         int depth{0};
 
-        friend bool operator<(const Box &l, const Box &r) {
-            return l.tuv[0].lower < r.tuv[0].lower;
-        }
+        friend bool operator<(const Box &l, const Box &r) { return l.tuv[0].lower < r.tuv[0].lower; }
 
         Box() = default;
         Box(Interval t, Interval u, Interval v, int depth) : tuv{t, u, v}, depth(depth) {}
@@ -329,7 +376,7 @@ namespace sccd {
             return 0;
         }
 
-        bool bisect(int split_dim, const T toi, std::vector<Box> &stack) const {
+        bool bisect_vf(int split_dim, const T toi, std::vector<Box> &stack) const {
             std::pair<Interval, Interval> split_intervals{
                 Interval{tuv[split_dim].lower, (tuv[split_dim].lower + tuv[split_dim].upper) * T(0.5)},
                 Interval{(tuv[split_dim].lower + tuv[split_dim].upper) * T(0.5), tuv[split_dim].upper}};
@@ -362,6 +409,34 @@ namespace sccd {
                         stack.back().depth++;
                     }
                 }
+            }
+
+            return false;
+        }
+
+        bool bisect_ee(int split_dim, const T toi, std::vector<Box> &stack) const {
+            std::pair<Interval, Interval> split_intervals{
+                Interval{tuv[split_dim].lower, (tuv[split_dim].lower + tuv[split_dim].upper) * T(0.5)},
+                Interval{(tuv[split_dim].lower + tuv[split_dim].upper) * T(0.5), tuv[split_dim].upper}};
+
+            if (split_intervals.first.is_terminal() || split_intervals.second.is_terminal()) {
+                return true;
+            }
+
+            stack.push_back(*this);
+            stack.back().tuv[split_dim] = split_intervals.first;
+            stack.back().depth++;
+
+            if (split_dim == 0) {
+                if (split_intervals.second.lower < toi) {
+                    stack.push_back(*this);
+                    stack.back().tuv[split_dim] = split_intervals.second;
+                    stack.back().depth++;
+                }
+            } else {
+                stack.push_back(*this);
+                stack.back().tuv[split_dim] = split_intervals.second;
+                stack.back().depth++;
             }
 
             return false;
@@ -522,11 +597,11 @@ namespace sccd {
                     continue;
                 }
 
-                if(box.depth > max_iter) continue;
+                if (box.depth > max_iter) continue;
 
                 // Split the box along the widest dimension
                 int split_dim = box.widest_dimension();
-                if (box.bisect(split_dim, toi, stack)) {
+                if (box.bisect_vf(split_dim, toi, stack)) {
                     // Split box too small
                     t = box.tuv[0].lower;
                     u = box.tuv[1].lower;
@@ -543,21 +618,21 @@ namespace sccd {
     }
 
     template <int NT, int NU, int NV, typename T>
-    inline static void grid_sample_Fvf(const T start_t,
-                                       const T start_u,
-                                       const T start_v,
-                                       const T ht,
-                                       const T hu,
-                                       const T hv,
-                                       const T sv,
-                                       const T ev,
-                                       const T s1,
-                                       const T s2,
-                                       const T s3,
-                                       const T e1,
-                                       const T e2,
-                                       const T e3,
-                                       T *const SFEM_RESTRICT F) {
+    inline static void grid_sample_F_vf(const T start_t,
+                                        const T start_u,
+                                        const T start_v,
+                                        const T ht,
+                                        const T hu,
+                                        const T hv,
+                                        const T sv,
+                                        const T ev,
+                                        const T s1,
+                                        const T s2,
+                                        const T s3,
+                                        const T e1,
+                                        const T e2,
+                                        const T e3,
+                                        T *const SFEM_RESTRICT F) {
         static constexpr int STRIDE_T = (NU + 1) * (NV + 1);
         static constexpr int STRIDE_U = (NV + 1);
 
@@ -641,31 +716,28 @@ namespace sccd {
                     cond_mask |= (cond2 ? (2 & accept_cell[c]) : 0);
                     cond_mask |= (cond3 ? 4 : 0);
                     cond_mask |= (cond4 ? (8 & accept_cell[c]) : 0);
-
-                    // printf("(%d %d %d) %d (%g %g)\n", a, b, c, contains_origin_cell[c], fmin, fmax);
-
-                    accept_cell[c] = cond_mask & (contains_origin_cell[c] ? 0xf : 0);
+                    accept_cell[c] = cond_mask & ((fmin <= tol) & ((fmax >= -tol) ? 0xf : 0));
                 }
             }
         }
     }
 
     template <int NT, int NU, int NV, typename T>
-    inline bool grid_search(const sccd::Box<T> &domain,
-                            const T tol,
-                            const T tols[3],
-                            const T sv[3],
-                            const T s1[3],
-                            const T s2[3],
-                            const T s3[3],
-                            const T ev[3],
-                            const T e1[3],
-                            const T e2[3],
-                            const T e3[3],
-                            T &toi,  // In/Out
-                            T &u,
-                            T &v,
-                            std::vector<sccd::Box<T>> &stack) {
+    inline bool grid_search_vf(const sccd::Box<T> &domain,
+                               const T tol,
+                               const T tols[3],
+                               const T sv[3],
+                               const T s1[3],
+                               const T s2[3],
+                               const T s3[3],
+                               const T ev[3],
+                               const T e1[3],
+                               const T e2[3],
+                               const T e3[3],
+                               T &toi,  // In/Out
+                               T &u,
+                               T &v,
+                               std::vector<sccd::Box<T>> &stack) {
         static constexpr int N_nodes = (NT + 1) * (NU + 1) * (NV + 1);
         static constexpr int N_cells = NT * NU * NV;
         static constexpr int STRIDE_T = (NU + 1) * (NV + 1);
@@ -683,13 +755,13 @@ namespace sccd {
 
         // 1) Generate F_grid
         T F[3][N_nodes];
-        grid_sample_Fvf<NT, NU, NV, T>(
+        grid_sample_F_vf<NT, NU, NV, T>(
             t_min, u_min, v_min, t_h, u_h, v_h, sv[0], ev[0], s1[0], s2[0], s3[0], e1[0], e2[0], e3[0], F[0]);
 
-        grid_sample_Fvf<NT, NU, NV, T>(
+        grid_sample_F_vf<NT, NU, NV, T>(
             t_min, u_min, v_min, t_h, u_h, v_h, sv[1], ev[1], s1[1], s2[1], s3[1], e1[1], e2[1], e3[1], F[1]);
 
-        grid_sample_Fvf<NT, NU, NV, T>(
+        grid_sample_F_vf<NT, NU, NV, T>(
             t_min, u_min, v_min, t_h, u_h, v_h, sv[2], ev[2], s1[2], s2[2], s3[2], e1[2], e2[2], e3[2], F[2]);
 
         // 2) Find cells containing zeros and check for acceptability
@@ -744,7 +816,7 @@ namespace sccd {
 
                         Box<T> box({tt_min, tt_max}, {uu_min, uu_max}, {vv_min, vv_max}, domain.depth + 1);
                         int split_dim = box.widest_dimension();
-                        box.bisect(split_dim, toi, stack);
+                        box.bisect_vf(split_dim, toi, stack);
                     }
                 }
             }
@@ -754,20 +826,20 @@ namespace sccd {
     }
 
     template <typename T>
-    bool find_root_grid(const int max_iter,
-                        const T tol,
-                        const T sv[3],
-                        const T s1[3],
-                        const T s2[3],
-                        const T s3[3],
-                        const T ev[3],
-                        const T e1[3],
-                        const T e2[3],
-                        const T e3[3],
-                        T &t,
-                        T &u,
-                        T &v,
-                        std::vector<Box<T>> &stack) {
+    bool find_root_grid_vf(const int max_iter,
+                           const T tol,
+                           const T sv[3],
+                           const T s1[3],
+                           const T s2[3],
+                           const T s3[3],
+                           const T ev[3],
+                           const T e1[3],
+                           const T e2[3],
+                           const T e3[3],
+                           T &t,
+                           T &u,
+                           T &v,
+                           std::vector<Box<T>> &stack) {
         using Box = sccd::Box<T>;
         using Interval = sccd::Interval<T>;
 
@@ -802,7 +874,7 @@ namespace sccd {
                                              &tols[1],
                                              &tols[2]);
 
-        t = 1;
+        t = 1.1;
         u = 0;
         v = 0;
 
@@ -814,26 +886,254 @@ namespace sccd {
             Box box = stack.back();
             stack.pop_back();
 
-            if(box.depth > max_iter) {
+            if (box.depth > max_iter) {
                 // // Mid-point approximation
                 // const T approx = (box.tuv[0].lower + box.tuv[0].upper) / 2;
 
                 // Conservative approximation
                 const T approx = box.tuv[0].lower;
-                if(approx < t) {
+                if (approx < t) {
                     t = approx;
-                    u = (box.tuv[1].lower + box.tuv[1].upper)/2;
-                    v = (box.tuv[2].lower + box.tuv[2].upper)/2;
+                    u = box.tuv[1].lower;
+                    v = box.tuv[2].lower;
                     found = true;
                 }
                 continue;
             }
 
-            if (box.tuv[0].lower > t) {
+            if (box.tuv[0].lower >= t) {
                 continue;
             }
 
-            found |= grid_search<3, 3, 3, T>(box, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack);
+            found |= grid_search_vf<3, 3, 3, T>(box, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack);
+
+            // std::sort(stack.begin(), stack.end());
+        }
+
+        return found;
+    }
+
+    template <int NT, int NU, int NV, typename T>
+    inline static void grid_sample_F_ee(const T start_t,
+                                        const T start_u,
+                                        const T start_v,
+                                        const T ht,
+                                        const T hu,
+                                        const T hv,
+                                        const T s1,
+                                        const T s2,
+                                        const T s3,
+                                        const T s4,
+                                        const T e1,
+                                        const T e2,
+                                        const T e3,
+                                        const T e4,
+                                        T *const SFEM_RESTRICT F) {
+        static constexpr int STRIDE_T = (NU + 1) * (NV + 1);
+        static constexpr int STRIDE_U = (NV + 1);
+
+        for (int a = 0; a <= NT; a++) {
+            for (int b = 0; b <= NU; b++) {
+                for (int c = 0; c <= NV; c++) {
+                    const int idx = a * STRIDE_T + b * STRIDE_U + c;
+                    const T t = start_t + a * ht;
+                    const T u = start_u + b * hu;
+                    const T v = start_v + c * hv;
+
+                    const T ea0 = (e1 - s1) * t + s1;
+                    const T ea1 = (e2 - s2) * t + s2;
+                    const T eb0 = (e3 - s3) * t + s3;
+                    const T eb1 = (e4 - s4) * t + s4;
+                    F[idx] = ((ea1 - ea0) * u + ea0) - ((eb1 - eb0) * v + eb0);
+                }
+            }
+        }
+    }
+
+    template <int NT, int NU, int NV, typename T>
+    inline bool grid_search_ee(const sccd::Box<T> &domain,
+                               const T tol,
+                               const T tols[3],
+                               const T s1[3],
+                               const T s2[3],
+                               const T s3[3],
+                               const T s4[3],
+                               const T e1[3],
+                               const T e2[3],
+                               const T e3[3],
+                               const T e4[3],
+                               T &toi,  // In/Out
+                               T &u,
+                               T &v,
+                               std::vector<sccd::Box<T>> &stack) {
+        static constexpr int N_nodes = (NT + 1) * (NU + 1) * (NV + 1);
+        static constexpr int N_cells = NT * NU * NV;
+        static constexpr int STRIDE_T = (NU + 1) * (NV + 1);
+        static constexpr int STRIDE_U = (NV + 1);
+
+        const T t_min = domain.tuv[0].lower;
+        const T u_min = domain.tuv[1].lower;
+        const T v_min = domain.tuv[2].lower;
+        const T t_max = domain.tuv[0].upper;
+        const T u_max = domain.tuv[1].upper;
+        const T v_max = domain.tuv[2].upper;
+        const T t_h = (t_max - t_min) / NT;
+        const T u_h = (u_max - u_min) / NU;
+        const T v_h = (v_max - v_min) / NV;
+
+        // 1) Generate F_grid
+        T F[3][N_nodes];
+        grid_sample_F_ee<NT, NU, NV, T>(
+            t_min, u_min, v_min, t_h, u_h, v_h, s1[0], s2[0], s3[0], s4[0], e1[0], e2[0], e3[0], e4[0], F[0]);
+
+        grid_sample_F_ee<NT, NU, NV, T>(
+            t_min, u_min, v_min, t_h, u_h, v_h, s1[1], s2[1], s3[1], s4[1], e1[1], e2[1], e3[1], e4[1], F[1]);
+
+        grid_sample_F_ee<NT, NU, NV, T>(
+            t_min, u_min, v_min, t_h, u_h, v_h, s1[2], s2[2], s3[2], s4[2], e1[2], e2[2], e3[2], e4[2], F[2]);
+
+        // 2) Find cells containing zeros and check for acceptability
+        uint8_t contains_zero_and_refine[N_cells];
+        uint8_t accept[N_cells];
+        for (int i = 0; i < N_cells; i++) {
+            contains_zero_and_refine[i] = true;
+            accept[i] = 0xf;
+        }
+
+        grid_zero_and_accept<NT, NU, NV, T>(F[0], tol, tols[0], contains_zero_and_refine, accept);
+        grid_zero_and_accept<NT, NU, NV, T>(F[1], tol, tols[1], contains_zero_and_refine, accept);
+        grid_zero_and_accept<NT, NU, NV, T>(F[2], tol, tols[2], contains_zero_and_refine, accept);
+
+        bool found = false;
+        // 3) Find earilest toi and schedule for refinement
+        for (int a = 0; a < NT; a++) {
+            const T t0 = t_min + a * t_h;
+            if (t0 > toi) continue;
+
+            for (int b = 0; b < NU; b++) {
+                for (int c = 0; c < NV; c++) {
+                    const int i = a * NU * NV + b * NV + c;
+                    if (accept[i]) {
+                        toi = t0;
+                        u = u_min + b * u_h;
+                        v = v_min + c * v_h;
+                        found = true;
+                        contains_zero_and_refine[i] = false;
+                    }
+                }
+            }
+        }
+
+        // Create new boxes
+        for (int a = 0; a < NT; a++) {
+            for (int b = 0; b < NU; b++) {
+                for (int c = 0; c < NV; c++) {
+                    const int i = a * NU * NV + b * NV + c;
+                    if (contains_zero_and_refine[i] && !accept[i]) {
+                        const T tt_min = t_min + a * t_h;
+                        const T uu_min = u_min + b * u_h;
+                        const T vv_min = v_min + c * v_h;
+
+                        const T tt_max = t_min + (a + 1) * t_h;
+                        const T uu_max = u_min + (b + 1) * u_h;
+                        const T vv_max = v_min + (c + 1) * v_h;
+
+                        if (tt_min >= toi) {
+                            continue;
+                        }
+
+                        Box<T> box({tt_min, tt_max}, {uu_min, uu_max}, {vv_min, vv_max}, domain.depth + 1);
+                        int split_dim = box.widest_dimension();
+                        box.bisect_ee(split_dim, toi, stack);
+                    }
+                }
+            }
+        }
+
+        return found;
+    }
+
+    template <typename T>
+    bool find_root_grid_ee(const int max_iter,
+                           const T tol,
+                           const T s1[3],
+                           const T s2[3],
+                           const T s3[3],
+                           const T s4[3],
+                           const T e1[3],
+                           const T e2[3],
+                           const T e3[3],
+                           const T e4[3],
+                           T &t,
+                           T &u,
+                           T &v,
+                           std::vector<Box<T>> &stack) {
+        using Box = sccd::Box<T>;
+        using Interval = sccd::Interval<T>;
+
+        // Compute per-axis tolerances (matching snumtol.hpp signature)
+        T tols[3];
+        compute_edge_edge_tolerance_soa<T>(tol,
+                                           s1[0],
+                                           s1[1],
+                                           s1[2],
+                                           s2[0],
+                                           s2[1],
+                                           s2[2],
+                                           s3[0],
+                                           s3[1],
+                                           s3[2],
+                                           s4[0],
+                                           s4[1],
+                                           s4[2],
+                                           e1[0],
+                                           e1[1],
+                                           e1[2],
+                                           e2[0],
+                                           e2[1],
+                                           e2[2],
+                                           e3[0],
+                                           e3[1],
+                                           e3[2],
+                                           e4[0],
+                                           e4[1],
+                                           e4[2],
+                                           &tols[0],
+                                           &tols[1],
+                                           &tols[2]);
+
+        t = 1.1;
+        u = 0;
+        v = 0;
+
+        bool found = false;
+        stack.clear();
+        stack.push_back(Box(Interval{T(0), T(1)}, Interval{T(0), T(1)}, Interval{T(0), T(1)}, 0));
+        bool found_root = false;
+        while (!stack.empty()) {
+            Box box = stack.back();
+            stack.pop_back();
+
+            if (box.depth > max_iter) {
+                // // Mid-point approximation
+                // const T approx = (box.tuv[0].lower + box.tuv[0].upper) / 2;
+
+                // Conservative approximation
+                const T approx = box.tuv[0].lower;
+                if (approx < t) {
+                    t = approx;
+                    u = box.tuv[1].lower;
+                    v = box.tuv[2].lower;
+                    found = true;
+                }
+                continue;
+            }
+
+            if (box.tuv[0].lower >= t) {
+                continue;
+            }
+
+            found |= grid_search_ee<4, 4, 4, T>(box, tol, tols, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v, stack);
 
             // std::sort(stack.begin(), stack.end());
         }

@@ -43,6 +43,7 @@ typedef struct SCCD {
 
     // Time of Impact
     std::vector<geom_t> vf_toi;
+    std::vector<geom_t> ee_toi;
 
     // FV overalps
     std::vector<idx_t> foverlap;
@@ -420,14 +421,36 @@ typedef struct SCCD {
         geom_t* v0[3] = { x0.data(), y0.data(), z0.data() };
         geom_t* v1[3] = { x1.data(), y1.data(), z1.data() };
 
+        Timer timer;
+        timer.start();
+
         vf_toi.resize(voverlap.size());
 
-        return sccd::narrow_phase_vf<3, geom_t>(
+        geom_t toi_vf =  sccd::narrow_phase_vf<3, geom_t>(
             voverlap.size(), voverlap.data(), foverlap.data(),
             // Geometric data
             v0, v1, 3, soafaces,
             // Output
             vf_toi.data());
+
+        timer.stop();
+        printf("NP VF(%lu): %g [ms]\n", vf_toi.size(), timer.getElapsedTimeInMilliSec());
+        timer.start();
+
+        ee_toi.resize(e0_overlap.size());
+
+        geom_t toi_ee =  sccd::narrow_phase_ee<geom_t>(
+            voverlap.size(), e0_overlap.data(), e1_overlap.data(),
+            // Geometric data
+            v0, v1, 2, soaedges,
+            // Output
+            ee_toi.data());
+
+
+        timer.stop();
+        printf("NP EE(%lu): %g [ms]\n", ee_toi.size(), timer.getElapsedTimeInMilliSec());
+
+        return sccd::min(toi_ee, toi_vf);
     }
 
     void export_narrowphase_results(

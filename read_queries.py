@@ -25,28 +25,17 @@ def read_queries(path: str) -> Dict[str, List[List[float]]]:
     coords = queries[..., 0] / queries[..., 1]
 
     lower_path = path.lower()
-    if "vf" in lower_path:
-        names = [
-            "v_t0",
-            "f0_t0",
-            "f1_t0",
-            "f2_t0",
-            "v_t1",
-            "f0_t1",
-            "f1_t1",
-            "f2_t1",
-        ]
-    else:
-        names = [
-            "ea0_t0",
-            "ea1_t0",
-            "eb0_t0",
-            "eb1_t0",
-            "ea0_t1",
-            "ea1_t1",
-            "eb0_t1",
-            "eb1_t1",
-        ]
+    names = [
+        "s0",
+        "s1",
+        "s2",
+        "s3",
+        "e0",
+        "e1",
+        "e2",
+        "e3",
+    ]
+
 
     soa: Dict[str, List[List[float]]] = {}
     for idx, name in enumerate(names):
