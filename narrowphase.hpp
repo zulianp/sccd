@@ -70,7 +70,8 @@ namespace sccd {
                     continue;
                 }
 #endif
-                if (find_root_grid_vf<double>(SCCD_MAX_ITER, tol, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack))
+                if (find_root_grid_rotate_vf<double>(SCCD_MAX_ITER, tol, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack))
+                // if (find_root_grid_vf<double>(SCCD_MAX_ITER, tol, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack))
                 // if (find_root_bisection<double>(SCCD_MAX_ITER * 3*3*3, tol, sv,
                 // s1, s2, s3, ev, e1, e2, e3, t, u, v))
                 {
