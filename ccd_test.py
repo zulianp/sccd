@@ -77,12 +77,16 @@ if __name__ == "__main__":
         print(f"No {prefix} dataset triples found.")
         raise SystemExit(0)
 
+    max_iter = 15
     tol_t = 1e-2
     tol_uv = 1e-2
+    tol = 1e-12
+
     total_cases = 0
     mismatches = 0
     false_positives = 0
     false_negatives = 0
+    
 
     funs = {
         "vf" : (sccd_py.find_root_vf_d, vf_F_3d),
@@ -127,7 +131,7 @@ if __name__ == "__main__":
             e3 = [ query_data["e3"][0][i], query_data["e3"][1][i], query_data["e3"][2][i]]
 
             time_start = time.perf_counter()
-            ret = find_root(16, 1e-12, s0, s1, s2, s3, e0, e1, e2, e3)
+            ret = find_root(max_iter, tol, s0, s1, s2, s3, e0, e1, e2, e3)
             time_end = time.perf_counter()
             total_time += time_end - time_start
             expected_hit = bool(mma_bool[i]) 
@@ -160,7 +164,7 @@ if __name__ == "__main__":
                     print(f'{key}:{i}/{n}) false negative: ret={ret[1:]}, gt=({gt["t"]}, {gt["a"]}, {gt["b"]}), F=({eFx}, {eFy}, {eFz})')
                     false_negatives += 1
                     assert False
-                continue
+                # continue
 
             expected_toi = 10000
             if expected_hit:

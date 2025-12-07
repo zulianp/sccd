@@ -52,7 +52,7 @@ namespace sccd {
                 double u = 0;
                 double v = 0;
                 double tol = 1e-12;
-                int max_iter = 16;
+                int max_iter = 15;
 
 #ifdef SCCD_ENABLE_TIGHT_INCLUSION
 #warning "SCCD_ENABLE_TIGHT_INCLUSION"
@@ -128,7 +128,7 @@ namespace sccd {
                     double u = 0;
                     double v = 0;
                     double tol = 1e-12;
-                    int max_iter = 16;
+                    int max_iter = 15;
 
     #ifdef SCCD_ENABLE_TIGHT_INCLUSION
     #warning "SCCD_ENABLE_TIGHT_INCLUSION"
