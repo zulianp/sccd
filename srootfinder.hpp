@@ -910,11 +910,10 @@ namespace sccd {
         return found;
     }
 
-    template <int NT, int NU, int NV, typename T>
-    inline bool grid_search_rotate_vf(const sccd::Box<T> &domain,
+    template <typename T>
+    inline bool find_root_grid_rotate_vf(
                                const int max_iter,
                                const T tol,
-                               const T tols[3],
                                const T sv[3],
                                const T s1[3],
                                const T s2[3],
@@ -929,11 +928,127 @@ namespace sccd {
                                std::vector<sccd::Box<T>> &stack) 
 {
 
-// TODO 
-// 1) make the C equivalent of the python code def build_transform(sv, ev, eps_len=Float("1e-12"), eps_ang=Float("1e-12")): and rotation_x
-// 2) Transform sv, s1, s2, s3, ev, e1, e2, e3 to the new coordinate system
-// 3) Call find_root_grid_vf with the new coordinate system
-// 4) call find_root_grid_vf with the new coordinate system
+        static constexpr T EPS_LEN = static_cast<T>(1e-12);
+        static constexpr T EPS_ANG = static_cast<T>(1e-12);
+
+        const T d[3] = {ev[0] - sv[0], ev[1] - sv[1], ev[2] - sv[2]};
+        const T dlen2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+        const T dlen = std::sqrt(sccd::max<T>(dlen2, T(0)));
+
+        if (dlen < EPS_LEN) {
+            return find_root_grid_vf<T>(max_iter, tol, sv, s1, s2, s3, ev, e1, e2, e3, toi, u, v, stack);
+        }
+
+        T d_hat[3];
+        const T inv_len = T(1) / dlen;
+        d_hat[0] = d[0] * inv_len;
+        d_hat[1] = d[1] * inv_len;
+        d_hat[2] = d[2] * inv_len;
+
+
+        T R[3][3];
+        const T sss = d_hat[1] * d_hat[1] + d_hat[2] * d_hat[2];
+        const T c = d_hat[0];
+
+        if (sss < EPS_ANG && c < T(0)) {
+            const bool use_y = sccd::abs(d_hat[0]) > sccd::abs(d_hat[1]);
+            const T axis_seed[3] = {T(0), use_y ? T(1) : T(0), use_y ? T(0) : T(1)};
+
+            T axis[3];
+            axis[0] = d_hat[1] * axis_seed[2] - d_hat[2] * axis_seed[1];
+            axis[1] = d_hat[2] * axis_seed[0] - d_hat[0] * axis_seed[2];
+            axis[2] = d_hat[0] * axis_seed[1] - d_hat[1] * axis_seed[0];
+
+            const T axis_norm2 = axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2];
+            const T inv_axis_norm = T(1) / std::sqrt(sccd::max<T>(axis_norm2, EPS_ANG));
+
+            axis[0] *= inv_axis_norm;
+            axis[1] *= inv_axis_norm;
+            axis[2] *= inv_axis_norm;
+
+            const T a0a0 = axis[0] * axis[0];
+            const T a0a1 = axis[0] * axis[1];
+            const T a0a2 = axis[0] * axis[2];
+            const T a1a1 = axis[1] * axis[1];
+            const T a1a2 = axis[1] * axis[2];
+            const T a2a2 = axis[2] * axis[2];
+
+            R[0][0] = T(2) * a0a0 - T(1);
+            R[0][1] = T(2) * a0a1;
+            R[0][2] = T(2) * a0a2;
+            R[1][0] = R[0][1];
+            R[1][1] = T(2) * a1a1 - T(1);
+            R[1][2] = T(2) * a1a2;
+            R[2][0] = R[0][2];
+            R[2][1] = R[1][2];
+            R[2][2] = T(2) * a2a2 - T(1);
+        } else if (sss < EPS_ANG) {
+            R[0][0] = T(1);
+            R[0][1] = T(0);
+            R[0][2] = T(0);
+            R[1][0] = T(0);
+            R[1][1] = T(1);
+            R[1][2] = T(0);
+            R[2][0] = T(0);
+            R[2][1] = T(0);
+            R[2][2] = T(1);
+        } else {
+            const T factor = (T(1) - c) / sccd::max<T>(sss, EPS_ANG);
+            const T s2_factor = sss * factor;
+            const T xy = d_hat[1] * d_hat[2] * (-factor);
+            const T yy = d_hat[1] * d_hat[1] * factor;
+            const T zz = d_hat[2] * d_hat[2] * factor;
+
+            R[0][0] = T(1) - s2_factor;
+            R[0][1] = d_hat[1];
+            R[0][2] = d_hat[2];
+
+            R[1][0] = -d_hat[1];
+            R[1][1] = T(1) - yy;
+            R[1][2] = xy;
+
+            R[2][0] = -d_hat[2];
+            R[2][1] = xy;
+            R[2][2] = T(1) - zz;
+        }
+
+        const T scale = T(1) / dlen;
+
+        auto transform_point = [&](const T in[3], T out[3]) {
+            const T x = in[0] - sv[0];
+            const T y = in[1] - sv[1];
+            const T z = in[2] - sv[2];
+
+            out[0] = scale * (R[0][0] * x + R[0][1] * y + R[0][2] * z);
+            out[1] = scale * (R[1][0] * x + R[1][1] * y + R[1][2] * z);
+            out[2] = scale * (R[2][0] * x + R[2][1] * y + R[2][2] * z);
+        };
+
+        T sv_r[3], s1_r[3], s2_r[3], s3_r[3], ev_r[3], e1_r[3], e2_r[3], e3_r[3];
+        transform_point(sv, sv_r);
+        transform_point(s1, s1_r);
+        transform_point(s2, s2_r);
+        transform_point(s3, s3_r);
+        transform_point(ev, ev_r);
+        transform_point(e1, e1_r);
+        transform_point(e2, e2_r);
+        transform_point(e3, e3_r);
+
+        const T min_y = sccd::min(sccd::min(sccd::min(s1_r[1], s2_r[1]), sccd::min(s3_r[1], e1_r[1])),
+                                  sccd::min(e2_r[1], e3_r[1]));
+        const T max_y = sccd::max(sccd::max(sccd::max(s1_r[1], s2_r[1]), sccd::max(s3_r[1], e1_r[1])),
+                                  sccd::max(e2_r[1], e3_r[1]));
+        const T min_z = sccd::min(sccd::min(sccd::min(s1_r[2], s2_r[2]), sccd::min(s3_r[2], e1_r[2])),
+                                  sccd::min(e2_r[2], e3_r[2]));
+        const T max_z = sccd::max(sccd::max(sccd::max(s1_r[2], s2_r[2]), sccd::max(s3_r[2], e1_r[2])),
+                                  sccd::max(e2_r[2], e3_r[2]));
+
+        if ((min_y > T(0) || max_y < T(0)) || (min_z > T(0) || max_z < T(0))) {
+            // Early skip good for TTS
+            return false;
+        }
+
+        return find_root_grid_vf<T>(max_iter, tol, sv_r, s1_r, s2_r, s3_r, ev_r, e1_r, e2_r, e3_r, toi, u, v, stack);
 }
 
 
