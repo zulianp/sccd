@@ -631,6 +631,22 @@ def vf_F_3d(sv_3d, s1_3d, s2_3d, s3_3d, ev_3d, e1_3d, e2_3d, e3_3d, tt, uu, vv):
     fz = o * f1z + uu * f2z + vv * f3z
     return (vx - fx, vy - fy, vz - fz)
 
+def ee_F_3d(s1, s2, s3, s4, e1, e2, e3, e4, tt, uu, vv):
+    s1 = np.array(s1)
+    s2 = np.array(s2)
+    s3 = np.array(s3)
+    s4 = np.array(s4)
+    e1 = np.array(e1)
+    e2 = np.array(e2)
+    e3 = np.array(e3)
+    e4 = np.array(e4)
+
+    ea0 = (e1 - s1) * tt + s1;
+    ea1 = (e2 - s2) * tt + s2;
+    eb0 = (e3 - s3) * tt + s3;
+    eb1 = (e4 - s4) * tt + s4;
+    return((ea1 - ea0) * uu + ea0) - ((eb1 - eb0) * vv + eb0);
+
 @myjit
 def _sample_Fvf_component_3d(
     n_t, n_u, n_v,
