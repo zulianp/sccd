@@ -24,7 +24,6 @@ if __name__ == "__main__":
 
     diff = expected_toi - toi
 
-
     print(f'Mean:   {np.mean(diff)}')
     print(f'Std:    {np.std(diff)}')
     print(f'Min:    {np.min(diff)}')
@@ -37,14 +36,16 @@ if __name__ == "__main__":
     plt.xlabel("Difference Between Expected TOI and TOI")
     plt.title("Time of Impact (TOI) Difference Histogram")
     plt.savefig(f"{name}_diff_histogram.pdf")
+    plt.close()
     # plt.show()
 
     ind = np.argsort(expected_toi)
     # plt.semilogy(diff)
+    normalization = expected_toi[ind] + 1e-12
     
-    plt.plot(toi[ind], label="TOI")
-    plt.plot(expected_toi[ind], label="Expected TOI")
-    plt.plot(diff[ind], label="Difference")
+    plt.plot(expected_toi[ind], toi[ind]/normalization, label="TOI")
+    plt.plot(expected_toi[ind], expected_toi[ind]/normalization, label="Expected TOI")
+    # plt.plot(diff[ind]/normalization, label="Difference")
     plt.legend()
     plt.yscale("log")
     plt.ylabel("Difference Between Expected TOI and TOI")

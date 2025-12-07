@@ -77,23 +77,24 @@ if __name__ == "__main__":
         print(f"No {prefix} dataset triples found.")
         raise SystemExit(0)
 
-    max_iter = 11
+
     tol_t = 1e-2
     tol_uv = 1e-2
-    tol = 1e-12
 
     total_cases = 0
     mismatches = 0
     false_positives = 0
     false_negatives = 0
     
-
     funs = {
-        "vf" : (sccd_py.find_root_vf_d, vf_F_3d),
-        "ee" : (sccd_py.find_root_ee_d, ee_F_3d),
+        # "vf" : (sccd_py.find_root_vf_d, vf_F_3d, 12, 1e-12),
+        # "vf" : (sccd_py.find_root_rotate_vf_d, vf_F_3d, 12, 1e-12),
+        # "ee" : (sccd_py.find_root_ee_d, ee_F_3d, 12, 1e-12),
+        "vf" : (sccd_py.find_root_tight_inclusion_vf_d, vf_F_3d, 10000, 1e-8),
+        "ee" : (sccd_py.find_root_tight_inclusion_ee_d, ee_F_3d, 10000, 1e-8),
     }
 
-    find_root, F_eval = funs[prefix]
+    find_root, F_eval, max_iter, tol = funs[prefix]
 
     table = CCDTable(os.path.basename(base_folder))
 
