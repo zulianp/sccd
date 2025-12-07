@@ -724,6 +724,7 @@ namespace sccd {
 
     template <int NT, int NU, int NV, typename T>
     inline bool grid_search_vf(const sccd::Box<T> &domain,
+                               const int max_iter,
                                const T tol,
                                const T tols[3],
                                const T sv[3],
@@ -815,6 +816,18 @@ namespace sccd {
                         }
 
                         Box<T> box({tt_min, tt_max}, {uu_min, uu_max}, {vv_min, vv_max}, domain.depth + 1);
+                        if (box.depth > max_iter) {
+                            // Conservative approximation
+                            const T approx = box.tuv[0].lower;
+                            if (approx < toi) {
+                                toi = approx;
+                                u = box.tuv[1].lower;
+                                v = box.tuv[2].lower;
+                                found = true;
+                            }
+                            continue;
+                        }
+
                         int split_dim = box.widest_dimension();
                         box.bisect_vf(split_dim, toi, stack);
                     }
@@ -886,28 +899,11 @@ namespace sccd {
             Box box = stack.back();
             stack.pop_back();
 
-            if (box.depth > max_iter) {
-                // // Mid-point approximation
-                // const T approx = (box.tuv[0].lower + box.tuv[0].upper) / 2;
-
-                // Conservative approximation
-                const T approx = box.tuv[0].lower;
-                if (approx < t) {
-                    t = approx;
-                    u = box.tuv[1].lower;
-                    v = box.tuv[2].lower;
-                    found = true;
-                }
-                continue;
-            }
-
             if (box.tuv[0].lower >= t) {
                 continue;
             }
 
-            found |= grid_search_vf<3, 3, 3, T>(box, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack);
-
-            // std::sort(stack.begin(), stack.end());
+            found |= grid_search_vf<4, 4, 4, T>(box, max_iter, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack);
         }
 
         return found;
@@ -952,6 +948,7 @@ namespace sccd {
 
     template <int NT, int NU, int NV, typename T>
     inline bool grid_search_ee(const sccd::Box<T> &domain,
+                               const int max_iter,
                                const T tol,
                                const T tols[3],
                                const T s1[3],
@@ -1043,6 +1040,18 @@ namespace sccd {
                         }
 
                         Box<T> box({tt_min, tt_max}, {uu_min, uu_max}, {vv_min, vv_max}, domain.depth + 1);
+                        if (box.depth > max_iter) {
+                            // Conservative approximation
+                            const T approx = box.tuv[0].lower;
+                            if (approx < toi) {
+                                toi = approx;
+                                u = box.tuv[1].lower;
+                                v = box.tuv[2].lower;
+                                found = true;
+                            }
+                            continue;
+                        }
+
                         int split_dim = box.widest_dimension();
                         box.bisect_ee(split_dim, toi, stack);
                     }
@@ -1114,28 +1123,11 @@ namespace sccd {
             Box box = stack.back();
             stack.pop_back();
 
-            if (box.depth > max_iter) {
-                // // Mid-point approximation
-                // const T approx = (box.tuv[0].lower + box.tuv[0].upper) / 2;
-
-                // Conservative approximation
-                const T approx = box.tuv[0].lower;
-                if (approx < t) {
-                    t = approx;
-                    u = box.tuv[1].lower;
-                    v = box.tuv[2].lower;
-                    found = true;
-                }
-                continue;
-            }
-
             if (box.tuv[0].lower >= t) {
                 continue;
             }
 
-            found |= grid_search_ee<4, 4, 4, T>(box, tol, tols, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v, stack);
-
-            // std::sort(stack.begin(), stack.end());
+            found |= grid_search_ee<4, 4, 4, T>(box, max_iter, tol, tols, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v, stack);
         }
 
         return found;
