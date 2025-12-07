@@ -77,7 +77,7 @@ if __name__ == "__main__":
         print(f"No {prefix} dataset triples found.")
         raise SystemExit(0)
 
-    max_iter = 15
+    max_iter = 11
     tol_t = 1e-2
     tol_uv = 1e-2
     tol = 1e-12

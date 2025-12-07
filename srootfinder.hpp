@@ -722,6 +722,7 @@ namespace sccd {
         }
     }
 
+
     template <int NT, int NU, int NV, typename T>
     inline bool grid_search_vf(const sccd::Box<T> &domain,
                                const int max_iter,
@@ -908,6 +909,33 @@ namespace sccd {
 
         return found;
     }
+
+    template <int NT, int NU, int NV, typename T>
+    inline bool grid_search_rotate_vf(const sccd::Box<T> &domain,
+                               const int max_iter,
+                               const T tol,
+                               const T tols[3],
+                               const T sv[3],
+                               const T s1[3],
+                               const T s2[3],
+                               const T s3[3],
+                               const T ev[3],
+                               const T e1[3],
+                               const T e2[3],
+                               const T e3[3],
+                               T &toi,  // In/Out
+                               T &u,
+                               T &v,
+                               std::vector<sccd::Box<T>> &stack) 
+{
+
+// TODO 
+// 1) make the C equivalent of the python code def build_transform(sv, ev, eps_len=Float("1e-12"), eps_ang=Float("1e-12")): and rotation_x
+// 2) Transform sv, s1, s2, s3, ev, e1, e2, e3 to the new coordinate system
+// 3) Call find_root_grid_vf with the new coordinate system
+// 4) call find_root_grid_vf with the new coordinate system
+}
+
 
     template <int NT, int NU, int NV, typename T>
     inline static void grid_sample_F_ee(const T start_t,
