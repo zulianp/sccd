@@ -123,6 +123,7 @@ TEST_CASE("Test Lean Narrow phase", "[narrow_phase]")
         "Total time: %g [ms]\n", tts_narrow_phase + tts_broad_phase);
 
     printf("Toi: %g\n", toi);
+    printf("====>>\n");
 
     ccd_algo.export_narrowphase_results(collisions);
 
