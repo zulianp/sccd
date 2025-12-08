@@ -25,7 +25,7 @@
 namespace sccd {
 
 #ifdef SCCD_ENABLE_TIGHT_INCLUSION
-    bool barycentric_triangle_3d(const ticcd::Vector3 &A,
+    static bool barycentric_triangle_3d(const ticcd::Vector3 &A,
                                  const ticcd::Vector3 &B,
                                  const ticcd::Vector3 &C,
                                  const ticcd::Vector3 &P,
@@ -66,7 +66,7 @@ namespace sccd {
         return true;
     }
 
-    bool isInsideTriangle(const ticcd::Vector3 &lambda, ticcd::Scalar tol = ticcd::Scalar(1e-6)) {
+    static bool isInsideTriangle(const ticcd::Vector3 &lambda, ticcd::Scalar tol = ticcd::Scalar(1e-6)) {
         return (lambda.array() >= -tol).all() && (lambda.array() <= ticcd::Scalar(1) + tol).all() &&
                std::abs(lambda.sum() - ticcd::Scalar(1)) <= ticcd::Scalar(1e-6);
     }

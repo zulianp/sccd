@@ -12,13 +12,13 @@ if __name__ == "__main__":
         sys.exit(1)
 
 
-    name = sys.argv[1]
-    figure_path = os.path.join("figures", name)
-    if not os.path.exists("./figures"):
-        os.mkdir("./figures")
+    # name = sys.argv[1]
+    # figure_path = os.path.join("figures", name)
+    # if not os.path.exists("./figures"):
+    #     os.mkdir("./figures")
 
-    
-        
+    figure_path = sys.argv[1]
+
     table_file = sys.argv[2]
     # read the table.csv file
     table = pd.read_csv(table_file)
