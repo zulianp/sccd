@@ -6,10 +6,19 @@ import pandas as pd
 
 if __name__ == "__main__":
     import sys
+    import os
     if len(sys.argv) != 3:
         print("Usage: python plot_ccd.py <name> <table.csv>")
         sys.exit(1)
+
+
     name = sys.argv[1]
+    figure_path = os.path.join("figures", name)
+    if not os.path.exists("./figures"):
+        os.mkdir("./figures")
+
+    
+        
     table_file = sys.argv[2]
     # read the table.csv file
     table = pd.read_csv(table_file)
@@ -35,7 +44,7 @@ if __name__ == "__main__":
     plt.hist(diff, bins=100, log=True)
     plt.ylabel("Count")
     plt.xlabel("Relative Difference Between Expected TOI and TOI")
-    plt.savefig(f"{name}_diff_histogram.pdf")
+    plt.savefig(f"{figure_path}_diff_histogram.pdf")
     plt.close()
     # plt.show()
 
@@ -54,12 +63,12 @@ if __name__ == "__main__":
     plt.ylabel("Relative TOI (1 is reference)")
     plt.xlabel("Time of Impact (Expected TOI)")
     plt.title("Time of Impact (TOI) Difference")
-    plt.savefig(f"{name}_diff.pdf")
+    plt.savefig(f"{figure_path}_diff.png")
     # plt.show()
 
     hit_diff = expected_hits != hits
 
     print(f"Number of hit differences: {np.count_nonzero(hit_diff)}")
-    print(f"Number of False Positives: {np.count_nonzero(hits[hit_diff])}")
-    print(f"Number of False Negatives: {np.count_nonzero(~hits[hit_diff])}")
+    print(f"Number of False Positives: {np.count_nonzero(hits[hit_diff])}/{np.count_nonzero(~expected_hits)}")
+    print(f"Number of False Negatives: {np.count_nonzero(~hits[hit_diff])}/{np.count_nonzero(expected_hits)}")
     print(f"Queries per second {len(time)}/{time.sum():.5f} = {len(time)/time.sum():.5f} [qxs]")

@@ -23,7 +23,7 @@ do
 	echo "Testing on $ds"
 	# SCCD_LIB_PATH=build/libsccd.dylib python3 ccd_test.py $db_dir/$ds
 	export SCCD_LIB_PATH=/Users/patrickzulian/Desktop/code/installations/sources/Scalable-CCD/build/src/sccd/libsccd.dylib
-	# python3 ccd_test.py $db_dir/$ds ee
+	python3 ccd_test.py $db_dir/$ds ee
 	python3 ccd_test.py $db_dir/$ds vf
 	echo "---------------------------------------------------------"
 done

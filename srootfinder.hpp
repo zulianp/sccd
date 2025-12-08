@@ -10,7 +10,7 @@
 #include <utility>
 #include <vector>
 
-#include "vaabb.h"
+#include "vaabb.hpp"
 
 #include "roots.hpp"
 #include "snumtol.hpp"
@@ -102,7 +102,7 @@ namespace sccd {
         ticcd::Scalar max_time = 1;
         ticcd::Scalar toi = 1;
         ticcd::Scalar output_tolerance = 1e-6;
-        bool no_zero_toi = true;
+        bool no_zero_toi = false;
 
         return ticcd::vertexFaceCCD(v_t0,
                                     f0_t0,
