@@ -119,9 +119,9 @@ def gen_c_function(name, tol_exprs, arg_names):
         ["const T codomain_tol"]
         + [f"const T {n}" for n in arg_names]
         + [
-            "T * const SFEM_RESTRICT tol0",
-            "T * const SFEM_RESTRICT tol1",
-            "T * const SFEM_RESTRICT tol2",
+            "T * const SCCD_RESTRICT tol0",
+            "T * const SCCD_RESTRICT tol1",
+            "T * const SCCD_RESTRICT tol2",
         ]
     )
     body = []

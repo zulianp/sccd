@@ -188,9 +188,9 @@ def gen_vec_function(name, comp_exprs, extra_scalar_params):
         [f"const T {p}" for p in extra_scalar_params]
         + [f"const T {n}" for n in geom_names]
         + [
-            "T * const SFEM_RESTRICT rx",
-            "T * const SFEM_RESTRICT ry",
-            "T * const SFEM_RESTRICT rz",
+            "T * const SCCD_RESTRICT rx",
+            "T * const SCCD_RESTRICT ry",
+            "T * const SCCD_RESTRICT rz",
         ]
     )
     body = []
@@ -251,8 +251,8 @@ def gen_origin_function(name, is_vf):
         + [
             "const T msx", "const T msy", "const T msz",
             "const T errx", "const T erry", "const T errz",
-            "T * const SFEM_RESTRICT true_tol",
-            "int * const SFEM_RESTRICT box_in",
+            "T * const SCCD_RESTRICT true_tol",
+            "int * const SCCD_RESTRICT box_in",
         ]
     )
     fn = []

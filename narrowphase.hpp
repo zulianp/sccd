@@ -1,58 +1,165 @@
-// #ifndef NARROWPHASE_HPP
-// #define NARROWPHASE_HPP
+#ifndef NARROWPHASE_HPP
+#define NARROWPHASE_HPP
+#include <tbb/blocked_range.h>
+#include <tbb/parallel_for.h>
 
-// // #include "snumerr.hpp"
-// // #include "snumtol.hpp"
-// // #include "stuv.hpp"
-// // #include <limits>
+#include "assert.h"
 
-// // namespace sccd {
+#include "roots.hpp"
+#include "srootfinder.hpp"
+#include "vaabb.hpp"
 
-// // enum class CCDStepResult {
-// //   Continue = 0,
-// //   NoInclusion,
-// //   DomainTolSatisfied,
-// //   BoxInside,
-// //   CodomainTolSatisfied,
-// //   DegenerateSplit
-// // };
+namespace sccd {
 
-// // template <typename T>
-// // int ccd_ee(const int max_iter, const T codomain_tol, const T ms,
-// //            const int use_ms, const int allow_zero_toi,
-// //            // Boxes
-// //            // Start
-// //            const T v0_sx, const T v0_sy, const T v0_sz,
-// //            // V1
-// //            const T v1_sx, const T v1_sy, const T v1_sz,
-// //            // V2
-// //            const T v2_sx, const T v2_sy, const T v2_sz,
-// //            // V3
-// //            const T v3_sx, const T v3_sy, const T v3_sz,
-// //            // End
-// //            // V0
-// //            const T v0_ex, const T v0_ey, const T v0_ez,
-// //            // V1
-// //            const T v1_ex, const T v1_ey, const T v1_ez,
-// //            // V2
-// //            const T v2_ex, const T v2_ey, const T v2_ez,
-// //            // V3
-// //            const T v3_ex, const T v3_ey, const T v3_ez,
-// //            // Output
-// //            T *const toi) {
+    template <int nxe, typename T, typename I>
+    T narrow_phase_vf(const size_t noverlaps,
+                      const I* const SCCD_RESTRICT voveralp,
+                      const I* const SCCD_RESTRICT foveralp,
+                      // Geometric data
+                      T** const SCCD_RESTRICT v0,
+                      T** const SCCD_RESTRICT v1,
+                      const size_t face_stride,
+                      I** const SCCD_RESTRICT faces,
+                      // Output
+                      T* const SCCD_RESTRICT toi) {
+        using T_HP = double;
+        const T infty = 100000;
+        T min_t = infty;
 
-// // 	// This can be vectorized?
-// //   int box_in = 0;
-// //   const int ok = sccd_origin_in_inclusion_ee_soa<T>(
-// //       t_l, t_u, u_l, u_u, v_l, v_u, v0sx, v0sy, v0sz, v1sx, v1sy, v1sz, v2sx,
-// //       v2sy, v2sz, v3sx, v3sy, v3sz, v0ex, v0ey, v0ez, v1ex, v1ey, v1ez, v2ex,
-// //       v2ey, v2ez, v3ex, v3ey, v3ez, ms, ms, ms, errx, erry, errz, &true_tol,
-// //       &box_in);
+        int USE_TI = 0;
+        SFEM_READ_ENV(USE_TI, atoi);
 
+        int SCCD_MAX_ITER = 12;
+        SFEM_READ_ENV(SCCD_MAX_ITER, atoi);
 
-// //   if (!ok) {
-// //     return CCDStepResult::NoInclusion;
-// //   }
-// // }
+        T_HP tol = 1e-11;
 
-// // } // namespace sccd
+        tbb::parallel_for(tbb::blocked_range<size_t>(0, noverlaps), [&](const tbb::blocked_range<size_t>& r) {
+            std::vector<Box<T_HP>> stack;
+            for (size_t i = r.begin(); i < r.end(); i++) {
+                // for (size_t i = 0; i < noverlaps; i++) {
+                const I vi = voveralp[i];
+                const I fi = foveralp[i];
+
+                I nodes[3] = {faces[0][fi * face_stride], faces[1][fi * face_stride], faces[2][fi * face_stride]};
+
+                const T_HP sv[3] = {v0[0][vi], v0[1][vi], v0[2][vi]};
+                const T_HP ev[3] = {v1[0][vi], v1[1][vi], v1[2][vi]};
+
+                const T_HP s1[3] = {v0[0][nodes[0]], v0[1][nodes[0]], v0[2][nodes[0]]};
+                const T_HP s2[3] = {v0[0][nodes[1]], v0[1][nodes[1]], v0[2][nodes[1]]};
+                const T_HP s3[3] = {v0[0][nodes[2]], v0[1][nodes[2]], v0[2][nodes[2]]};
+
+                const T_HP e1[3] = {v1[0][nodes[0]], v1[1][nodes[0]], v1[2][nodes[0]]};
+                const T_HP e2[3] = {v1[0][nodes[1]], v1[1][nodes[1]], v1[2][nodes[1]]};
+                const T_HP e3[3] = {v1[0][nodes[2]], v1[1][nodes[2]], v1[2][nodes[2]]};
+
+                // Iteration variables
+                T_HP t = 0;
+                T_HP u = 0;
+                T_HP v = 0;
+
+#ifdef SCCD_ENABLE_TIGHT_INCLUSION
+#warning "SCCD_ENABLE_TIGHT_INCLUSION"
+                if (USE_TI) {
+                    if (find_root_tight_inclusion_vf<T_HP>(
+                            SCCD_MAX_ITER * 1000, tol, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v)) {
+                        toi[i] = t;
+                        min_t = sccd::min<T>(t, min_t);
+                    } else {
+                        toi[i] = infty;
+                    }
+                    continue;
+                }
+#endif
+                if (find_root_grid_rotate_vf<T_HP>(SCCD_MAX_ITER, tol, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack))
+                {
+                    toi[i] = t;
+                    min_t = sccd::min<T>(t, min_t);
+                } else {
+                    toi[i] = infty;
+                }
+            }
+        });
+
+        return min_t;
+    }
+
+    template <typename T, typename I>
+    T narrow_phase_ee(const size_t noverlaps,
+                      const I* const SCCD_RESTRICT e0overalp,
+                      const I* const SCCD_RESTRICT e1overalp,
+                      // Geometric data
+                      T** const SCCD_RESTRICT v0,
+                      T** const SCCD_RESTRICT v1,
+                      const size_t edge_stride,
+                      I** const SCCD_RESTRICT edges,
+                      // Output
+                      T* const SCCD_RESTRICT toi) {
+        using T_HP = double;
+        const T infty = 100000;
+        T min_t = infty;
+
+        int USE_TI = 0;
+        SFEM_READ_ENV(USE_TI, atoi);
+
+        int SCCD_MAX_ITER = 12;
+        SFEM_READ_ENV(SCCD_MAX_ITER, atoi);
+
+        T_HP tol = 1e-11;
+
+        tbb::parallel_for(tbb::blocked_range<size_t>(0, noverlaps), [&](const tbb::blocked_range<size_t>& r) {
+            std::vector<Box<T_HP>> stack;
+            for (size_t i = r.begin(); i < r.end(); i++) {
+                // for (size_t i = 0; i < noverlaps; i++) {
+                const I i0 = e0overalp[i];
+                const I i1 = e1overalp[i];
+
+                I nodes0[2] = {edges[0][i0 * edge_stride], edges[1][i0 * edge_stride]};
+                I nodes1[2] = {edges[0][i1 * edge_stride], edges[1][i1 * edge_stride]};
+
+                const T_HP s1[3] = {v0[0][nodes0[0]], v0[1][nodes0[0]], v0[2][nodes0[0]]};
+                const T_HP s2[3] = {v0[0][nodes0[1]], v0[1][nodes0[1]], v0[2][nodes0[1]]};
+
+                const T_HP s3[3] = {v0[0][nodes1[2]], v0[1][nodes1[2]], v0[2][nodes1[2]]};
+                const T_HP s4[3] = {v0[0][nodes1[2]], v0[1][nodes1[2]], v0[2][nodes1[2]]};
+
+                const T_HP e1[3] = {v1[0][nodes0[0]], v1[1][nodes0[0]], v1[2][nodes0[0]]};
+                const T_HP e2[3] = {v1[0][nodes0[1]], v1[1][nodes0[1]], v1[2][nodes0[1]]};
+
+                const T_HP e3[3] = {v1[0][nodes1[2]], v1[1][nodes1[2]], v1[2][nodes1[2]]};
+                const T_HP e4[3] = {v1[0][nodes1[2]], v1[1][nodes1[2]], v1[2][nodes1[2]]};
+
+                // Iteration variables
+                T_HP t = 0;
+                T_HP u = 0;
+                T_HP v = 0;
+
+#ifdef SCCD_ENABLE_TIGHT_INCLUSION
+#warning "SCCD_ENABLE_TIGHT_INCLUSION"
+                if (USE_TI) {
+                    if (find_root_tight_inclusion_ee<T_HP>(
+                            SCCD_MAX_ITER * 1000, tol, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v)) {
+                        toi[i] = t;
+                        min_t = sccd::min<T>(t, min_t);
+                    } else {
+                        toi[i] = infty;
+                    }
+                    continue;
+                }
+#endif
+                if (find_root_grid_ee<T_HP>(SCCD_MAX_ITER, tol, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v, stack)) {
+                    toi[i] = t;
+                    min_t = sccd::min<T>(t, min_t);
+                } else {
+                    toi[i] = infty;
+                }
+            }
+        });
+
+        return min_t;
+    }
+
+}  // namespace sccd
+
+#endif
