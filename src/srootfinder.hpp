@@ -656,12 +656,12 @@ namespace sccd {
         }
     }
 
-    template <int NT, int NU, int NV, typename T>
+    template <int NT, int NU, int NV, typename T, typename mask_t>
     inline static void grid_zero_and_accept(const T *const SCCD_RESTRICT F,
                                             const T tol,
                                             const T adaptive_tol,
-                                            uint8_t *const SCCD_RESTRICT contains_origin,
-                                            uint8_t *const SCCD_RESTRICT accept) {
+                                            mask_t *const SCCD_RESTRICT contains_origin,
+                                            mask_t *const SCCD_RESTRICT accept) {
         static constexpr int STIDE_T = (NU + 1) * (NV + 1);
         static constexpr int STIDE_U = (NV + 1);
 
@@ -686,8 +686,8 @@ namespace sccd {
                 const T *const SCCD_RESTRICT F111 = &F[i7];
 
                 const int cell_offset = a * NU * NV + b * NV;
-                uint8_t *const SCCD_RESTRICT contains_origin_cell = &contains_origin[cell_offset];
-                uint8_t *const SCCD_RESTRICT accept_cell = &accept[cell_offset];
+                mask_t *const SCCD_RESTRICT contains_origin_cell = &contains_origin[cell_offset];
+                mask_t *const SCCD_RESTRICT accept_cell = &accept[cell_offset];
 
                 for (int c = 0; c < NV; c++) {
                     const T fmin = sccd::min(sccd::min(sccd::min(F000[c], F001[c]), sccd::min(F010[c], F011[c])),
@@ -702,7 +702,7 @@ namespace sccd {
                     bool cond3 = (fmax - fmin < tol);  // OR) Real tolerance is smaller than the int tolerance
                     bool cond4 = (fmin >= fmax);       // AND) The interval is terminal
 
-                    uint8_t cond_mask = (cond1 ? (1 & accept_cell[c]) : 0);
+                    mask_t cond_mask = (cond1 ? (1 & accept_cell[c]) : 0);
                     cond_mask |= (cond2 ? (2 & accept_cell[c]) : 0);
                     cond_mask |= (cond3 ? 4 : 0);
                     cond_mask |= (cond4 ? (8 & accept_cell[c]) : 0);
@@ -710,6 +710,108 @@ namespace sccd {
                 }
             }
         }
+    }
+
+    template <int NT, int NU, int NV, typename T, typename mask_t>
+    void grid_zero_and_accept_split(const T *const SCCD_RESTRICT F,
+                                    const T tol,
+                                    const T adaptive_tol,
+                                    mask_t *const SCCD_RESTRICT contains_origin,
+                                    mask_t *const SCCD_RESTRICT accept1,
+                                    mask_t *const SCCD_RESTRICT accept2,
+                                    mask_t *const SCCD_RESTRICT accept3,
+                                    mask_t *const SCCD_RESTRICT accept4) {
+        static constexpr int STIDE_T = (NU + 1) * (NV + 1);
+        static constexpr int STIDE_U = (NV + 1);
+
+        for (int a = 0; a < NT; a++) {
+            for (int b = 0; b < NU; b++) {
+                const int i0 = a * STIDE_T + b * STIDE_U;
+                const int i1 = a * STIDE_T + b * STIDE_U + 1;
+                const int i2 = a * STIDE_T + (b + 1) * STIDE_U;
+                const int i3 = a * STIDE_T + (b + 1) * STIDE_U + 1;
+                const int i4 = (a + 1) * STIDE_T + b * STIDE_U;
+                const int i5 = (a + 1) * STIDE_T + b * STIDE_U + 1;
+                const int i6 = (a + 1) * STIDE_T + (b + 1) * STIDE_U;
+                const int i7 = (a + 1) * STIDE_T + (b + 1) * STIDE_U + 1;
+
+                const T *const SCCD_RESTRICT F000 = &F[i0];
+                const T *const SCCD_RESTRICT F001 = &F[i1];
+                const T *const SCCD_RESTRICT F010 = &F[i2];
+                const T *const SCCD_RESTRICT F011 = &F[i3];
+                const T *const SCCD_RESTRICT F100 = &F[i4];
+                const T *const SCCD_RESTRICT F101 = &F[i5];
+                const T *const SCCD_RESTRICT F110 = &F[i6];
+                const T *const SCCD_RESTRICT F111 = &F[i7];
+
+                const int cell_offset = a * NU * NV + b * NV;
+                mask_t *const SCCD_RESTRICT contains_origin_cell = &contains_origin[cell_offset];
+                mask_t *const SCCD_RESTRICT a1 = &accept1[cell_offset];
+                mask_t *const SCCD_RESTRICT a2 = &accept1[cell_offset];
+                mask_t *const SCCD_RESTRICT a3 = &accept1[cell_offset];
+                mask_t *const SCCD_RESTRICT a4 = &accept1[cell_offset];
+
+                for (int c = 0; c < NV; c++) {
+                    const T fmin = sccd::min(sccd::min(sccd::min(F000[c], F001[c]), sccd::min(F010[c], F011[c])),
+                                             sccd::min(sccd::min(F100[c], F101[c]), sccd::min(F110[c], F111[c])));
+
+                    const T fmax = sccd::max(sccd::max(sccd::max(F000[c], F001[c]), sccd::max(F010[c], F011[c])),
+                                             sccd::max(sccd::max(F100[c], F101[c]), sccd::max(F110[c], F111[c])));
+
+                    contains_origin_cell[c] &= (fmin <= tol) & (fmax >= -tol);
+                    a1[c] &= (fmax - fmin <= adaptive_tol);
+                    a2[c] &= !((fmin < tol) | (fmax > -tol));
+                    a3[c] |= (fmax - fmin < tol);
+                    a4[c] &= (fmin >= fmax);
+                }
+            }
+        }
+    }
+
+    template <int NT, int NU, int NV, typename T, typename mask_t>
+    void grid_zero_and_accept_all(const T *const SCCD_RESTRICT Fx,
+                                  const T *const SCCD_RESTRICT Fy,
+                                  const T *const SCCD_RESTRICT Fz,
+                                  const T tol,
+                                  const T*const SCCD_RESTRICT adaptive_tol,
+                                  mask_t *const SCCD_RESTRICT contains_origin,
+                                  mask_t *const SCCD_RESTRICT accept) {
+        static constexpr int N_cells = NT * NU * NV;
+#if 1 // Best version
+        for (int i = 0; i < N_cells; i++) {
+            contains_origin[i] = true;
+            accept[i] = 0xf;
+        }
+
+        grid_zero_and_accept<NT, NU, NV, T, mask_t>(Fx, tol, adaptive_tol[0], contains_origin, accept);
+        grid_zero_and_accept<NT, NU, NV, T, mask_t>(Fy, tol, adaptive_tol[1], contains_origin, accept);
+        grid_zero_and_accept<NT, NU, NV, T, mask_t>(Fz, tol, adaptive_tol[2], contains_origin, accept);
+#else
+        mask_t accept2[N_cells];
+        mask_t accept3[N_cells];
+        mask_t accept4[N_cells];
+
+        for (int i = 0; i < N_cells; i++) {
+            contains_origin[i] = true;
+            accept[i] = 1;
+            accept2[i] = 1;
+            accept3[i] = 1;
+            accept4[i] = 1;
+        }
+
+        grid_zero_and_accept_split<NT, NU, NV, T, mask_t>(
+            Fx, tol, adaptive_tol[0], contains_origin, accept, accept2, accept3, accept4);
+        
+        grid_zero_and_accept_split<NT, NU, NV, T, mask_t>(
+            Fy, tol, adaptive_tol[1], contains_origin, accept, accept2, accept3, accept4);
+
+        grid_zero_and_accept_split<NT, NU, NV, T, mask_t>(
+            Fz, tol, adaptive_tol[1], contains_origin, accept, accept2, accept3, accept4);
+
+        for (int i = 0; i < N_cells; i++) {
+            accept[i] &= accept2[i] & accept3[i] & accept4[i] & contains_origin[i];
+        }
+#endif
     }
 
     template <int NT, int NU, int NV, typename T>
@@ -755,17 +857,13 @@ namespace sccd {
         grid_sample_F_vf<NT, NU, NV, T>(
             t_min, u_min, v_min, t_h, u_h, v_h, sv[2], ev[2], s1[2], s2[2], s3[2], e1[2], e2[2], e3[2], F[2]);
 
+        using mask_t = uint32_t;
         // 2) Find cells containing zeros and check for acceptability
-        uint8_t contains_zero_and_refine[N_cells];
-        uint8_t accept[N_cells];
-        for (int i = 0; i < N_cells; i++) {
-            contains_zero_and_refine[i] = true;
-            accept[i] = 0xf;
-        }
+        mask_t contains_zero_and_refine[N_cells];
+        mask_t accept[N_cells];
 
-        grid_zero_and_accept<NT, NU, NV, T>(F[0], tol, tols[0], contains_zero_and_refine, accept);
-        grid_zero_and_accept<NT, NU, NV, T>(F[1], tol, tols[1], contains_zero_and_refine, accept);
-        grid_zero_and_accept<NT, NU, NV, T>(F[2], tol, tols[2], contains_zero_and_refine, accept);
+        grid_zero_and_accept_all<NT, NU, NV, T, mask_t>(
+            F[0], F[1], F[2], tol, tols, contains_zero_and_refine, accept);
 
         bool found = false;
         // 3) Find earilest toi and schedule for refinement
@@ -894,7 +992,7 @@ namespace sccd {
             }
 
             found |=
-                grid_search_vf<4, 4, 4, T>(box, max_iter, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack);
+                grid_search_vf<3, 3, 3, T>(box, max_iter, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack);
         }
 
         return found;
@@ -1118,16 +1216,10 @@ namespace sccd {
             t_min, u_min, v_min, t_h, u_h, v_h, s1[2], s2[2], s3[2], s4[2], e1[2], e2[2], e3[2], e4[2], F[2]);
 
         // 2) Find cells containing zeros and check for acceptability
-        uint8_t contains_zero_and_refine[N_cells];
-        uint8_t accept[N_cells];
-        for (int i = 0; i < N_cells; i++) {
-            contains_zero_and_refine[i] = true;
-            accept[i] = 0xf;
-        }
-
-        grid_zero_and_accept<NT, NU, NV, T>(F[0], tol, tols[0], contains_zero_and_refine, accept);
-        grid_zero_and_accept<NT, NU, NV, T>(F[1], tol, tols[1], contains_zero_and_refine, accept);
-        grid_zero_and_accept<NT, NU, NV, T>(F[2], tol, tols[2], contains_zero_and_refine, accept);
+        using mask_t = uint32_t;
+        mask_t contains_zero_and_refine[N_cells];
+        mask_t accept[N_cells];
+        grid_zero_and_accept_all<NT, NU, NV, T, mask_t>(F[0], F[1], F[2], tol, tols, contains_zero_and_refine, accept);
 
         bool found = false;
         // 3) Find earilest toi and schedule for refinement
