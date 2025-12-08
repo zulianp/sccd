@@ -92,7 +92,7 @@ def find_root_vf_f(
     tol: float,
     sv, s1, s2, s3,
     ev, e1, e2, e3,
-    t0: float = 0.0, u0: float = 0.0, v0: float = 0.0
+    t0: float = 1.1, u0: float = 0.0, v0: float = 0.0
 ) -> Tuple[bool, float, float, float]:
     svp = _as_arr3_f(sv)[0]
     s1p = _as_arr3_f(s1)[0]
@@ -120,7 +120,7 @@ def find_root_vf_d(
     tol: float,
     sv, s1, s2, s3,
     ev, e1, e2, e3,
-    t0: float = 0.0, u0: float = 0.0, v0: float = 0.0
+    t0: float = 1.1, u0: float = 0.0, v0: float = 0.0
 ) -> Tuple[bool, float, float, float]:
     svp = _as_arr3_d(sv)[0]
     s1p = _as_arr3_d(s1)[0]
@@ -147,7 +147,7 @@ def find_root_rotate_vf_d(
     tol: float,
     sv, s1, s2, s3,
     ev, e1, e2, e3,
-    t0: float = 0.0, u0: float = 0.0, v0: float = 0.0
+    t0: float = 1.1, u0: float = 0.0, v0: float = 0.0
 ) -> Tuple[bool, float, float, float]:
     svp = _as_arr3_d(sv)[0]
     s1p = _as_arr3_d(s1)[0]
@@ -173,7 +173,7 @@ def find_root_ee_d(
     tol: float,
     s0, s1, s2, s3,
     e0, e1, e2, e3,
-    t0: float = 0.0, u0: float = 0.0, v0: float = 0.0
+    t0: float = 1.1, u0: float = 0.0, v0: float = 0.0
 ) -> Tuple[bool, float, float, float]:
     s0p = _as_arr3_d(s0)[0]
     s1p = _as_arr3_d(s1)[0]
@@ -201,7 +201,7 @@ def find_root_bisection_vf_d(
     tol: float,
     sv, s1, s2, s3,
     ev, e1, e2, e3,
-    t0: float = 0.0, u0: float = 0.0, v0: float = 0.0
+    t0: float = 1.1, u0: float = 0.0, v0: float = 0.0
 ) -> Tuple[bool, float, float, float]:
     svp = _as_arr3_d(sv)[0]
     s1p = _as_arr3_d(s1)[0]
@@ -228,7 +228,7 @@ try:
         tol: float,
         sv, s1, s2, s3,
         ev, e1, e2, e3,
-        t0: float = 0.0, u0: float = 0.0, v0: float = 0.0
+        t0: float = 1.1, u0: float = 0.0, v0: float = 0.0
     ) -> Tuple[bool, float, float, float]:
         svp = _as_arr3_d(sv)[0]
         s1p = _as_arr3_d(s1)[0]
@@ -254,7 +254,7 @@ try:
         tol: float,
         s0, s1, s2, s3,
         e0, e1, e2, e3,
-        t0: float = 0.0, u0: float = 0.0, v0: float = 0.0
+        t0: float = 1.1, u0: float = 0.0, v0: float = 0.0
     ) -> Tuple[bool, float, float, float]:
         s0p = _as_arr3_d(s0)[0]
         s1p = _as_arr3_d(s1)[0]
