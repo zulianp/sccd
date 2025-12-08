@@ -24,7 +24,6 @@ namespace sccd {
                       T* const SCCD_RESTRICT toi) {
         using T_HP = double;
         const T infty = 100000;
-        T min_t = infty;
 
         int USE_TI = 0;
         SFEM_READ_ENV(USE_TI, atoi);
@@ -32,12 +31,11 @@ namespace sccd {
         int SCCD_MAX_ITER = 12;
         SFEM_READ_ENV(SCCD_MAX_ITER, atoi);
 
-        T_HP tol = 1e-11;
+        T_HP tol = 1e-12;
 
-        tbb::parallel_for(tbb::blocked_range<size_t>(0, noverlaps), [&](const tbb::blocked_range<size_t>& r) {
+        sccd::parallel_for_br(0, noverlaps, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
             std::vector<Box<T_HP>> stack;
-            for (size_t i = r.begin(); i < r.end(); i++) {
-                // for (size_t i = 0; i < noverlaps; i++) {
+            for (ptrdiff_t i = rbegin; i < rend; i++) {
                 const I vi = voveralp[i];
                 const I fi = foveralp[i];
 
@@ -55,7 +53,7 @@ namespace sccd {
                 const T_HP e3[3] = {v1[0][nodes[2]], v1[1][nodes[2]], v1[2][nodes[2]]};
 
                 // Iteration variables
-                T_HP t = 0;
+                T_HP t = infty;
                 T_HP u = 0;
                 T_HP v = 0;
 
@@ -65,7 +63,6 @@ namespace sccd {
                     if (find_root_tight_inclusion_vf<T_HP>(
                             SCCD_MAX_ITER * 1000, tol, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v)) {
                         toi[i] = t;
-                        min_t = sccd::min<T>(t, min_t);
                     } else {
                         toi[i] = infty;
                     }
@@ -75,12 +72,17 @@ namespace sccd {
                 if (find_root_grid_rotate_vf<T_HP>(SCCD_MAX_ITER, tol, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack))
                 {
                     toi[i] = t;
-                    min_t = sccd::min<T>(t, min_t);
                 } else {
                     toi[i] = infty;
                 }
             }
         });
+
+        T min_t = infty;
+        for (size_t i = 0; i < noverlaps; i++) {
+            min_t = sccd::min<T>(toi[i], min_t);
+        }
+
 
         return min_t;
     }
@@ -98,7 +100,7 @@ namespace sccd {
                       T* const SCCD_RESTRICT toi) {
         using T_HP = double;
         const T infty = 100000;
-        T min_t = infty;
+        
 
         int USE_TI = 0;
         SFEM_READ_ENV(USE_TI, atoi);
@@ -106,12 +108,11 @@ namespace sccd {
         int SCCD_MAX_ITER = 12;
         SFEM_READ_ENV(SCCD_MAX_ITER, atoi);
 
-        T_HP tol = 1e-11;
+        T_HP tol = 1e-12;
 
-        tbb::parallel_for(tbb::blocked_range<size_t>(0, noverlaps), [&](const tbb::blocked_range<size_t>& r) {
+        sccd::parallel_for_br(0, noverlaps, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
             std::vector<Box<T_HP>> stack;
-            for (size_t i = r.begin(); i < r.end(); i++) {
-                // for (size_t i = 0; i < noverlaps; i++) {
+            for (ptrdiff_t i = rbegin; i < rend; i++) {
                 const I i0 = e0overalp[i];
                 const I i1 = e1overalp[i];
 
@@ -131,7 +132,7 @@ namespace sccd {
                 const T_HP e4[3] = {v1[0][nodes1[2]], v1[1][nodes1[2]], v1[2][nodes1[2]]};
 
                 // Iteration variables
-                T_HP t = 0;
+                T_HP t = infty;
                 T_HP u = 0;
                 T_HP v = 0;
 
@@ -141,7 +142,6 @@ namespace sccd {
                     if (find_root_tight_inclusion_ee<T_HP>(
                             SCCD_MAX_ITER * 1000, tol, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v)) {
                         toi[i] = t;
-                        min_t = sccd::min<T>(t, min_t);
                     } else {
                         toi[i] = infty;
                     }
@@ -150,12 +150,16 @@ namespace sccd {
 #endif
                 if (find_root_grid_ee<T_HP>(SCCD_MAX_ITER, tol, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v, stack)) {
                     toi[i] = t;
-                    min_t = sccd::min<T>(t, min_t);
                 } else {
                     toi[i] = infty;
                 }
             }
         });
+
+        T min_t = infty;
+        for (size_t i = 0; i < noverlaps; i++) {
+            min_t = sccd::min<T>(toi[i], min_t);
+        }
 
         return min_t;
     }

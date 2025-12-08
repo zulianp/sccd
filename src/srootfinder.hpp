@@ -975,9 +975,7 @@ namespace sccd {
                                              &tols[1],
                                              &tols[2]);
 
-        t = 1.1;
-        u = 0;
-        v = 0;
+     
 
         bool found = false;
         stack.clear();
@@ -1331,9 +1329,7 @@ namespace sccd {
                                            &tols[1],
                                            &tols[2]);
 
-        t = 1.1;
-        u = 0;
-        v = 0;
+     
 
         bool found = false;
         stack.clear();
