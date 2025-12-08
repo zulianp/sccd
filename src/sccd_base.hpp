@@ -3,8 +3,8 @@
 
 #include "sccd_config.hpp"
 
-#ifndef SFEM_READ_ENV
-#define SFEM_READ_ENV(name, conversion)                                        \
+#ifndef SCCD_READ_ENV
+#define SCCD_READ_ENV(name, conversion)                                        \
     do {                                                                       \
         char* var = getenv(#name);                                             \
         if (var) {                                                             \

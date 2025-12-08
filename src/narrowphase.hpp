@@ -5,6 +5,7 @@
 
 #include "assert.h"
 
+#include "sccd_base.hpp"
 #include "roots.hpp"
 #include "srootfinder.hpp"
 #include "vaabb.hpp"
@@ -25,13 +26,15 @@ namespace sccd {
         using T_HP = double;
         const T infty = 100000;
 
-        int USE_TI = 0;
-        SFEM_READ_ENV(USE_TI, atoi);
+        int SCCD_USE_TI = 0;
+        SCCD_READ_ENV(SCCD_USE_TI, atoi);
 
-        int SCCD_MAX_ITER = 12;
-        SFEM_READ_ENV(SCCD_MAX_ITER, atoi);
+        int SCCD_MAX_ITER = 14;
+        SCCD_READ_ENV(SCCD_MAX_ITER, atoi);
 
-        T_HP tol = 1e-12;
+        T_HP SCCD_TOL = 1e-11;
+        SCCD_READ_ENV(SCCD_TOL, atof);
+
 
         sccd::parallel_for_br(0, noverlaps, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
             std::vector<Box<T_HP>> stack;
@@ -59,9 +62,10 @@ namespace sccd {
 
 #ifdef SCCD_ENABLE_TIGHT_INCLUSION
 #warning "SCCD_ENABLE_TIGHT_INCLUSION"
-                if (USE_TI) {
+                if (SCCD_USE_TI) {
+                    // Make sure to increase SCCD_MAX_ITER from the command line
                     if (find_root_tight_inclusion_vf<T_HP>(
-                            SCCD_MAX_ITER * 1000, tol, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v)) {
+                            SCCD_MAX_ITER, SCCD_TOL, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v)) {
                         toi[i] = t;
                     } else {
                         toi[i] = infty;
@@ -69,7 +73,7 @@ namespace sccd {
                     continue;
                 }
 #endif
-                if (find_root_grid_rotate_vf<T_HP>(SCCD_MAX_ITER, tol, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack))
+                if (find_root_grid_rotate_vf<T_HP>(SCCD_MAX_ITER, SCCD_TOL, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack))
                 {
                     toi[i] = t;
                 } else {
@@ -102,13 +106,15 @@ namespace sccd {
         const T infty = 100000;
         
 
-        int USE_TI = 0;
-        SFEM_READ_ENV(USE_TI, atoi);
+        int SCCD_USE_TI = 0;
+        SCCD_READ_ENV(SCCD_USE_TI, atoi);
 
-        int SCCD_MAX_ITER = 12;
-        SFEM_READ_ENV(SCCD_MAX_ITER, atoi);
+        int SCCD_MAX_ITER = 14;
+        SCCD_READ_ENV(SCCD_MAX_ITER, atoi);
 
-        T_HP tol = 1e-12;
+        T_HP SCCD_TOL = 1e-11;
+        SCCD_READ_ENV(SCCD_TOL, atof);
+
 
         sccd::parallel_for_br(0, noverlaps, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
             std::vector<Box<T_HP>> stack;
@@ -138,9 +144,10 @@ namespace sccd {
 
 #ifdef SCCD_ENABLE_TIGHT_INCLUSION
 #warning "SCCD_ENABLE_TIGHT_INCLUSION"
-                if (USE_TI) {
+                if (SCCD_USE_TI) {
+                    // Make sure to increase SCCD_MAX_ITER from the command line
                     if (find_root_tight_inclusion_ee<T_HP>(
-                            SCCD_MAX_ITER * 1000, tol, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v)) {
+                            SCCD_MAX_ITER, SCCD_TOL, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v)) {
                         toi[i] = t;
                     } else {
                         toi[i] = infty;
@@ -148,7 +155,7 @@ namespace sccd {
                     continue;
                 }
 #endif
-                if (find_root_grid_ee<T_HP>(SCCD_MAX_ITER, tol, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v, stack)) {
+                if (find_root_grid_ee<T_HP>(SCCD_MAX_ITER, SCCD_TOL, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v, stack)) {
                     toi[i] = t;
                 } else {
                     toi[i] = infty;

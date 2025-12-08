@@ -88,8 +88,8 @@ if __name__ == "__main__":
     
     funs = {
         # "vf" : (sccd_py.find_root_vf_d, vf_F_3d, 12, 1e-11),
-        "vf" : (sccd_py.find_root_rotate_vf_d, vf_F_3d, 12, 1e-12),
-        "ee" : (sccd_py.find_root_ee_d, ee_F_3d, 12, 1e-12),
+        "vf" : (sccd_py.find_root_rotate_vf_d, vf_F_3d, 14, 1e-11),
+        "ee" : (sccd_py.find_root_ee_d, ee_F_3d, 14, 1e-11),
         # "vf" : (sccd_py.find_root_tight_inclusion_vf_d, vf_F_3d, 10000, 1e-8),
         # "ee" : (sccd_py.find_root_tight_inclusion_ee_d, ee_F_3d, 10000, 1e-8),
     }
