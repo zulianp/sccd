@@ -84,9 +84,9 @@ def gen_numerr_function(name: str, mult_nominal: int, mult_ms: int):
         ["const int use_ms"]
         + [f"const T {n}" for n in arg_names]
         + [
-            "T * const SFEM_RESTRICT errx",
-            "T * const SFEM_RESTRICT erry",
-            "T * const SFEM_RESTRICT errz",
+            "T * const SCCD_RESTRICT errx",
+            "T * const SCCD_RESTRICT erry",
+            "T * const SCCD_RESTRICT errz",
         ]
     )
 

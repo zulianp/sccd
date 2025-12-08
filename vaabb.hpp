@@ -66,99 +66,99 @@ namespace sccd {
     }
 
     template <typename T>
-    inline static void vdisjoint(const T* const SFEM_RESTRICT aminx,
-                                 const T* const SFEM_RESTRICT aminy,
-                                 const T* const SFEM_RESTRICT aminz,
-                                 const T* const SFEM_RESTRICT amaxx,
-                                 const T* const SFEM_RESTRICT amaxy,
-                                 const T* const SFEM_RESTRICT amaxz,
-                                 const T* const SFEM_RESTRICT bminx,
-                                 const T* const SFEM_RESTRICT bminy,
-                                 const T* const SFEM_RESTRICT bminz,
-                                 const T* const SFEM_RESTRICT bmaxx,
-                                 const T* const SFEM_RESTRICT bmaxy,
-                                 const T* const SFEM_RESTRICT bmaxz,
-                                 uint32_t* SFEM_RESTRICT mask) {
+    inline static void vdisjoint(const T* const SCCD_RESTRICT aminx,
+                                 const T* const SCCD_RESTRICT aminy,
+                                 const T* const SCCD_RESTRICT aminz,
+                                 const T* const SCCD_RESTRICT amaxx,
+                                 const T* const SCCD_RESTRICT amaxy,
+                                 const T* const SCCD_RESTRICT amaxz,
+                                 const T* const SCCD_RESTRICT bminx,
+                                 const T* const SCCD_RESTRICT bminy,
+                                 const T* const SCCD_RESTRICT bminz,
+                                 const T* const SCCD_RESTRICT bmaxx,
+                                 const T* const SCCD_RESTRICT bmaxy,
+                                 const T* const SCCD_RESTRICT bmaxz,
+                                 uint32_t* SCCD_RESTRICT mask) {
         if constexpr (std::is_same<T, double>::value)  //
         {
 #if defined(__AVX512F__)
-            for (int i = 0; i < AABB_DISJOINT_CHUNK_SIZE; i += 16) {
-                const __m512 a_minx = _mm512_loadu_ps(aminx + i);
-                const __m512 a_miny = _mm512_loadu_ps(aminy + i);
-                const __m512 a_minz = _mm512_loadu_ps(aminz + i);
-                const __m512 a_maxx = _mm512_loadu_ps(amaxx + i);
-                const __m512 a_maxy = _mm512_loadu_ps(amaxy + i);
-                const __m512 a_maxz = _mm512_loadu_ps(amaxz + i);
+            for (int i = 0; i < AABB_DISJOINT_CHUNK_SIZE; i += 8) {
+                const __m512d a_minx = _mm512_loadu_pd(aminx + i);
+                const __m512d a_miny = _mm512_loadu_pd(aminy + i);
+                const __m512d a_minz = _mm512_loadu_pd(aminz + i);
+                const __m512d a_maxx = _mm512_loadu_pd(amaxx + i);
+                const __m512d a_maxy = _mm512_loadu_pd(amaxy + i);
+                const __m512d a_maxz = _mm512_loadu_pd(amaxz + i);
 
-                const __m512 b_minx = _mm512_loadu_ps(bminx + i);
-                const __m512 b_miny = _mm512_loadu_ps(bminy + i);
-                const __m512 b_minz = _mm512_loadu_ps(bminz + i);
-                const __m512 b_maxx = _mm512_loadu_ps(bmaxx + i);
-                const __m512 b_maxy = _mm512_loadu_ps(bmaxy + i);
-                const __m512 b_maxz = _mm512_loadu_ps(bmaxz + i);
+                const __m512d b_minx = _mm512_loadu_pd(bminx + i);
+                const __m512d b_miny = _mm512_loadu_pd(bminy + i);
+                const __m512d b_minz = _mm512_loadu_pd(bminz + i);
+                const __m512d b_maxx = _mm512_loadu_pd(bmaxx + i);
+                const __m512d b_maxy = _mm512_loadu_pd(bmaxy + i);
+                const __m512d b_maxz = _mm512_loadu_pd(bmaxz + i);
 
-                __mmask16 k =
-                    _mm512_cmp_ps_mask(a_minx, b_maxx, _CMP_GT_OQ) | _mm512_cmp_ps_mask(a_miny, b_maxy, _CMP_GT_OQ) |
-                    _mm512_cmp_ps_mask(a_minz, b_maxz, _CMP_GT_OQ) | _mm512_cmp_ps_mask(b_minx, a_maxx, _CMP_GT_OQ) |
-                    _mm512_cmp_ps_mask(b_miny, a_maxy, _CMP_GT_OQ) | _mm512_cmp_ps_mask(b_minz, a_maxz, _CMP_GT_OQ);
+                __mmask8 k =
+                    _mm512_cmp_pd_mask(a_minx, b_maxx, _CMP_GT_OQ) | _mm512_cmp_pd_mask(a_miny, b_maxy, _CMP_GT_OQ) |
+                    _mm512_cmp_pd_mask(a_minz, b_maxz, _CMP_GT_OQ) | _mm512_cmp_pd_mask(b_minx, a_maxx, _CMP_GT_OQ) |
+                    _mm512_cmp_pd_mask(b_miny, a_maxy, _CMP_GT_OQ) | _mm512_cmp_pd_mask(b_minz, a_maxz, _CMP_GT_OQ);
 
-                __m512i k_as_epi32 = _mm512_movm_epi32(k);
-                __m512i k_01 = _mm512_srli_epi32(k_as_epi32, 31);
+                __m512i k_as_epi64 = _mm512_movm_epi64(k);
+                __m512i k_01 = _mm512_srli_epi64(k_as_epi64, 63);
                 _mm512_storeu_si512((__m512i*)(mask + i), k_01);
             }
             return;
 #elif defined(__AVX2__)
-            for (int i = 0; i < AABB_DISJOINT_CHUNK_SIZE; i += 8) {
-                const __m256 a_minx = _mm256_loadu_ps(aminx + i);
-                const __m256 a_miny = _mm256_loadu_ps(aminy + i);
-                const __m256 a_minz = _mm256_loadu_ps(aminz + i);
-                const __m256 a_maxx = _mm256_loadu_ps(amaxx + i);
-                const __m256 a_maxy = _mm256_loadu_ps(amaxy + i);
-                const __m256 a_maxz = _mm256_loadu_ps(amaxz + i);
+            for (int i = 0; i < AABB_DISJOINT_CHUNK_SIZE; i += 4) {
+                const __m256d a_minx = _mm256_loadu_pd(aminx + i);
+                const __m256d a_miny = _mm256_loadu_pd(aminy + i);
+                const __m256d a_minz = _mm256_loadu_pd(aminz + i);
+                const __m256d a_maxx = _mm256_loadu_pd(amaxx + i);
+                const __m256d a_maxy = _mm256_loadu_pd(amaxy + i);
+                const __m256d a_maxz = _mm256_loadu_pd(amaxz + i);
 
-                const __m256 b_minx = _mm256_loadu_ps(bminx + i);
-                const __m256 b_miny = _mm256_loadu_ps(bminy + i);
-                const __m256 b_minz = _mm256_loadu_ps(bminz + i);
-                const __m256 b_maxx = _mm256_loadu_ps(bmaxx + i);
-                const __m256 b_maxy = _mm256_loadu_ps(bmaxy + i);
-                const __m256 b_maxz = _mm256_loadu_ps(bmaxz + i);
+                const __m256d b_minx = _mm256_loadu_pd(bminx + i);
+                const __m256d b_miny = _mm256_loadu_pd(bminy + i);
+                const __m256d b_minz = _mm256_loadu_pd(bminz + i);
+                const __m256d b_maxx = _mm256_loadu_pd(bmaxx + i);
+                const __m256d b_maxy = _mm256_loadu_pd(bmaxy + i);
+                const __m256d b_maxz = _mm256_loadu_pd(bmaxz + i);
 
-                __m256 m = _mm256_or_ps(
-                    _mm256_or_ps(_mm256_cmp_ps(a_minx, b_maxx, _CMP_GT_OQ), _mm256_cmp_ps(a_miny, b_maxy, _CMP_GT_OQ)),
-                    _mm256_cmp_ps(a_minz, b_maxz, _CMP_GT_OQ));
-                m = _mm256_or_ps(
+                __m256d m = _mm256_or_pd(
+                    _mm256_or_pd(_mm256_cmp_pd(a_minx, b_maxx, _CMP_GT_OQ), _mm256_cmp_pd(a_miny, b_maxy, _CMP_GT_OQ)),
+                    _mm256_cmp_pd(a_minz, b_maxz, _CMP_GT_OQ));
+                m = _mm256_or_pd(
                     m,
-                    _mm256_or_ps(_mm256_cmp_ps(b_minx, a_maxx, _CMP_GT_OQ), _mm256_cmp_ps(b_miny, a_maxy, _CMP_GT_OQ)));
-                m = _mm256_or_ps(m, _mm256_cmp_ps(b_minz, a_maxz, _CMP_GT_OQ));
+                    _mm256_or_pd(_mm256_cmp_pd(b_minx, a_maxx, _CMP_GT_OQ), _mm256_cmp_pd(b_miny, a_maxy, _CMP_GT_OQ)));
+                m = _mm256_or_pd(m, _mm256_cmp_pd(b_minz, a_maxz, _CMP_GT_OQ));
 
-                const __m256i m_i = _mm256_castps_si256(m);
-                const __m256i m_01 = _mm256_srli_epi32(m_i, 31);
+                const __m256i m_i = _mm256_castpd_si256(m);
+                const __m256i m_01 = _mm256_srli_epi64(m_i, 63);
                 _mm256_storeu_si256((__m256i*)(mask + i), m_01);
             }
             return;
 #elif defined(__ARM_NEON) || defined(__ARM_NEON__)
-            for (int i = 0; i < AABB_DISJOINT_CHUNK_SIZE; i += 4) {
-                const float32x4_t a_minx = vld1q_f32(aminx + i);
-                const float32x4_t a_miny = vld1q_f32(aminy + i);
-                const float32x4_t a_minz = vld1q_f32(aminz + i);
-                const float32x4_t a_maxx = vld1q_f32(amaxx + i);
-                const float32x4_t a_maxy = vld1q_f32(amaxy + i);
-                const float32x4_t a_maxz = vld1q_f32(amaxz + i);
+            for (int i = 0; i < AABB_DISJOINT_CHUNK_SIZE; i += 2) {
+                const float64x2_t a_minx = vld1q_f64(aminx + i);
+                const float64x2_t a_miny = vld1q_f64(aminy + i);
+                const float64x2_t a_minz = vld1q_f64(aminz + i);
+                const float64x2_t a_maxx = vld1q_f64(amaxx + i);
+                const float64x2_t a_maxy = vld1q_f64(amaxy + i);
+                const float64x2_t a_maxz = vld1q_f64(amaxz + i);
 
-                const float32x4_t b_minx = vld1q_f32(bminx + i);
-                const float32x4_t b_miny = vld1q_f32(bminy + i);
-                const float32x4_t b_minz = vld1q_f32(bminz + i);
-                const float32x4_t b_maxx = vld1q_f32(bmaxx + i);
-                const float32x4_t b_maxy = vld1q_f32(bmaxy + i);
-                const float32x4_t b_maxz = vld1q_f32(bmaxz + i);
+                const float64x2_t b_minx = vld1q_f64(bminx + i);
+                const float64x2_t b_miny = vld1q_f64(bminy + i);
+                const float64x2_t b_minz = vld1q_f64(bminz + i);
+                const float64x2_t b_maxx = vld1q_f64(bmaxx + i);
+                const float64x2_t b_maxy = vld1q_f64(bmaxy + i);
+                const float64x2_t b_maxz = vld1q_f64(bmaxz + i);
 
-                uint32x4_t m = vorrq_u32(vorrq_u32(vcgtq_f32(a_minx, b_maxx), vcgtq_f32(a_miny, b_maxy)),
-                                         vcgtq_f32(a_minz, b_maxz));
-                m = vorrq_u32(m, vorrq_u32(vcgtq_f32(b_minx, a_maxx), vcgtq_f32(b_miny, a_maxy)));
-                m = vorrq_u32(m, vcgtq_f32(b_minz, a_maxz));
+                uint64x2_t m = vorrq_u64(vorrq_u64(vcgtq_f64(a_minx, b_maxx), vcgtq_f64(a_miny, b_maxy)),
+                                         vcgtq_f64(a_minz, b_maxz));
+                m = vorrq_u64(m, vorrq_u64(vcgtq_f64(b_minx, a_maxx), vcgtq_f64(b_miny, a_maxy)));
+                m = vorrq_u64(m, vcgtq_f64(b_minz, a_maxz));
 
-                const uint32x4_t m_01 = vshrq_n_u32(m, 31);
-                vst1q_u32(mask + i, m_01);
+                const uint64x2_t m_01 = vshrq_n_u64(m, 63);
+                vst1q_u64((uint64_t*)(mask + i), m_01);
             }
             return;
 #endif
@@ -166,17 +166,17 @@ namespace sccd {
 #pragma omp simd aligned(aminx, aminy, aminz, amaxx, amaxy, amaxz, bminx, bminy, bminz, bmaxx, bmaxy, bmaxz, mask : 64)
         for (int i = 0; i < AABB_DISJOINT_CHUNK_SIZE; i++) {
             mask[i] = disjoint<T>(aminx[i],
-                               aminy[i],
-                               aminz[i],
-                               amaxx[i],
-                               amaxy[i],
-                               amaxz[i],
-                               bminx[i],
-                               bminy[i],
-                               bminz[i],
-                               bmaxx[i],
-                               bmaxy[i],
-                               bmaxz[i]);
+                                  aminy[i],
+                                  aminz[i],
+                                  amaxx[i],
+                                  amaxy[i],
+                                  amaxz[i],
+                                  bminx[i],
+                                  bminy[i],
+                                  bminz[i],
+                                  bmaxx[i],
+                                  bmaxy[i],
+                                  bmaxz[i]);
         }
     }
 
@@ -187,14 +187,14 @@ namespace sccd {
      * \param A_minx..A_maxz Output arrays of length AABB_DISJOINT_CHUNK_SIZE.
      */
     template <typename T>
-    inline static void vaabb_broadcast(T** const SFEM_RESTRICT aabbs,
+    inline static void vaabb_broadcast(T** const SCCD_RESTRICT aabbs,
                                        const size_t fi,
-                                       T* const SFEM_RESTRICT A_minx,
-                                       T* const SFEM_RESTRICT A_miny,
-                                       T* const SFEM_RESTRICT A_minz,
-                                       T* const SFEM_RESTRICT A_maxx,
-                                       T* const SFEM_RESTRICT A_maxy,
-                                       T* const SFEM_RESTRICT A_maxz) {
+                                       T* const SCCD_RESTRICT A_minx,
+                                       T* const SCCD_RESTRICT A_miny,
+                                       T* const SCCD_RESTRICT A_minz,
+                                       T* const SCCD_RESTRICT A_maxx,
+                                       T* const SCCD_RESTRICT A_maxy,
+                                       T* const SCCD_RESTRICT A_maxz) {
         const geom_t aminx = aabbs[0][fi];
         const geom_t aminy = aabbs[1][fi];
         const geom_t aminz = aabbs[2][fi];
@@ -212,21 +212,103 @@ namespace sccd {
     }
 
     template <typename T>
-    inline static void vdisjoint_one_to_many(const T aminx,
+    inline static void vaabb_disjoint_one_to_many(const T aminx,
                                              const T aminy,
                                              const T aminz,
                                              const T amaxx,
                                              const T amaxy,
                                              const T amaxz,
-                                             const T* const SFEM_RESTRICT bminx,
-                                             const T* const SFEM_RESTRICT bminy,
-                                             const T* const SFEM_RESTRICT bminz,
-                                             const T* const SFEM_RESTRICT bmaxx,
-                                             const T* const SFEM_RESTRICT bmaxy,
-                                             const T* const SFEM_RESTRICT bmaxz,
-                                             uint32_t* SFEM_RESTRICT mask) {
+                                             const T* const SCCD_RESTRICT bminx,
+                                             const T* const SCCD_RESTRICT bminy,
+                                             const T* const SCCD_RESTRICT bminz,
+                                             const T* const SCCD_RESTRICT bmaxx,
+                                             const T* const SCCD_RESTRICT bmaxy,
+                                             const T* const SCCD_RESTRICT bmaxz,
+                                             uint32_t* SCCD_RESTRICT mask) {
         if constexpr (std::is_same<T, double>::value)  //
         {
+#if defined(__AVX512F__)
+            const __m512d a_minx = _mm512_set1_pd(aminx);
+            const __m512d a_miny = _mm512_set1_pd(aminy);
+            const __m512d a_minz = _mm512_set1_pd(aminz);
+            const __m512d a_maxx = _mm512_set1_pd(amaxx);
+            const __m512d a_maxy = _mm512_set1_pd(amaxy);
+            const __m512d a_maxz = _mm512_set1_pd(amaxz);
+
+            for (int i = 0; i < AABB_DISJOINT_CHUNK_SIZE; i += 8) {
+                const __m512d b_minx = _mm512_loadu_pd(bminx + i);
+                const __m512d b_miny = _mm512_loadu_pd(bminy + i);
+                const __m512d b_minz = _mm512_loadu_pd(bminz + i);
+                const __m512d b_maxx = _mm512_loadu_pd(bmaxx + i);
+                const __m512d b_maxy = _mm512_loadu_pd(bmaxy + i);
+                const __m512d b_maxz = _mm512_loadu_pd(bmaxz + i);
+
+                __mmask8 k =
+                    _mm512_cmp_pd_mask(a_minx, b_maxx, _CMP_GT_OQ) | _mm512_cmp_pd_mask(a_miny, b_maxy, _CMP_GT_OQ) |
+                    _mm512_cmp_pd_mask(a_minz, b_maxz, _CMP_GT_OQ) | _mm512_cmp_pd_mask(b_minx, a_maxx, _CMP_GT_OQ) |
+                    _mm512_cmp_pd_mask(b_miny, a_maxy, _CMP_GT_OQ) | _mm512_cmp_pd_mask(b_minz, a_maxz, _CMP_GT_OQ);
+
+                const __m512i k_as_epi64 = _mm512_movm_epi64(k);
+                const __m512i k_01 = _mm512_srli_epi64(k_as_epi64, 63);
+                _mm512_storeu_si512((__m512i*)(mask + i), k_01);
+            }
+            return;
+#elif defined(__AVX2__)
+            const __m256d a_minx = _mm256_set1_pd(aminx);
+            const __m256d a_miny = _mm256_set1_pd(aminy);
+            const __m256d a_minz = _mm256_set1_pd(aminz);
+            const __m256d a_maxx = _mm256_set1_pd(amaxx);
+            const __m256d a_maxy = _mm256_set1_pd(amaxy);
+            const __m256d a_maxz = _mm256_set1_pd(amaxz);
+
+            for (int i = 0; i < AABB_DISJOINT_CHUNK_SIZE; i += 4) {
+                const __m256d b_minx = _mm256_loadu_pd(bminx + i);
+                const __m256d b_miny = _mm256_loadu_pd(bminy + i);
+                const __m256d b_minz = _mm256_loadu_pd(bminz + i);
+                const __m256d b_maxx = _mm256_loadu_pd(bmaxx + i);
+                const __m256d b_maxy = _mm256_loadu_pd(bmaxy + i);
+                const __m256d b_maxz = _mm256_loadu_pd(bmaxz + i);
+
+                __m256d m = _mm256_or_pd(
+                    _mm256_or_pd(_mm256_cmp_pd(a_minx, b_maxx, _CMP_GT_OQ), _mm256_cmp_pd(a_miny, b_maxy, _CMP_GT_OQ)),
+                    _mm256_cmp_pd(a_minz, b_maxz, _CMP_GT_OQ));
+                m = _mm256_or_pd(
+                    m,
+                    _mm256_or_pd(_mm256_cmp_pd(b_minx, a_maxx, _CMP_GT_OQ), _mm256_cmp_pd(b_miny, a_maxy, _CMP_GT_OQ)));
+                m = _mm256_or_pd(m, _mm256_cmp_pd(b_minz, a_maxz, _CMP_GT_OQ));
+
+                const __m256i m_i = _mm256_castpd_si256(m);
+                const __m256i m_01 = _mm256_srli_epi64(m_i, 63);
+                _mm256_storeu_si256((__m256i*)(mask + i), m_01);
+            }
+            return;
+#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
+            const float64x2_t a_minx = vdupq_n_f64(aminx);
+            const float64x2_t a_miny = vdupq_n_f64(aminy);
+            const float64x2_t a_minz = vdupq_n_f64(aminz);
+            const float64x2_t a_maxx = vdupq_n_f64(amaxx);
+            const float64x2_t a_maxy = vdupq_n_f64(amaxy);
+            const float64x2_t a_maxz = vdupq_n_f64(amaxz);
+
+            for (int i = 0; i < AABB_DISJOINT_CHUNK_SIZE; i += 2) {
+                const float64x2_t b_minx = vld1q_f64(bminx + i);
+                const float64x2_t b_miny = vld1q_f64(bminy + i);
+                const float64x2_t b_minz = vld1q_f64(bminz + i);
+                const float64x2_t b_maxx = vld1q_f64(bmaxx + i);
+                const float64x2_t b_maxy = vld1q_f64(bmaxy + i);
+                const float64x2_t b_maxz = vld1q_f64(bmaxz + i);
+
+                uint64x2_t m = vorrq_u64(vorrq_u64(vcgtq_f64(a_minx, b_maxx), vcgtq_f64(a_miny, b_maxy)),
+                                         vcgtq_f64(a_minz, b_maxz));
+                m = vorrq_u64(m, vorrq_u64(vcgtq_f64(b_minx, a_maxx), vcgtq_f64(b_miny, a_maxy)));
+                m = vorrq_u64(m, vcgtq_f64(b_minz, a_maxz));
+
+                const uint64x2_t m_01 = vshrq_n_u64(m, 63);
+                vst1q_u64((uint64_t*)(mask + i), m_01);
+            }
+            return;
+#endif
+        } else if constexpr (std::is_same<T, float>::value) {
 #if defined(__AVX512F__)
             const __m512 a_minx = _mm512_set1_ps(aminx);
             const __m512 a_miny = _mm512_set1_ps(aminy);
@@ -308,87 +390,6 @@ namespace sccd {
             }
             return;
 #endif
-        } else if constexpr (std::is_same<T, float>::value) {
-            #if defined(__AVX512F__)
-            const __m512 a_minx = _mm512_set1_ps(aminx);
-            const __m512 a_miny = _mm512_set1_ps(aminy);
-            const __m512 a_minz = _mm512_set1_ps(aminz);
-            const __m512 a_maxx = _mm512_set1_ps(amaxx);
-            const __m512 a_maxy = _mm512_set1_ps(amaxy);
-            const __m512 a_maxz = _mm512_set1_ps(amaxz);
-
-            for (int i = 0; i < AABB_DISJOINT_CHUNK_SIZE; i += 16) {
-                const __m512 b_minx = _mm512_loadu_ps(bminx + i);
-                const __m512 b_miny = _mm512_loadu_ps(bminy + i);
-                const __m512 b_minz = _mm512_loadu_ps(bminz + i);
-                const __m512 b_maxx = _mm512_loadu_ps(bmaxx + i);
-                const __m512 b_maxy = _mm512_loadu_ps(bmaxy + i);
-                const __m512 b_maxz = _mm512_loadu_ps(bmaxz + i);
-
-                __mmask16 k =
-                    _mm512_cmp_ps_mask(a_minx, b_maxx, _CMP_GT_OQ) | _mm512_cmp_ps_mask(a_miny, b_maxy, _CMP_GT_OQ) |
-                    _mm512_cmp_ps_mask(a_minz, b_maxz, _CMP_GT_OQ) | _mm512_cmp_ps_mask(b_minx, a_maxx, _CMP_GT_OQ) |
-                    _mm512_cmp_ps_mask(b_miny, a_maxy, _CMP_GT_OQ) | _mm512_cmp_ps_mask(b_minz, a_maxz, _CMP_GT_OQ);
-            }
-            return;
-#elif defined(__AVX2__)
-            const __m256 a_minx = _mm256_set1_ps(aminx);
-            const __m256 a_miny = _mm256_set1_ps(aminy);
-            const __m256 a_minz = _mm256_set1_ps(aminz);
-            const __m256 a_maxx = _mm256_set1_ps(amaxx);
-            const __m256 a_maxy = _mm256_set1_ps(amaxy);
-            const __m256 a_maxz = _mm256_set1_ps(amaxz);
-
-            for (int i = 0; i < AABB_DISJOINT_CHUNK_SIZE; i += 8) {
-                const __m256 b_minx = _mm256_loadu_ps(bminx + i);
-                const __m256 b_miny = _mm256_loadu_ps(bminy + i);
-                const __m256 b_minz = _mm256_loadu_ps(bminz + i);
-                const __m256 b_maxx = _mm256_loadu_ps(bmaxx + i);
-                const __m256 b_maxy = _mm256_loadu_ps(bmaxy + i);
-                const __m256 b_maxz = _mm256_loadu_ps(bmaxz + i);
-
-                __m256 m = _mm256_or_ps(
-                    _mm256_or_ps(_mm256_cmp_ps(a_minx, b_maxx, _CMP_GT_OQ), _mm256_cmp_ps(a_miny, b_maxy, _CMP_GT_OQ)),
-                    _mm256_cmp_ps(a_minz, b_maxz, _CMP_GT_OQ));
-                m = _mm256_or_ps(m, _mm256_or_ps(_mm256_cmp_ps(b_minx, a_maxx, _CMP_GT_OQ), _mm256_cmp_ps(b_miny, a_maxy, _CMP_GT_OQ)));
-                m = _mm256_or_ps(m, _mm256_cmp_ps(b_minz, a_maxz, _CMP_GT_OQ));
-
-                const __m256i m_i = _mm256_castps_si256(m);
-                const __m256i m_01 = _mm256_srli_epi32(m_i, 31);
-                _mm256_storeu_si256((__m256i*)(mask + i), m_01);
-            }
-            return;
-#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
-            const float32x4_t a_minx = vdupq_n_f32(aminx);
-            const float32x4_t a_miny = vdupq_n_f32(aminy);
-            const float32x4_t a_minz = vdupq_n_f32(aminz);
-            const float32x4_t a_maxx = vdupq_n_f32(amaxx);
-            const float32x4_t a_maxy = vdupq_n_f32(amaxy);
-            const float32x4_t a_maxz = vdupq_n_f32(amaxz);
-
-            for (int i = 0; i < AABB_DISJOINT_CHUNK_SIZE; i += 4) {
-                const float32x4_t b_minx = vld1q_f32(bminx + i);
-                const float32x4_t b_miny = vld1q_f32(bminy + i);
-                const float32x4_t b_minz = vld1q_f32(bminz + i);
-                const float32x4_t b_maxx = vld1q_f32(bmaxx + i);
-                const float32x4_t b_maxy = vld1q_f32(bmaxy + i);
-                const float32x4_t b_maxz = vld1q_f32(bmaxz + i);
-
-                uint32x4_t m = vorrq_u32(vorrq_u32(vcgtq_f32(a_minx, b_maxx), vcgtq_f32(a_miny, b_maxy)),
-                                         vcgtq_f32(a_minz, b_maxz));
-                m = vorrq_u32(m, vorrq_u32(vcgtq_f32(b_minx, a_maxx), vcgtq_f32(b_miny, a_maxy)));
-                m = vorrq_u32(m, vcgtq_f32(b_minz, a_maxz));
-
-                const uint32x4_t m_01 = vshrq_n_u32(m, 31);
-                vst1q_u32(mask + i, m_01);
-            }
-            return;
-#endif
-        } else {
-            #pragma omp simd
-            for (int i = 0; i < AABB_DISJOINT_CHUNK_SIZE; i++) {
-                mask[i] = disjoint<T>(aminx[i], aminy[i], aminz[i], amaxx[i], amaxy[i], amaxz[i], bminx[i], bminy[i], bminz[i], bmaxx[i], bmaxy[i], bmaxz[i]);
-            }
         }
 #pragma omp simd
         for (int i = 0; i < AABB_DISJOINT_CHUNK_SIZE; i++) {

@@ -5,8 +5,8 @@ static inline void sccd_calculate_vf_soa(
     const T v2sz, const T v3sx, const T v3sy, const T v3sz, const T v0ex,
     const T v0ey, const T v0ez, const T v1ex, const T v1ey, const T v1ez,
     const T v2ex, const T v2ey, const T v2ez, const T v3ex, const T v3ey,
-    const T v3ez, T *const SFEM_RESTRICT rx, T *const SFEM_RESTRICT ry,
-    T *const SFEM_RESTRICT rz) {
+    const T v3ez, T *const SCCD_RESTRICT rx, T *const SCCD_RESTRICT ry,
+    T *const SCCD_RESTRICT rz) {
   const T ssa0 = -v1sx;
   const T ssa1 = t * (ssa0 + v1ex);
   const T ssa2 = -v2sx;
@@ -40,8 +40,8 @@ static inline void sccd_calculate_ee_soa(
     const T v2sz, const T v3sx, const T v3sy, const T v3sz, const T v0ex,
     const T v0ey, const T v0ez, const T v1ex, const T v1ey, const T v1ez,
     const T v2ex, const T v2ey, const T v2ez, const T v3ex, const T v3ey,
-    const T v3ez, T *const SFEM_RESTRICT rx, T *const SFEM_RESTRICT ry,
-    T *const SFEM_RESTRICT rz) {
+    const T v3ez, T *const SCCD_RESTRICT rx, T *const SCCD_RESTRICT ry,
+    T *const SCCD_RESTRICT rz) {
   const T ssa0 = -v2sx;
   const T ssa1 = -v3sx;
   const T ssa2 = t * (ssa0 + v2ex);
@@ -74,8 +74,8 @@ static inline int sccd_origin_in_inclusion_vf_soa(
     const T v0ez, const T v1ex, const T v1ey, const T v1ez, const T v2ex,
     const T v2ey, const T v2ez, const T v3ex, const T v3ey, const T v3ez,
     const T msx, const T msy, const T msz, const T errx, const T erry,
-    const T errz, T *const SFEM_RESTRICT true_tol,
-    int *const SFEM_RESTRICT box_in) {
+    const T errz, T *const SCCD_RESTRICT true_tol,
+    int *const SCCD_RESTRICT box_in) {
   const T ssa0 = -v3sx;
   const T ssa1 = ssa0 + v3ex;
   const T ssa2 = -v1sx;
@@ -415,8 +415,8 @@ static inline int sccd_origin_in_inclusion_ee_soa(
     const T v0ez, const T v1ex, const T v1ey, const T v1ez, const T v2ex,
     const T v2ey, const T v2ez, const T v3ex, const T v3ey, const T v3ez,
     const T msx, const T msy, const T msz, const T errx, const T erry,
-    const T errz, T *const SFEM_RESTRICT true_tol,
-    int *const SFEM_RESTRICT box_in) {
+    const T errz, T *const SCCD_RESTRICT true_tol,
+    int *const SCCD_RESTRICT box_in) {
   const T ssa0 = -v2sx;
   const T ssa1 = ssa0 + v2ex;
   const T ssa2 = ssa1 * t_l;

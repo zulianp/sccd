@@ -1,4 +1,4 @@
-#define SFEM_RESTRICT __restrict
+#define SCCD_RESTRICT __restrict
 
 #include "smath.hpp"
 
@@ -10,8 +10,8 @@ static inline void compute_face_vertex_tolerance_soa(
     const T v2sz, const T v3sx, const T v3sy, const T v3sz, const T v0ex,
     const T v0ey, const T v0ez, const T v1ex, const T v1ey, const T v1ez,
     const T v2ex, const T v2ey, const T v2ez, const T v3ex, const T v3ey,
-    const T v3ez, T *const SFEM_RESTRICT tol0, T *const SFEM_RESTRICT tol1,
-    T *const SFEM_RESTRICT tol2) {
+    const T v3ez, T *const SCCD_RESTRICT tol0, T *const SCCD_RESTRICT tol1,
+    T *const SCCD_RESTRICT tol2) {
   const T ssa0 = v0ex - v0sx;
   const T ssa1 = -v2ex;
   const T ssa2 = ssa0 + v2sx;
@@ -89,8 +89,8 @@ static inline void compute_edge_edge_tolerance_soa(
     const T v2sz, const T v3sx, const T v3sy, const T v3sz, const T v0ex,
     const T v0ey, const T v0ez, const T v1ex, const T v1ey, const T v1ez,
     const T v2ex, const T v2ey, const T v2ez, const T v3ex, const T v3ey,
-    const T v3ez, T *const SFEM_RESTRICT tol0, T *const SFEM_RESTRICT tol1,
-    T *const SFEM_RESTRICT tol2) {
+    const T v3ez, T *const SCCD_RESTRICT tol0, T *const SCCD_RESTRICT tol1,
+    T *const SCCD_RESTRICT tol2) {
   const T ssa0 = v0ex - v0sx;
   const T ssa1 = -v2ex + v2sx;
   const T ssa2 = -v3ex + v3sx;
@@ -151,21 +151,21 @@ static inline void compute_edge_edge_tolerance_soa(
 using scalar_t = double;
 
 void compute_face_vertex_tolerance(
-    const scalar_t *const SFEM_RESTRICT codomain_tol,
-    const scalar_t *const SFEM_RESTRICT v0sx, const scalar_t *const SFEM_RESTRICT v0sy,
-    const scalar_t *const SFEM_RESTRICT v0sz, const scalar_t *const SFEM_RESTRICT v1sx,
-    const scalar_t *const SFEM_RESTRICT v1sy, const scalar_t *const SFEM_RESTRICT v1sz,
-    const scalar_t *const SFEM_RESTRICT v2sx, const scalar_t *const SFEM_RESTRICT v2sy,
-    const scalar_t *const SFEM_RESTRICT v2sz, const scalar_t *const SFEM_RESTRICT v3sx,
-    const scalar_t *const SFEM_RESTRICT v3sy, const scalar_t *const SFEM_RESTRICT v3sz,
-    const scalar_t *const SFEM_RESTRICT v0ex, const scalar_t *const SFEM_RESTRICT v0ey,
-    const scalar_t *const SFEM_RESTRICT v0ez, const scalar_t *const SFEM_RESTRICT v1ex,
-    const scalar_t *const SFEM_RESTRICT v1ey, const scalar_t *const SFEM_RESTRICT v1ez,
-    const scalar_t *const SFEM_RESTRICT v2ex, const scalar_t *const SFEM_RESTRICT v2ey,
-    const scalar_t *const SFEM_RESTRICT v2ez, const scalar_t *const SFEM_RESTRICT v3ex,
-    const scalar_t *const SFEM_RESTRICT v3ey, const scalar_t *const SFEM_RESTRICT v3ez,
-    scalar_t *const SFEM_RESTRICT tol0, scalar_t *const SFEM_RESTRICT tol1,
-    scalar_t *const SFEM_RESTRICT tol2) {
+    const scalar_t *const SCCD_RESTRICT codomain_tol,
+    const scalar_t *const SCCD_RESTRICT v0sx, const scalar_t *const SCCD_RESTRICT v0sy,
+    const scalar_t *const SCCD_RESTRICT v0sz, const scalar_t *const SCCD_RESTRICT v1sx,
+    const scalar_t *const SCCD_RESTRICT v1sy, const scalar_t *const SCCD_RESTRICT v1sz,
+    const scalar_t *const SCCD_RESTRICT v2sx, const scalar_t *const SCCD_RESTRICT v2sy,
+    const scalar_t *const SCCD_RESTRICT v2sz, const scalar_t *const SCCD_RESTRICT v3sx,
+    const scalar_t *const SCCD_RESTRICT v3sy, const scalar_t *const SCCD_RESTRICT v3sz,
+    const scalar_t *const SCCD_RESTRICT v0ex, const scalar_t *const SCCD_RESTRICT v0ey,
+    const scalar_t *const SCCD_RESTRICT v0ez, const scalar_t *const SCCD_RESTRICT v1ex,
+    const scalar_t *const SCCD_RESTRICT v1ey, const scalar_t *const SCCD_RESTRICT v1ez,
+    const scalar_t *const SCCD_RESTRICT v2ex, const scalar_t *const SCCD_RESTRICT v2ey,
+    const scalar_t *const SCCD_RESTRICT v2ez, const scalar_t *const SCCD_RESTRICT v3ex,
+    const scalar_t *const SCCD_RESTRICT v3ey, const scalar_t *const SCCD_RESTRICT v3ez,
+    scalar_t *const SCCD_RESTRICT tol0, scalar_t *const SCCD_RESTRICT tol1,
+    scalar_t *const SCCD_RESTRICT tol2) {
 
   for (int i = 0; i < 32; i++) {
     compute_face_vertex_tolerance_soa(
