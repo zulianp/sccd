@@ -1,0 +1,7 @@
+#ifndef SCCD_CONFIG_HPP
+#define SCCD_CONFIG_HPP
+
+#cmakedefine SCCD_ENABLE_OPENMP
+#cmakedefine SCCD_ENABLE_TBB
+
+#endif
