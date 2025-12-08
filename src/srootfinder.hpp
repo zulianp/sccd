@@ -26,11 +26,11 @@ namespace sccd {
 
 #ifdef SCCD_ENABLE_TIGHT_INCLUSION
     static bool barycentric_triangle_3d(const ticcd::Vector3 &A,
-                                 const ticcd::Vector3 &B,
-                                 const ticcd::Vector3 &C,
-                                 const ticcd::Vector3 &P,
-                                 double &u,
-                                 double &v) {
+                                        const ticcd::Vector3 &B,
+                                        const ticcd::Vector3 &C,
+                                        const ticcd::Vector3 &P,
+                                        double &u,
+                                        double &v) {
         using std::abs;
 
         ticcd::Vector3 e1 = B - A;
@@ -651,16 +651,6 @@ namespace sccd {
 
                     const T face = (t1 - t0) * u + (t2 - t0) * v + t0;
                     F[idx] = vertex - face;
-
-                    // T t0 = (1 - t);
-                    // T t1 = t;
-                    // T o = (1-u-v);
-                    // T v_pos = t0 * sv + t1 * ev;
-                    // T f0 = t0 * (o * s1 + u * s2 + v * s3);
-                    // T f1 = t1 * (o * e1 + u * e2 + v * e3);
-                    // T f = f0 + f1;
-                    // T diff = v_pos - f;
-                    // F[idx] = diff;
                 }
             }
         }
@@ -721,7 +711,6 @@ namespace sccd {
             }
         }
     }
-
 
     template <int NT, int NU, int NV, typename T>
     inline bool grid_search_vf(const sccd::Box<T> &domain,
@@ -904,30 +893,28 @@ namespace sccd {
                 continue;
             }
 
-            found |= grid_search_vf<4, 4, 4, T>(box, max_iter, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack);
+            found |=
+                grid_search_vf<4, 4, 4, T>(box, max_iter, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack);
         }
 
         return found;
     }
 
     template <typename T>
-    inline bool find_root_grid_rotate_vf(
-                               const int max_iter,
-                               const T tol,
-                               const T sv[3],
-                               const T s1[3],
-                               const T s2[3],
-                               const T s3[3],
-                               const T ev[3],
-                               const T e1[3],
-                               const T e2[3],
-                               const T e3[3],
-                               T &toi,  // In/Out
-                               T &u,
-                               T &v,
-                               std::vector<sccd::Box<T>> &stack) 
-{
-
+    inline bool find_root_grid_rotate_vf(const int max_iter,
+                                         const T tol,
+                                         const T sv[3],
+                                         const T s1[3],
+                                         const T s2[3],
+                                         const T s3[3],
+                                         const T ev[3],
+                                         const T e1[3],
+                                         const T e2[3],
+                                         const T e3[3],
+                                         T &toi,  // In/Out
+                                         T &u,
+                                         T &v,
+                                         std::vector<sccd::Box<T>> &stack) {
         static constexpr T EPS_LEN = static_cast<T>(1e-12);
         static constexpr T EPS_ANG = static_cast<T>(1e-12);
 
@@ -944,7 +931,6 @@ namespace sccd {
         d_hat[0] = d[0] * inv_len;
         d_hat[1] = d[1] * inv_len;
         d_hat[2] = d[2] * inv_len;
-
 
         T R[3][3];
         const T sss = d_hat[1] * d_hat[1] + d_hat[2] * d_hat[2];
@@ -1034,14 +1020,14 @@ namespace sccd {
         transform_point(e2, e2_r);
         transform_point(e3, e3_r);
 
-        const T min_y = sccd::min(sccd::min(sccd::min(s1_r[1], s2_r[1]), sccd::min(s3_r[1], e1_r[1])),
-                                  sccd::min(e2_r[1], e3_r[1]));
-        const T max_y = sccd::max(sccd::max(sccd::max(s1_r[1], s2_r[1]), sccd::max(s3_r[1], e1_r[1])),
-                                  sccd::max(e2_r[1], e3_r[1]));
-        const T min_z = sccd::min(sccd::min(sccd::min(s1_r[2], s2_r[2]), sccd::min(s3_r[2], e1_r[2])),
-                                  sccd::min(e2_r[2], e3_r[2]));
-        const T max_z = sccd::max(sccd::max(sccd::max(s1_r[2], s2_r[2]), sccd::max(s3_r[2], e1_r[2])),
-                                  sccd::max(e2_r[2], e3_r[2]));
+        const T min_y =
+            sccd::min(sccd::min(sccd::min(s1_r[1], s2_r[1]), sccd::min(s3_r[1], e1_r[1])), sccd::min(e2_r[1], e3_r[1]));
+        const T max_y =
+            sccd::max(sccd::max(sccd::max(s1_r[1], s2_r[1]), sccd::max(s3_r[1], e1_r[1])), sccd::max(e2_r[1], e3_r[1]));
+        const T min_z =
+            sccd::min(sccd::min(sccd::min(s1_r[2], s2_r[2]), sccd::min(s3_r[2], e1_r[2])), sccd::min(e2_r[2], e3_r[2]));
+        const T max_z =
+            sccd::max(sccd::max(sccd::max(s1_r[2], s2_r[2]), sccd::max(s3_r[2], e1_r[2])), sccd::max(e2_r[2], e3_r[2]));
 
         if ((min_y > T(0) || max_y < T(0)) || (min_z > T(0) || max_z < T(0))) {
             // Early skip good for TTS
@@ -1049,8 +1035,7 @@ namespace sccd {
         }
 
         return find_root_grid_vf<T>(max_iter, tol, sv_r, s1_r, s2_r, s3_r, ev_r, e1_r, e2_r, e3_r, toi, u, v, stack);
-}
-
+    }
 
     template <int NT, int NU, int NV, typename T>
     inline static void grid_sample_F_ee(const T start_t,
@@ -1270,7 +1255,8 @@ namespace sccd {
                 continue;
             }
 
-            found |= grid_search_ee<4, 4, 4, T>(box, max_iter, tol, tols, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v, stack);
+            found |=
+                grid_search_ee<4, 4, 4, T>(box, max_iter, tol, tols, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v, stack);
         }
 
         return found;
