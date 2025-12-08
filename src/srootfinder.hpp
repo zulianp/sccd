@@ -100,7 +100,6 @@ namespace sccd {
 
         ticcd::Scalar ms = 0;
         ticcd::Scalar max_time = 1;
-        ticcd::Scalar toi = 1;
         ticcd::Scalar output_tolerance = 1e-6;
         bool no_zero_toi = false;
 
@@ -114,7 +113,7 @@ namespace sccd {
                                     f2_t1,
                                     err,
                                     ms,
-                                    toi,
+                                    t,
                                     atol,
                                     1,
                                     max_iter,
@@ -173,7 +172,6 @@ namespace sccd {
 
         ticcd::Scalar ms = 0;
         ticcd::Scalar max_time = 1;
-        ticcd::Scalar toi = 1;
         ticcd::Scalar output_tolerance = 1e-6;
         bool no_zero_toi = true;
         return ticcd::edgeEdgeCCD(e1_t0,
@@ -186,7 +184,7 @@ namespace sccd {
                                   e4_t1,
                                   err,
                                   ms,
-                                  toi,
+                                  t,
                                   atol,
                                   1,
                                   max_iter,
