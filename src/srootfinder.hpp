@@ -905,7 +905,7 @@ namespace sccd {
                         if (box.depth > max_iter) {
                             // Conservative approximation
                             const T approx = box.tuv[0].lower;
-                            if (approx < toi) {
+                            if (approx < toi && box.tuv[1].lower + box.tuv[2].lower < 1 + tols[1] + tols[2]) {
                                 toi = approx;
                                 u = box.tuv[1].lower;
                                 v = box.tuv[2].lower;

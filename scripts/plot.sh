@@ -7,6 +7,8 @@ PROJECT_DIR=$SCRIPTPATH/..
 
 source $PROJECT_DIR/data/venv/bin/activate
 
+set -x
+
 python3 $PROJECT_DIR/python/plot_ccd.py $PROJECT_DIR/figures/armadillo-rollers_ee  $PROJECT_DIR/csv/armadillo-rollers_ee_table.csv
 python3 $PROJECT_DIR/python/plot_ccd.py $PROJECT_DIR/figures/armadillo-rollers_fv  $PROJECT_DIR/csv/armadillo-rollers_vf_table.csv
 
