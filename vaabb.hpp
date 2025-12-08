@@ -195,12 +195,12 @@ namespace sccd {
                                        T* const SCCD_RESTRICT A_maxx,
                                        T* const SCCD_RESTRICT A_maxy,
                                        T* const SCCD_RESTRICT A_maxz) {
-        const geom_t aminx = aabbs[0][fi];
-        const geom_t aminy = aabbs[1][fi];
-        const geom_t aminz = aabbs[2][fi];
-        const geom_t amaxx = aabbs[3][fi];
-        const geom_t amaxy = aabbs[4][fi];
-        const geom_t amaxz = aabbs[5][fi];
+        const T aminx = aabbs[0][fi];
+        const T aminy = aabbs[1][fi];
+        const T aminz = aabbs[2][fi];
+        const T amaxx = aabbs[3][fi];
+        const T amaxy = aabbs[4][fi];
+        const T amaxz = aabbs[5][fi];
         for (int k = 0; k < AABB_DISJOINT_CHUNK_SIZE; ++k) {
             A_minx[k] = aminx;
             A_miny[k] = aminy;

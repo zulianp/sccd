@@ -18,13 +18,4 @@
 #define SCCD_RESTRICT __restrict
 #endif
 #endif
-
-/// Geometry scalar type used for coordinates and AABB values.
-using geom_t = float;
-/// Integer type used for element/vertex indices.
-using idx_t = int;
-/// Integer type used for counts and prefix sums.
-using count_t = int;
-
-
 #endif

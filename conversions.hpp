@@ -15,6 +15,14 @@ using namespace scalable_ccd;
 #include "cell_broadphase.hpp"
 #include "narrowphase.hpp"
 
+/// Geometry scalar type used for coordinates and AABB values.
+using geom_t = float;
+/// Integer type used for element/vertex indices.
+using idx_t = int;
+/// Integer type used for counts and prefix sums.
+using count_t = int;
+
+
 namespace sccd {
 
 // (Ugly) Conversion between Scalable-CCD and sccd and back
