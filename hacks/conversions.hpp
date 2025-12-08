@@ -448,7 +448,7 @@ typedef struct SCCD {
         ee_toi.resize(e0_overlap.size());
 
         geom_t toi_ee =  sccd::narrow_phase_ee<geom_t>(
-            voverlap.size(), e0_overlap.data(), e1_overlap.data(),
+            e0_overlap.size(), e0_overlap.data(), e1_overlap.data(),
             // Geometric data
             v0, v1, 2, soaedges,
             // Output
@@ -462,9 +462,26 @@ typedef struct SCCD {
     }
 
     void export_narrowphase_results(
-        std::vector<std::tuple<int, int, Scalar>>& collisions)
+        std::vector<std::tuple<int, int, Scalar>>& vf_collisions,
+        std::vector<std::tuple<int, int, Scalar>>& ee_collisions)
     {
-        // TODO
+        const ptrdiff_t vf_size = vf_toi.size();
+        const ptrdiff_t ee_size = ee_toi.size();
+
+        vf_collisions.reserve(vf_size);
+        ee_collisions.reserve(ee_size);
+
+        for(ptrdiff_t i = 0; i < vf_size; i++) {
+            if(vf_toi[i] < 1.1) {
+                vf_collisions.push_back({voverlap[i], foverlap[i], vf_toi[i]});
+            }
+        }
+
+         for(ptrdiff_t i = 0; i < ee_size; i++) {
+            if(ee_toi[i] < 1.1) {
+                ee_collisions.push_back({e0_overlap[i], e1_overlap[i], ee_toi[i]});
+            }
+        }
     }
 
 } SCCD_t;

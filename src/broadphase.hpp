@@ -601,8 +601,8 @@ namespace sccd {
                 I sev[N];
                 load_ev<N>(elements, jidx, stride, sev);
                 if (!shares_vertex<N, N>(ev, sev)) {
-                    first_out[count] = std::min(idxi, jidx);
-                    second_out[count] = std::max(idxi, jidx);
+                    first_out[count] = sccd::min(idxi, jidx);
+                    second_out[count] = sccd::max(idxi, jidx);
                     count += 1;
                 }
             }
@@ -696,7 +696,7 @@ namespace sccd {
                 ptrdiff_t noffset = ni;
 
                 for (; noffset < end;) {
-                    const ptrdiff_t chunk_len = std::min((ptrdiff_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
+                    const ptrdiff_t chunk_len = sccd::min((ptrdiff_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
 
                     uint32_t dmask[AABB_DISJOINT_CHUNK_SIZE] = {0};
 
@@ -832,7 +832,7 @@ namespace sccd {
                 ptrdiff_t noffset = ni;
 
                 for (; noffset < end;) {
-                    const ptrdiff_t chunk_len = std::min((ptrdiff_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
+                    const ptrdiff_t chunk_len = sccd::min((ptrdiff_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
 
                     uint32_t dmask[AABB_DISJOINT_CHUNK_SIZE] = {0};
                     sccd_detail::build_disjoint_mask_for_block(second_aabbs,
@@ -931,7 +931,7 @@ namespace sccd {
                 ptrdiff_t count = 0;
 
                 for (; noffset < end;) {
-                    const ptrdiff_t chunk_len = std::min((ptrdiff_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
+                    const ptrdiff_t chunk_len = sccd::min((ptrdiff_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
 
                     uint32_t mask[AABB_DISJOINT_CHUNK_SIZE] = {0};
                     sccd_detail::build_disjoint_mask_for_block(aabbs,
@@ -1038,7 +1038,7 @@ namespace sccd {
 
                 ptrdiff_t count = 0;
                 for (; noffset < end;) {
-                    const ptrdiff_t chunk_len = std::min((ptrdiff_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
+                    const ptrdiff_t chunk_len = sccd::min((ptrdiff_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
 
                     uint32_t mask[AABB_DISJOINT_CHUNK_SIZE] = {0};
 
@@ -1059,8 +1059,8 @@ namespace sccd {
                         if (mask[lane]) continue;
                         const ptrdiff_t j = noffset + lane;
                         const I jidx = idx[j];
-                        first_local_elements[count] = std::min(idxi, jidx);
-                        second_local_elements[count] = std::max(idxi, jidx);
+                        first_local_elements[count] = sccd::min(idxi, jidx);
+                        second_local_elements[count] = sccd::max(idxi, jidx);
                         count += 1;
                     }
 

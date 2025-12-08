@@ -94,7 +94,7 @@ TEST_CASE("Test Lean Narrow phase", "[narrow_phase]")
     constexpr Scalar tolerance = 1e-6;
     constexpr Scalar memory_limit_GB = 0;
 
-    std::vector<std::tuple<int, int, Scalar>> collisions;
+    
 
     Timer timer_ccd;
 
@@ -125,7 +125,8 @@ TEST_CASE("Test Lean Narrow phase", "[narrow_phase]")
     printf("Toi: %g\n", toi);
     printf("====>>\n");
 
-    ccd_algo.export_narrowphase_results(collisions);
+    std::vector<std::tuple<int, int, Scalar>> vf_collisions, ee_collisions;
+    ccd_algo.export_narrowphase_results(vf_collisions, ee_collisions);
 
     //     Scalar toi =
     //         ccd(vertices_t0, vertices_t1, edges, faces, min_distance,
@@ -135,9 +136,14 @@ TEST_CASE("Test Lean Narrow phase", "[narrow_phase]")
     // #endif
     //             memory_limit_GB);
 
-    for (const auto& [i, j, _toi] : collisions) {
+    for (const auto& [i, j, _toi] : vf_collisions) {
         CHECK(toi <= _toi);
     }
+
+      for (const auto& [i, j, _toi] : ee_collisions) {
+        CHECK(toi <= _toi);
+    }
+
 
     // if(!CASE)
     //     CHECK(toi == Catch::Approx(3.814697265625e-06));
