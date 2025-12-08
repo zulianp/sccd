@@ -21,9 +21,9 @@ namespace sccd {
 
 typedef struct SCCD {
     int sort_axis;
-    size_t nfaces;
-    size_t nedges;
-    size_t nnodes;
+    ptrdiff_t nfaces;
+    ptrdiff_t nedges;
+    ptrdiff_t nnodes;
 
     geom_t* faabb[6];
     geom_t* eaabb[6];
@@ -58,7 +58,7 @@ typedef struct SCCD {
     std::vector<idx_t> eidx;
 
     // CCD poter
-    std::vector<size_t> ccdptr;
+    std::vector<ptrdiff_t> ccdptr;
 
     // Scratch space for sorting
     std::vector<geom_t> scratch;
@@ -87,7 +87,7 @@ typedef struct SCCD {
 
         scratch.resize(std::max(nfaces, std::max(nedges, nnodes)));
 
-        size_t max_ccdptr_size = std::max(nfaces, nedges) + 1;
+        ptrdiff_t max_ccdptr_size = std::max(nfaces, nedges) + 1;
         ccdptr.resize(max_ccdptr_size);
 
         face_aabb.resize(6);
@@ -112,21 +112,21 @@ typedef struct SCCD {
             vaabb[d] = vertex_aabb[d].data();
         }
 
-        for (size_t i = 0; i < nfaces; i++) {
+        for (ptrdiff_t i = 0; i < nfaces; i++) {
             for (int d = 0; d < 3; d++) {
                 faabb[d][i] = face_boxes[i].min[d];
                 faabb[3 + d][i] = face_boxes[i].max[d];
             }
         }
 
-        for (size_t i = 0; i < nnodes; i++) {
+        for (ptrdiff_t i = 0; i < nnodes; i++) {
             for (int d = 0; d < 3; d++) {
                 vaabb[d][i] = vertex_boxes[i].min[d];
                 vaabb[3 + d][i] = vertex_boxes[i].max[d];
             }
         }
 
-        for (size_t i = 0; i < nedges; i++) {
+        for (ptrdiff_t i = 0; i < nedges; i++) {
             for (int d = 0; d < 3; d++) {
                 eaabb[d][i] = edge_boxes[i].min[d];
                 eaabb[3 + d][i] = edge_boxes[i].max[d];
@@ -134,14 +134,14 @@ typedef struct SCCD {
         }
 
         faces.resize(nfaces * 3);
-        for (size_t i = 0; i < nfaces; i++) {
+        for (ptrdiff_t i = 0; i < nfaces; i++) {
             for (int d = 0; d < 3; d++) {
                 faces[i * 3 + d] = face_boxes[i].vertex_ids[d];
             }
         }
 
         edges.resize(nedges * 2);
-        for (size_t i = 0; i < nedges; i++) {
+        for (ptrdiff_t i = 0; i < nedges; i++) {
             for (int d = 0; d < 2; d++) {
                 edges[i * 2 + d] = edge_boxes[i].vertex_ids[d];
             }
@@ -163,7 +163,7 @@ typedef struct SCCD {
 
     //     timer.start();
 
-    //     size_t max_ccdptr_size = std::max(nfaces, nedges) + 1;
+    //     ptrdiff_t max_ccdptr_size = std::max(nfaces, nedges) + 1;
     //     ccdptr.resize(max_ccdptr_size);
 
     //     int axes[3];
@@ -183,13 +183,13 @@ typedef struct SCCD {
     //     timer.start();
 
     //     int cell_list_axis = sort_axis;
-    //     size_t ncells = 1024; // Max amount
+    //     ptrdiff_t ncells = 1024; // Max amount
     //     geom_t cell_min;
     //     geom_t cell_size;
     //     cell_starts_setup(
     //         nnodes, vaabb[cell_list_axis], vaabb[cell_list_axis + 3], ncells,
     //         &cell_min, &cell_size);
-    //     std::vector<size_t> starts(ncells);
+    //     std::vector<ptrdiff_t> starts(ncells);
     //     cell_starts(
     //         ncells, cell_min, cell_size, nnodes, vaabb[cell_list_axis],
     //         starts.data());
@@ -220,7 +220,7 @@ typedef struct SCCD {
 
         timer.start();
 
-        size_t max_ccdptr_size = std::max(nfaces, nedges) + 1;
+        ptrdiff_t max_ccdptr_size = std::max(nfaces, nedges) + 1;
         ccdptr.resize(max_ccdptr_size);
 
         int axes[3];
@@ -232,7 +232,7 @@ typedef struct SCCD {
         sort_along_axis(nedges, sort_axis, eaabb, eidx.data(), scratch.data());
 
         int cell_list_axis = axes[1];
-        size_t ncells = 2048; // Max amount
+        ptrdiff_t ncells = 2048; // Max amount
         geom_t cell_min;
         geom_t cell_size;
         cell_setup(
@@ -261,7 +261,7 @@ typedef struct SCCD {
         count_self_overlaps<2>(
             sort_axis, nedges, eaabb, eidx.data(), 2, soaedges, ccdptr.data());
 
-        const size_t ee_n_intersections = ccdptr[nedges];
+        const ptrdiff_t ee_n_intersections = ccdptr[nedges];
         e0_overlap.resize(ee_n_intersections);
         e1_overlap.resize(ee_n_intersections);
 
@@ -277,7 +277,7 @@ typedef struct SCCD {
         Timer co;
         co.start();
         // F2V
-        cell_count_overlaps<3, 1>(
+        cell_count_overlaps<3, 1, geom_t, idx_t>(
             sort_axis, nfaces, faabb, fidx.data(), 3, soafaces, nnodes, vaabb,
             vidx.data(), 0, nullptr, cell_list_axis, ncells, cell_min,
             cell_size, cellptr.data(), cellidx.data(), ccdptr.data());
@@ -287,11 +287,11 @@ typedef struct SCCD {
             "SCCD(CELL): F2V Count %g [ms]\n", co.getElapsedTimeInMilliSec());
 
         // Allocation (expensive, could be expanded dynamically in CCD)
-        const size_t fv_nintersections = ccdptr[nfaces];
+        const ptrdiff_t fv_nintersections = ccdptr[nfaces];
         foverlap.resize(fv_nintersections);
         voverlap.resize(fv_nintersections);
 
-        cell_collect_overlaps<3, 1>(
+        cell_collect_overlaps<3, 1, geom_t, idx_t>(
             sort_axis, nfaces, faabb, fidx.data(), 3, soafaces, nnodes, vaabb,
             vidx.data(), 0, nullptr, cell_list_axis, ncells, cell_min,
             cell_size, cellptr.data(), cellidx.data(), ccdptr.data(),
@@ -309,7 +309,7 @@ typedef struct SCCD {
 
         timer.start();
 
-        size_t max_ccdptr_size = std::max(nfaces, nedges) + 1;
+        ptrdiff_t max_ccdptr_size = std::max(nfaces, nedges) + 1;
         ccdptr.resize(max_ccdptr_size);
 
         sort_axis = choose_axis(nnodes, vaabb);
@@ -329,7 +329,7 @@ typedef struct SCCD {
         count_self_overlaps<2>(
             sort_axis, nedges, eaabb, eidx.data(), 2, soaedges, ccdptr.data());
 
-        const size_t ee_n_intersections = ccdptr[nedges];
+        const ptrdiff_t ee_n_intersections = ccdptr[nedges];
         e0_overlap.resize(ee_n_intersections);
         e1_overlap.resize(ee_n_intersections);
 
@@ -345,7 +345,7 @@ typedef struct SCCD {
         Timer co;
         co.start();
         // F2V
-        count_overlaps<3, 1>(
+        count_overlaps<3, 1, geom_t, idx_t>(
             sort_axis, nfaces, faabb, fidx.data(), 3, soafaces, nnodes, vaabb,
             vidx.data(), 0, nullptr, ccdptr.data());
 
@@ -353,11 +353,11 @@ typedef struct SCCD {
         printf("SCCD: F2V Count %g [ms]\n", co.getElapsedTimeInMilliSec());
 
         // Allocation (expensive, could be expanded dynamically in CCD)
-        const size_t fv_nintersections = ccdptr[nfaces];
+        const ptrdiff_t fv_nintersections = ccdptr[nfaces];
         foverlap.resize(fv_nintersections);
         voverlap.resize(fv_nintersections);
 
-        collect_overlaps<3, 1>(
+        collect_overlaps<3, 1, geom_t, idx_t>(
             sort_axis, nfaces, faabb, fidx.data(), 3, soafaces, nnodes, vaabb,
             vidx.data(), 0, nullptr, ccdptr.data(), foverlap.data(),
             voverlap.data());
@@ -371,14 +371,14 @@ typedef struct SCCD {
         std::vector<std::pair<int, int>>& vf_overlaps,
         std::vector<std::pair<int, int>>& ee_overlaps)
     {
-        const size_t fv_nintersections = foverlap.size();
+        const ptrdiff_t fv_nintersections = foverlap.size();
         vf_overlaps.resize(fv_nintersections);
         for (ptrdiff_t i = 0; i < fv_nintersections; i++) {
             vf_overlaps[i].first = voverlap[i];
             vf_overlaps[i].second = foverlap[i];
         }
 
-        const size_t ee_n_intersections = e0_overlap.size();
+        const ptrdiff_t ee_n_intersections = e0_overlap.size();
         ee_overlaps.resize(ee_n_intersections);
         for (ptrdiff_t i = 0; i < ee_n_intersections; i++) {
             ee_overlaps[i].first = e0_overlap[i];

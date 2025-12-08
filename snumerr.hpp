@@ -26,9 +26,9 @@ static inline void sccd_get_numerical_error_vf_soa(
     const T v3ex,
     const T v3ey,
     const T v3ez,
-    T* const SFEM_RESTRICT errx,
-    T* const SFEM_RESTRICT erry,
-    T* const SFEM_RESTRICT errz)
+    T* const SCCD_RESTRICT errx,
+    T* const SCCD_RESTRICT erry,
+    T* const SCCD_RESTRICT errz)
 {
     const T kFilter =
         (use_ms ? T(34) : T(30)) * std::numeric_limits<T>::epsilon();
@@ -109,9 +109,9 @@ static inline void sccd_get_numerical_error_ee_soa(
     const T v3ex,
     const T v3ey,
     const T v3ez,
-    T* const SFEM_RESTRICT errx,
-    T* const SFEM_RESTRICT erry,
-    T* const SFEM_RESTRICT errz)
+    T* const SCCD_RESTRICT errx,
+    T* const SCCD_RESTRICT erry,
+    T* const SCCD_RESTRICT errz)
 {
     const T kFilter =
         (use_ms ? T(32) : T(28)) * std::numeric_limits<T>::epsilon();

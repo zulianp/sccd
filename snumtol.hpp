@@ -26,9 +26,9 @@ static inline void compute_face_vertex_tolerance_soa(
     const T v3ex,
     const T v3ey,
     const T v3ez,
-    T* const SFEM_RESTRICT tol0,
-    T* const SFEM_RESTRICT tol1,
-    T* const SFEM_RESTRICT tol2)
+    T* const SCCD_RESTRICT tol0,
+    T* const SCCD_RESTRICT tol1,
+    T* const SCCD_RESTRICT tol2)
 {
     const T ssa0 = v0ex - v0sx;
     const T ssa1 = -v2ex;
@@ -133,9 +133,9 @@ static inline void compute_edge_edge_tolerance_soa(
     const T v3ex,
     const T v3ey,
     const T v3ez,
-    T* const SFEM_RESTRICT tol0,
-    T* const SFEM_RESTRICT tol1,
-    T* const SFEM_RESTRICT tol2)
+    T* const SCCD_RESTRICT tol0,
+    T* const SCCD_RESTRICT tol1,
+    T* const SCCD_RESTRICT tol2)
 {
     const T ssa0 = v0ex - v0sx;
     const T ssa1 = -v2ex + v2sx;

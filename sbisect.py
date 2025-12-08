@@ -34,8 +34,8 @@ def gen_split_function(name: str, axis: str):
         L1, U1, L2, U2 = "v1_l", "v1_u", "v2_l", "v2_u"
 
     args = [
-        f"T * const SFEM_RESTRICT {L1}", f"T * const SFEM_RESTRICT {U1}",
-        f"T * const SFEM_RESTRICT {L2}", f"T * const SFEM_RESTRICT {U2}",
+        f"T * const SCCD_RESTRICT {L1}", f"T * const SCCD_RESTRICT {U1}",
+        f"T * const SCCD_RESTRICT {L2}", f"T * const SCCD_RESTRICT {U2}",
     ]
 
     body = []

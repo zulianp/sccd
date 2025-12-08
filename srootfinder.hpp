@@ -224,7 +224,7 @@ namespace sccd {
                         const T &t,
                         const T &u,
                         const T &v,
-                        T *const SFEM_RESTRICT diff) {
+                        T *const SCCD_RESTRICT diff) {
         T t0 = (1 - t);
         T t1 = t;
         T o = (1 - u - v);
@@ -632,7 +632,7 @@ namespace sccd {
                                         const T e1,
                                         const T e2,
                                         const T e3,
-                                        T *const SFEM_RESTRICT F) {
+                                        T *const SCCD_RESTRICT F) {
         static constexpr int STRIDE_T = (NU + 1) * (NV + 1);
         static constexpr int STRIDE_U = (NV + 1);
 
@@ -667,11 +667,11 @@ namespace sccd {
     }
 
     template <int NT, int NU, int NV, typename T>
-    inline static void grid_zero_and_accept(const T *const SFEM_RESTRICT F,
+    inline static void grid_zero_and_accept(const T *const SCCD_RESTRICT F,
                                             const T tol,
                                             const T adaptive_tol,
-                                            uint8_t *const SFEM_RESTRICT contains_origin,
-                                            uint8_t *const SFEM_RESTRICT accept) {
+                                            uint8_t *const SCCD_RESTRICT contains_origin,
+                                            uint8_t *const SCCD_RESTRICT accept) {
         static constexpr int STIDE_T = (NU + 1) * (NV + 1);
         static constexpr int STIDE_U = (NV + 1);
 
@@ -686,18 +686,18 @@ namespace sccd {
                 const int i6 = (a + 1) * STIDE_T + (b + 1) * STIDE_U;
                 const int i7 = (a + 1) * STIDE_T + (b + 1) * STIDE_U + 1;
 
-                const T *const SFEM_RESTRICT F000 = &F[i0];
-                const T *const SFEM_RESTRICT F001 = &F[i1];
-                const T *const SFEM_RESTRICT F010 = &F[i2];
-                const T *const SFEM_RESTRICT F011 = &F[i3];
-                const T *const SFEM_RESTRICT F100 = &F[i4];
-                const T *const SFEM_RESTRICT F101 = &F[i5];
-                const T *const SFEM_RESTRICT F110 = &F[i6];
-                const T *const SFEM_RESTRICT F111 = &F[i7];
+                const T *const SCCD_RESTRICT F000 = &F[i0];
+                const T *const SCCD_RESTRICT F001 = &F[i1];
+                const T *const SCCD_RESTRICT F010 = &F[i2];
+                const T *const SCCD_RESTRICT F011 = &F[i3];
+                const T *const SCCD_RESTRICT F100 = &F[i4];
+                const T *const SCCD_RESTRICT F101 = &F[i5];
+                const T *const SCCD_RESTRICT F110 = &F[i6];
+                const T *const SCCD_RESTRICT F111 = &F[i7];
 
                 const int cell_offset = a * NU * NV + b * NV;
-                uint8_t *const SFEM_RESTRICT contains_origin_cell = &contains_origin[cell_offset];
-                uint8_t *const SFEM_RESTRICT accept_cell = &accept[cell_offset];
+                uint8_t *const SCCD_RESTRICT contains_origin_cell = &contains_origin[cell_offset];
+                uint8_t *const SCCD_RESTRICT accept_cell = &accept[cell_offset];
 
                 for (int c = 0; c < NV; c++) {
                     const T fmin = sccd::min(sccd::min(sccd::min(F000[c], F001[c]), sccd::min(F010[c], F011[c])),
@@ -1067,7 +1067,7 @@ namespace sccd {
                                         const T e2,
                                         const T e3,
                                         const T e4,
-                                        T *const SFEM_RESTRICT F) {
+                                        T *const SCCD_RESTRICT F) {
         static constexpr int STRIDE_T = (NU + 1) * (NV + 1);
         static constexpr int STRIDE_U = (NV + 1);
 
