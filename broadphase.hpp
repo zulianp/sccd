@@ -583,7 +583,7 @@ namespace sccd {
         template <int N, typename T, typename I>
         static inline ptrdiff_t scalar_collect_range_self(T **const SCCD_RESTRICT aabbs,
                                                        const ptrdiff_t fi,
-                                                       const idx_t idxi,
+                                                       const I idxi,
                                                        I **const SCCD_RESTRICT elements,
                                                        const I *const SCCD_RESTRICT idx,
                                                        const ptrdiff_t stride,
@@ -654,12 +654,12 @@ namespace sccd {
      */
     template <int first_nxe, int second_nxe, typename T, typename I>
     bool count_overlaps(const int sort_axis,
-                        const count_t first_count,
+                        const ptrdiff_t first_count,
                         T **const SCCD_RESTRICT first_aabbs,
                         I *const SCCD_RESTRICT first_idx,
                         const ptrdiff_t first_stride,
                         I **const SCCD_RESTRICT first_elements,
-                        const count_t second_count,
+                        const ptrdiff_t second_count,
                         T **const SCCD_RESTRICT second_aabbs,
                         I *const SCCD_RESTRICT second_idx,
                         const ptrdiff_t second_stride,
@@ -771,12 +771,12 @@ namespace sccd {
      */
     template <int first_nxe, int second_nxe, typename T, typename I>
     void collect_overlaps(const int sort_axis,
-                          const count_t first_count,
+                          const ptrdiff_t first_count,
                           T **const SCCD_RESTRICT first_aabbs,
                           I *const SCCD_RESTRICT first_idx,
                           const ptrdiff_t first_stride,
                           I **SCCD_RESTRICT const first_elements,
-                          const count_t second_count,
+                          const ptrdiff_t second_count,
                           T **const SCCD_RESTRICT second_aabbs,
                           I *const SCCD_RESTRICT second_idx,
                           const ptrdiff_t second_stride,

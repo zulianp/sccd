@@ -295,12 +295,12 @@ namespace sccd {
 
     template <int first_nxe, int second_nxe, typename T, typename I>
     bool cell_count_overlaps(const int sort_axis,
-                             const count_t first_count,
+                             const ptrdiff_t first_count,
                              T **const SCCD_RESTRICT first_aabbs,
                              I *const SCCD_RESTRICT first_idx,
                              const ptrdiff_t first_stride,
                              I **const SCCD_RESTRICT first_elements,
-                             const count_t second_count,
+                             const ptrdiff_t second_count,
                              T **const SCCD_RESTRICT second_aabbs,
                              I *const SCCD_RESTRICT second_idx,
                              const ptrdiff_t second_stride,
@@ -445,12 +445,12 @@ namespace sccd {
 
     template <int first_nxe, int second_nxe, typename T, typename I>
     void cell_collect_overlaps(const int sort_axis,
-                               const count_t first_count,
+                               const ptrdiff_t first_count,
                                T **const SCCD_RESTRICT first_aabbs,
                                I *const SCCD_RESTRICT first_idx,
                                const ptrdiff_t first_stride,
                                I **const SCCD_RESTRICT first_elements,
-                               const count_t second_count,
+                               const ptrdiff_t second_count,
                                T **const SCCD_RESTRICT second_aabbs,
                                I *const SCCD_RESTRICT second_idx,
                                const ptrdiff_t second_stride,
@@ -543,12 +543,12 @@ namespace sccd {
 
     template <int first_nxe, int second_nxe, typename T, typename I>
     bool count_overlaps_with_starts(const int sort_axis,
-                                    const count_t first_count,
+                                    const ptrdiff_t first_count,
                                     T **const SCCD_RESTRICT first_aabbs,
                                     I *const SCCD_RESTRICT first_idx,
                                     const ptrdiff_t first_stride,
                                     I **const SCCD_RESTRICT first_elements,
-                                    const count_t second_count,
+                                    const ptrdiff_t second_count,
                                     T **const SCCD_RESTRICT second_aabbs,
                                     I *const SCCD_RESTRICT second_idx,
                                     const ptrdiff_t second_stride,
