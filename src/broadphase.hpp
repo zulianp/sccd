@@ -1,25 +1,8 @@
 #ifndef SCCD_BROADPHASE_HPP
 #define SCCD_BROADPHASE_HPP
 
-/**
- * \file sccd.hpp
- * \brief SIMD-friendly AABB broad-phase helpers and lean CCD utilities (test
- * scope).
- *
- * Provides counting and collection of candidate overlaps for two lists and
- * self-overlaps, with vectorized disjoint tests and scalar fallbacks.
- * The AABB layout is structure-of-arrays: [minx, miny, minz, maxx, maxy, maxz].
- */
-
-#include <tbb/blocked_range.h>
-#include <tbb/parallel_for.h>
-#include <tbb/parallel_sort.h>
-
 #include <algorithm>
 #include <cfloat>
-#include <cstdio>
-#include <filesystem>
-#include <vector>
 
 #include "vaabb.hpp"
 #include "sparallel.hpp"
