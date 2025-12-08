@@ -10,7 +10,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(SCCD_ENABLE_TBB "Use TBB for parallelization" ON)
 option(SCCD_ENABLE_OPENMP "Use OpenMP for parallelization" OFF)
-option(SCCD_ENABLE_HACKS "Do not use" OFF)
+option(SCCD_ENABLE_HACKS "Do not use without Scalable-CCD library" OFF)
 
 # SCCD library
 file(GLOB_RECURSE SCCD_HEADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp")
@@ -50,5 +50,9 @@ install(TARGETS sccd
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
   INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
+
+install(FILES ${SCCD_HEADERS} DESTINATION include)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/python/sccd_py.py" DESTINATION python)
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/sccd_config.hpp" DESTINATION include)
 
 # install(FILES sccd.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/sccd RENAME sccd.hpp)
