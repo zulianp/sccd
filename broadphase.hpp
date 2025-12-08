@@ -21,7 +21,7 @@
 #include <filesystem>
 #include <vector>
 
-#include "vaabb.h"
+#include "vaabb.hpp"
 
 namespace sccd {
 

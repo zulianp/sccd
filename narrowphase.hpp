@@ -6,7 +6,7 @@
 #include "assert.h"
 #include "roots.hpp"
 #include "srootfinder.hpp"
-#include "vaabb.h"
+#include "vaabb.hpp"
 
 namespace sccd {
 
@@ -30,7 +30,7 @@ namespace sccd {
         int SCCD_MAX_ITER = 12;
         SFEM_READ_ENV(SCCD_MAX_ITER, atoi);
 
-        double tol = 1e-12;
+        double tol = 1e-11;
 
         tbb::parallel_for(tbb::blocked_range<size_t>(0, noverlaps), [&](const tbb::blocked_range<size_t>& r) {
             std::vector<Box<double>> stack;
@@ -106,7 +106,7 @@ namespace sccd {
         int SCCD_MAX_ITER = 12;
         SFEM_READ_ENV(SCCD_MAX_ITER, atoi);
 
-        double tol = 1e-12;
+        double tol = 1e-11;
 
         tbb::parallel_for(tbb::blocked_range<size_t>(0, noverlaps), [&](const tbb::blocked_range<size_t>& r) {
             std::vector<Box<double>> stack;
