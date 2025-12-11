@@ -771,11 +771,11 @@ namespace sccd {
                                   const T *const SCCD_RESTRICT Fy,
                                   const T *const SCCD_RESTRICT Fz,
                                   const T tol,
-                                  const T*const SCCD_RESTRICT adaptive_tol,
+                                  const T *const SCCD_RESTRICT adaptive_tol,
                                   mask_t *const SCCD_RESTRICT contains_origin,
                                   mask_t *const SCCD_RESTRICT accept) {
         static constexpr int N_cells = NT * NU * NV;
-#if 1 // Best version
+#if 1  // Best version
         for (int i = 0; i < N_cells; i++) {
             contains_origin[i] = true;
             accept[i] = 0xf;
@@ -799,7 +799,7 @@ namespace sccd {
 
         grid_zero_and_accept_split<NT, NU, NV, T, mask_t>(
             Fx, tol, adaptive_tol[0], contains_origin, accept, accept2, accept3, accept4);
-        
+
         grid_zero_and_accept_split<NT, NU, NV, T, mask_t>(
             Fy, tol, adaptive_tol[1], contains_origin, accept, accept2, accept3, accept4);
 
@@ -828,7 +828,8 @@ namespace sccd {
                                T &toi,  // In/Out
                                T &u,
                                T &v,
-                               std::vector<sccd::Box<T>> &stack) {
+                               std::vector<sccd::Box<T>> &stack,
+                               const bool refine) {
         static constexpr int N_nodes = (NT + 1) * (NU + 1) * (NV + 1);
         static constexpr int N_cells = NT * NU * NV;
         static constexpr int STRIDE_T = (NU + 1) * (NV + 1);
@@ -860,14 +861,18 @@ namespace sccd {
         mask_t contains_zero_and_refine[N_cells];
         mask_t accept[N_cells];
 
-        grid_zero_and_accept_all<NT, NU, NV, T, mask_t>(
-            F[0], F[1], F[2], tol, tols, contains_zero_and_refine, accept);
+        grid_zero_and_accept_all<NT, NU, NV, T, mask_t>(F[0], F[1], F[2], tol, tols, contains_zero_and_refine, accept);
 
         bool found = false;
         // 3) Find earilest toi and schedule for refinement
         for (int a = 0; a < NT; a++) {
             const T t0 = t_min + a * t_h;
-            if (t0 > toi) continue;
+            if (t0 > toi) {
+                for (int bc = 0; bc < NU * NV; bc++) {
+                    contains_zero_and_refine[a * NU * NV + bc] = false;
+                }
+                continue;
+            }
 
             for (int b = 0; b < NU; b++) {
                 for (int c = 0; c < NV; c++) {
@@ -904,12 +909,28 @@ namespace sccd {
                         Box<T> box({tt_min, tt_max}, {uu_min, uu_max}, {vv_min, vv_max}, domain.depth + 1);
                         if (box.depth > max_iter) {
                             // Conservative approximation
-                            const T approx = box.tuv[0].lower;
-                            if (approx < toi && box.tuv[1].lower + box.tuv[2].lower < 1 + tols[1] + tols[2]) {
-                                toi = approx;
-                                u = box.tuv[1].lower;
-                                v = box.tuv[2].lower;
-                                found = true;
+                            T t_approx = box.tuv[0].lower;
+                            if (t_approx < toi && box.tuv[1].lower + box.tuv[2].lower < 1 + tols[1] + tols[2]) {
+                                T u_approx = box.tuv[1].lower;
+                                T v_approx = box.tuv[2].lower;
+
+                                if (refine) {
+                                    // Refined approximation possibly not conservative (no guarantee)
+                                    found = find_root_newton<T>(
+                                        40, tol, sv, s1, s2, s3, ev, e1, e2, e3, t_approx, u_approx, v_approx);
+
+                                    if (found) {
+                                        // Conservative trick??
+                                        toi = 0.999999 * t_approx;
+                                        u = u_approx;
+                                        v = v_approx;
+                                    }
+                                } else {
+                                    toi = t_approx;
+                                    u = u_approx;
+                                    v = v_approx;
+                                    found = true;
+                                }
                             }
                             continue;
                         }
@@ -938,7 +959,8 @@ namespace sccd {
                            T &t,
                            T &u,
                            T &v,
-                           std::vector<Box<T>> &stack) {
+                           std::vector<Box<T>> &stack,
+                           const bool refine = false) {
         using Box = sccd::Box<T>;
         using Interval = sccd::Interval<T>;
 
@@ -973,8 +995,6 @@ namespace sccd {
                                              &tols[1],
                                              &tols[2]);
 
-     
-
         bool found = false;
         stack.clear();
         stack.push_back(Box(Interval{T(0), T(1)}, Interval{T(0), T(1)}, Interval{T(0), T(1)}, 0));
@@ -987,8 +1007,8 @@ namespace sccd {
                 continue;
             }
 
-            found |=
-                grid_search_vf<3, 3, 3, T>(box, max_iter, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack);
+            found |= grid_search_vf<3, 3, 3, T>(
+                box, max_iter, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack, refine);
         }
 
         return found;
@@ -1008,7 +1028,8 @@ namespace sccd {
                                          T &toi,  // In/Out
                                          T &u,
                                          T &v,
-                                         std::vector<sccd::Box<T>> &stack) {
+                                         std::vector<sccd::Box<T>> &stack,
+                                         const bool refine = false) {
         static constexpr T EPS_LEN = static_cast<T>(1e-12);
         static constexpr T EPS_ANG = static_cast<T>(1e-12);
 
@@ -1128,7 +1149,8 @@ namespace sccd {
             return false;
         }
 
-        return find_root_grid_vf<T>(max_iter, tol, sv_r, s1_r, s2_r, s3_r, ev_r, e1_r, e2_r, e3_r, toi, u, v, stack);
+        return find_root_grid_vf<T>(
+            max_iter, tol, sv_r, s1_r, s2_r, s3_r, ev_r, e1_r, e2_r, e3_r, toi, u, v, stack, refine);
     }
 
     template <int NT, int NU, int NV, typename T>
@@ -1221,7 +1243,12 @@ namespace sccd {
         // 3) Find earilest toi and schedule for refinement
         for (int a = 0; a < NT; a++) {
             const T t0 = t_min + a * t_h;
-            if (t0 > toi) continue;
+            if (t0 > toi) {
+                for (int bc = 0; bc < NU * NV; bc++) {
+                    contains_zero_and_refine[a * NU * NV + bc] = false;
+                }
+                continue;
+            }
 
             for (int b = 0; b < NU; b++) {
                 for (int c = 0; c < NV; c++) {
@@ -1327,8 +1354,6 @@ namespace sccd {
                                            &tols[1],
                                            &tols[2]);
 
-     
-
         bool found = false;
         stack.clear();
         stack.push_back(Box(Interval{T(0), T(1)}, Interval{T(0), T(1)}, Interval{T(0), T(1)}, 0));
@@ -1342,7 +1367,7 @@ namespace sccd {
             }
 
             found |=
-                grid_search_ee<4, 4, 4, T>(box, max_iter, tol, tols, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v, stack);
+                grid_search_ee<3, 3, 3, T>(box, max_iter, tol, tols, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v, stack);
         }
 
         return found;

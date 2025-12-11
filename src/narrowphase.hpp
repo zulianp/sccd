@@ -5,12 +5,26 @@
 
 #include "assert.h"
 
-#include "sccd_base.hpp"
 #include "roots.hpp"
+#include "sccd_base.hpp"
 #include "srootfinder.hpp"
 #include "vaabb.hpp"
 
 namespace sccd {
+
+    template <typename T>
+    T atomic_min(std::atomic<T>& atm, T val) {
+        T expected = atm.load();
+        while (expected > val) {
+            // If 'atm' is still equal to 'expected', set it to 'val'.
+            // If not, 'expected' is updated to the actual current value of 'atm', and the loop retries.
+            if (atm.compare_exchange_strong(expected, val)) {
+                break;
+            }
+            // No need for a separate load() here; compare_exchange_strong updates 'expected' on failure.
+        }
+        return expected;  // Returns the value 'expected' held when the operation succeeded (the prior minimum).
+    }
 
     template <int nxe, typename T, typename I>
     T narrow_phase_vf(const size_t noverlaps,
@@ -21,23 +35,27 @@ namespace sccd {
                       T** const SCCD_RESTRICT v1,
                       const size_t face_stride,
                       I** const SCCD_RESTRICT faces,
-                      // Output
-                      T* const SCCD_RESTRICT toi) {
+                      const T max_toi) {
         using T_HP = double;
         const T infty = 100000;
 
         int SCCD_USE_TI = 0;
         SCCD_READ_ENV(SCCD_USE_TI, atoi);
 
-        int SCCD_MAX_ITER = 14;
+        int SCCD_MAX_ITER = 27;
         SCCD_READ_ENV(SCCD_MAX_ITER, atoi);
 
-        T_HP SCCD_TOL = 1e-11;
+        T_HP SCCD_TOL = 1e-12;
         SCCD_READ_ENV(SCCD_TOL, atof);
 
+        int SCCD_REFINE = 0;
+        SCCD_READ_ENV(SCCD_REFINE, atoi);
 
+
+        std::atomic<T> min_t = max_toi;
         sccd::parallel_for_br(0, noverlaps, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
             std::vector<Box<T_HP>> stack;
+            
             for (ptrdiff_t i = rbegin; i < rend; i++) {
                 const I vi = voveralp[i];
                 const I fi = foveralp[i];
@@ -56,7 +74,7 @@ namespace sccd {
                 const T_HP e3[3] = {v1[0][nodes[2]], v1[1][nodes[2]], v1[2][nodes[2]]};
 
                 // Iteration variables
-                T_HP t = infty;
+                T_HP t = min_t;
                 T_HP u = 0;
                 T_HP v = 0;
 
@@ -66,27 +84,18 @@ namespace sccd {
                     // Make sure to increase SCCD_MAX_ITER from the command line
                     if (find_root_tight_inclusion_vf<T_HP>(
                             SCCD_MAX_ITER, SCCD_TOL, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v)) {
-                        toi[i] = t;
-                    } else {
-                        toi[i] = infty;
-                    }
+                        atomic_min<T>(min_t, t);
+                    } 
                     continue;
                 }
 #endif
-                if (find_root_grid_rotate_vf<T_HP>(SCCD_MAX_ITER, SCCD_TOL, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack))
-                {
-                    toi[i] = t;
-                } else {
-                    toi[i] = infty;
+                // if (find_root_grid_rotate_vf<T_HP>(
+                if (find_root_grid_vf<T_HP>(
+                        SCCD_MAX_ITER, SCCD_TOL, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack, SCCD_REFINE)) {
+                    atomic_min<T>(min_t, t);
                 }
             }
         });
-
-        T min_t = infty;
-        for (size_t i = 0; i < noverlaps; i++) {
-            min_t = sccd::min<T>(toi[i], min_t);
-        }
-
 
         return min_t;
     }
@@ -101,23 +110,23 @@ namespace sccd {
                       const size_t edge_stride,
                       I** const SCCD_RESTRICT edges,
                       // Output
-                      T* const SCCD_RESTRICT toi) {
+                      const T max_toi) {
         using T_HP = double;
         const T infty = 100000;
-        
 
         int SCCD_USE_TI = 0;
         SCCD_READ_ENV(SCCD_USE_TI, atoi);
 
-        int SCCD_MAX_ITER = 14;
-        SCCD_READ_ENV(SCCD_MAX_ITER, atoi);
+        int SCCD_MAX_ITER = 27;
+        // SCCD_READ_ENV(SCCD_MAX_ITER, atoi);
 
-        T_HP SCCD_TOL = 1e-11;
+        T_HP SCCD_TOL = 1e-12;
         SCCD_READ_ENV(SCCD_TOL, atof);
 
-
+        std::atomic<T> min_t = max_toi;
         sccd::parallel_for_br(0, noverlaps, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
             std::vector<Box<T_HP>> stack;
+
             for (ptrdiff_t i = rbegin; i < rend; i++) {
                 const I i0 = e0overalp[i];
                 const I i1 = e1overalp[i];
@@ -138,7 +147,7 @@ namespace sccd {
                 const T_HP e4[3] = {v1[0][nodes1[1]], v1[1][nodes1[1]], v1[2][nodes1[1]]};
 
                 // Iteration variables
-                T_HP t = infty;
+                T_HP t = min_t;
                 T_HP u = 0;
                 T_HP v = 0;
 
@@ -148,25 +157,16 @@ namespace sccd {
                     // Make sure to increase SCCD_MAX_ITER from the command line
                     if (find_root_tight_inclusion_ee<T_HP>(
                             SCCD_MAX_ITER, SCCD_TOL, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v)) {
-                        toi[i] = t;
-                    } else {
-                        toi[i] = infty;
-                    }
+                        atomic_min<T>(min_t, t);
+                    } 
                     continue;
                 }
 #endif
                 if (find_root_grid_ee<T_HP>(SCCD_MAX_ITER, SCCD_TOL, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v, stack)) {
-                    toi[i] = t;
-                } else {
-                    toi[i] = infty;
+                    atomic_min<T>(min_t, t);
                 }
             }
         });
-
-        T min_t = infty;
-        for (size_t i = 0; i < noverlaps; i++) {
-            min_t = sccd::min<T>(toi[i], min_t);
-        }
 
         return min_t;
     }
