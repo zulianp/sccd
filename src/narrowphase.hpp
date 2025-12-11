@@ -128,14 +128,14 @@ namespace sccd {
                 const T_HP s1[3] = {v0[0][nodes0[0]], v0[1][nodes0[0]], v0[2][nodes0[0]]};
                 const T_HP s2[3] = {v0[0][nodes0[1]], v0[1][nodes0[1]], v0[2][nodes0[1]]};
 
-                const T_HP s3[3] = {v0[0][nodes1[2]], v0[1][nodes1[2]], v0[2][nodes1[2]]};
-                const T_HP s4[3] = {v0[0][nodes1[2]], v0[1][nodes1[2]], v0[2][nodes1[2]]};
+                const T_HP s3[3] = {v0[0][nodes1[0]], v0[1][nodes1[0]], v0[2][nodes1[0]]};
+                const T_HP s4[3] = {v0[0][nodes1[1]], v0[1][nodes1[1]], v0[2][nodes1[1]]};
 
                 const T_HP e1[3] = {v1[0][nodes0[0]], v1[1][nodes0[0]], v1[2][nodes0[0]]};
                 const T_HP e2[3] = {v1[0][nodes0[1]], v1[1][nodes0[1]], v1[2][nodes0[1]]};
 
-                const T_HP e3[3] = {v1[0][nodes1[2]], v1[1][nodes1[2]], v1[2][nodes1[2]]};
-                const T_HP e4[3] = {v1[0][nodes1[2]], v1[1][nodes1[2]], v1[2][nodes1[2]]};
+                const T_HP e3[3] = {v1[0][nodes1[0]], v1[1][nodes1[0]], v1[2][nodes1[0]]};
+                const T_HP e4[3] = {v1[0][nodes1[1]], v1[1][nodes1[1]], v1[2][nodes1[1]]};
 
                 // Iteration variables
                 T_HP t = infty;
