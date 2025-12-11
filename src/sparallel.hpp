@@ -6,6 +6,7 @@
 #ifdef SCCD_ENABLE_TBB
 #include <tbb/blocked_range.h>
 #include <tbb/parallel_for.h>
+#include <tbb/parallel_scan.h>
 #include <tbb/parallel_sort.h>
 #endif
 
@@ -37,6 +38,80 @@ namespace sccd {
         // FIXME: Implement parallel sort without TBB
         std::sort(begin, end, fun);
 #endif
+    }
+
+    template <typename T>
+    void parallel_cum_sum_br(T* const begin, T* const end) {
+        ptrdiff_t len = end - begin;
+
+// #ifdef SCCD_ENABLE_TBB
+//         tbb::parallel_scan(
+//             tbb::blocked_range<ptrdiff_t>(0, len),
+//             0,
+//             [=](const tbb::blocked_range<ptrdiff_t>& r, T sum, bool is_final_scan) -> T {
+//                 if (!is_final_scan) {
+//                     T temp = sum;
+//                     for (int i = r.begin(); i < r.end(); ++i) {
+//                         temp = temp + begin[i];
+//                     }
+//                     return temp;
+//                 } else {
+//                     begin[r.begin()] += sum;
+//                     for (int i = r.begin() + 1; i < r.end(); ++i) {
+//                         begin[i] += begin[i - 1];
+//                     }
+
+//                     return begin[r.end() - 1];
+//                 }
+//             },
+//             [](T left, T right) { return left + right; });
+// #else
+        T acc = 0;
+#pragma omp parallel for reduction(inscan, + : acc)
+        for (ptrdiff_t i = 0; i < len; i++) {
+            acc += begin[i];
+
+#pragma omp scan inclusive(acc)
+            begin[i] = acc;
+        }
+// #endif  // SCCD_ENABLE_TBB
+    }
+
+    template <typename T>
+    void parallel_cum_max_br(T* const begin, T* const end) {
+        ptrdiff_t len = end - begin;
+
+// #ifdef SCCD_ENABLE_TBB
+//         tbb::parallel_scan(
+//             tbb::blocked_range<ptrdiff_t>(0, len),
+//             begin[0],
+//             [=](const tbb::blocked_range<ptrdiff_t>& r, T acc, bool is_final_scan) -> T {
+//                 if (!is_final_scan) {
+//                     T temp = acc;
+//                     for (int i = r.begin(); i < r.end(); ++i) {
+//                         temp = sccd::max(temp, begin[i]);
+//                     }
+//                     return temp;
+//                 } else {
+//                     begin[r.begin()] = sccd::max(begin[r.begin()], acc);
+//                     for (int i = r.begin() + 1; i < r.end(); ++i) {
+//                         begin[i] = sccd::max(begin[i], begin[i - 1]);
+//                     }
+
+//                     return begin[r.end() - 1];
+//                 }
+//             },
+//             [](T left, T right) { return sccd::max(left, right); });
+// #else
+        T acc = begin[0];
+#pragma omp parallel for reduction(inscan, max : acc)
+        for (ptrdiff_t i = 0; i < len; i++) {
+            acc = sccd::max(acc, begin[i]);
+
+#pragma omp scan inclusive(acc)
+            begin[i] = acc;
+        }
+// #endif  // SCCD_ENABLE_TBB
     }
 }  // namespace sccd
 

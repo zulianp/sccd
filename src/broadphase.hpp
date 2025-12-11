@@ -4,8 +4,8 @@
 #include <algorithm>
 #include <cfloat>
 
-#include "vaabb.hpp"
 #include "sparallel.hpp"
+#include "vaabb.hpp"
 
 namespace sccd {
 
@@ -103,6 +103,8 @@ namespace sccd {
             }
         }
     }
+
+
 
     /**
      * \brief Remap indices in-place through a permutation table.
@@ -393,14 +395,14 @@ namespace sccd {
          */
         template <int F, int S, typename T, typename I>
         static inline ptrdiff_t scalar_count_range_two_lists(T **const SCCD_RESTRICT first_aabbs,
-                                                          const ptrdiff_t fi,
-                                                          T **const SCCD_RESTRICT second_aabbs,
-                                                          const I *const SCCD_RESTRICT second_idx,
-                                                          I **const SCCD_RESTRICT second_elements,
-                                                          const ptrdiff_t second_stride,
-                                                          const I (&ev)[F],
-                                                          const ptrdiff_t begin,
-                                                          const ptrdiff_t end) {
+                                                             const ptrdiff_t fi,
+                                                             T **const SCCD_RESTRICT second_aabbs,
+                                                             const I *const SCCD_RESTRICT second_idx,
+                                                             I **const SCCD_RESTRICT second_elements,
+                                                             const ptrdiff_t second_stride,
+                                                             const I (&ev)[F],
+                                                             const ptrdiff_t begin,
+                                                             const ptrdiff_t end) {
             ptrdiff_t count = 0;
             const T aminx = first_aabbs[0][fi];
             const T aminy = first_aabbs[1][fi];
@@ -451,17 +453,17 @@ namespace sccd {
          */
         template <int F, int S, typename T, typename I>
         static inline ptrdiff_t scalar_collect_range_two_lists(T **const SCCD_RESTRICT first_aabbs,
-                                                            const ptrdiff_t fi,
-                                                            const I first_idxi,
-                                                            T **const SCCD_RESTRICT second_aabbs,
-                                                            const I *const SCCD_RESTRICT second_idx,
-                                                            I **const SCCD_RESTRICT second_elements,
-                                                            const ptrdiff_t second_stride,
-                                                            const I (&ev)[F],
-                                                            const ptrdiff_t begin,
-                                                            const ptrdiff_t end,
-                                                            I *const SCCD_RESTRICT first_out,
-                                                            I *const SCCD_RESTRICT second_out) {
+                                                               const ptrdiff_t fi,
+                                                               const I first_idxi,
+                                                               T **const SCCD_RESTRICT second_aabbs,
+                                                               const I *const SCCD_RESTRICT second_idx,
+                                                               I **const SCCD_RESTRICT second_elements,
+                                                               const ptrdiff_t second_stride,
+                                                               const I (&ev)[F],
+                                                               const ptrdiff_t begin,
+                                                               const ptrdiff_t end,
+                                                               I *const SCCD_RESTRICT first_out,
+                                                               I *const SCCD_RESTRICT second_out) {
             ptrdiff_t count = 0;
             const T aminx = first_aabbs[0][fi];
             const T aminy = first_aabbs[1][fi];
@@ -519,13 +521,13 @@ namespace sccd {
          */
         template <int N, typename T, typename I>
         static inline ptrdiff_t scalar_count_range_self(T **const SCCD_RESTRICT aabbs,
-                                                     const ptrdiff_t fi,
-                                                     I **const SCCD_RESTRICT elements,
-                                                     const I *const SCCD_RESTRICT idx,
-                                                     const ptrdiff_t stride,
-                                                     const I (&ev)[N],
-                                                     const ptrdiff_t begin,
-                                                     const ptrdiff_t end) {
+                                                        const ptrdiff_t fi,
+                                                        I **const SCCD_RESTRICT elements,
+                                                        const I *const SCCD_RESTRICT idx,
+                                                        const ptrdiff_t stride,
+                                                        const I (&ev)[N],
+                                                        const ptrdiff_t begin,
+                                                        const ptrdiff_t end) {
             ptrdiff_t count = 0;
             const T aminx = aabbs[0][fi];
             const T aminy = aabbs[1][fi];
@@ -565,16 +567,16 @@ namespace sccd {
          */
         template <int N, typename T, typename I>
         static inline ptrdiff_t scalar_collect_range_self(T **const SCCD_RESTRICT aabbs,
-                                                       const ptrdiff_t fi,
-                                                       const I idxi,
-                                                       I **const SCCD_RESTRICT elements,
-                                                       const I *const SCCD_RESTRICT idx,
-                                                       const ptrdiff_t stride,
-                                                       const I (&ev)[N],
-                                                       const ptrdiff_t begin,
-                                                       const ptrdiff_t end,
-                                                       I *const SCCD_RESTRICT first_out,
-                                                       I *const SCCD_RESTRICT second_out) {
+                                                          const ptrdiff_t fi,
+                                                          const I idxi,
+                                                          I **const SCCD_RESTRICT elements,
+                                                          const I *const SCCD_RESTRICT idx,
+                                                          const ptrdiff_t stride,
+                                                          const I (&ev)[N],
+                                                          const ptrdiff_t begin,
+                                                          const ptrdiff_t end,
+                                                          I *const SCCD_RESTRICT first_out,
+                                                          I *const SCCD_RESTRICT second_out) {
             ptrdiff_t count = 0;
             const T aminx = aabbs[0][fi];
             const T aminy = aabbs[1][fi];
@@ -662,7 +664,7 @@ namespace sccd {
         sccd::parallel_for_br(0, first_count, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
             ptrdiff_t ni = 0;
             for (; ni < second_count; ni++) {
-                if (second_xmax[ni] > first_xmin[0]) {
+                if (second_xmax[ni] > first_xmin[rbegin]) {
                     break;
                 }
             }
@@ -725,10 +727,7 @@ namespace sccd {
             }
         });
 
-        for (ptrdiff_t fi = 0; fi < first_count; fi++) {
-            ccdptr[fi + 1] += ccdptr[fi];
-        }
-
+        sccd::parallel_cum_sum_br(ccdptr, ccdptr + first_count + 1);
         return ccdptr[first_count] > 0;
     }
 
@@ -779,7 +778,7 @@ namespace sccd {
         sccd::parallel_for_br(0, first_count, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
             ptrdiff_t ni = 0;
             for (; ni < second_count; ni++) {
-                if (second_xmax[ni] > first_xmin[0]) {
+                if (second_xmax[ni] > first_xmin[rbegin]) {
                     break;
                 }
             }
@@ -958,10 +957,7 @@ namespace sccd {
             }
         });
 
-        for (ptrdiff_t fi = 0; fi < element_count; fi++) {
-            ccdptr[fi + 1] += ccdptr[fi];
-        }
-
+        sccd::parallel_cum_sum_br(ccdptr, ccdptr + element_count + 1);
         return ccdptr[element_count] > 0;
     }
 
@@ -1022,16 +1018,16 @@ namespace sccd {
 
                 if (end - noffset < AABB_DISJOINT_NOVECTORIZE_THRESHOLD) {
                     ptrdiff_t count = sccd_detail::scalar_collect_range_self<nxe>(aabbs,
-                                                                               fi,
-                                                                               idxi,
-                                                                               elements,
-                                                                               idx,
-                                                                               stride,
-                                                                               ev,
-                                                                               noffset,
-                                                                               end,
-                                                                               first_local_elements,
-                                                                               second_local_elements);
+                                                                                  fi,
+                                                                                  idxi,
+                                                                                  elements,
+                                                                                  idx,
+                                                                                  stride,
+                                                                                  ev,
+                                                                                  noffset,
+                                                                                  end,
+                                                                                  first_local_elements,
+                                                                                  second_local_elements);
                     assert(expected_count == count);
                     continue;
                 }
