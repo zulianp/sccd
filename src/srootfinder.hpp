@@ -916,12 +916,13 @@ namespace sccd {
 
                                 if (refine) {
                                     // Refined approximation possibly not conservative (no guarantee)
+                                    // FIXME use semismooth newton to guarantee minimum is in constrained set
                                     found = find_root_newton<T>(
                                         40, tol, sv, s1, s2, s3, ev, e1, e2, e3, t_approx, u_approx, v_approx);
 
-                                    if (found) {
+                                    if (found && t_approx < toi) {
                                         // Conservative trick??
-                                        toi = 0.999999 * t_approx;
+                                        toi = sccd::min<T>(box.tuv[0].upper, sccd::max<T>(box.tuv[0].lower, 0.99 * t_approx));
                                         u = u_approx;
                                         v = v_approx;
                                     }
