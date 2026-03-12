@@ -442,7 +442,6 @@ namespace sccd {
                                                   foverlap.data(),
                                                   voverlap.data());
 #else
-
             collect_overlaps_lb<3, 1, geom_t, idx_t>(sort_axis,
                                                      nfaces,
                                                      faabb,
