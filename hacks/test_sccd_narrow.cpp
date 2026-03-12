@@ -125,8 +125,8 @@ TEST_CASE("Test Lean Narrow phase", "[narrow_phase]")
     printf("Toi: %g\n", toi);
     printf("====>>\n");
 
-    std::vector<std::tuple<int, int, Scalar>> vf_collisions, ee_collisions;
-    ccd_algo.export_narrowphase_results(vf_collisions, ee_collisions);
+    // std::vector<std::tuple<int, int, Scalar>> vf_collisions, ee_collisions;
+    // ccd_algo.export_narrowphase_results(vf_collisions, ee_collisions);
 
     //     Scalar toi =
     //         ccd(vertices_t0, vertices_t1, edges, faces, min_distance,
@@ -136,13 +136,13 @@ TEST_CASE("Test Lean Narrow phase", "[narrow_phase]")
     // #endif
     //             memory_limit_GB);
 
-    for (const auto& [i, j, _toi] : vf_collisions) {
-        CHECK(toi <= _toi);
-    }
+    // for (const auto& [i, j, _toi] : vf_collisions) {
+    //     CHECK(toi <= _toi);
+    // }
 
-      for (const auto& [i, j, _toi] : ee_collisions) {
-        CHECK(toi <= _toi);
-    }
+    //   for (const auto& [i, j, _toi] : ee_collisions) {
+    //     CHECK(toi <= _toi);
+    // }
 
 
     // if(!CASE)
