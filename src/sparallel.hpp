@@ -1,7 +1,7 @@
 #ifndef SCCD_PARALLEL_HPP
 #define SCCD_PARALLEL_HPP
 
-#define SCCD_ENABLE_TBB
+// #define SCCD_ENABLE_TBB
 
 #ifdef SCCD_ENABLE_TBB
 #include <tbb/blocked_range.h>
