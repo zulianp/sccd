@@ -242,7 +242,6 @@ int main(int argc, char** argv) {
             SMESH_TRACE_SCOPE("Narrow phase: E2E");
             toi_ee = sccd::narrow_phase_ee<smesh::geom_t>(
                 e0_overlap->size(), e0_overlap->data(), e1_overlap->data(), p0, p1, 1, edges, toi);
-
             toi = toi_ee;
         }
 
