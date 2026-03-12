@@ -11,6 +11,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(SCCD_ENABLE_TBB "Use TBB for parallelization" ON)
 option(SCCD_ENABLE_OPENMP "Use OpenMP for parallelization" OFF)
 option(SCCD_ENABLE_HACKS "Do not use without Scalable-CCD library" OFF)
+option(SCCD_ENABLE_SMESH "Enable smesh and demos" ON)
 
 # SCCD library
 file(GLOB_RECURSE SCCD_HEADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp")
@@ -38,6 +39,11 @@ if(SCCD_ENABLE_HACKS)
   # target_include_directories(sccd PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/hacks>)
 endif()
 
+if(SCCD_ENABLE_SMESH)
+  find_package(smesh REQUIRED)
+  target_link_libraries(sccd PUBLIC smesh::smesh)
+endif()
+
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/src/sccd_config.hpp.in" "${CMAKE_CURRENT_BINARY_DIR}/sccd_config.hpp")
 target_include_directories(sccd PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>)
 target_include_directories(sccd PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
@@ -57,3 +63,14 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/python/sccd_py.py" DESTINATION python
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/sccd_config.hpp" DESTINATION include)
 
 # install(FILES sccd.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/sccd RENAME sccd.hpp)
+
+
+if(SCCD_ENABLE_SMESH)
+  file(GLOB DEMO_DRIVERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/demo/*.exe.cpp")
+  foreach(DEMO_DRIVER ${DEMO_DRIVERS})
+    get_filename_component(DEMO_TARGET ${DEMO_DRIVER} NAME_WE)
+    string(REGEX REPLACE "\\.exe$" "" DEMO_TARGET "${DEMO_TARGET}")
+    add_executable(${DEMO_TARGET} ${DEMO_DRIVER})
+    target_link_libraries(${DEMO_TARGET} PRIVATE sccd)
+  endforeach()
+endif()

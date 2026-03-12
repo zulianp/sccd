@@ -235,6 +235,7 @@ namespace sccd {
             if (starts[c] == 0) starts[c] = starts[c - 1];
         }
     }
+    
     template <typename T>
     static void cell_count(
         // Cell list

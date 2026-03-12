@@ -219,7 +219,7 @@ namespace sccd {
         // }
 
         void find_with_cell_list() {
-            Timer timer;
+            Timer timer, co;
 
             timer.start();
 
@@ -279,7 +279,7 @@ namespace sccd {
             if (verbose) printf("SCCD, E2E: %g [ms]\n", timer.getElapsedTimeInMilliSec());
             timer.start();
 
-            Timer co;
+            
             co.start();
             // F2V
             cell_count_overlaps<3, 1, geom_t, idx_t>(sort_axis,
@@ -335,7 +335,7 @@ namespace sccd {
         }
 
         void broad_phase() {
-            Timer timer;
+            Timer timer, co;
 
             timer.start();
 
@@ -354,7 +354,12 @@ namespace sccd {
             // E2E
             std::fill(ccdptr.begin(), ccdptr.end(), 0);
 
+            co.start();
+
             count_self_overlaps<2>(sort_axis, nedges, eaabb, eidx.data(), 2, soaedges, ccdptr.data());
+
+            co.stop();
+            printf("SCCD: E2E Count %g [ms]\n", co.getElapsedTimeInMilliSec());
 
             const ptrdiff_t ee_n_intersections = ccdptr[nedges];
             e0_overlap.resize(ee_n_intersections);
@@ -374,7 +379,7 @@ namespace sccd {
             if (verbose) printf("SCCD, E2E: %g [ms]\n", timer.getElapsedTimeInMilliSec());
             timer.start();
 
-            Timer co;
+
             co.start();
 
 #define USE_LB
@@ -511,6 +516,8 @@ namespace sccd {
 
             vf_toi.resize(voverlap.size());
 
+            geom_t max_toi = 100000;
+
             geom_t toi_vf = sccd::narrow_phase_vf<3, geom_t>(voverlap.size(),
                                                              voverlap.data(),
                                                              foverlap.data(),
@@ -519,8 +526,9 @@ namespace sccd {
                                                              v1,
                                                              3,
                                                              soafaces,
-                                                             // Output
-                                                             vf_toi.data());
+                                                             max_toi);
+
+            max_toi = toi_vf;
 
             timer.stop();
             printf("NP VF(%lu): %g [ms]\n", vf_toi.size(), timer.getElapsedTimeInMilliSec());
@@ -536,9 +544,9 @@ namespace sccd {
                                                           v1,
                                                           2,
                                                           soaedges,
-                                                          // Output
-                                                          ee_toi.data());
+                                                          max_toi);
 
+            max_toi = toi_ee;
             timer.stop();
             printf("NP EE(%lu): %g [ms]\n", ee_toi.size(), timer.getElapsedTimeInMilliSec());
 
@@ -550,20 +558,20 @@ namespace sccd {
             const ptrdiff_t vf_size = vf_toi.size();
             const ptrdiff_t ee_size = ee_toi.size();
 
-            vf_collisions.reserve(vf_size);
-            ee_collisions.reserve(ee_size);
+            // vf_collisions.reserve(vf_size);
+            // ee_collisions.reserve(ee_size);
 
-            for (ptrdiff_t i = 0; i < vf_size; i++) {
-                if (vf_toi[i] < 1.1) {
-                    vf_collisions.push_back({voverlap[i], foverlap[i], vf_toi[i]});
-                }
-            }
+            // for (ptrdiff_t i = 0; i < vf_size; i++) {
+            //     if (vf_toi[i] < 1.1) {
+            //         vf_collisions.push_back({voverlap[i], foverlap[i], vf_toi[i]});
+            //     }
+            // }
 
-            for (ptrdiff_t i = 0; i < ee_size; i++) {
-                if (ee_toi[i] < 1.1) {
-                    ee_collisions.push_back({e0_overlap[i], e1_overlap[i], ee_toi[i]});
-                }
-            }
+            // for (ptrdiff_t i = 0; i < ee_size; i++) {
+            //     if (ee_toi[i] < 1.1) {
+            //         ee_collisions.push_back({e0_overlap[i], e1_overlap[i], ee_toi[i]});
+            //     }
+            // }
         }
 
     } SCCD_t;

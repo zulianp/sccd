@@ -87,7 +87,7 @@ if __name__ == "__main__":
     false_negatives = 0
     
     funs = {
-        # "vf" : (sccd_py.find_root_vf_d, vf_F_3d, 12, 1e-11),
+        # "vf" : (sccd_py.find_root_vf_d, vf_F_3d, 14, 1e-11),
         "vf" : (sccd_py.find_root_rotate_vf_d, vf_F_3d, 14, 1e-11),
         "ee" : (sccd_py.find_root_ee_d, ee_F_3d, 14, 1e-11),
         # "vf" : (sccd_py.find_root_tight_inclusion_vf_d, vf_F_3d, 10000, 1e-8),
@@ -185,6 +185,8 @@ if __name__ == "__main__":
                         Fx, Fy, Fz = F_eval(s0, s1, s2, s3, e0, e1, e2, e3, ret[1], ret[2], ret[3])
                         print(f'  ({Fx}, {Fy}, {Fz}) vs expected ({eFx}, {eFy}, {eFz})')
                         print("-"*80)
+
+                        assert ret[1] <= gt["t"]
                         mismatches += 1
                 else:
                     false_positives += 1
