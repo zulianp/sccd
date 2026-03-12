@@ -10,6 +10,7 @@
 #include <tbb/parallel_sort.h>
 #endif
 
+#include <algorithm>
 #include <cstddef>
 
 #include "smath.hpp"
@@ -24,7 +25,7 @@ namespace sccd {
         static const ptrdiff_t TILE_SIZE = 128;
 #pragma omp parallel for
         for (ptrdiff_t i = start; i < end; i += TILE_SIZE) {
-            ptrdiff_t iend = min(TILE_SIZE, end - i);
+            ptrdiff_t iend = min(i + TILE_SIZE, end);
             fun(i, iend);
         }
 #endif
@@ -42,22 +43,25 @@ namespace sccd {
 
     template <typename T>
     void parallel_cum_sum_br(T* const begin, T* const end) {
-        ptrdiff_t len = end - begin;
+        const ptrdiff_t len = end - begin;
+        if (len <= 0) {
+            return;
+        }
 
 #ifdef SCCD_ENABLE_TBB
         tbb::parallel_scan(
             tbb::blocked_range<ptrdiff_t>(0, len),
-            0,
+            T{},
             [=](const tbb::blocked_range<ptrdiff_t>& r, T sum, bool is_final_scan) -> T {
                 if (!is_final_scan) {
                     T temp = sum;
-                    for (int i = r.begin(); i < r.end(); ++i) {
+                    for (ptrdiff_t i = r.begin(); i < r.end(); ++i) {
                         temp = temp + begin[i];
                     }
                     return temp;
                 } else {
                     begin[r.begin()] += sum;
-                    for (int i = r.begin() + 1; i < r.end(); ++i) {
+                    for (ptrdiff_t i = r.begin() + 1; i < r.end(); ++i) {
                         begin[i] += begin[i - 1];
                     }
 
@@ -79,7 +83,10 @@ namespace sccd {
 
     template <typename T>
     void parallel_cum_max_br(T* const begin, T* const end) {
-        ptrdiff_t len = end - begin;
+        const ptrdiff_t len = end - begin;
+        if (len <= 0) {
+            return;
+        }
 
 #ifdef SCCD_ENABLE_TBB
         tbb::parallel_scan(
@@ -88,13 +95,13 @@ namespace sccd {
             [=](const tbb::blocked_range<ptrdiff_t>& r, T acc, bool is_final_scan) -> T {
                 if (!is_final_scan) {
                     T temp = acc;
-                    for (int i = r.begin(); i < r.end(); ++i) {
+                    for (ptrdiff_t i = r.begin(); i < r.end(); ++i) {
                         temp = sccd::max(temp, begin[i]);
                     }
                     return temp;
                 } else {
                     begin[r.begin()] = sccd::max(begin[r.begin()], acc);
-                    for (int i = r.begin() + 1; i < r.end(); ++i) {
+                    for (ptrdiff_t i = r.begin() + 1; i < r.end(); ++i) {
                         begin[i] = sccd::max(begin[i], begin[i - 1]);
                     }
 
