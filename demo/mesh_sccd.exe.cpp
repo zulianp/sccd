@@ -8,52 +8,6 @@
 #include "narrowphase.hpp"
 #include "sccd_config.hpp"
 
-template <typename idx_t, typename geom_t>
-void compute_aabbs(const int nxe,
-                   const ptrdiff_t n_elements,
-                   const idx_t* const SMESH_RESTRICT* const SMESH_RESTRICT elements,
-                   const int dim,
-                   const geom_t* const SMESH_RESTRICT* const SMESH_RESTRICT points0,
-                   const geom_t* const SMESH_RESTRICT* const SMESH_RESTRICT points1,
-                   geom_t* const SMESH_RESTRICT* const SMESH_RESTRICT aabb_min,
-                   geom_t* const SMESH_RESTRICT* const SMESH_RESTRICT aabb_max) {
-    for (int d = 0; d < dim; d++) {
-#pragma omp parallel for
-        for (int i = 0; i < n_elements; i++) {
-            aabb_min[d][i] = std::numeric_limits<geom_t>::max();
-            aabb_max[d][i] = std::numeric_limits<geom_t>::lowest();
-        }
-
-        for (int v = 0; v < nxe; v++) {
-#pragma omp parallel for
-            for (int i = 0; i < n_elements; i++) {
-                const idx_t ii = elements[v][i];
-                const geom_t p_min = std::min(points0[d][ii], points1[d][ii]);
-                const geom_t p_max = std::max(points0[d][ii], points1[d][ii]);
-                aabb_min[d][i] = std::min(aabb_min[d][i], p_min);
-                aabb_max[d][i] = std::max(aabb_max[d][i], p_max);
-            }
-        }
-    }
-}
-
-template <typename geom_t>
-void compute_aabbs(const int dim,
-                   const ptrdiff_t n_nodes,
-                   const geom_t* const SMESH_RESTRICT* const SMESH_RESTRICT points0,
-                   const geom_t* const SMESH_RESTRICT* const SMESH_RESTRICT points1,
-                   geom_t* const SMESH_RESTRICT* const SMESH_RESTRICT aabb_min,
-                   geom_t* const SMESH_RESTRICT* const SMESH_RESTRICT aabb_max) {
-    for (int d = 0; d < dim; d++) {
-#pragma omp parallel for
-        for (int i = 0; i < n_nodes; i++) {
-            const geom_t p_min = std::min(points0[d][i], points1[d][i]);
-            const geom_t p_max = std::max(points0[d][i], points1[d][i]);
-            aabb_min[d][i] = p_min;
-            aabb_max[d][i] = p_max;
-        }
-    }
-}
 
 int main(int argc, char** argv) {
     auto ctx = smesh::initialize(argc, argv);
@@ -91,7 +45,7 @@ int main(int argc, char** argv) {
         const ptrdiff_t n_nodes = t0->n_nodes();
         auto aabb_min_nodes = smesh::create_host_buffer<smesh::geom_t>(dim, n_nodes);
         auto aabb_max_nodes = smesh::create_host_buffer<smesh::geom_t>(dim, n_nodes);
-        compute_aabbs(dim, t0->n_nodes(), p0, p1, aabb_min_nodes->data(), aabb_max_nodes->data());
+        sccd::compute_aabbs(dim, t0->n_nodes(), p0, p1, aabb_min_nodes->data(), aabb_max_nodes->data());
 
         // AABB faces
         const ptrdiff_t n_faces = t0->n_elements();
@@ -106,7 +60,7 @@ int main(int argc, char** argv) {
             auto amin = smesh::view(aabb_min_faces, 0, dim, element_offset, element_offset + n_elements);
             auto amax = smesh::view(aabb_max_faces, 0, dim, element_offset, element_offset + n_elements);
 
-            compute_aabbs(nxe, n_elements, b->elements()->data(), dim, p0, p1, amin->data(), amax->data());
+            sccd::compute_aabbs(nxe, n_elements, b->elements()->data(), dim, p0, p1, amin->data(), amax->data());
             element_offset += n_elements;
         }
 
@@ -121,7 +75,7 @@ int main(int argc, char** argv) {
         auto aabb_max_edges = smesh::create_host_buffer<smesh::geom_t>(dim, n_edges);
 
         smesh::idx_t* edges[2] = {row_idx->data(), n2n_crs->colidx()->data()};
-        compute_aabbs(2, row_idx->size(), edges, dim, p0, p1, aabb_min_edges->data(), aabb_max_edges->data());
+        sccd::compute_aabbs(2, row_idx->size(), edges, dim, p0, p1, aabb_min_edges->data(), aabb_max_edges->data());
 
         // CCD: Broadphase
 
