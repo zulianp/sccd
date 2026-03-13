@@ -213,18 +213,18 @@ namespace sccd {
 
     template <typename T>
     inline static void vaabb_disjoint_one_to_many(const T aminx,
-                                             const T aminy,
-                                             const T aminz,
-                                             const T amaxx,
-                                             const T amaxy,
-                                             const T amaxz,
-                                             const T* const SCCD_RESTRICT bminx,
-                                             const T* const SCCD_RESTRICT bminy,
-                                             const T* const SCCD_RESTRICT bminz,
-                                             const T* const SCCD_RESTRICT bmaxx,
-                                             const T* const SCCD_RESTRICT bmaxy,
-                                             const T* const SCCD_RESTRICT bmaxz,
-                                             uint32_t* SCCD_RESTRICT mask) {
+                                                  const T aminy,
+                                                  const T aminz,
+                                                  const T amaxx,
+                                                  const T amaxy,
+                                                  const T amaxz,
+                                                  const T* const SCCD_RESTRICT bminx,
+                                                  const T* const SCCD_RESTRICT bminy,
+                                                  const T* const SCCD_RESTRICT bminz,
+                                                  const T* const SCCD_RESTRICT bmaxx,
+                                                  const T* const SCCD_RESTRICT bmaxy,
+                                                  const T* const SCCD_RESTRICT bmaxz,
+                                                  uint32_t* SCCD_RESTRICT mask) {
         if constexpr (std::is_same<T, double>::value)  //
         {
 #if defined(__AVX512F__)
@@ -395,6 +395,53 @@ namespace sccd {
         for (int i = 0; i < AABB_DISJOINT_CHUNK_SIZE; i++) {
             mask[i] = disjoint<T>(
                 aminx, aminy, aminz, amaxx, amaxy, amaxz, bminx[i], bminy[i], bminz[i], bmaxx[i], bmaxy[i], bmaxz[i]);
+        }
+    }
+
+    template <typename idx_t, typename geom_t>
+    void compute_aabbs(const int nxe,
+                       const ptrdiff_t n_elements,
+                       const idx_t* const SCCD_RESTRICT* const SCCD_RESTRICT elements,
+                       const int dim,
+                       const geom_t* const SCCD_RESTRICT* const SCCD_RESTRICT points0,
+                       const geom_t* const SCCD_RESTRICT* const SCCD_RESTRICT points1,
+                       geom_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_min,
+                       geom_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_max) {
+        for (int d = 0; d < dim; d++) {
+#pragma omp parallel for
+            for (int i = 0; i < n_elements; i++) {
+                aabb_min[d][i] = std::numeric_limits<geom_t>::max();
+                aabb_max[d][i] = std::numeric_limits<geom_t>::lowest();
+            }
+
+            for (int v = 0; v < nxe; v++) {
+#pragma omp parallel for
+                for (int i = 0; i < n_elements; i++) {
+                    const idx_t ii = elements[v][i];
+                    const geom_t p_min = std::min(points0[d][ii], points1[d][ii]);
+                    const geom_t p_max = std::max(points0[d][ii], points1[d][ii]);
+                    aabb_min[d][i] = std::min(aabb_min[d][i], p_min);
+                    aabb_max[d][i] = std::max(aabb_max[d][i], p_max);
+                }
+            }
+        }
+    }
+
+    template <typename geom_t>
+    void compute_aabbs(const int dim,
+                       const ptrdiff_t n_nodes,
+                       const geom_t* const SCCD_RESTRICT* const SCCD_RESTRICT points0,
+                       const geom_t* const SCCD_RESTRICT* const SCCD_RESTRICT points1,
+                       geom_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_min,
+                       geom_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_max) {
+        for (int d = 0; d < dim; d++) {
+#pragma omp parallel for
+            for (int i = 0; i < n_nodes; i++) {
+                const geom_t p_min = std::min(points0[d][i], points1[d][i]);
+                const geom_t p_max = std::max(points0[d][i], points1[d][i]);
+                aabb_min[d][i] = p_min;
+                aabb_max[d][i] = p_max;
+            }
         }
     }
 
