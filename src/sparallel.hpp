@@ -70,12 +70,17 @@ namespace sccd {
             },
             [](T left, T right) { return left + right; });
 #else
-        T acc = 0;
-#pragma omp parallel for reduction(inscan, + : acc)
-        for (ptrdiff_t i = 0; i < len; i++) {
-            acc += begin[i];
+        //         T acc = 0;
+        // #pragma omp parallel for reduction(inscan, + : acc)
+        //         for (ptrdiff_t i = 0; i < len; i++) {
+        //             acc += begin[i];
 
-#pragma omp scan inclusive(acc)
+        // #pragma omp scan inclusive(acc)
+        //             begin[i] = acc;
+        //         }
+        T acc = T{};
+        for (ptrdiff_t i = 0; i < len; ++i) {
+            acc += begin[i];
             begin[i] = acc;
         }
 #endif  // SCCD_ENABLE_TBB
