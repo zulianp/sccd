@@ -42,20 +42,19 @@ namespace sccd {
         int SCCD_USE_TI = 0;
         SCCD_READ_ENV(SCCD_USE_TI, atoi);
 
-        int SCCD_MAX_ITER = 27;
+        int SCCD_MAX_ITER = 12;
         SCCD_READ_ENV(SCCD_MAX_ITER, atoi);
 
-        T_HP SCCD_TOL = 1e-12;
+        T_HP SCCD_TOL = 1e-8;
         SCCD_READ_ENV(SCCD_TOL, atof);
 
         int SCCD_REFINE = 0;
         SCCD_READ_ENV(SCCD_REFINE, atoi);
 
-
         std::atomic<T> min_t = max_toi;
         sccd::parallel_for_br(0, noverlaps, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
             std::vector<Box<T_HP>> stack;
-            
+
             for (ptrdiff_t i = rbegin; i < rend; i++) {
                 const I vi = voveralp[i];
                 const I fi = foveralp[i];
@@ -85,7 +84,7 @@ namespace sccd {
                     if (find_root_tight_inclusion_vf<T_HP>(
                             SCCD_MAX_ITER, SCCD_TOL, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v)) {
                         atomic_min<T>(min_t, t);
-                    } 
+                    }
                     continue;
                 }
 #endif
@@ -117,10 +116,10 @@ namespace sccd {
         int SCCD_USE_TI = 0;
         SCCD_READ_ENV(SCCD_USE_TI, atoi);
 
-        int SCCD_MAX_ITER = 27;
+        int SCCD_MAX_ITER = 12;
         // SCCD_READ_ENV(SCCD_MAX_ITER, atoi);
 
-        T_HP SCCD_TOL = 1e-12;
+        T_HP SCCD_TOL = 1e-8;
         SCCD_READ_ENV(SCCD_TOL, atof);
 
         std::atomic<T> min_t = max_toi;
@@ -158,7 +157,7 @@ namespace sccd {
                     if (find_root_tight_inclusion_ee<T_HP>(
                             SCCD_MAX_ITER, SCCD_TOL, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v)) {
                         atomic_min<T>(min_t, t);
-                    } 
+                    }
                     continue;
                 }
 #endif
