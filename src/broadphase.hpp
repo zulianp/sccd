@@ -104,8 +104,6 @@ namespace sccd {
         }
     }
 
-
-
     /**
      * \brief Remap indices in-place through a permutation table.
      * \param n Number of entries.
@@ -684,6 +682,7 @@ namespace sccd {
                     fimin, fimax, second_xmax, second_xmin, second_count, ni, end);
 
                 if (ni >= end) {
+                    ccdptr[fi + 1] = 0;
                     continue;
                 }
 
