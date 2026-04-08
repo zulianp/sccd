@@ -502,6 +502,33 @@ namespace sccd {
         }
     }
 
+    template <typename idx_t, typename geom_t>
+    void compute_aabbs(const int nxe,
+                       const ptrdiff_t n_elements,
+                       const idx_t* const SCCD_RESTRICT* const SCCD_RESTRICT elements,
+                       const int dim,
+                       const geom_t* const SCCD_RESTRICT* const SCCD_RESTRICT points,
+                       geom_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_min,
+                       geom_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_max) {
+        for (int d = 0; d < dim; d++) {
+#pragma omp parallel for
+            for (int i = 0; i < n_elements; i++) {
+                aabb_min[d][i] = std::numeric_limits<geom_t>::max();
+                aabb_max[d][i] = std::numeric_limits<geom_t>::lowest();
+            }
+
+            for (int v = 0; v < nxe; v++) {
+#pragma omp parallel for
+                for (int i = 0; i < n_elements; i++) {
+                    const idx_t ii = elements[v][i];
+                    const geom_t p = points[d][ii];
+                    aabb_min[d][i] = std::min(aabb_min[d][i], p);
+                    aabb_max[d][i] = std::max(aabb_max[d][i], p);
+                }
+            }
+        }
+    }
+
 }  // namespace sccd
 
 #endif  // VAABB_H
