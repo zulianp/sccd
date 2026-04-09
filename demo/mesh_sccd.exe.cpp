@@ -8,7 +8,6 @@
 #include "narrowphase.hpp"
 #include "sccd_config.hpp"
 
-
 int main(int argc, char** argv) {
     auto ctx = smesh::initialize(argc, argv);
     SMESH_TRACE_SCOPE("mesh_sccd.exe");
@@ -66,7 +65,7 @@ int main(int argc, char** argv) {
 
         // AABB edges
 
-        auto n2n_crs = t0->node_to_node_graph();
+        auto n2n_crs = t0->edge_graph();
         auto row_idx = smesh::create_host_buffer<smesh::idx_t>(n2n_crs->nnz());
         smesh::crs_to_coo(t0->n_nodes(), n2n_crs->rowptr()->data(), row_idx->data());
 
