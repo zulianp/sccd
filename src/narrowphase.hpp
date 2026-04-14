@@ -117,7 +117,7 @@ namespace sccd {
         SCCD_READ_ENV(SCCD_USE_TI, atoi);
 
         int SCCD_MAX_ITER = 12;
-        // SCCD_READ_ENV(SCCD_MAX_ITER, atoi);
+        SCCD_READ_ENV(SCCD_MAX_ITER, atoi);
 
         T_HP SCCD_TOL = 1e-8;
         SCCD_READ_ENV(SCCD_TOL, atof);
