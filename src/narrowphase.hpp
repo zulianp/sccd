@@ -10,6 +10,8 @@
 #include "srootfinder.hpp"
 #include "vaabb.hpp"
 
+#include <atomic>
+
 namespace sccd {
 
     template <typename T>
