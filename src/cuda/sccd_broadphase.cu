@@ -2,40 +2,13 @@
 
 #include <cassert>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 
+#include <cub/device/device_radix_sort.cuh>
+
 #include "sccd_base.hpp"
-
-//  template <typename T>
-//     static int choose_axis(const ptrdiff_t n, T** const SCCD_RESTRICT aabb) {
-//     T mean[3] = {0};
-//     T var[3] = {0};
-//     for (int d = 0; d < 3; d++) {
-//         for (ptrdiff_t i = 0; i < n; i++) {
-//             const T c = (aabb[d + 3][i] + aabb[d][i]) / 2;
-//             mean[d] += c;
-//         }
-
-//         mean[d] /= n;
-//         for (ptrdiff_t i = 0; i < n; i++) {
-//             const T c = (aabb[d + 3][i] + aabb[d][i]) / 2;
-//             var[d] += (c - mean[d]) * (c - mean[d]);
-//         }
-//     }
-
-//     int fargmax = 0;
-//     T fmax = var[0];
-
-//     for (int d = 1; d < 3; d++) {
-//         if (fmax < var[d]) {
-//             fmax = var[d];
-//             fargmax = d;
-//         }
-//     }
-
-//     return fargmax;
-// }
 
 #define SCCD_N_WARPS_PER_BLOCK 8
 #define SCCD_WARP_SIZE 32
@@ -59,7 +32,9 @@ namespace sccd {
         }
 
         template <typename T>
-        __device__ void t_warp_reduce(const T val, T* block_accumulator, T* result) {
+        __device__ void t_warp_reduce(const T val,
+                                      T* const SCCD_RESTRICT block_accumulator,
+                                      T* const SCCD_RESTRICT result) {
             T acc = warp_reduce_32(val);
             const unsigned int warp_id = threadIdx.x / SCCD_WARP_SIZE;
             const unsigned int lid = lane_id();
@@ -87,7 +62,7 @@ namespace sccd {
         __global__ void choose_axis_mean_kernel(const int dim,
                                                 const ptrdiff_t n,
                                                 const T* const SCCD_RESTRICT* const SCCD_RESTRICT aabbs,
-                                                T* const SCCD_RESTRICT* const SCCD_RESTRICT mean) {
+                                                T* const SCCD_RESTRICT mean) {
             ptrdiff_t i = blockIdx.x * blockDim.x + threadIdx.x;
             if (i >= n) return;
 
@@ -102,7 +77,7 @@ namespace sccd {
 
             __shared__ T block_accumulator[SCCD_N_WARPS_PER_BLOCK];
             for (int d = 0; d < dim; d++) {
-                t_warp_reduce(local_mean[d], block_accumulator, mean[d]);
+                t_warp_reduce<T>(local_mean[d], block_accumulator, &mean[d]);
             }
         }
 
@@ -111,7 +86,7 @@ namespace sccd {
                                                const ptrdiff_t n,
                                                const T* const SCCD_RESTRICT* const SCCD_RESTRICT aabbs,
                                                T* const SCCD_RESTRICT mean,
-                                               T* const SCCD_RESTRICT* const SCCD_RESTRICT var) {
+                                               T* const SCCD_RESTRICT var) {
             ptrdiff_t i = blockIdx.x * blockDim.x + threadIdx.x;
             if (i >= n) return;
 
@@ -124,7 +99,7 @@ namespace sccd {
 
             __shared__ T block_accumulator[SCCD_N_WARPS_PER_BLOCK];
             for (int d = 0; d < dim; d++) {
-                t_warp_reduce(local_var[d], block_accumulator, var[d]);
+                t_warp_reduce<T>(local_var[d], block_accumulator, &var[d]);
             }
         }
 
@@ -170,6 +145,108 @@ namespace sccd {
 
             return fargmax;
         }
+
+        template <typename T>
+        __global__ void enumerate_kernel(const ptrdiff_t begin, const ptrdiff_t end, T* const SCCD_RESTRICT idx) {
+            ptrdiff_t i = blockIdx.x * blockDim.x + threadIdx.x;
+            if (i >= end - begin) return;
+            idx[i] = begin + i;
+        }
+
+        template <typename T>
+        void enumerate(const ptrdiff_t begin, const ptrdiff_t end, T* const SCCD_RESTRICT idx) {
+            dim3 block(SCCD_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
+            dim3 grid((end - begin + block.x - 1) / block.x);
+            enumerate_kernel<T><<<grid, block>>>(begin, end, idx);
+        }
+
+        template <typename T, typename I>
+        __global__ void permute_kernel(const ptrdiff_t n,
+                                       const I* const SCCD_RESTRICT idx,
+                                       const T* const SCCD_RESTRICT src,
+                                       T* const SCCD_RESTRICT dst) {
+            const ptrdiff_t i = blockIdx.x * blockDim.x + threadIdx.x;
+            if (i >= n) return;
+            dst[i] = src[idx[i]];
+        }
+
+        bool is_ptr_device(const void* ptr) {
+            cudaPointerAttributes attributes;
+            cudaError_t err = cudaPointerGetAttributes(&attributes, ptr);
+
+            if (err != cudaSuccess) {
+                fprintf(stderr, "cudaPointerGetAttributes failed: %s\n", cudaGetErrorString(err));
+            }
+
+#if CUDART_VERSION >= 10000
+            // CUDA 10.0 and newer
+            return attributes.type == cudaMemoryTypeDevice;
+#else
+            return attributes.memoryType == cudaMemoryTypeDevice;
+#endif
+        }
+
+        template <typename T, typename I>
+        void sort_along_axis(const int dim,
+                             const ptrdiff_t n,
+                             const int sort_axis,
+                             T** const SCCD_RESTRICT arrays,
+                             I* const SCCD_RESTRICT idx,
+                             T* const SCCD_RESTRICT scratch) {
+            if (n <= 0) return;
+
+            auto check_cuda = [](const cudaError_t error) {
+                if (error != cudaSuccess) {
+                    fprintf(stderr, "CUDA error: %s\n", cudaGetErrorString(error));
+                    exit(1);
+                }
+            };
+
+            if (n == 1) {
+                enumerate<I>(0, n, idx);
+                check_cuda(cudaGetLastError());
+                return;
+            }
+
+            T* host_arrays[6] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+
+            if (is_ptr_device(arrays)) {
+                check_cuda(cudaMemcpy(host_arrays, arrays, 2 * dim * sizeof(T*), cudaMemcpyDeviceToHost));
+            } else {
+                for (int d = 0; d < 2 * dim; d++) {
+                    host_arrays[d] = arrays[d];
+                }
+            }
+
+            const T* const SCCD_RESTRICT x = host_arrays[sort_axis];
+
+            I* tmp_idx = nullptr;
+            void* tmp_storage = nullptr;
+            size_t tmp_storage_bytes = 0;
+
+            check_cuda(cudaMalloc(&tmp_idx, n * sizeof(I)));
+            enumerate<I>(0, n, tmp_idx);
+            check_cuda(cudaGetLastError());
+
+            check_cuda(cub::DeviceRadixSort::SortPairs(nullptr, tmp_storage_bytes, x, scratch, tmp_idx, idx, n));
+            check_cuda(cudaMalloc(&tmp_storage, tmp_storage_bytes));
+            check_cuda(cub::DeviceRadixSort::SortPairs(tmp_storage, tmp_storage_bytes, x, scratch, tmp_idx, idx, n));
+
+            check_cuda(cudaMemcpy(host_arrays[sort_axis], scratch, n * sizeof(T), cudaMemcpyDeviceToDevice));
+
+            dim3 block(SCCD_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
+            dim3 grid((n + block.x - 1) / block.x);
+            for (int d = 0; d < 2 * dim; d++) {
+                if (d == sort_axis) continue;
+                permute_kernel<T, I><<<grid, block>>>(n, idx, host_arrays[d], scratch);
+                check_cuda(cudaGetLastError());
+                check_cuda(cudaMemcpy(host_arrays[d], scratch, n * sizeof(T), cudaMemcpyDeviceToDevice));
+            }
+
+            check_cuda(cudaFree(tmp_storage));
+            check_cuda(cudaFree(tmp_idx));
+        }
+
     }  // namespace device
 }  // namespace sccd
 
@@ -177,7 +254,31 @@ namespace sccd {
     template int sccd::device::choose_axis<T>( \
         const int dim, const ptrdiff_t n, const T* const SCCD_RESTRICT* const SCCD_RESTRICT aabbs);
 
+#define INSTANTIATE_ENUMERATE(T) \
+    template void sccd::device::enumerate<T>(const ptrdiff_t begin, const ptrdiff_t end, T* const SCCD_RESTRICT idx);
+
+#define INSTANTIATE_SORT_ALONG_AXIS(T, I)                                             \
+    template void sccd::device::sort_along_axis<T, I>(const int dim,                  \
+                                                      const ptrdiff_t n,              \
+                                                      const int sort_axis,            \
+                                                      T** const SCCD_RESTRICT arrays, \
+                                                      I* const SCCD_RESTRICT idx,     \
+                                                      T* const SCCD_RESTRICT scratch);
+
 INSTANTIATE_CHOOSE_AXIS(float);
 INSTANTIATE_CHOOSE_AXIS(double);
+INSTANTIATE_ENUMERATE(int32_t);
+INSTANTIATE_ENUMERATE(int64_t);
+INSTANTIATE_SORT_ALONG_AXIS(float, int32_t);
+INSTANTIATE_SORT_ALONG_AXIS(float, int64_t);
+INSTANTIATE_SORT_ALONG_AXIS(double, int32_t);
+INSTANTIATE_SORT_ALONG_AXIS(double, int64_t);
 
 #undef INSTANTIATE_CHOOSE_AXIS
+#undef INSTANTIATE_ENUMERATE
+#undef INSTANTIATE_SORT_ALONG_AXIS
+
+// Clean-up kernel macros
+#undef SCCD_N_WARPS_PER_BLOCK
+#undef SCCD_WARP_SIZE
+#undef SCCD_WARP_FULL_MASK

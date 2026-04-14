@@ -61,8 +61,7 @@ int main(int argc, char** argv) {
         sccd::device::compute_aabbs<smesh::geom_t, smesh::geom_t>(
             dim, t0->n_nodes(), points0->data(), points1->data(), vaabb->data());
 
-        //     // AABB edges
-
+        // AABB edges
         auto n2n_crs = t0->edge_graph();
         auto row_idx_temp = smesh::create_host_buffer<smesh::idx_t>(n2n_crs->nnz());
         smesh::crs_to_coo(t0->n_nodes(), n2n_crs->rowptr()->data(), row_idx_temp->data());
@@ -77,29 +76,18 @@ int main(int argc, char** argv) {
         sccd::device::compute_aabbs<smesh::idx_t, smesh::geom_t, smesh::geom_t>(
             2, n_edges, edges->data(), dim, points0->data(), points1->data(), eaabb->data());
 
-        //     // CCD: Broadphase
-        auto device_scratch = smesh::create_device_buffer<smesh::geom_t>(std::max(n_nodes, std::max(n_faces, n_edges)));
-
+        // CCD: Broadphase
         int sort_axis = sccd::device::choose_axis(dim, n_nodes, vaabb->data());
 
-        //     auto vidx = smesh::create_host_buffer<smesh::idx_t>(n_nodes);
-        //     for (int i = 0; i < n_nodes; i++) {
-        //         vidx->data()[i] = i;
-        //     }
+        auto vidx = smesh::create_device_buffer<smesh::idx_t>(n_nodes);
+        auto fidx = smesh::create_device_buffer<smesh::idx_t>(n_faces);
+        auto eidx = smesh::create_device_buffer<smesh::idx_t>(n_edges);
 
-        //     auto fidx = smesh::create_host_buffer<smesh::idx_t>(n_faces);
-        //     for (int i = 0; i < n_faces; i++) {
-        //         fidx->data()[i] = i;
-        //     }
+        auto scratch = smesh::create_device_buffer<smesh::geom_t>(std::max(n_nodes, std::max(n_faces, n_edges)));
 
-        //     auto eidx = smesh::create_host_buffer<smesh::idx_t>(n_edges);
-        //     for (int i = 0; i < n_edges; i++) {
-        //         eidx->data()[i] = i;
-        //     }
-
-        //     sccd::sort_along_axis(n_nodes, sort_axis, vaabb, vidx->data(), scratch->data());
-        //     sccd::sort_along_axis(n_faces, sort_axis, faabb, fidx->data(), scratch->data());
-        //     sccd::sort_along_axis(n_edges, sort_axis, eaabb, eidx->data(), scratch->data());
+        sccd::device::sort_along_axis(dim, n_nodes, sort_axis, vaabb->data(), vidx->data(), scratch->data());
+        sccd::device::sort_along_axis(dim, n_faces, sort_axis, faabb->data(), fidx->data(), scratch->data());
+        sccd::device::sort_along_axis(dim, n_edges, sort_axis, eaabb->data(), eidx->data(), scratch->data());
 
         //     ptrdiff_t max_ccdptr_size = std::max(n_faces, n_edges) + 1;
         //     auto ccdptr = smesh::create_host_buffer<ptrdiff_t>(max_ccdptr_size);
