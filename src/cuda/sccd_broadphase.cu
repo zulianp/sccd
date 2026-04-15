@@ -692,6 +692,143 @@ namespace sccd {
             SCCD_CUDA_LAST_ERROR();
         }
 
+        template <int first_nxe, int second_nxe, typename T, typename I>
+        __global__ void collect_overlaps_kernel(const int sort_axis,
+                                                const ptrdiff_t first_count,
+                                                T** const SCCD_RESTRICT first_aabbs,
+                                                I* const SCCD_RESTRICT first_idx,
+                                                const ptrdiff_t first_stride,
+                                                I** SCCD_RESTRICT const first_elements,
+                                                const ptrdiff_t second_count,
+                                                T** const SCCD_RESTRICT second_aabbs,
+                                                I* const SCCD_RESTRICT second_idx,
+                                                const ptrdiff_t second_stride,
+                                                I** SCCD_RESTRICT const second_elements,
+                                                const ptrdiff_t* const SCCD_RESTRICT ccdptr,
+                                                const T* const SCCD_RESTRICT cummax,
+                                                I* SCCD_RESTRICT foverlap,
+                                                I* SCCD_RESTRICT noverlap) {
+            ptrdiff_t fi = blockIdx.x * blockDim.x + threadIdx.x;
+            if (fi >= first_count) return;
+            if (fi == 0) {
+                ccdptr[0] = 0;
+            }
+
+            const T* const SCCD_RESTRICT first_xmin = first_aabbs[sort_axis];
+            const T* const SCCD_RESTRICT first_xmax = first_aabbs[3 + sort_axis];
+            const T* const SCCD_RESTRICT second_xmin = second_aabbs[sort_axis];
+            const T* const SCCD_RESTRICT second_xmax = second_aabbs[3 + sort_axis];
+
+            const ptrdiff_t expected_count = ccdptr[fi + 1] - ccdptr[fi];
+            if (!expected_count) return;
+
+            const T fimin = first_aabbs[sort_axis][fi];
+            const T fimax = first_aabbs[3 + sort_axis][fi];
+            const I first_idxi = first_idx[fi];
+
+            I ev[first_nxe];
+            for (int v = 0; v < first_nxe; v++) {
+                ev[v] = first_elements[v][first_idxi * first_stride];
+            }
+
+            ptrdiff_t begin = lower_bound(cummax, cummax + second_count, fimin) - cummax;
+
+            ptrdiff_t end = begin;
+            compute_candidate_window_progressive(fimin, fimax, second_xmax, second_xmin, second_count, begin, end);
+
+            if (begin >= end) {
+                return;
+            }
+
+            I* SCCD_RESTRICT const first_local_elements = &foverlap[ccdptr[fi]];
+            I* SCCD_RESTRICT const second_local_elements = &noverlap[ccdptr[fi]];
+
+            ptrdiff_t count = 0;
+            const T aminx = first_aabbs[0][fi];
+            const T aminy = first_aabbs[1][fi];
+            const T aminz = first_aabbs[2][fi];
+            const T amaxx = first_aabbs[3][fi];
+            const T amaxy = first_aabbs[4][fi];
+            const T amaxz = first_aabbs[5][fi];
+            for (ptrdiff_t j = begin; j < end; ++j) {
+                if (disjoint(aminx,
+                             aminy,
+                             aminz,
+                             amaxx,
+                             amaxy,
+                             amaxz,
+                             second_aabbs[0][j],
+                             second_aabbs[1][j],
+                             second_aabbs[2][j],
+                             second_aabbs[3][j],
+                             second_aabbs[4][j],
+                             second_aabbs[5][j])) {
+                    continue;
+                }
+                bool share = false;
+                const I jidx = second_idx[j];
+
+                if constexpr (second_nxe > 1) {
+                    I sev[second_nxe];
+                    for (int v = 0; v < second_nxe; ++v) {
+                        sev[v] = second_elements[v][jidx * second_stride];
+                    }
+                    share = shares_vertex<first_nxe, second_nxe>(ev, sev);
+                } else {
+                    for (int a = 0; a < first_nxe; ++a) {
+                        if (ev[a] == jidx) {
+                            share = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!share) continue;
+                first_local_elements[count] = first_idxi;
+                second_local_elements[count] = jidx;
+                count += 1;
+            }
+        }
+
+        template <int first_nxe, int second_nxe, typename T, typename I>
+        void collect_overlaps(const int sort_axis,
+                              const ptrdiff_t first_count,
+                              T** const SCCD_RESTRICT first_aabbs,
+                              I* const SCCD_RESTRICT first_idx,
+                              const ptrdiff_t first_stride,
+                              I** SCCD_RESTRICT const first_elements,
+                              const ptrdiff_t second_count,
+                              T** const SCCD_RESTRICT second_aabbs,
+                              I* const SCCD_RESTRICT second_idx,
+                              const ptrdiff_t second_stride,
+                              I** SCCD_RESTRICT const second_elements,
+                              const ptrdiff_t* const SCCD_RESTRICT ccdptr,
+                              const T* const SCCD_RESTRICT cummax,
+                              I* SCCD_RESTRICT foverlap,
+                              I* SCCD_RESTRICT noverlap) {
+            SCCD_CUDA_LAST_ERROR();
+
+            dim3 block(SCCD_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
+            dim3 grid((first_count + block.x - 1) / block.x);
+            collect_overlaps_kernel<first_nxe, second_nxe, T, I><<<grid, block>>>(sort_axis,
+                                                                                  first_count,
+                                                                                  first_aabbs,
+                                                                                  first_idx,
+                                                                                  first_stride,
+                                                                                  first_elements,
+                                                                                  second_count,
+                                                                                  second_aabbs,
+                                                                                  second_idx,
+                                                                                  second_stride,
+                                                                                  second_elements,
+                                                                                  ccdptr,
+                                                                                  cummax,
+                                                                                  foverlap,
+                                                                                  noverlap);
+
+            SCCD_CUDA_LAST_ERROR();
+        }
+
     }  // namespace device
 }  // namespace sccd
 
