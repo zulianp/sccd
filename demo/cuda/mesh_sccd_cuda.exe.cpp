@@ -167,24 +167,33 @@ int main(int argc, char** argv) {
 
         // Narrow phase
         smesh::geom_t toi = std::numeric_limits<smesh::geom_t>::max();
-        // smesh::geom_t toi_vf, toi_ee;
+        smesh::geom_t toi_vf, toi_ee;
 
-        //     {
-        //         SMESH_TRACE_SCOPE("Narrow phase: F2V");
-        //         toi_vf = sccd::narrow_phase_vf<3, smesh::geom_t>(
-        //             v_overlap->size(), v_overlap->data(), f_overlap->data(), p0, p1, 1, t0->elements(0)->data(),
-        //             toi);
-        //         toi = toi_vf;
-        //     }
+        {
+            SMESH_TRACE_SCOPE("Narrow phase: F2V");
+            toi_vf = sccd::device::narrow_phase_vf<3, smesh::geom_t>(v_overlap->size(),
+                                                                     v_overlap->data(),
+                                                                     f_overlap->data(),
+                                                                     points0->data(),
+                                                                     points1->data(),
+                                                                     1,
+                                                                     faces->data(),
+                                                                     toi);
+            toi = toi_vf;
+        }
 
-        //     {
-        //         SMESH_TRACE_SCOPE("Narrow phase: E2E");
-        //         toi_ee = sccd::narrow_phase_ee<smesh::geom_t>(
-        //             e0_overlap->size(), e0_overlap->data(), e1_overlap->data(), p0, p1, 1, edges, toi);
-        //         toi = toi_ee;
-        //     }
-
-        //     // toi = sccd::min(toi_vf, toi_ee);
+        {
+            SMESH_TRACE_SCOPE("Narrow phase: E2E");
+            toi_ee = sccd::device::narrow_phase_ee<smesh::geom_t>(e0_overlap->size(),
+                                                                  e0_overlap->data(),
+                                                                  e1_overlap->data(),
+                                                                  points0->data(),
+                                                                  points1->data(),
+                                                                  1,
+                                                                  edges->data(),
+                                                                  toi);
+            toi = toi_ee;
+        }
 
         double tock = smesh::time_seconds();
         printf("#faces %ld #edges %ld #nodes %ld, #e2e %ld #f2v %ld, %g [s], toi %g\n",
