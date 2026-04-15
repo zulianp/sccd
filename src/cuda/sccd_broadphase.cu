@@ -236,6 +236,19 @@ namespace sccd {
 #endif
         }
 
+        template <typename T>
+        T* soa_device_row(T** const SCCD_RESTRICT arrays, const int dim, const int row) {
+            T* host_rows[6] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+            if (is_ptr_device(arrays)) {
+                SCCD_CHECK_CUDA(cudaMemcpy(host_rows, arrays, 2 * dim * sizeof(T*), cudaMemcpyDeviceToHost));
+            } else {
+                for (int d = 0; d < 2 * dim; d++) {
+                    host_rows[d] = arrays[d];
+                }
+            }
+            return host_rows[row];
+        }
+
         template <typename T, typename I>
         void sort_along_axis(const int dim,
                              const ptrdiff_t n,
@@ -895,6 +908,9 @@ namespace sccd {
     template void sccd::device::cummax<T>( \
         const ptrdiff_t n, const T* const SCCD_RESTRICT in, T* const SCCD_RESTRICT out)
 
+#define INSTANTIATE_SOA_DEVICE_ROW(T) \
+    template T* sccd::device::soa_device_row<T>(T** const SCCD_RESTRICT arrays, const int dim, const int row)
+
 #define INSTANTIATE_COUNT_OVERLAPS(FIRST_NXE, SECOND_NXE, T, I)                                                      \
     template void sccd::device::count_overlaps<FIRST_NXE, SECOND_NXE, T, I>(const int sort_axis,                     \
                                                                             const ptrdiff_t first_count,             \
@@ -950,6 +966,9 @@ INSTANTIATE_COLLECT_SELF_OVERLAPS(2, double, int64_t);
 INSTANTIATE_CUMMAX(float);
 INSTANTIATE_CUMMAX(double);
 
+INSTANTIATE_SOA_DEVICE_ROW(float);
+INSTANTIATE_SOA_DEVICE_ROW(double);
+
 INSTANTIATE_COUNT_OVERLAPS(3, 1, float, int32_t);
 INSTANTIATE_COUNT_OVERLAPS(3, 1, float, int64_t);
 INSTANTIATE_COUNT_OVERLAPS(3, 1, double, int32_t);
@@ -966,6 +985,7 @@ INSTANTIATE_COLLECT_OVERLAPS(3, 1, double, int64_t);
 #undef INSTANTIATE_COUNT_SELF_OVERLAPS
 #undef INSTANTIATE_COLLECT_SELF_OVERLAPS
 #undef INSTANTIATE_CUMMAX
+#undef INSTANTIATE_SOA_DEVICE_ROW
 #undef INSTANTIATE_COUNT_OVERLAPS
 #undef INSTANTIATE_COLLECT_OVERLAPS
 
