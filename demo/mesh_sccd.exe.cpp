@@ -64,7 +64,6 @@ int main(int argc, char** argv) {
         }
 
         // AABB edges
-
         auto n2n_crs = t0->edge_graph();
         auto row_idx = smesh::create_host_buffer<smesh::idx_t>(n2n_crs->nnz());
         smesh::crs_to_coo(t0->n_nodes(), n2n_crs->rowptr()->data(), row_idx->data());
@@ -77,7 +76,6 @@ int main(int argc, char** argv) {
         sccd::compute_aabbs(2, row_idx->size(), edges, dim, p0, p1, aabb_min_edges->data(), aabb_max_edges->data());
 
         // CCD: Broadphase
-
         auto scratch = smesh::create_host_buffer<smesh::geom_t>(std::max(n_nodes, std::max(n_faces, n_edges)));
 
         smesh::geom_t* vaabb[6] = {aabb_min_nodes->data()[0],
