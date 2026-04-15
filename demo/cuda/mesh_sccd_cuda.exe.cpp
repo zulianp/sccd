@@ -122,16 +122,19 @@ int main(int argc, char** argv) {
         {
             SMESH_TRACE_SCOPE("Broadphase: F2V");
             auto cm = smesh::create_device_buffer<smesh::geom_t>(n_nodes);
-            sccd::device::cummax(n_nodes, vaabb[dim + sort_axis], cm->data());
+
+            // TODO: get host pointer to vaabb->data()[dim + sort_axis]
+
+            sccd::device::cummax(n_nodes, vaabb->data()[dim + sort_axis], cm->data());
 
             sccd::device::count_overlaps<3, 1, smesh::geom_t, smesh::idx_t>(sort_axis,
                                                                             n_faces,
-                                                                            faabb,
+                                                                            faabb->data(),
                                                                             fidx->data(),
                                                                             1,
                                                                             t0->elements(0)->data(),
                                                                             n_nodes,
-                                                                            vaabb,
+                                                                            vaabb->data(),
                                                                             vidx->data(),
                                                                             0,
                                                                             nullptr,
@@ -141,20 +144,21 @@ int main(int argc, char** argv) {
             f_overlap = smesh::create_device_buffer<smesh::idx_t>(ccdptr->data()[n_faces]);
             v_overlap = smesh::create_device_buffer<smesh::idx_t>(ccdptr->data()[n_faces]);
 
-            //         sccd::collect_overlaps<3, 1, smesh::geom_t, smesh::idx_t>(sort_axis,
-            //                                                                   n_faces,
-            //                                                                   faabb,
-            //                                                                   fidx->data(),
-            //                                                                   1,
-            //                                                                   t0->elements(0)->data(),
-            //                                                                   n_nodes,
-            //                                                                   vaabb,
-            //                                                                   vidx->data(),
-            //                                                                   0,
-            //                                                                   nullptr,
-            //                                                                   ccdptr->data(),
-            //                                                                   f_overlap->data(),
-            //                                                                   v_overlap->data());
+            sccd::collect_overlaps<3, 1, smesh::geom_t, smesh::idx_t>(sort_axis,
+                                                                      n_faces,
+                                                                      faabb->data(),
+                                                                      fidx->data(),
+                                                                      1,
+                                                                      t0->elements(0)->data(),
+                                                                      n_nodes,
+                                                                      vaabb->data(),
+                                                                      vidx->data(),
+                                                                      0,
+                                                                      nullptr,
+                                                                      ccdptr->data(),
+                                                                      cm->data(),
+                                                                      f_overlap->data(),
+                                                                      v_overlap->data());
         }
 
         // Narrow phase
@@ -183,10 +187,8 @@ int main(int argc, char** argv) {
                n_faces,
                n_edges,
                n_nodes,
-               -1,
-               -1,
-               //    e0_overlap->size(),
-               //    f_overlap->size(),
+               e0_overlap->size(),
+               f_overlap->size(),
                tock - tick,
                (double)toi);
     }
