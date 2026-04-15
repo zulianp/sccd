@@ -45,6 +45,10 @@ namespace sccd {
         template <typename T>
         void cummax(const ptrdiff_t n, const T* const SCCD_RESTRICT in, T* const SCCD_RESTRICT out);
 
+        /** Row pointer for SoA device buffers (same host/device table rules as sort_along_axis). */
+        template <typename T>
+        T* soa_device_row(T** const SCCD_RESTRICT arrays, const int dim, const int row);
+
         template <int first_nxe, int second_nxe, typename T, typename I>
         void count_overlaps(const int sort_axis,
                             const ptrdiff_t first_count,

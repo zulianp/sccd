@@ -95,7 +95,7 @@ int main(int argc, char** argv) {
         auto ccdptr = smesh::create_device_buffer<ptrdiff_t>(max_ccdptr_size);
 
         // Results of the broadphase
-        std::shared_ptr<smesh::Buffer<smesh::idx_t>> e0_overlap, e1_overlap, f_overlap, v_overlap;
+        smesh::SharedBuffer<smesh::idx_t> e0_overlap, e1_overlap, f_overlap, v_overlap;
 
         {
             SMESH_TRACE_SCOPE("Broadphase: E2E");
@@ -187,7 +187,7 @@ int main(int argc, char** argv) {
         //     // toi = sccd::min(toi_vf, toi_ee);
 
         double tock = smesh::time_seconds();
-        printf("#faces %ld #edges %ld $nodes %ld, #e2e %ld #f2v %ld, %g [s], toi %g\n",
+        printf("#faces %ld #edges %ld #nodes %ld, #e2e %ld #f2v %ld, %g [s], toi %g\n",
                n_faces,
                n_edges,
                n_nodes,
