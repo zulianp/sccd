@@ -611,6 +611,17 @@ namespace sccd {
 
     }  // namespace sccd_detail
 
+    template <typename T>
+    void cummax(const ptrdiff_t n, const T *const SCCD_RESTRICT in, T *const SCCD_RESTRICT out) {
+        T acc = in[0];
+        out[0] = acc;
+
+        for (ptrdiff_t i = 1; i < n; ++i) {
+            acc = sccd::max(acc, in[i]);
+            out[i] = acc;
+        }
+    }
+
     /**
      * \brief Count candidate overlaps between two sorted AABB lists.
      *
@@ -647,7 +658,8 @@ namespace sccd {
                         I *const SCCD_RESTRICT second_idx,
                         const ptrdiff_t second_stride,
                         I **const SCCD_RESTRICT second_elements,
-                        ptrdiff_t *const SCCD_RESTRICT ccdptr) {
+                        ptrdiff_t *const SCCD_RESTRICT ccdptr,
+                        const T *const SCCD_RESTRICT cummax) {
         const T *const SCCD_RESTRICT first_xmin = first_aabbs[sort_axis];
         const T *const SCCD_RESTRICT first_xmax = first_aabbs[3 + sort_axis];
         const T *const SCCD_RESTRICT second_xmin = second_aabbs[sort_axis];
@@ -656,16 +668,10 @@ namespace sccd {
         ccdptr[0] = 0;
 
         if (first_xmax[first_count - 1] < second_xmin[0]) return false;
-
         if (second_xmax[second_count - 1] < first_xmin[0]) return false;
 
         sccd::parallel_for_br(0, first_count, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
-            ptrdiff_t ni = 0;
-            for (; ni < second_count; ni++) {
-                if (second_xmax[ni] > first_xmin[rbegin]) {
-                    break;
-                }
-            }
+            ptrdiff_t ni = std::lower_bound(cummax, cummax + second_count, first_xmin[rbegin]) - cummax;
 
             for (ptrdiff_t fi = rbegin; fi < rend; fi++) {
                 const T fimin = first_xmin[fi];
@@ -763,6 +769,7 @@ namespace sccd {
                           const ptrdiff_t second_stride,
                           I **SCCD_RESTRICT const second_elements,
                           const ptrdiff_t *const SCCD_RESTRICT ccdptr,
+                          const T *const SCCD_RESTRICT cummax,
                           I *SCCD_RESTRICT foverlap,
                           I *SCCD_RESTRICT noverlap) {
         const T *const SCCD_RESTRICT first_xmin = first_aabbs[sort_axis];
@@ -771,16 +778,10 @@ namespace sccd {
         const T *const SCCD_RESTRICT second_xmax = second_aabbs[3 + sort_axis];
 
         if (first_xmax[first_count - 1] < second_xmin[0]) return;
-
         if (second_xmax[second_count - 1] < first_xmin[0]) return;
 
         sccd::parallel_for_br(0, first_count, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
-            ptrdiff_t ni = 0;
-            for (; ni < second_count; ni++) {
-                if (second_xmax[ni] > first_xmin[rbegin]) {
-                    break;
-                }
-            }
+            ptrdiff_t ni = std::lower_bound(cummax, cummax + second_count, first_xmin[rbegin]) - cummax;
 
             for (ptrdiff_t fi = rbegin; fi < rend; fi++) {
                 const ptrdiff_t expected_count = ccdptr[fi + 1] - ccdptr[fi];
