@@ -122,10 +122,11 @@ int main(int argc, char** argv) {
         {
             SMESH_TRACE_SCOPE("Broadphase: F2V");
             auto cm = smesh::create_device_buffer<smesh::geom_t>(n_nodes);
+            smesh::geom_t* vaabb_max_axis = nullptr;
+            cudaMemcpy(
+                &vaabb_max_axis, vaabb->data() + dim + sort_axis, sizeof(vaabb_max_axis), cudaMemcpyDeviceToHost);
 
-            // TODO: get host pointer to vaabb->data()[dim + sort_axis]
-
-            sccd::device::cummax(n_nodes, vaabb->data()[dim + sort_axis], cm->data());
+            sccd::device::cummax(n_nodes, vaabb_max_axis, cm->data());
 
             sccd::device::count_overlaps<3, 1, smesh::geom_t, smesh::idx_t>(sort_axis,
                                                                             n_faces,
@@ -141,24 +142,27 @@ int main(int argc, char** argv) {
                                                                             ccdptr->data(),
                                                                             cm->data());
 
-            f_overlap = smesh::create_device_buffer<smesh::idx_t>(ccdptr->data()[n_faces]);
-            v_overlap = smesh::create_device_buffer<smesh::idx_t>(ccdptr->data()[n_faces]);
+            ptrdiff_t n_face_overlaps = 0;
+            cudaMemcpy(&n_face_overlaps, ccdptr->data() + n_faces, sizeof(n_face_overlaps), cudaMemcpyDeviceToHost);
 
-            sccd::collect_overlaps<3, 1, smesh::geom_t, smesh::idx_t>(sort_axis,
-                                                                      n_faces,
-                                                                      faabb->data(),
-                                                                      fidx->data(),
-                                                                      1,
-                                                                      t0->elements(0)->data(),
-                                                                      n_nodes,
-                                                                      vaabb->data(),
-                                                                      vidx->data(),
-                                                                      0,
-                                                                      nullptr,
-                                                                      ccdptr->data(),
-                                                                      cm->data(),
-                                                                      f_overlap->data(),
-                                                                      v_overlap->data());
+            f_overlap = smesh::create_device_buffer<smesh::idx_t>(n_face_overlaps);
+            v_overlap = smesh::create_device_buffer<smesh::idx_t>(n_face_overlaps);
+
+            sccd::device::collect_overlaps<3, 1, smesh::geom_t, smesh::idx_t>(sort_axis,
+                                                                              n_faces,
+                                                                              faabb->data(),
+                                                                              fidx->data(),
+                                                                              1,
+                                                                              t0->elements(0)->data(),
+                                                                              n_nodes,
+                                                                              vaabb->data(),
+                                                                              vidx->data(),
+                                                                              0,
+                                                                              nullptr,
+                                                                              ccdptr->data(),
+                                                                              cm->data(),
+                                                                              f_overlap->data(),
+                                                                              v_overlap->data());
         }
 
         // Narrow phase

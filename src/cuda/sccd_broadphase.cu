@@ -591,9 +591,6 @@ namespace sccd {
             const T* const SCCD_RESTRICT second_xmin = second_aabbs[sort_axis];
             const T* const SCCD_RESTRICT second_xmax = second_aabbs[3 + sort_axis];
 
-            const ptrdiff_t expected_count = ccdptr[fi + 1] - ccdptr[fi];
-            if (!expected_count) return;
-
             const T fimin = first_aabbs[sort_axis][fi];
             const T fimax = first_aabbs[3 + sort_axis][fi];
             const I first_idxi = first_idx[fi];
@@ -669,9 +666,14 @@ namespace sccd {
                             I* const SCCD_RESTRICT second_idx,
                             const ptrdiff_t second_stride,
                             I** const SCCD_RESTRICT second_elements,
-                            const T* const SCCD_RESTRICT cummax,
-                            ptrdiff_t* const SCCD_RESTRICT ccdptr) {
+                            ptrdiff_t* const SCCD_RESTRICT ccdptr,
+                            const T* const SCCD_RESTRICT cummax) {
             SCCD_CUDA_LAST_ERROR();
+
+            if (first_count <= 0) {
+                SCCD_CHECK_CUDA(cudaMemset(ccdptr, 0, sizeof(*ccdptr)));
+                return;
+            }
 
             dim3 block(SCCD_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
             dim3 grid((first_count + block.x - 1) / block.x);
@@ -688,6 +690,17 @@ namespace sccd {
                                                                                 second_elements,
                                                                                 cummax,
                                                                                 ccdptr);
+
+            SCCD_CUDA_LAST_ERROR();
+
+            void* tmp_storage = nullptr;
+            size_t tmp_storage_bytes = 0;
+            SCCD_CHECK_CUDA(
+                cub::DeviceScan::InclusiveSum(nullptr, tmp_storage_bytes, ccdptr, ccdptr, first_count + 1));
+            SCCD_CHECK_CUDA(cudaMalloc(&tmp_storage, tmp_storage_bytes));
+            SCCD_CHECK_CUDA(
+                cub::DeviceScan::InclusiveSum(tmp_storage, tmp_storage_bytes, ccdptr, ccdptr, first_count + 1));
+            SCCD_CHECK_CUDA(cudaFree(tmp_storage));
 
             SCCD_CUDA_LAST_ERROR();
         }
@@ -710,9 +723,6 @@ namespace sccd {
                                                 I* SCCD_RESTRICT noverlap) {
             ptrdiff_t fi = blockIdx.x * blockDim.x + threadIdx.x;
             if (fi >= first_count) return;
-            if (fi == 0) {
-                ccdptr[0] = 0;
-            }
 
             const T* const SCCD_RESTRICT first_xmin = first_aabbs[sort_axis];
             const T* const SCCD_RESTRICT first_xmax = first_aabbs[3 + sort_axis];
@@ -783,7 +793,7 @@ namespace sccd {
                     }
                 }
 
-                if (!share) continue;
+                if (share) continue;
                 first_local_elements[count] = first_idxi;
                 second_local_elements[count] = jidx;
                 count += 1;
@@ -883,8 +893,26 @@ namespace sccd {
                                                                             I* const SCCD_RESTRICT second_idx,       \
                                                                             const ptrdiff_t second_stride,           \
                                                                             I** const SCCD_RESTRICT second_elements, \
-                                                                            const T* const SCCD_RESTRICT cummax,     \
-                                                                            ptrdiff_t* const SCCD_RESTRICT ccdptr)
+                                                                            ptrdiff_t* const SCCD_RESTRICT ccdptr,   \
+                                                                            const T* const SCCD_RESTRICT cummax)
+
+#define INSTANTIATE_COLLECT_OVERLAPS(FIRST_NXE, SECOND_NXE, T, I)              \
+    template void sccd::device::collect_overlaps<FIRST_NXE, SECOND_NXE, T, I>( \
+        const int sort_axis,                                                   \
+        const ptrdiff_t first_count,                                           \
+        T** const SCCD_RESTRICT first_aabbs,                                   \
+        I* const SCCD_RESTRICT first_idx,                                      \
+        const ptrdiff_t first_stride,                                          \
+        I** const SCCD_RESTRICT first_elements,                                \
+        const ptrdiff_t second_count,                                          \
+        T** const SCCD_RESTRICT second_aabbs,                                  \
+        I* const SCCD_RESTRICT second_idx,                                     \
+        const ptrdiff_t second_stride,                                         \
+        I** const SCCD_RESTRICT second_elements,                               \
+        const ptrdiff_t* const SCCD_RESTRICT ccdptr,                           \
+        const T* const SCCD_RESTRICT cummax,                                   \
+        I* SCCD_RESTRICT foverlap,                                             \
+        I* SCCD_RESTRICT noverlap)
 
 INSTANTIATE_CHOOSE_AXIS(float);
 INSTANTIATE_CHOOSE_AXIS(double);
@@ -913,12 +941,20 @@ INSTANTIATE_COUNT_OVERLAPS(3, 1, float, int64_t);
 INSTANTIATE_COUNT_OVERLAPS(3, 1, double, int32_t);
 INSTANTIATE_COUNT_OVERLAPS(3, 1, double, int64_t);
 
+INSTANTIATE_COLLECT_OVERLAPS(3, 1, float, int32_t);
+INSTANTIATE_COLLECT_OVERLAPS(3, 1, float, int64_t);
+INSTANTIATE_COLLECT_OVERLAPS(3, 1, double, int32_t);
+INSTANTIATE_COLLECT_OVERLAPS(3, 1, double, int64_t);
+
 #undef INSTANTIATE_CHOOSE_AXIS
 #undef INSTANTIATE_ENUMERATE
 #undef INSTANTIATE_SORT_ALONG_AXIS
 #undef INSTANTIATE_COUNT_SELF_OVERLAPS
 #undef INSTANTIATE_COLLECT_SELF_OVERLAPS
 #undef INSTANTIATE_CUMMAX
+#undef INSTANTIATE_COUNT_OVERLAPS
+#undef INSTANTIATE_COLLECT_OVERLAPS
+
 // Clean-up kernel macros
 #undef SCCD_N_WARPS_PER_BLOCK
 #undef SCCD_WARP_SIZE
