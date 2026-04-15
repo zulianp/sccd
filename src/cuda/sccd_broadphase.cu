@@ -7,6 +7,7 @@
 #include <cstdlib>
 
 #include <cub/device/device_radix_sort.cuh>
+#include <cub/device/device_scan.cuh>
 
 #include "sccd_base.hpp"
 
@@ -14,8 +15,28 @@
 #define SCCD_WARP_SIZE 32
 #define SCCD_WARP_FULL_MASK 0xffffffff
 
+#ifndef MIN
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+#endif
+#ifndef MAX
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+#endif
+
 namespace sccd {
     namespace device {
+
+        void cuda_check(const cudaError_t error) {
+            if (error != cudaSuccess) {
+                fprintf(stderr, "CUDA error: %s\n", cudaGetErrorString(error));
+                exit(1);
+            }
+        }
+
+#define SCCD_CHECK_CUDA(error) \
+    cudaDeviceSynchronize();   \
+    cuda_check(error)
+
+#define SCCD_CUDA_LAST_ERROR() SCCD_CHECK_CUDA(cudaGetLastError())
 
         inline __device__ unsigned int lane_id() { return threadIdx.x % SCCD_WARP_SIZE; }
 
@@ -195,23 +216,18 @@ namespace sccd {
                              T* const SCCD_RESTRICT scratch) {
             if (n <= 0) return;
 
-            auto check_cuda = [](const cudaError_t error) {
-                if (error != cudaSuccess) {
-                    fprintf(stderr, "CUDA error: %s\n", cudaGetErrorString(error));
-                    exit(1);
-                }
-            };
+            SCCD_CUDA_LAST_ERROR();
 
             if (n == 1) {
                 enumerate<I>(0, n, idx);
-                check_cuda(cudaGetLastError());
+                SCCD_CUDA_LAST_ERROR();
                 return;
             }
 
             T* host_arrays[6] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
 
             if (is_ptr_device(arrays)) {
-                check_cuda(cudaMemcpy(host_arrays, arrays, 2 * dim * sizeof(T*), cudaMemcpyDeviceToHost));
+                SCCD_CHECK_CUDA(cudaMemcpy(host_arrays, arrays, 2 * dim * sizeof(T*), cudaMemcpyDeviceToHost));
             } else {
                 for (int d = 0; d < 2 * dim; d++) {
                     host_arrays[d] = arrays[d];
@@ -224,38 +240,330 @@ namespace sccd {
             void* tmp_storage = nullptr;
             size_t tmp_storage_bytes = 0;
 
-            check_cuda(cudaMalloc(&tmp_idx, n * sizeof(I)));
+            SCCD_CHECK_CUDA(cudaMalloc(&tmp_idx, n * sizeof(I)));
             enumerate<I>(0, n, tmp_idx);
-            check_cuda(cudaGetLastError());
+            SCCD_CUDA_LAST_ERROR();
 
-            check_cuda(cub::DeviceRadixSort::SortPairs(nullptr, tmp_storage_bytes, x, scratch, tmp_idx, idx, n));
-            check_cuda(cudaMalloc(&tmp_storage, tmp_storage_bytes));
-            check_cuda(cub::DeviceRadixSort::SortPairs(tmp_storage, tmp_storage_bytes, x, scratch, tmp_idx, idx, n));
+            SCCD_CHECK_CUDA(cub::DeviceRadixSort::SortPairs(nullptr, tmp_storage_bytes, x, scratch, tmp_idx, idx, n));
+            SCCD_CHECK_CUDA(cudaMalloc(&tmp_storage, tmp_storage_bytes));
+            SCCD_CHECK_CUDA(
+                cub::DeviceRadixSort::SortPairs(tmp_storage, tmp_storage_bytes, x, scratch, tmp_idx, idx, n));
 
-            check_cuda(cudaMemcpy(host_arrays[sort_axis], scratch, n * sizeof(T), cudaMemcpyDeviceToDevice));
+            SCCD_CHECK_CUDA(cudaMemcpy(host_arrays[sort_axis], scratch, n * sizeof(T), cudaMemcpyDeviceToDevice));
 
             dim3 block(SCCD_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
             dim3 grid((n + block.x - 1) / block.x);
             for (int d = 0; d < 2 * dim; d++) {
                 if (d == sort_axis) continue;
                 permute_kernel<T, I><<<grid, block>>>(n, idx, host_arrays[d], scratch);
-                check_cuda(cudaGetLastError());
-                check_cuda(cudaMemcpy(host_arrays[d], scratch, n * sizeof(T), cudaMemcpyDeviceToDevice));
+                SCCD_CUDA_LAST_ERROR();
+                SCCD_CHECK_CUDA(cudaMemcpy(host_arrays[d], scratch, n * sizeof(T), cudaMemcpyDeviceToDevice));
             }
 
-            check_cuda(cudaFree(tmp_storage));
-            check_cuda(cudaFree(tmp_idx));
+            SCCD_CHECK_CUDA(cudaFree(tmp_storage));
+            SCCD_CHECK_CUDA(cudaFree(tmp_idx));
+
+            SCCD_CUDA_LAST_ERROR();
         }
+
+        template <typename T>
+        static inline __device__ void compute_candidate_window_progressive(const T fimin,
+                                                                           const T fimax,
+                                                                           const T* const SCCD_RESTRICT second_xmax,
+                                                                           const T* const SCCD_RESTRICT second_xmin,
+                                                                           const ptrdiff_t second_count,
+                                                                           ptrdiff_t& begin,
+                                                                           ptrdiff_t& end) {
+            for (; begin < second_count; ++begin) {
+                if (fimin < second_xmax[begin]) {
+                    break;
+                }
+            }
+            end = begin;
+            for (; end < second_count; ++end) {
+                if (fimax < second_xmin[end]) {
+                    break;
+                }
+            }
+        }
+
+        template <int nxe, typename I>
+        static inline __device__ void load_ev(I** const SCCD_RESTRICT elements,
+                                              const I elem_idx,
+                                              const ptrdiff_t stride,
+                                              I (&out)[nxe]) {
+            for (int v = 0; v < nxe; ++v) {
+                out[v] = elements[v][elem_idx * stride];
+            }
+        }
+
+        template <int n1, int n2, typename I>
+        static inline __device__ bool shares_vertex(const I (&a)[n1], const I (&b)[n2]) {
+            for (int i = 0; i < n1; ++i) {
+                for (int j = 0; j < n2; ++j) {
+                    if (a[i] == b[j]) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        template <typename T>
+        static inline __device__ uint32_t disjoint(const T aminx,
+                                                   const T aminy,
+                                                   const T aminz,
+                                                   const T amaxx,
+                                                   const T amaxy,
+                                                   const T amaxz,
+                                                   const T bminx,
+                                                   const T bminy,
+                                                   const T bminz,
+                                                   const T bmaxx,
+                                                   const T bmaxy,
+                                                   const T bmaxz) {
+            return aminx > bmaxx | aminy > bmaxy | aminz > bmaxz | bminx > amaxx | bminy > amaxy | bminz > amaxz;
+        }
+
+        template <int nxe, typename T, typename I>
+        __global__ void count_self_overlaps_kernel(const int sort_axis,
+                                                   const ptrdiff_t element_count,
+                                                   T** const SCCD_RESTRICT aabbs,
+                                                   I* const SCCD_RESTRICT idx,
+                                                   const ptrdiff_t stride,
+                                                   I** const SCCD_RESTRICT elements,
+                                                   ptrdiff_t* const SCCD_RESTRICT ccdptr) {
+            ptrdiff_t fi = blockIdx.x * blockDim.x + threadIdx.x;
+            if (fi >= element_count) return;
+            if (fi == 0) {
+                ccdptr[0] = 0;
+            }
+
+            const T* const SCCD_RESTRICT xmin = aabbs[sort_axis];
+            const T* const SCCD_RESTRICT xmax = aabbs[3 + sort_axis];
+
+            const T fimin = xmin[fi];
+            const T fimax = xmax[fi];
+            const I idxi = idx[fi];
+
+            assert(idxi >= 0);
+            assert(idxi < element_count);
+
+            I ev[nxe];
+            for (int v = 0; v < nxe; v++) {
+                ev[v] = elements[v][idxi * stride];
+            }
+
+            ptrdiff_t begin = fi + 1;
+            ptrdiff_t end = begin;
+            compute_candidate_window_progressive(fimin, fimax, xmax, xmin, element_count, begin, end);
+
+            if (begin >= end) {
+                ccdptr[fi + 1] = 0;
+                return;
+            }
+
+            ptrdiff_t count = 0;
+            const T aminx = aabbs[0][fi];
+            const T aminy = aabbs[1][fi];
+            const T aminz = aabbs[2][fi];
+            const T amaxx = aabbs[3][fi];
+            const T amaxy = aabbs[4][fi];
+            const T amaxz = aabbs[5][fi];
+
+            for (ptrdiff_t j = begin; j < end; ++j) {
+                if (disjoint(aminx,
+                             aminy,
+                             aminz,
+                             amaxx,
+                             amaxy,
+                             amaxz,
+                             aabbs[0][j],
+                             aabbs[1][j],
+                             aabbs[2][j],
+                             aabbs[3][j],
+                             aabbs[4][j],
+                             aabbs[5][j])) {
+                    continue;
+                }
+                const I jidx = idx[j];
+                I sev[nxe];
+                load_ev<nxe>(elements, jidx, stride, sev);
+                const bool share = shares_vertex<nxe, nxe>(ev, sev);
+                count += share ? 0 : 1;
+            }
+
+            ccdptr[fi + 1] = count;
+        }
+
+        template <int nxe, typename T, typename I>
+        void count_self_overlaps(const int sort_axis,
+                                 const ptrdiff_t element_count,
+                                 T** const SCCD_RESTRICT aabbs,
+                                 I* const SCCD_RESTRICT idx,
+                                 const ptrdiff_t stride,
+                                 I** const SCCD_RESTRICT elements,
+                                 ptrdiff_t* const SCCD_RESTRICT ccdptr) {
+            SCCD_CUDA_LAST_ERROR();
+
+            if (element_count <= 0) {
+                SCCD_CHECK_CUDA(cudaMemset(ccdptr, 0, sizeof(*ccdptr)));
+                return;
+            }
+
+            dim3 block(SCCD_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
+            dim3 grid((element_count + block.x - 1) / block.x);
+            count_self_overlaps_kernel<nxe, T, I>
+                <<<grid, block>>>(sort_axis, element_count, aabbs, idx, stride, elements, ccdptr);
+            SCCD_CUDA_LAST_ERROR();
+
+            void* tmp_storage = nullptr;
+            size_t tmp_storage_bytes = 0;
+            SCCD_CHECK_CUDA(
+                cub::DeviceScan::InclusiveSum(nullptr, tmp_storage_bytes, ccdptr, ccdptr, element_count + 1));
+            SCCD_CHECK_CUDA(cudaMalloc(&tmp_storage, tmp_storage_bytes));
+            SCCD_CHECK_CUDA(
+                cub::DeviceScan::InclusiveSum(tmp_storage, tmp_storage_bytes, ccdptr, ccdptr, element_count + 1));
+            SCCD_CHECK_CUDA(cudaFree(tmp_storage));
+
+            SCCD_CUDA_LAST_ERROR();
+        }
+
+        template <int nxe, typename T, typename I>
+        __global__ void collect_self_overlaps_kernel(const int sort_axis,
+                                                     const ptrdiff_t element_count,
+                                                     T** const SCCD_RESTRICT aabbs,
+                                                     I* const SCCD_RESTRICT idx,
+                                                     const ptrdiff_t stride,
+                                                     I** const elements,
+                                                     const ptrdiff_t* const SCCD_RESTRICT ccdptr,
+                                                     I* SCCD_RESTRICT foverlap,
+                                                     I* SCCD_RESTRICT noverlap) {
+            ptrdiff_t fi = blockIdx.x * blockDim.x + threadIdx.x;
+            if (fi >= element_count) return;
+
+            const ptrdiff_t expected_count = ccdptr[fi + 1] - ccdptr[fi];
+            if (!expected_count) return;
+
+            const T fimin = aabbs[sort_axis][fi];
+            const T fimax = aabbs[3 + sort_axis][fi];
+            const I idxi = idx[fi];
+
+            I ev[nxe];
+            for (int v = 0; v < nxe; v++) {
+                ev[v] = elements[v][idxi * stride];
+            }
+
+            ptrdiff_t begin = fi + 1;
+            ptrdiff_t end = begin;
+            compute_candidate_window_progressive(
+                fimin, fimax, aabbs[3 + sort_axis], aabbs[sort_axis], element_count, begin, end);
+
+            if (begin >= end) {
+                return;
+            }
+
+            I* SCCD_RESTRICT const first_local_elements = &foverlap[ccdptr[fi]];
+            I* SCCD_RESTRICT const second_local_elements = &noverlap[ccdptr[fi]];
+
+            ptrdiff_t count = 0;
+            const T aminx = aabbs[0][fi];
+            const T aminy = aabbs[1][fi];
+            const T aminz = aabbs[2][fi];
+            const T amaxx = aabbs[3][fi];
+            const T amaxy = aabbs[4][fi];
+            const T amaxz = aabbs[5][fi];
+
+            for (ptrdiff_t j = begin; j < end; ++j) {
+                if (disjoint(aminx,
+                             aminy,
+                             aminz,
+                             amaxx,
+                             amaxy,
+                             amaxz,
+                             aabbs[0][j],
+                             aabbs[1][j],
+                             aabbs[2][j],
+                             aabbs[3][j],
+                             aabbs[4][j],
+                             aabbs[5][j])) {
+                    continue;
+                }
+                const I jidx = idx[j];
+                I sev[nxe];
+                load_ev<nxe>(elements, jidx, stride, sev);
+                if (shares_vertex<nxe, nxe>(ev, sev)) {
+                    continue;
+                }
+
+                first_local_elements[count] = MIN(idxi, jidx);
+                second_local_elements[count] = MAX(idxi, jidx);
+
+                count++;
+            }
+
+            assert(expected_count == count);
+        }
+
+        template <int nxe, typename T, typename I>
+        void collect_self_overlaps(const int sort_axis,
+                                   const ptrdiff_t element_count,
+                                   T** const SCCD_RESTRICT aabbs,
+                                   I* const SCCD_RESTRICT idx,
+                                   const ptrdiff_t stride,
+                                   I** const elements,
+                                   const ptrdiff_t* const SCCD_RESTRICT ccdptr,
+                                   I* SCCD_RESTRICT foverlap,
+                                   I* SCCD_RESTRICT noverlap) {
+            SCCD_CUDA_LAST_ERROR();
+
+            dim3 block(SCCD_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
+            dim3 grid((element_count + block.x - 1) / block.x);
+            collect_self_overlaps_kernel<nxe, T, I>
+                <<<grid, block>>>(sort_axis, element_count, aabbs, idx, stride, elements, ccdptr, foverlap, noverlap);
+
+            SCCD_CUDA_LAST_ERROR();
+        }
+
+        template <int first_nxe, int second_nxe, typename T, typename I>
+        __global__ void count_overlaps_kernel(const int sort_axis,
+                                              const ptrdiff_t first_count,
+                                              T** const SCCD_RESTRICT first_aabbs,
+                                              I* const SCCD_RESTRICT first_idx,
+                                              const ptrdiff_t first_stride,
+                                              I** const SCCD_RESTRICT first_elements,
+                                              const ptrdiff_t second_count,
+                                              T** const SCCD_RESTRICT second_aabbs,
+                                              I* const SCCD_RESTRICT second_idx,
+                                              const ptrdiff_t second_stride,
+                                              I** const SCCD_RESTRICT second_elements,
+                                              const T* const SCCD_RESTRICT cummax,
+                                              ptrdiff_t* const SCCD_RESTRICT ccdptr) {}
+
+        template <int first_nxe, int second_nxe, typename T, typename I>
+        void count_overlaps(const int sort_axis,
+                            const ptrdiff_t first_count,
+                            T** const SCCD_RESTRICT first_aabbs,
+                            I* const SCCD_RESTRICT first_idx,
+                            const ptrdiff_t first_stride,
+                            I** const SCCD_RESTRICT first_elements,
+                            const ptrdiff_t second_count,
+                            T** const SCCD_RESTRICT second_aabbs,
+                            I* const SCCD_RESTRICT second_idx,
+                            const ptrdiff_t second_stride,
+                            I** const SCCD_RESTRICT second_elements,
+                            const T* const SCCD_RESTRICT cummax,
+                            ptrdiff_t* const SCCD_RESTRICT ccdptr) {}
 
     }  // namespace device
 }  // namespace sccd
 
 #define INSTANTIATE_CHOOSE_AXIS(T)             \
     template int sccd::device::choose_axis<T>( \
-        const int dim, const ptrdiff_t n, const T* const SCCD_RESTRICT* const SCCD_RESTRICT aabbs);
+        const int dim, const ptrdiff_t n, const T* const SCCD_RESTRICT* const SCCD_RESTRICT aabbs)
 
 #define INSTANTIATE_ENUMERATE(T) \
-    template void sccd::device::enumerate<T>(const ptrdiff_t begin, const ptrdiff_t end, T* const SCCD_RESTRICT idx);
+    template void sccd::device::enumerate<T>(const ptrdiff_t begin, const ptrdiff_t end, T* const SCCD_RESTRICT idx)
 
 #define INSTANTIATE_SORT_ALONG_AXIS(T, I)                                             \
     template void sccd::device::sort_along_axis<T, I>(const int dim,                  \
@@ -263,7 +571,42 @@ namespace sccd {
                                                       const int sort_axis,            \
                                                       T** const SCCD_RESTRICT arrays, \
                                                       I* const SCCD_RESTRICT idx,     \
-                                                      T* const SCCD_RESTRICT scratch);
+                                                      T* const SCCD_RESTRICT scratch)
+
+#define INSTANTIATE_COUNT_SELF_OVERLAPS(NXE, T, I)                                               \
+    template void sccd::device::count_self_overlaps<NXE, T, I>(const int sort_axis,              \
+                                                               const ptrdiff_t element_count,    \
+                                                               T** const SCCD_RESTRICT aabbs,    \
+                                                               I* const SCCD_RESTRICT idx,       \
+                                                               const ptrdiff_t stride,           \
+                                                               I** const SCCD_RESTRICT elements, \
+                                                               ptrdiff_t* const SCCD_RESTRICT ccdptr)
+
+#define INSTANTIATE_COLLECT_SELF_OVERLAPS(NXE, T, I)                                                          \
+    template void sccd::device::collect_self_overlaps<NXE, T, I>(const int sort_axis,                         \
+                                                                 const ptrdiff_t element_count,               \
+                                                                 T** const SCCD_RESTRICT aabbs,               \
+                                                                 I* const SCCD_RESTRICT idx,                  \
+                                                                 const ptrdiff_t stride,                      \
+                                                                 I** const SCCD_RESTRICT elements,            \
+                                                                 const ptrdiff_t* const SCCD_RESTRICT ccdptr, \
+                                                                 I* SCCD_RESTRICT foverlap,                   \
+                                                                 I* SCCD_RESTRICT noverlap)
+
+#define INSTANTIATE_COUNT_OVERLAPS(FIRST_NXE, SECOND_NXE, T, I)                                                      \
+    template void sccd::device::count_overlaps<FIRST_NXE, SECOND_NXE, T, I>(const int sort_axis,                     \
+                                                                            const ptrdiff_t first_count,             \
+                                                                            T** const SCCD_RESTRICT first_aabbs,     \
+                                                                            I* const SCCD_RESTRICT first_idx,        \
+                                                                            const ptrdiff_t first_stride,            \
+                                                                            I** const SCCD_RESTRICT first_elements,  \
+                                                                            const ptrdiff_t second_count,            \
+                                                                            T** const SCCD_RESTRICT second_aabbs,    \
+                                                                            I* const SCCD_RESTRICT second_idx,       \
+                                                                            const ptrdiff_t second_stride,           \
+                                                                            I** const SCCD_RESTRICT second_elements, \
+                                                                            const T* const SCCD_RESTRICT cummax,     \
+                                                                            ptrdiff_t* const SCCD_RESTRICT ccdptr)
 
 INSTANTIATE_CHOOSE_AXIS(float);
 INSTANTIATE_CHOOSE_AXIS(double);
@@ -274,10 +617,26 @@ INSTANTIATE_SORT_ALONG_AXIS(float, int64_t);
 INSTANTIATE_SORT_ALONG_AXIS(double, int32_t);
 INSTANTIATE_SORT_ALONG_AXIS(double, int64_t);
 
+INSTANTIATE_COUNT_SELF_OVERLAPS(2, float, int32_t);
+INSTANTIATE_COUNT_SELF_OVERLAPS(2, float, int64_t);
+INSTANTIATE_COUNT_SELF_OVERLAPS(2, double, int32_t);
+INSTANTIATE_COUNT_SELF_OVERLAPS(2, double, int64_t);
+
+INSTANTIATE_COLLECT_SELF_OVERLAPS(2, float, int32_t);
+INSTANTIATE_COLLECT_SELF_OVERLAPS(2, float, int64_t);
+INSTANTIATE_COLLECT_SELF_OVERLAPS(2, double, int32_t);
+INSTANTIATE_COLLECT_SELF_OVERLAPS(2, double, int64_t);
+
+INSTANTIATE_COUNT_OVERLAPS(3, 1, float, int32_t);
+INSTANTIATE_COUNT_OVERLAPS(3, 1, float, int64_t);
+INSTANTIATE_COUNT_OVERLAPS(3, 1, double, int32_t);
+INSTANTIATE_COUNT_OVERLAPS(3, 1, double, int64_t);
+
 #undef INSTANTIATE_CHOOSE_AXIS
 #undef INSTANTIATE_ENUMERATE
 #undef INSTANTIATE_SORT_ALONG_AXIS
-
+#undef INSTANTIATE_COUNT_SELF_OVERLAPS
+#undef INSTANTIATE_COLLECT_SELF_OVERLAPS
 // Clean-up kernel macros
 #undef SCCD_N_WARPS_PER_BLOCK
 #undef SCCD_WARP_SIZE
