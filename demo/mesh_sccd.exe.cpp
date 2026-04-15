@@ -130,6 +130,7 @@ int main(int argc, char** argv) {
 
         {
             SMESH_TRACE_SCOPE("Broadphase: E2E");
+
             sccd::count_self_overlaps<2>(sort_axis, n_edges, eaabb, eidx->data(), 1, edges, ccdptr->data());
 
             e0_overlap = smesh::create_host_buffer<smesh::idx_t>(ccdptr->data()[n_edges]);
@@ -148,6 +149,10 @@ int main(int argc, char** argv) {
 
         {
             SMESH_TRACE_SCOPE("Broadphase: F2V");
+
+            auto cm = smesh::create_host_buffer<smesh::geom_t>(n_nodes);
+            sccd::cummax(n_nodes, vaabb[dim + sort_axis], cm->data());
+
             sccd::count_overlaps<3, 1, smesh::geom_t, smesh::idx_t>(sort_axis,
                                                                     n_faces,
                                                                     faabb,
@@ -159,7 +164,8 @@ int main(int argc, char** argv) {
                                                                     vidx->data(),
                                                                     0,
                                                                     nullptr,
-                                                                    ccdptr->data());
+                                                                    ccdptr->data(),
+                                                                    cm->data());
 
             f_overlap = smesh::create_host_buffer<smesh::idx_t>(ccdptr->data()[n_faces]);
             v_overlap = smesh::create_host_buffer<smesh::idx_t>(ccdptr->data()[n_faces]);
@@ -176,6 +182,7 @@ int main(int argc, char** argv) {
                                                                       0,
                                                                       nullptr,
                                                                       ccdptr->data(),
+                                                                      cm->data(),
                                                                       f_overlap->data(),
                                                                       v_overlap->data());
         }

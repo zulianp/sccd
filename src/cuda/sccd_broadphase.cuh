@@ -54,22 +54,9 @@ namespace sccd {
                             I* const SCCD_RESTRICT second_idx,
                             const ptrdiff_t second_stride,
                             I** const SCCD_RESTRICT second_elements,
-                            ptrdiff_t* const SCCD_RESTRICT ccdptr);
+                            ptrdiff_t* const SCCD_RESTRICT ccdptr,
+                            const T* const SCCD_RESTRICT cummax);
 
-        template <int first_nxe, int second_nxe, typename T, typename I>
-        void count_overlaps(const int sort_axis,
-                            const ptrdiff_t first_count,
-                            T** const SCCD_RESTRICT first_aabbs,
-                            I* const SCCD_RESTRICT first_idx,
-                            const ptrdiff_t first_stride,
-                            I** const SCCD_RESTRICT first_elements,
-                            const ptrdiff_t second_count,
-                            T** const SCCD_RESTRICT second_aabbs,
-                            I* const SCCD_RESTRICT second_idx,
-                            const ptrdiff_t second_stride,
-                            I** const SCCD_RESTRICT second_elements,
-                            const T* const SCCD_RESTRICT cummax,
-                            ptrdiff_t* const SCCD_RESTRICT ccdptr);
     }  // namespace device
 }  // namespace sccd
 
