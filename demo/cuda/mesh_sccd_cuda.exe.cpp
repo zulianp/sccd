@@ -121,21 +121,25 @@ int main(int argc, char** argv) {
 
         {
             SMESH_TRACE_SCOPE("Broadphase: F2V");
-            //         sccd::count_overlaps<3, 1, smesh::geom_t, smesh::idx_t>(sort_axis,
-            //                                                                 n_faces,
-            //                                                                 faabb,
-            //                                                                 fidx->data(),
-            //                                                                 1,
-            //                                                                 t0->elements(0)->data(),
-            //                                                                 n_nodes,
-            //                                                                 vaabb,
-            //                                                                 vidx->data(),
-            //                                                                 0,
-            //                                                                 nullptr,
-            //                                                                 ccdptr->data());
+            auto cm = smesh::create_device_buffer<smesh::geom_t>(n_nodes);
+            sccd::device::cummax(n_nodes, vaabb[dim + sort_axis], cm->data());
 
-            //         f_overlap = smesh::create_host_buffer<smesh::idx_t>(ccdptr->data()[n_faces]);
-            //         v_overlap = smesh::create_host_buffer<smesh::idx_t>(ccdptr->data()[n_faces]);
+            sccd::device::count_overlaps<3, 1, smesh::geom_t, smesh::idx_t>(sort_axis,
+                                                                            n_faces,
+                                                                            faabb,
+                                                                            fidx->data(),
+                                                                            1,
+                                                                            t0->elements(0)->data(),
+                                                                            n_nodes,
+                                                                            vaabb,
+                                                                            vidx->data(),
+                                                                            0,
+                                                                            nullptr,
+                                                                            ccdptr->data(),
+                                                                            cm->data());
+
+            f_overlap = smesh::create_device_buffer<smesh::idx_t>(ccdptr->data()[n_faces]);
+            v_overlap = smesh::create_device_buffer<smesh::idx_t>(ccdptr->data()[n_faces]);
 
             //         sccd::collect_overlaps<3, 1, smesh::geom_t, smesh::idx_t>(sort_axis,
             //                                                                   n_faces,

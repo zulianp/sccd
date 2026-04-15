@@ -42,6 +42,9 @@ namespace sccd {
                                    I* SCCD_RESTRICT foverlap,
                                    I* SCCD_RESTRICT noverlap);
 
+        template <typename T>
+        void cummax(const ptrdiff_t n, const T* const SCCD_RESTRICT in, T* const SCCD_RESTRICT out);
+
         template <int first_nxe, int second_nxe, typename T, typename I>
         bool count_overlaps(const int sort_axis,
                             const ptrdiff_t first_count,
