@@ -82,6 +82,8 @@ namespace sccd {
                     atomicAdd(result, acc);
                 }
             }
+
+            __syncthreads();
         }
 
         template <typename T>
@@ -175,7 +177,7 @@ namespace sccd {
             int fargmax = 0;
             T fmax = hvar[0];
 
-            for (int d = 1; d < 3; d++) {
+            for (int d = 1; d < dim; d++) {
                 if (fmax < hvar[d]) {
                     fmax = hvar[d];
                     fargmax = d;
@@ -595,6 +597,9 @@ namespace sccd {
             const T fimax = first_aabbs[3 + sort_axis][fi];
             const I first_idxi = first_idx[fi];
 
+            assert(first_idxi >= 0);
+            assert(first_idxi < first_count);
+
             I ev[first_nxe];
             for (int v = 0; v < first_nxe; v++) {
                 ev[v] = first_elements[v][first_idxi * first_stride];
@@ -633,8 +638,10 @@ namespace sccd {
                     continue;
                 }
                 bool share = false;
+                const I jidx = second_idx[j];
+                assert(jidx >= 0);
+                assert(jidx < second_count);
                 if constexpr (second_nxe > 1) {
-                    const I jidx = second_idx[j];
                     I sev[second_nxe];
                     for (int v = 0; v < second_nxe; ++v) {
                         sev[v] = second_elements[v][jidx * second_stride];
@@ -642,7 +649,7 @@ namespace sccd {
                     share = shares_vertex<first_nxe, second_nxe>(ev, sev);
                 } else {
                     for (int a = 0; a < first_nxe; ++a) {
-                        if (ev[a] == second_idx[j]) {
+                        if (ev[a] == jidx) {
                             share = true;
                             break;
                         }
@@ -695,8 +702,7 @@ namespace sccd {
 
             void* tmp_storage = nullptr;
             size_t tmp_storage_bytes = 0;
-            SCCD_CHECK_CUDA(
-                cub::DeviceScan::InclusiveSum(nullptr, tmp_storage_bytes, ccdptr, ccdptr, first_count + 1));
+            SCCD_CHECK_CUDA(cub::DeviceScan::InclusiveSum(nullptr, tmp_storage_bytes, ccdptr, ccdptr, first_count + 1));
             SCCD_CHECK_CUDA(cudaMalloc(&tmp_storage, tmp_storage_bytes));
             SCCD_CHECK_CUDA(
                 cub::DeviceScan::InclusiveSum(tmp_storage, tmp_storage_bytes, ccdptr, ccdptr, first_count + 1));
@@ -735,6 +741,9 @@ namespace sccd {
             const T fimin = first_aabbs[sort_axis][fi];
             const T fimax = first_aabbs[3 + sort_axis][fi];
             const I first_idxi = first_idx[fi];
+
+            assert(first_idxi >= 0);
+            assert(first_idxi < first_count);
 
             I ev[first_nxe];
             for (int v = 0; v < first_nxe; v++) {
@@ -778,6 +787,9 @@ namespace sccd {
                 bool share = false;
                 const I jidx = second_idx[j];
 
+                assert(jidx >= 0);
+                assert(jidx < second_count);
+
                 if constexpr (second_nxe > 1) {
                     I sev[second_nxe];
                     for (int v = 0; v < second_nxe; ++v) {
@@ -798,6 +810,8 @@ namespace sccd {
                 second_local_elements[count] = jidx;
                 count += 1;
             }
+
+            assert(expected_count == count);
         }
 
         template <int first_nxe, int second_nxe, typename T, typename I>
