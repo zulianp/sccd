@@ -356,7 +356,7 @@ namespace sccd {
 
                 if (root) {
                     if (or_left_contains_origin) {
-                        if (level < SCCD_MAX_STACK_SIZE && tlower < max_toi) {
+                        if (level < SCCD_MAX_STACK_SIZE && tlower < current_toi) {
                             stack_tlower[stack_size] = tlower;
                             stack_tupper[stack_size] = tmid;
                             stack_level[stack_size] = level + 1;
@@ -411,7 +411,7 @@ namespace sccd {
 
                 if (root) {
                     if (or_right_contains_origin) {
-                        if (level < SCCD_MAX_STACK_SIZE && tmid < max_toi) {
+                        if (level < SCCD_MAX_STACK_SIZE && tmid < current_toi) {
                             stack_tlower[stack_size] = tmid;
                             stack_tupper[stack_size] = tupper;
                             stack_level[stack_size] = level + 1;
