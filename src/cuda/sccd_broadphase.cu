@@ -10,81 +10,14 @@
 #include <cub/device/device_scan.cuh>
 
 #include "sccd_base.hpp"
+#include "sccd_cuda_base.cuh"
 
-#define SCCD_N_WARPS_PER_BLOCK 8
-#define SCCD_WARP_SIZE 32
-#define SCCD_WARP_FULL_MASK 0xffffffff
+#include "sccd_reduce.cuh"
 
-#ifndef MIN
-#define MIN(a, b) ((a) < (b) ? (a) : (b))
-#endif
-#ifndef MAX
-#define MAX(a, b) ((a) > (b) ? (a) : (b))
-#endif
+#define SCCD_BP_N_WARPS_PER_BLOCK 8
 
 namespace sccd {
     namespace device {
-
-        void cuda_check(const cudaError_t error) {
-            if (error != cudaSuccess) {
-                fprintf(stderr, "CUDA error: %s\n", cudaGetErrorString(error));
-                exit(1);
-            }
-        }
-
-#define SCCD_CHECK_CUDA(error) \
-    cudaDeviceSynchronize();   \
-    cuda_check(error)
-
-#define SCCD_CUDA_LAST_ERROR() SCCD_CHECK_CUDA(cudaGetLastError())
-
-        inline __device__ unsigned int lane_id() { return threadIdx.x % SCCD_WARP_SIZE; }
-
-        template <typename T>
-        struct device_max_op {
-            __host__ __device__ __forceinline__ T operator()(const T& a, const T& b) const { return a > b ? a : b; }
-        };
-
-        template <typename T>
-        __device__ T warp_reduce_32(const T in) {
-            static_assert(SCCD_WARP_SIZE == 32, "Only implemented for CUDA!");
-            T out = in;
-            out += __shfl_xor_sync(SCCD_WARP_FULL_MASK, out, 16, SCCD_WARP_SIZE);  // 0-16, 1-17, ..., 15-31
-            out += __shfl_xor_sync(SCCD_WARP_FULL_MASK, out, 8, SCCD_WARP_SIZE);   // 0-8, ..., 1-7, ..., 23-31
-            out += __shfl_xor_sync(SCCD_WARP_FULL_MASK, out, 4, SCCD_WARP_SIZE);
-            out += __shfl_xor_sync(SCCD_WARP_FULL_MASK, out, 2, SCCD_WARP_SIZE);
-            out += __shfl_xor_sync(SCCD_WARP_FULL_MASK, out, 1, SCCD_WARP_SIZE);
-            return out;
-        }
-
-        template <typename T>
-        __device__ void t_warp_reduce(const T val,
-                                      T* const SCCD_RESTRICT block_accumulator,
-                                      T* const SCCD_RESTRICT result) {
-            T acc = warp_reduce_32(val);
-            const unsigned int warp_id = threadIdx.x / SCCD_WARP_SIZE;
-            const unsigned int lid = lane_id();
-            const unsigned int n_warps = (blockDim.x + SCCD_WARP_SIZE - 1) / SCCD_WARP_SIZE;
-
-            if (!lid) {
-                block_accumulator[warp_id] = acc;
-            }
-
-            __syncthreads();
-
-            if (!warp_id) {
-                assert(warp_id < SCCD_N_WARPS_PER_BLOCK);
-                acc = lid < n_warps ? block_accumulator[lid] : 0;
-                acc = warp_reduce_32(acc);
-
-                if (!threadIdx.x) {
-                    assert(acc == acc);
-                    atomicAdd(result, acc);
-                }
-            }
-
-            __syncthreads();
-        }
 
         template <typename T>
         __device__ __forceinline__ const T* lower_bound(const T* const SCCD_RESTRICT begin,
@@ -125,7 +58,7 @@ namespace sccd {
                 local_mean[d] += p;
             }
 
-            __shared__ T block_accumulator[SCCD_N_WARPS_PER_BLOCK];
+            __shared__ T block_accumulator[SCCD_BP_N_WARPS_PER_BLOCK];
             for (int d = 0; d < dim; d++) {
                 t_warp_reduce<T>(local_mean[d], block_accumulator, &mean[d]);
             }
@@ -147,7 +80,7 @@ namespace sccd {
                 local_var[d] += (p - m) * (p - m);
             }
 
-            __shared__ T block_accumulator[SCCD_N_WARPS_PER_BLOCK];
+            __shared__ T block_accumulator[SCCD_BP_N_WARPS_PER_BLOCK];
             for (int d = 0; d < dim; d++) {
                 t_warp_reduce<T>(local_var[d], block_accumulator, &var[d]);
             }
@@ -155,7 +88,7 @@ namespace sccd {
 
         template <typename T>
         int choose_axis(const int dim, const ptrdiff_t n, const T* const SCCD_RESTRICT* const SCCD_RESTRICT aabbs) {
-            dim3 block(SCCD_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
+            dim3 block(SCCD_BP_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
             dim3 grid((n + block.x - 1) / block.x);
 
             T* mean = nullptr;
@@ -205,7 +138,7 @@ namespace sccd {
 
         template <typename T>
         void enumerate(const ptrdiff_t begin, const ptrdiff_t end, T* const SCCD_RESTRICT idx) {
-            dim3 block(SCCD_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
+            dim3 block(SCCD_BP_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
             dim3 grid((end - begin + block.x - 1) / block.x);
             enumerate_kernel<T><<<grid, block>>>(begin, end, idx);
         }
@@ -293,7 +226,7 @@ namespace sccd {
 
             SCCD_CHECK_CUDA(cudaMemcpy(host_arrays[sort_axis], scratch, n * sizeof(T), cudaMemcpyDeviceToDevice));
 
-            dim3 block(SCCD_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
+            dim3 block(SCCD_BP_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
             dim3 grid((n + block.x - 1) / block.x);
             for (int d = 0; d < 2 * dim; d++) {
                 if (d == sort_axis) continue;
@@ -453,7 +386,7 @@ namespace sccd {
                 return;
             }
 
-            dim3 block(SCCD_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
+            dim3 block(SCCD_BP_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
             dim3 grid((element_count + block.x - 1) / block.x);
             count_self_overlaps_kernel<nxe, T, I>
                 <<<grid, block>>>(sort_axis, element_count, aabbs, idx, stride, elements, ccdptr);
@@ -559,7 +492,7 @@ namespace sccd {
                                    I* SCCD_RESTRICT noverlap) {
             SCCD_CUDA_LAST_ERROR();
 
-            dim3 block(SCCD_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
+            dim3 block(SCCD_BP_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
             dim3 grid((element_count + block.x - 1) / block.x);
             collect_self_overlaps_kernel<nxe, T, I>
                 <<<grid, block>>>(sort_axis, element_count, aabbs, idx, stride, elements, ccdptr, foverlap, noverlap);
@@ -695,7 +628,7 @@ namespace sccd {
                 return;
             }
 
-            dim3 block(SCCD_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
+            dim3 block(SCCD_BP_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
             dim3 grid((first_count + block.x - 1) / block.x);
             count_overlaps_kernel<first_nxe, second_nxe, T, I><<<grid, block>>>(sort_axis,
                                                                                 first_count,
@@ -845,7 +778,7 @@ namespace sccd {
                               I* SCCD_RESTRICT noverlap) {
             SCCD_CUDA_LAST_ERROR();
 
-            dim3 block(SCCD_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
+            dim3 block(SCCD_BP_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
             dim3 grid((first_count + block.x - 1) / block.x);
             collect_overlaps_kernel<first_nxe, second_nxe, T, I><<<grid, block>>>(sort_axis,
                                                                                   first_count,
@@ -909,7 +842,7 @@ namespace sccd {
         const ptrdiff_t n, const T* const SCCD_RESTRICT in, T* const SCCD_RESTRICT out)
 
 #define INSTANTIATE_SOA_DEVICE_ROW(T) \
-    template T* sccd::device::soa_device_row<T>(T** const SCCD_RESTRICT arrays, const int dim, const int row)
+    template T* sccd::device::soa_device_row<T>(T * * const SCCD_RESTRICT arrays, const int dim, const int row)
 
 #define INSTANTIATE_COUNT_OVERLAPS(FIRST_NXE, SECOND_NXE, T, I)                                                      \
     template void sccd::device::count_overlaps<FIRST_NXE, SECOND_NXE, T, I>(const int sort_axis,                     \
@@ -990,6 +923,4 @@ INSTANTIATE_COLLECT_OVERLAPS(3, 1, double, int64_t);
 #undef INSTANTIATE_COLLECT_OVERLAPS
 
 // Clean-up kernel macros
-#undef SCCD_N_WARPS_PER_BLOCK
-#undef SCCD_WARP_SIZE
-#undef SCCD_WARP_FULL_MASK
+#undef SCCD_BP_N_WARPS_PER_BLOCK

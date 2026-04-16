@@ -9,6 +9,7 @@
 #include "sccd_config.hpp"
 
 #include "sccd_broadphase.cuh"
+#include "sccd_narrowphase.cuh"
 #include "sccd_vaabb.cuh"
 
 #include <cuda_runtime_api.h>
@@ -171,27 +172,27 @@ int main(int argc, char** argv) {
 
         {
             SMESH_TRACE_SCOPE("Narrow phase: F2V");
-            toi_vf = sccd::device::narrow_phase_vf<3, smesh::geom_t>(v_overlap->size(),
-                                                                     v_overlap->data(),
-                                                                     f_overlap->data(),
-                                                                     points0->data(),
-                                                                     points1->data(),
-                                                                     1,
-                                                                     faces->data(),
-                                                                     toi);
+            toi_vf = sccd::device::narrow_phase_vf<3, smesh::geom_t, smesh::idx_t>(v_overlap->size(),
+                                                                                   v_overlap->data(),
+                                                                                   f_overlap->data(),
+                                                                                   points0->data(),
+                                                                                   points1->data(),
+                                                                                   1,
+                                                                                   faces->data(),
+                                                                                   toi);
             toi = toi_vf;
         }
 
         {
             SMESH_TRACE_SCOPE("Narrow phase: E2E");
-            toi_ee = sccd::device::narrow_phase_ee<smesh::geom_t>(e0_overlap->size(),
-                                                                  e0_overlap->data(),
-                                                                  e1_overlap->data(),
-                                                                  points0->data(),
-                                                                  points1->data(),
-                                                                  1,
-                                                                  edges->data(),
-                                                                  toi);
+            toi_ee = sccd::device::narrow_phase_ee<smesh::geom_t, smesh::idx_t>(e0_overlap->size(),
+                                                                                e0_overlap->data(),
+                                                                                e1_overlap->data(),
+                                                                                points0->data(),
+                                                                                points1->data(),
+                                                                                1,
+                                                                                edges->data(),
+                                                                                toi);
             toi = toi_ee;
         }
 
