@@ -1,8 +1,13 @@
 #include "sccd_narrowphase.cuh"
 
+#include <stdint.h>
+
+#include "sccd_cuda_base.cuh"
+
 namespace sccd {
     namespace device {
 
+        template <typename T, typename Vec4>
         __device__ void sample_f_ee(const T tl,
                                     const T tu,
                                     const T ul,
@@ -26,7 +31,7 @@ namespace sccd {
 
             // Compute temporal displacements for upper bound
             {
-                Vec4 xt = tu * dy + sy;
+                Vec4 xt = tu * dx + sx;
                 f[4] = ((xt[1] - xt[0]) * ul + xt[0] - (xt[3] - xt[2]) * vl + xt[2]);
                 f[5] = ((xt[1] - xt[0]) * ul + xt[0] - (xt[3] - xt[2]) * vu + xt[2]);
                 f[6] = ((xt[1] - xt[0]) * uu + xt[0] - (xt[3] - xt[2]) * vl + xt[2]);
@@ -34,7 +39,8 @@ namespace sccd {
             }
         }
 
-        __device__ void fminmax(const T* const f, T& fmin, T& fmax) {
+        template <typename T>
+        __device__ void fminmax(const T* const SCCD_RESTRICT f, T& fmin, T& fmax) {
             fmin = f[0];
             fmax = f[0];
             for (int i = 1; i < 8; i++) {
@@ -43,22 +49,24 @@ namespace sccd {
             }
         }
 
+#define MASK_FULL 0xf
 #define MASK_DOMAIN_SMALLER_THAN_TOL 1
 #define MASK_BOX_INSIDE_EPSILON_BOX 2
 #define MASK_REAL_TOLERANCE_SMALLER_THAN_INT_TOLERANCE 4
 #define MASK_INTERVAL_TERMINAL 8
 
+        template <typename T>
         __device__ uint8_t cond_mask(const T fmin, const T fmax, const T tol, const T adaptive_tol) {
-            uint8_t cond1 = (fmax - fmin <= adaptive_tol);
-            uint8_t cond2 = !((fmin < tol) | (fmax > -tol));
-            uint8_t cond3 = (fmax - fmin < tol);
-            uint8_t cond4 = (fmin >= fmax);
+            bool cond1 = (fmax - fmin <= adaptive_tol);
+            bool cond2 = !((fmin < tol) | (fmax > -tol));
+            bool cond3 = (fmax - fmin < tol);
+            bool cond4 = (fmin >= fmax);
 
-            uint8_t cond_mask = cond1 & MASK_DOMAIN_SMALLER_THAN_TOL;
-            cond_mask |= cond2 & MASK_BOX_INSIDE_EPSILON_BOX;
-            cond_mask |= cond3 & MASK_REAL_TOLERANCE_SMALLER_THAN_INT_TOLERANCE;
-            cond_mask |= cond4 & MASK_INTERVAL_TERMINAL;
-            cond_mask &= ((fmin <= tol) & ((fmax >= -tol) ? 0xf : 0));
+            uint8_t cond_mask = (cond1 ? MASK_DOMAIN_SMALLER_THAN_TOL : 0);
+            cond_mask |= (cond2 ? MASK_BOX_INSIDE_EPSILON_BOX : 0);
+            cond_mask |= (cond3 ? MASK_REAL_TOLERANCE_SMALLER_THAN_INT_TOLERANCE : 0);
+            cond_mask |= (cond4 ? MASK_INTERVAL_TERMINAL : 0);
+            cond_mask &= ((fmin <= tol) & ((fmax >= -tol) ? MASK_FULL : 0));
             return cond_mask;
         }
 
@@ -122,6 +130,21 @@ namespace sccd {
         }
 
         template <typename T, typename I>
+        __global__ void narrow_phase_ee_kernel(const size_t noverlaps,
+                                               const I* const SCCD_RESTRICT e0overalp,
+                                               const I* const SCCD_RESTRICT e1overalp,
+                                               // Geometric data
+                                               T** const SCCD_RESTRICT v0,
+                                               T** const SCCD_RESTRICT v1,
+                                               const size_t edge_stride,
+                                               I** const SCCD_RESTRICT edges,
+                                               // Output
+                                               const T max_toi,
+                                               T* SCCD_RESTRICT toi) {
+            // TODO: Implement
+        }
+
+        template <typename T, typename I>
         T narrow_phase_ee(const size_t noverlaps,
                           const I* const SCCD_RESTRICT e0overalp,
                           const I* const SCCD_RESTRICT e1overalp,
@@ -132,7 +155,25 @@ namespace sccd {
                           I** const SCCD_RESTRICT edges,
                           // Output
                           const T max_toi) {
-            return max_toi;
+            SCCD_CUDA_LAST_ERROR();
+
+            dim3 block(1024);
+            dim3 grid((noverlaps + block.x - 1) / block.x);
+
+            T* d_toi = nullptr;
+            cudaMalloc(&d_toi, noverlaps * sizeof(T));
+
+            narrow_phase_ee_kernel<T, I>
+                <<<grid, block>>>(noverlaps, e0overalp, e1overalp, v0, v1, edge_stride, edges, max_toi, d_toi);
+
+            SCCD_CUDA_LAST_ERROR();
+
+            T h_toi;
+            cudaMemcpy(&h_toi, d_toi, sizeof(T), cudaMemcpyDeviceToHost);
+            cudaFree(d_toi);
+
+            SCCD_CUDA_LAST_ERROR();
+            return h_toi;
         }
 
         template <int nxe, typename T, typename I>
