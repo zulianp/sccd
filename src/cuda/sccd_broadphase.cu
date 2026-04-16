@@ -60,7 +60,7 @@ namespace sccd {
 
             __shared__ T block_accumulator[SCCD_BP_N_WARPS_PER_BLOCK];
             for (int d = 0; d < dim; d++) {
-                t_warp_reduce<T>(local_mean[d], block_accumulator, &mean[d]);
+                block_reduce_to_gmem<T>(local_mean[d], block_accumulator, &mean[d]);
             }
         }
 
@@ -82,7 +82,7 @@ namespace sccd {
 
             __shared__ T block_accumulator[SCCD_BP_N_WARPS_PER_BLOCK];
             for (int d = 0; d < dim; d++) {
-                t_warp_reduce<T>(local_var[d], block_accumulator, &var[d]);
+                block_reduce_to_gmem<T>(local_var[d], block_accumulator, &var[d]);
             }
         }
 

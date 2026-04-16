@@ -3,9 +3,97 @@
 #include <stdint.h>
 
 #include "sccd_cuda_base.cuh"
+#include "sccd_reduce.cuh"
 
 namespace sccd {
     namespace device {
+
+        template <typename T, typename Vec4>
+        static inline __device__ void compute_edge_edge_tolerance_soa(const T codomain_tol,
+                                                                      const Vec4 sx,
+                                                                      const Vec4 sy,
+                                                                      const Vec4 sz,
+                                                                      const Vec4 ex,
+                                                                      const Vec4 ey,
+                                                                      const Vec4 ez,
+                                                                      T* const SCCD_RESTRICT tol0,
+                                                                      T* const SCCD_RESTRICT tol1,
+                                                                      T* const SCCD_RESTRICT tol2) {
+            const T v0sx = sx.x;
+            const T v0sy = sy.x;
+            const T v0sz = sz.x;
+            const T v1sx = sx.y;
+            const T v1sy = sy.y;
+            const T v1sz = sz.y;
+            const T v2sx = sx.z;
+            const T v2sy = sy.z;
+            const T v2sz = sz.z;
+            const T v3sx = sx.w;
+            const T v3sy = sy.w;
+            const T v3sz = sz.w;
+            const T v0ex = ex.x;
+            const T v0ey = ey.x;
+            const T v0ez = ez.x;
+            const T v1ex = ex.y;
+            const T v1ey = ey.y;
+            const T v1ez = ez.y;
+            const T v2ex = ex.z;
+            const T v2ey = ey.z;
+            const T v2ez = ez.z;
+            const T v3ex = ex.w;
+            const T v3ey = ey.w;
+            const T v3ez = ez.w;
+
+            const T ssa0 = v0ex - v0sx;
+            const T ssa1 = -v2ex + v2sx;
+            const T ssa2 = -v3ex + v3sx;
+            const T ssa3 = v0ey - v0sy;
+            const T ssa4 = -v2ey + v2sy;
+            const T ssa5 = -v3ey + v3sy;
+            const T ssa6 = v0ez - v0sz;
+            const T ssa7 = -v2ez + v2sz;
+            const T ssa8 = -v3ez + v3sz;
+            const T ssa9 = -v1sx;
+            const T ssa10 = ssa9 + v1ex;
+            const T ssa11 = -v1sy;
+            const T ssa12 = ssa11 + v1ey;
+            const T ssa13 = -v1sz;
+            const T ssa14 = ssa13 + v1ez;
+            const T ssa15 = (1.0 / 3.0) * codomain_tol;
+            const T ssa16 =
+                ssa15 / device::max<T>(
+                            device::abs<T>(ssa0 + ssa1),
+                            device::max<T>(
+                                device::abs<T>(ssa0 + ssa2),
+                                device::max<T>(
+                                    device::abs<T>(ssa1 + ssa10),
+                                    device::max<T>(
+                                        device::abs<T>(ssa10 + ssa2),
+                                        device::max<T>(
+                                            device::abs<T>(ssa12 + ssa4),
+                                            device::max<T>(
+                                                device::abs<T>(ssa12 + ssa5),
+                                                device::max<T>(
+                                                    device::abs<T>(ssa14 + ssa7),
+                                                    device::max<T>(
+                                                        device::abs<T>(ssa14 + ssa8),
+                                                        device::max<T>(
+                                                            device::abs<T>(ssa3 + ssa4),
+                                                            device::max<T>(
+                                                                device::abs<T>(ssa3 + ssa5),
+                                                                device::max<T>(device::abs<T>(ssa6 + ssa7),
+                                                                               device::abs<T>(ssa6 + ssa8))))))))))));
+            *tol0 = ssa16;
+            *tol1 = ssa16;
+            *tol2 = ssa15 /
+                    device::max<T>(
+                        device::abs<T>(ssa11 + v0sy),
+                        device::max<T>(device::abs<T>(ssa13 + v0sz),
+                                       device::max<T>(device::abs<T>(ssa9 + v0sx),
+                                                      device::max<T>(device::abs<T>(v0ex - v1ex),
+                                                                     device::max<T>(device::abs<T>(v0ey - v1ey),
+                                                                                    device::abs<T>(v0ez - v1ez))))));
+        }
 
         template <typename T, typename Vec4>
         __device__ void sample_f_ee(const T tl,
@@ -23,19 +111,19 @@ namespace sccd {
             // Compute temporal displacements for lower bound
             {
                 Vec4 xt = tl * dx + sx;
-                f[0] = ((xt[1] - xt[0]) * ul + xt[0] - (xt[3] - xt[2]) * vl + xt[2]);
-                f[1] = ((xt[1] - xt[0]) * ul + xt[0] - (xt[3] - xt[2]) * vu + xt[2]);
-                f[2] = ((xt[1] - xt[0]) * uu + xt[0] - (xt[3] - xt[2]) * vl + xt[2]);
-                f[3] = ((xt[1] - xt[0]) * uu + xt[0] - (xt[3] - xt[2]) * vu + xt[2]);
+                f[0] = ((xt.y - xt.x) * ul + xt.x - (xt.w - xt.y) * vl + xt.y);
+                f[1] = ((xt.y - xt.x) * ul + xt.x - (xt.w - xt.y) * vu + xt.y);
+                f[2] = ((xt.y - xt.x) * uu + xt.x - (xt.w - xt.y) * vl + xt.y);
+                f[3] = ((xt.y - xt.x) * uu + xt.x - (xt.w - xt.y) * vu + xt.y);
             }
 
             // Compute temporal displacements for upper bound
             {
                 Vec4 xt = tu * dx + sx;
-                f[4] = ((xt[1] - xt[0]) * ul + xt[0] - (xt[3] - xt[2]) * vl + xt[2]);
-                f[5] = ((xt[1] - xt[0]) * ul + xt[0] - (xt[3] - xt[2]) * vu + xt[2]);
-                f[6] = ((xt[1] - xt[0]) * uu + xt[0] - (xt[3] - xt[2]) * vl + xt[2]);
-                f[7] = ((xt[1] - xt[0]) * uu + xt[0] - (xt[3] - xt[2]) * vu + xt[2]);
+                f[4] = ((xt.y - xt.x) * ul + xt.x - (xt.w - xt.y) * vl + xt.y);
+                f[5] = ((xt.y - xt.x) * ul + xt.x - (xt.w - xt.y) * vu + xt.y);
+                f[6] = ((xt.y - xt.x) * uu + xt.x - (xt.w - xt.y) * vl + xt.y);
+                f[7] = ((xt.y - xt.x) * uu + xt.x - (xt.w - xt.y) * vu + xt.y);
             }
         }
 
@@ -88,9 +176,9 @@ namespace sccd {
                                            const Vec4 ey,
                                            const Vec4 ez,
                                            const T tol,
-                                           const T adaptive_tol,
-                                           bool* const SCCD_RESTRICT contains_origin,
-                                           bool* const SCCD_RESTRICT accept) {
+                                           const T* const SCCD_RESTRICT adaptive_tol,
+                                           int* const SCCD_RESTRICT contains_origin,
+                                           int* const SCCD_RESTRICT accept) {
             const T u_h = (uupper - ulower) / nx;
             const T v_h = (vupper - vlower) / ny;
 
@@ -104,17 +192,17 @@ namespace sccd {
 
             sample_f_ee(tlower, tupper, ul, uu, vl, vu, sx, ex, f);
             fminmax(f, fmin, fmax);
-            const uint8_t x_mask = cond_mask(fmin, fmax, tol, adaptive_tol);
+            const uint8_t x_mask = cond_mask(fmin, fmax, tol, adaptive_tol[0]);
             *contains_origin = (fmin <= tol) & (fmax >= -tol);
 
             sample_f_ee(tlower, tupper, ul, uu, vl, vu, sy, ey, f);
             fminmax(f, fmin, fmax);
-            const uint8_t y_mask = cond_mask(fmin, fmax, tol, adaptive_tol);
+            const uint8_t y_mask = cond_mask(fmin, fmax, tol, adaptive_tol[1]);
             *contains_origin &= (fmin <= tol) & (fmax >= -tol);
 
             sample_f_ee(tlower, tupper, ul, uu, vl, vu, sz, ez, f);
             fminmax(f, fmin, fmax);
-            const uint8_t z_mask = cond_mask(fmin, fmax, tol, adaptive_tol);
+            const uint8_t z_mask = cond_mask(fmin, fmax, tol, adaptive_tol[2]);
             *contains_origin &= (fmin <= tol) & (fmax >= -tol);
 
             const uint8_t and_mask = (x_mask & y_mask & z_mask);
@@ -129,19 +217,211 @@ namespace sccd {
             // If contains origin and does not accept, it is a nutcase (should we handle it separately?)
         }
 
+#define SCCD_MAX_STACK_SIZE 32
+
         template <typename T, typename I>
         __global__ void narrow_phase_ee_kernel(const size_t noverlaps,
                                                const I* const SCCD_RESTRICT e0overalp,
                                                const I* const SCCD_RESTRICT e1overalp,
                                                // Geometric data
-                                               T** const SCCD_RESTRICT v0,
-                                               T** const SCCD_RESTRICT v1,
+                                               T** const SCCD_RESTRICT sp,
+                                               T** const SCCD_RESTRICT ep,
                                                const size_t edge_stride,
                                                I** const SCCD_RESTRICT edges,
                                                // Output
                                                const T max_toi,
+                                               const T tol,
                                                T* SCCD_RESTRICT toi) {
-            // TODO: Implement
+            __shared__ T stack_tlower[SCCD_MAX_STACK_SIZE];
+            __shared__ T stack_tupper[SCCD_MAX_STACK_SIZE];
+            __shared__ int stack_level[SCCD_MAX_STACK_SIZE];
+            __shared__ T block_accumulator[1024];
+
+            using Vec4 = typename device::Vec4Type<T>::type;
+
+            const int thIdx = threadIdx.x + threadIdx.y * blockDim.x;
+            const int blDim = blockDim.x * blockDim.y;
+            const bool root = (thIdx == 0);
+
+            int stack_size = 0;
+            if (root) {
+                stack_tlower[stack_size] = 0;
+                stack_tupper[stack_size] = 1;
+                stack_level[stack_size] = 0;
+                stack_size++;
+            }
+
+            const I ea = e0overalp[blockIdx.x];
+            const I eb = e1overalp[blockIdx.x];
+
+            Vec4 sx, ex;
+            Vec4 sy, ey;
+            Vec4 sz, ez;
+
+            const ptrdiff_t idxa0 = edges[0][ea * edge_stride];
+            const ptrdiff_t idxa1 = edges[1][ea * edge_stride];
+
+            const ptrdiff_t idxb0 = edges[0][eb * edge_stride];
+            const ptrdiff_t idxb1 = edges[1][eb * edge_stride];
+
+            // All x-coordinates
+            sx.x = sp[0][idxa0];
+            sx.y = sp[0][idxa1];
+            sx.z = sp[0][idxb0];
+            sx.w = sp[0][idxb1];
+
+            ex.x = ep[0][idxa0];
+            ex.y = ep[0][idxa1];
+            ex.z = ep[0][idxb0];
+            ex.w = ep[0][idxb1];
+
+            // All y-coordinates
+            sy.x = sp[1][idxa0];
+            sy.y = sp[1][idxa1];
+            sy.z = sp[1][idxb0];
+            sy.w = sp[1][idxb1];
+
+            ey.x = ep[1][idxa0];
+            ey.y = ep[1][idxa1];
+            ey.z = ep[1][idxb0];
+            ey.w = ep[1][idxb1];
+
+            // All z-coordinates
+            sz.x = sp[2][idxa0];
+            sz.y = sp[2][idxa1];
+            sz.z = sp[2][idxb0];
+            sz.w = sp[2][idxb1];
+
+            ez.x = ep[2][idxa0];
+            ez.y = ep[2][idxa1];
+            ez.z = ep[2][idxb0];
+            ez.w = ep[2][idxb1];
+
+            T adaptive_tol[3];
+            compute_edge_edge_tolerance_soa<T, Vec4>(
+                tol, sx, sy, sz, ex, ey, ez, &adaptive_tol[0], &adaptive_tol[1], &adaptive_tol[2]);
+
+            T current_toi = max_toi;
+            while (stack_size < SCCD_MAX_STACK_SIZE && stack_size > 0) {
+                __syncthreads();
+
+                --stack_size;  // pop the top of the stack
+                T tlower = stack_tlower[stack_size];
+                T tupper = stack_tupper[stack_size];
+                int level = stack_level[stack_size];
+
+                T tmid = (tlower + tupper) * 0.5;
+
+                int left_contains_origin = 0;
+                int left_accept = 0;
+
+                contains_origin_ee<T, Vec4>(blockDim.x,
+                                            blockDim.y,
+                                            threadIdx.x,
+                                            threadIdx.y,
+                                            tlower,
+                                            tmid,
+                                            0,
+                                            1,
+                                            0,
+                                            1,
+                                            sx,
+                                            sy,
+                                            sz,
+                                            ex,
+                                            ey,
+                                            ez,
+                                            tol,
+                                            adaptive_tol,
+                                            &left_contains_origin,
+                                            &left_accept);
+
+                if (left_accept) {
+                    current_toi = MIN(current_toi, tlower);
+                }
+
+                // Reduce left_accept and left_contains_origin
+                int or_left_accept = 0;
+                device::block_max_to_root(thIdx, blDim, left_accept, (int*)block_accumulator, &or_left_accept);
+                or_left_accept = device::broadcast_to_block(0, or_left_accept);
+
+                if (or_left_accept) {
+                    // We have found the toi, so we are done
+                    break;
+                }
+
+                int or_left_contains_origin = 0;
+                device::block_max_to_root(
+                    thIdx, blDim, left_contains_origin, (int*)block_accumulator, &or_left_contains_origin);
+
+                if (root) {
+                    if (or_left_contains_origin) {
+                        if (level < SCCD_MAX_STACK_SIZE && tlower < max_toi) {
+                            stack_tlower[stack_size] = tlower;
+                            stack_tupper[stack_size] = tmid;
+                            stack_level[stack_size] = level + 1;
+                            stack_size++;
+                        } else {
+                            // TODO
+                        }
+                    }
+                }
+
+                int right_contains_origin = 0;
+                int right_accept = 0;
+
+                contains_origin_ee<T, Vec4>(blockDim.x,
+                                            blockDim.y,
+                                            threadIdx.x,
+                                            threadIdx.y,
+                                            tmid,
+                                            tupper,
+                                            0,
+                                            1,
+                                            0,
+                                            1,
+                                            sx,
+                                            sy,
+                                            sz,
+                                            ex,
+                                            ey,
+                                            ez,
+                                            tol,
+                                            adaptive_tol,
+                                            &right_contains_origin,
+                                            &right_accept);
+
+                if (right_accept) {
+                    current_toi = MIN(current_toi, tmid);
+                }
+
+                // Reduce left_accept and left_contains_origin
+                int or_right_accept = 0;
+                device::block_max_to_root(thIdx, blDim, right_accept, (int*)block_accumulator, &or_right_accept);
+                or_right_accept = device::broadcast_to_block(0, or_right_accept);
+
+                if (or_right_accept) {
+                    // We have found the toi, so we are done
+                    break;
+                }
+
+                int or_right_contains_origin = 0;
+                device::block_max_to_root(
+                    thIdx, blDim, right_contains_origin, (int*)block_accumulator, &or_right_contains_origin);
+
+                if (root) {
+                    if (or_right_contains_origin) {
+                        if (level < SCCD_MAX_STACK_SIZE && tmid < max_toi) {
+                            stack_tlower[stack_size] = tmid;
+                            stack_tupper[stack_size] = tupper;
+                            stack_level[stack_size] = level + 1;
+                            stack_size++;
+                        } else {
+                            // TODO
+                        }
+                    }
+                }
+            }
         }
 
         template <typename T, typename I>
@@ -157,14 +437,14 @@ namespace sccd {
                           const T max_toi) {
             SCCD_CUDA_LAST_ERROR();
 
-            dim3 block(1024);
-            dim3 grid((noverlaps + block.x - 1) / block.x);
+            dim3 block(32, 32, 1);
+            dim3 grid(noverlaps, 1, 1);
 
             T* d_toi = nullptr;
             cudaMalloc(&d_toi, noverlaps * sizeof(T));
 
             narrow_phase_ee_kernel<T, I>
-                <<<grid, block>>>(noverlaps, e0overalp, e1overalp, v0, v1, edge_stride, edges, max_toi, d_toi);
+                <<<grid, block>>>(noverlaps, e0overalp, e1overalp, v0, v1, edge_stride, edges, max_toi, 1e-8, d_toi);
 
             SCCD_CUDA_LAST_ERROR();
 
