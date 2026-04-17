@@ -369,56 +369,41 @@ namespace sccd {
         }
 
         // ----------------------------------------------------------------
-        // Seed kernel
-        //  - Initialize toi[i] = max_toi.
-        //  - Push one full-domain entry [0,1] x [0,1] x [0,1] per query
-        //    onto the global LIFO (qid stored last as the valid tag).
-        //  - Reset g_top = noverlaps and inflight = 0.
-        //  - Mark unused global slots as empty (SCCD_QID_EMPTY).
+        // One-time init
+        //  - toi[i] = max_toi for i in [0, noverlaps)
+        //  - g_qid[i] = SCCD_QID_EMPTY for i in [0, g_capacity)
+        //
+        // The old seed kernel used to push a full-domain entry per query
+        // onto the global LIFO, which persistent workers would then pop
+        // back out.  That is pure bookkeeping: we know a priori that
+        // every seed is the full unit cube at level 0.  Workers now pull
+        // seeds lazily via an atomic counter (see seed_cursor), so the
+        // global stack starts empty and we avoid O(noverlaps) wasted
+        // writes-then-reads.
         // ----------------------------------------------------------------
         template <typename T>
-        __global__ void seed_narrow_phase_ee_kernel(const size_t noverlaps,
+        __global__ void init_narrow_phase_ee_kernel(const size_t noverlaps,
                                                     const int g_capacity,
                                                     const T max_toi,
                                                     T* SCCD_RESTRICT toi,
-                                                    T* SCCD_RESTRICT g_tlower,
-                                                    T* SCCD_RESTRICT g_tupper,
-                                                    T* SCCD_RESTRICT g_ulower,
-                                                    T* SCCD_RESTRICT g_uupper,
-                                                    T* SCCD_RESTRICT g_vlower,
-                                                    T* SCCD_RESTRICT g_vupper,
-                                                    int* SCCD_RESTRICT g_level,
-                                                    int* SCCD_RESTRICT g_qid,
-                                                    int* SCCD_RESTRICT g_top,
-                                                    int* SCCD_RESTRICT inflight) {
+                                                    int* SCCD_RESTRICT g_qid) {
             const size_t i = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+            if (i < noverlaps) toi[i] = max_toi;
+            if (i < (size_t)g_capacity) g_qid[i] = SCCD_QID_EMPTY;
+        }
 
-            if (i == 0) {
-                *g_top = (int)noverlaps;
-                *inflight = 0;
-            }
-
-            // Tag the overflow region (beyond the seeded entries) as
-            // empty so future pushes see a "slot ready for write" state.
-            // The seeded entries below set g_qid[i] = (int)i and do not
-            // need the SCCD_QID_EMPTY transient.
-            if (i >= noverlaps && i < (size_t)g_capacity) {
-                g_qid[i] = SCCD_QID_EMPTY;
-            }
-
-            if (i >= noverlaps) return;
-
-            toi[i] = max_toi;
-            g_tlower[i] = T(0);
-            g_tupper[i] = T(1);
-            g_ulower[i] = T(0);
-            g_uupper[i] = T(1);
-            g_vlower[i] = T(0);
-            g_vupper[i] = T(1);
-            g_level[i] = 0;
-            __threadfence();
-            // Publish qid LAST so persistent workers see committed fields.
-            g_qid[i] = (int)i;
+        // Per-batch reset.  Launched as <<<1,1>>> between batches; much
+        // cheaper than a memset+memcpy dance.  Stream-ordered against
+        // the preceding worker launch, so no explicit sync is needed.
+        __global__ void reset_batch_narrow_phase_ee_kernel(int* SCCD_RESTRICT g_top,
+                                                           int* SCCD_RESTRICT inflight,
+                                                           int* SCCD_RESTRICT seed_cursor,
+                                                           int* SCCD_RESTRICT halt,
+                                                           const int seed_begin) {
+            *g_top = 0;
+            *inflight = 0;
+            *seed_cursor = seed_begin;
+            *halt = 0;
         }
 
         // Reserve k contiguous slots in a stack via bounded CAS.
@@ -537,9 +522,18 @@ namespace sccd {
         // Push up to two child entries (lane 0 only).  Any child whose
         // tlower is already >= the current toi[qid] is culled; this
         // rereads toi[qid] just before reserving slots so pushes see the
-        // freshest tight bound established by peer warps.  Tries the
-        // shared stack first; falls back to the global LIFO when shared
-        // is full.  Aborts in debug builds if the global LIFO is full.
+        // freshest tight bound established by peer warps.
+        //
+        // Memory discipline.  The global stack is split into two zones:
+        //   [0, g_normal_cap)              : normal pushes
+        //   [g_normal_cap, g_capacity)     : reserve for halt-flush
+        //
+        // If the shared stack is full AND the normal zone is full, the
+        // push raises the halt flag and uses the reserve zone.  The
+        // reserve is sized by the host (R = grid_blocks * (S_CAP + 2*W))
+        // to guarantee that every block can later flush its shared
+        // stack and every in-flight warp can finalize its push, so this
+        // fallback path always succeeds.
         template <typename T>
         static inline __device__ void push_children(int* SCCD_RESTRICT s_top,
                                                     T* SCCD_RESTRICT s_tlower,
@@ -561,6 +555,8 @@ namespace sccd {
                                                     int* SCCD_RESTRICT g_level,
                                                     int* SCCD_RESTRICT g_qid,
                                                     int g_capacity,
+                                                    int g_normal_cap,
+                                                    int* SCCD_RESTRICT halt,
                                                     const T* SCCD_RESTRICT toi_qid,
                                                     const T tl0,
                                                     const T tu0,
@@ -620,8 +616,16 @@ namespace sccd {
                 return;
             }
 
-            slot = reserve_slots(g_top, n, g_capacity);
-            assert(slot >= 0);
+            // Normal zone first.  If it's full, raise halt and spill
+            // into the reserve zone -- which, by construction, always
+            // has room for in-flight pushes plus the eventual shared-
+            // stack flushes.
+            slot = reserve_slots(g_top, n, g_normal_cap);
+            if (slot < 0) {
+                atomicExch(halt, 1);
+                slot = reserve_slots(g_top, n, g_capacity);
+                assert(slot >= 0);
+            }
             int k = 0;
             if (keep0) {
                 g_tlower[slot + k] = tl0;
@@ -655,15 +659,24 @@ namespace sccd {
         // ----------------------------------------------------------------
         // narrow_phase_ee_kernel (warp-per-query, persistent worker)
         //
-        // Block layout: (32, W, 1).  Each warp consumes one subdomain at a
-        // time; lane 0 manages stack ops on behalf of the warp.  All 32
-        // lanes evaluate the 2 x 4 x 4 decomposition (one cell per lane)
-        // in parallel via sample_cell_3d.
+        // Block layout: (32, W, 1).  Each warp consumes one subdomain at
+        // a time; lane 0 manages stack ops on behalf of the warp.  All
+        // 32 lanes evaluate the 2 x 4 x 4 decomposition (one cell per
+        // lane) in parallel via sample_cell_3d.
         //
-        // Termination: a warp exits when shared stack is empty AND global
-        // stack is empty AND no warp anywhere is mid-processing
-        // (inflight == 0).  inflight is incremented before claiming work
-        // to avoid premature termination races.
+        // Work sources, tried in order when lane 0 is hunting for work:
+        //   1. block-local shared stack (hottest, cheapest)
+        //   2. device-global LIFO stack (overflow from (1), cross-block)
+        //   3. the seed cursor: an atomic counter in [seed_begin,
+        //      seed_end).  Claiming seed i synthesizes the root entry
+        //      (tl=0, tu=1, ul=0, uu=1, vl=0, vu=1, level=0, qid=i) in
+        //      registers -- no global-memory dance.
+        //
+        // Termination: warp exits once (1) shared stack is empty, (2)
+        // global stack is empty, (3) no warp is mid-processing
+        // (inflight == 0), AND (4) seed_cursor >= seed_end.  Inflight
+        // is incremented before any work-claim attempt to prevent
+        // termination from racing ahead.
         // ----------------------------------------------------------------
         template <typename T, typename I>
         __global__ void narrow_phase_ee_kernel(const I* const SCCD_RESTRICT e0overlap,
@@ -684,7 +697,11 @@ namespace sccd {
                                                int* SCCD_RESTRICT g_qid,
                                                int* SCCD_RESTRICT g_top,
                                                int g_capacity,
-                                               int* SCCD_RESTRICT inflight) {
+                                               int g_normal_cap,
+                                               int* SCCD_RESTRICT inflight,
+                                               int* SCCD_RESTRICT seed_cursor,
+                                               const int seed_end,
+                                               int* SCCD_RESTRICT halt) {
             using Vec4 = typename device::Vec4Type<T>::type;
 
             constexpr int S_CAP = SCCD_NP_SHARED_STACK_CAP;
@@ -725,6 +742,19 @@ namespace sccd {
             unsigned int backoff = 64;
 
             while (true) {
+                if (lane == 0) {
+                    // Fast-path abort if another warp raised the halt
+                    // flag (global stack hit its normal-zone cap).  We
+                    // leave in-flight warps to finish their current
+                    // iteration; at next top-of-loop they'll also exit
+                    // here.  The block-flush below moves remaining
+                    // shared-stack work to global so the host can
+                    // relaunch and pick it up.
+                    w_status[warp] = (atomicAdd(halt, 0) != 0) ? 2 : 0;
+                }
+                __syncwarp();
+                if (w_status[warp] == 2) break;
+
                 if (lane == 0) {
                     // Optimistically claim a worker slot before touching
                     // any stack counter so that termination cannot race
@@ -770,6 +800,26 @@ namespace sccd {
                                                 qid);
                     }
 
+                    // Source 3: lazy seed claim.  Synthesizes the root
+                    // entry for query `old` in registers -- no global
+                    // push/pop roundtrip.  A seed_cursor that overshoots
+                    // seed_end is harmless: peers observing the larger
+                    // counter simply read "no seeds left".
+                    if (!got) {
+                        const int old = atomicAdd(seed_cursor, 1);
+                        if (old < seed_end) {
+                            tl = T(0);
+                            tu = T(1);
+                            ul = T(0);
+                            uu = T(1);
+                            vl = T(0);
+                            vu = T(1);
+                            level = 0;
+                            qid = old;
+                            got = 1;
+                        }
+                    }
+
                     if (got) {
                         w_tl[warp] = tl;
                         w_tu[warp] = tu;
@@ -789,7 +839,8 @@ namespace sccd {
                         const int gtop_now = atomicAdd(g_top, 0);
                         const int stop_now = atomicAdd(&s_top, 0);
                         const int infl_now = atomicAdd(inflight, 0);
-                        if (gtop_now <= 0 && stop_now <= 0 && infl_now <= 0) {
+                        const int seed_now = atomicAdd(seed_cursor, 0);
+                        if (gtop_now <= 0 && stop_now <= 0 && infl_now <= 0 && seed_now >= seed_end) {
                             w_status[warp] = 2;
                         } else {
                             w_status[warp] = 1;
@@ -943,6 +994,8 @@ namespace sccd {
                                          g_level,
                                          g_qid,
                                          g_capacity,
+                                         g_normal_cap,
+                                         halt,
                                          &toi[qid],
                                          tl0,
                                          tu0,
@@ -968,6 +1021,48 @@ namespace sccd {
                 if (lane == 0) atomicSub(inflight, 1);
                 __syncwarp();
             }
+
+            // ------------------------------------------------------------
+            // Block-flush: drain any residual shared-stack entries into
+            // the global stack so the host can relaunch and finish them.
+            //
+            // Under normal termination s_top is 0 and this is a no-op;
+            // under halt termination s_top may still hold valid entries
+            // that must not be lost.  A single team-wide reserve on the
+            // global stack amortizes the CAS cost; individual threads
+            // then copy one entry each.
+            // ------------------------------------------------------------
+            __syncthreads();
+
+            __shared__ int flush_n;
+            __shared__ int flush_base;
+            if (tid_in_block == 0) {
+                flush_n = s_top;
+                flush_base = (flush_n > 0) ? reserve_slots(g_top, flush_n, g_capacity) : 0;
+                // By construction (host sizes g_capacity with reserve
+                // >= grid_blocks * S_CAP) this reserve must succeed.
+                if (flush_n > 0) assert(flush_base >= 0);
+            }
+            __syncthreads();
+
+            for (int i = tid_in_block; i < flush_n; i += threads_in_block) {
+                const int src = i;
+                const int dst = flush_base + i;
+                g_tlower[dst] = s_tlower[src];
+                g_tupper[dst] = s_tupper[src];
+                g_ulower[dst] = s_ulower[src];
+                g_uupper[dst] = s_uupper[src];
+                g_vlower[dst] = s_vlower[src];
+                g_vupper[dst] = s_vupper[src];
+                g_level[dst] = s_level[src];
+                // s_qid[src] must be a published (non-EMPTY) tag because
+                // the invariant is that slots in [0, s_top) are fully
+                // committed.  Republish on the global side last, after a
+                // fence, so future popper sees fields first.
+                const int q = s_qid[src];
+                __threadfence();
+                atomicExch(&g_qid[dst], q);
+            }
         }
 
         template <typename T, typename I>
@@ -985,11 +1080,6 @@ namespace sccd {
 
             if (noverlaps == 0) return max_toi;
 
-            // Runtime-tunable knobs (env-var name == variable name).
-            int SCCD_GSTACK_CAP = (int)(noverlaps * 16) + 1024;
-            SCCD_READ_ENV(SCCD_GSTACK_CAP, atoi);
-            const int gstack_cap = SCCD_GSTACK_CAP;
-
             T tol = T(1e-8);
             {
                 double SCCD_TOL = (double)tol;
@@ -997,11 +1087,49 @@ namespace sccd {
                 tol = (T)SCCD_TOL;
             }
 
-            // Per-query toi output.
+            // Candidates-per-kernel cap.  Default 0 == unbounded (all
+            // overlaps in one worker launch).  When positive, the host
+            // splits the input into contiguous [begin, end) batches and
+            // relaunches the worker for each one, reusing all device
+            // buffers across batches.
+            int SCCD_BATCH_SIZE = 0;
+            SCCD_READ_ENV(SCCD_BATCH_SIZE, atoi);
+            const size_t batch_size = (SCCD_BATCH_SIZE > 0) ? (size_t)SCCD_BATCH_SIZE : noverlaps;
+
+            // Grid sizing up front: we need it to bound the reserve R.
+            int dev = 0;
+            cudaGetDevice(&dev);
+            cudaDeviceProp prop{};
+            cudaGetDeviceProperties(&prop, dev);
+
+            int SCCD_BLOCKS_PER_SM = 4;
+            SCCD_READ_ENV(SCCD_BLOCKS_PER_SM, atoi);
+
+            int base_grid_blocks = prop.multiProcessorCount * SCCD_BLOCKS_PER_SM;
+            if (base_grid_blocks <= 0) base_grid_blocks = 1;
+
+            // Reserve count R sized so that at halt time every block can
+            // flush its entire shared stack (S_CAP) and every warp can
+            // complete an in-flight push (2 children) without running
+            // out of global-stack slots.
+            const int W = SCCD_NP_WARPS_PER_BLOCK;
+            const int reserve_R = base_grid_blocks * (SCCD_NP_SHARED_STACK_CAP + 2 * W);
+
+            // Global stack cap.  Caller's env value is a starting point;
+            // we enforce gstack_cap >= 2*R so there's a non-trivial
+            // normal zone on top of the reserve.  With tiny caps the
+            // host simply relaunches more times.
+            int SCCD_GSTACK_CAP = (int)(noverlaps * 16) + 1024;
+            SCCD_READ_ENV(SCCD_GSTACK_CAP, atoi);
+            int gstack_cap = SCCD_GSTACK_CAP;
+            if (gstack_cap < 2 * reserve_R) gstack_cap = 2 * reserve_R;
+            const int g_normal_cap = gstack_cap - reserve_R;
+
+            // Per-query toi output (allocated once across all batches).
             T* d_toi = nullptr;
             cudaMalloc(&d_toi, noverlaps * sizeof(T));
 
-            // Global LIFO stack arrays.
+            // Global LIFO stack arrays (shared across batches).
             T* g_tlower = nullptr;
             T* g_tupper = nullptr;
             T* g_ulower = nullptr;
@@ -1012,6 +1140,8 @@ namespace sccd {
             int* g_qid = nullptr;
             int* g_top = nullptr;
             int* inflight = nullptr;
+            int* seed_cursor = nullptr;
+            int* halt = nullptr;
             cudaMalloc(&g_tlower, gstack_cap * sizeof(T));
             cudaMalloc(&g_tupper, gstack_cap * sizeof(T));
             cudaMalloc(&g_ulower, gstack_cap * sizeof(T));
@@ -1022,66 +1152,84 @@ namespace sccd {
             cudaMalloc(&g_qid, gstack_cap * sizeof(int));
             cudaMalloc(&g_top, sizeof(int));
             cudaMalloc(&inflight, sizeof(int));
+            cudaMalloc(&seed_cursor, sizeof(int));
+            cudaMalloc(&halt, sizeof(int));
 
-            // Seed.  Grid is sized over MAX(noverlaps, gstack_cap) so the
-            // kernel can also initialize all qid tags to SCCD_QID_EMPTY.
+            // One-time init: toi[] = max_toi, g_qid[] = SCCD_QID_EMPTY.
+            // Workers now pull seeds lazily, so the global stack is left
+            // empty here (no per-query push-then-pop bookkeeping).
             {
                 const int block = 256;
                 const size_t work = (gstack_cap > (int)noverlaps) ? (size_t)gstack_cap : noverlaps;
                 const int grid = (int)((work + block - 1) / block);
-                seed_narrow_phase_ee_kernel<T><<<grid, block>>>(noverlaps,
+                init_narrow_phase_ee_kernel<T><<<grid, block>>>(noverlaps,
                                                                 gstack_cap,
                                                                 max_toi,
                                                                 d_toi,
-                                                                g_tlower,
-                                                                g_tupper,
-                                                                g_ulower,
-                                                                g_uupper,
-                                                                g_vlower,
-                                                                g_vupper,
-                                                                g_level,
-                                                                g_qid,
-                                                                g_top,
-                                                                inflight);
+                                                                g_qid);
                 SCCD_CUDA_LAST_ERROR();
             }
 
-            // Persistent worker launch.  Size grid to saturate the SMs.
-            int dev = 0;
-            cudaGetDevice(&dev);
-            cudaDeviceProp prop{};
-            cudaGetDeviceProperties(&prop, dev);
-
-            int SCCD_BLOCKS_PER_SM = 4;
-            SCCD_READ_ENV(SCCD_BLOCKS_PER_SM, atoi);
-
-            int grid_blocks = prop.multiProcessorCount * SCCD_BLOCKS_PER_SM;
-            if (grid_blocks <= 0) grid_blocks = 1;
-            if ((size_t)grid_blocks > noverlaps) grid_blocks = (int)noverlaps;
-
             dim3 block(32, SCCD_NP_WARPS_PER_BLOCK, 1);
-            dim3 grid(grid_blocks, 1, 1);
 
-            narrow_phase_ee_kernel<T, I><<<grid, block>>>(e0overalp,
-                                                          e1overalp,
-                                                          v0,
-                                                          v1,
-                                                          edge_stride,
-                                                          edges,
-                                                          tol,
-                                                          d_toi,
-                                                          g_tlower,
-                                                          g_tupper,
-                                                          g_ulower,
-                                                          g_uupper,
-                                                          g_vlower,
-                                                          g_vupper,
-                                                          g_level,
-                                                          g_qid,
-                                                          g_top,
-                                                          gstack_cap,
-                                                          inflight);
-            SCCD_CUDA_LAST_ERROR();
+            // Batch loop.  Each iteration claims [begin, end) of the
+            // input.  Inside, we may relaunch the worker multiple times
+            // until that range's work fully drains; this is how we cap
+            // peak device memory -- when the global stack's normal zone
+            // fills, workers halt + flush + exit and the host relaunches
+            // with `g_top` and `seed_cursor` preserved.
+            for (size_t begin = 0; begin < noverlaps; begin += batch_size) {
+                const size_t end = (begin + batch_size < noverlaps) ? (begin + batch_size) : noverlaps;
+                const int this_batch = (int)(end - begin);
+
+                reset_batch_narrow_phase_ee_kernel<<<1, 1>>>(g_top, inflight, seed_cursor, halt, (int)begin);
+                SCCD_CUDA_LAST_ERROR();
+
+                while (true) {
+                    int grid_blocks = base_grid_blocks;
+                    if (grid_blocks > this_batch) grid_blocks = this_batch;
+                    dim3 grid(grid_blocks, 1, 1);
+
+                    narrow_phase_ee_kernel<T, I><<<grid, block>>>(e0overalp,
+                                                                  e1overalp,
+                                                                  v0,
+                                                                  v1,
+                                                                  edge_stride,
+                                                                  edges,
+                                                                  tol,
+                                                                  d_toi,
+                                                                  g_tlower,
+                                                                  g_tupper,
+                                                                  g_ulower,
+                                                                  g_uupper,
+                                                                  g_vlower,
+                                                                  g_vupper,
+                                                                  g_level,
+                                                                  g_qid,
+                                                                  g_top,
+                                                                  gstack_cap,
+                                                                  g_normal_cap,
+                                                                  inflight,
+                                                                  seed_cursor,
+                                                                  (int)end,
+                                                                  halt);
+                    SCCD_CUDA_LAST_ERROR();
+
+                    // Check whether the batch is fully drained.  A D2H
+                    // copy per relaunch is cheap compared to the kernel
+                    // runtime and is only paid once per overflow event.
+                    int h_g_top = 0;
+                    int h_seed_cursor = 0;
+                    cudaMemcpy(&h_g_top, g_top, sizeof(int), cudaMemcpyDeviceToHost);
+                    cudaMemcpy(&h_seed_cursor, seed_cursor, sizeof(int), cudaMemcpyDeviceToHost);
+                    if (h_g_top <= 0 && h_seed_cursor >= (int)end) break;
+
+                    // Work remains; reset transient counters and relaunch.
+                    // g_top, g_qid[], seed_cursor, d_toi are preserved.
+                    cudaMemsetAsync(halt, 0, sizeof(int));
+                    cudaMemsetAsync(inflight, 0, sizeof(int));
+                }
+            }
 
             // Reduce per-query toi to a single value on device, then copy.
             T h_toi = thrust::reduce(thrust::device_pointer_cast(d_toi),
@@ -1100,6 +1248,8 @@ namespace sccd {
             cudaFree(g_qid);
             cudaFree(g_top);
             cudaFree(inflight);
+            cudaFree(seed_cursor);
+            cudaFree(halt);
 
             SCCD_CUDA_LAST_ERROR();
             return h_toi;
