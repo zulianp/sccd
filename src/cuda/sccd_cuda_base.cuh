@@ -105,6 +105,29 @@ namespace sccd {
             return make_double4(alpha * b.x, alpha * b.y, alpha * b.z, alpha * b.w);
         }
 
+        // CAS-based atomic-min for float/double, works on both global and shared addresses.
+        static inline __device__ float atomic_min(float* address, float val) {
+            int* a = reinterpret_cast<int*>(address);
+            int old = __float_as_int(*address), assumed;
+            do {
+                if (__int_as_float(old) <= val) return __int_as_float(old);
+                assumed = old;
+                old = atomicCAS(a, assumed, __float_as_int(val));
+            } while (assumed != old);
+            return __int_as_float(old);
+        }
+
+        static inline __device__ double atomic_min(double* address, double val) {
+            unsigned long long* a = reinterpret_cast<unsigned long long*>(address);
+            unsigned long long old = __double_as_longlong(*address), assumed;
+            do {
+                if (__longlong_as_double(old) <= val) return __longlong_as_double(old);
+                assumed = old;
+                old = atomicCAS(a, assumed, __double_as_longlong(val));
+            } while (assumed != old);
+            return __longlong_as_double(old);
+        }
+
     }  // namespace device
 }  // namespace sccd
 
