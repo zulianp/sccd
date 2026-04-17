@@ -6,8 +6,8 @@
 #include <cassert>
 
 #include <thrust/device_ptr.h>
-#include <thrust/reduce.h>
 #include <thrust/functional.h>
+#include <thrust/reduce.h>
 
 #include "sccd_cuda_base.cuh"
 #include "sccd_reduce.cuh"
@@ -331,13 +331,31 @@ namespace sccd {
             const ptrdiff_t idxb0 = edges[0][eb * edge_stride];
             const ptrdiff_t idxb1 = edges[1][eb * edge_stride];
 
-            sx.x = sp[0][idxa0]; sx.y = sp[0][idxa1]; sx.z = sp[0][idxb0]; sx.w = sp[0][idxb1];
-            sy.x = sp[1][idxa0]; sy.y = sp[1][idxa1]; sy.z = sp[1][idxb0]; sy.w = sp[1][idxb1];
-            sz.x = sp[2][idxa0]; sz.y = sp[2][idxa1]; sz.z = sp[2][idxb0]; sz.w = sp[2][idxb1];
+            sx.x = sp[0][idxa0];
+            sx.y = sp[0][idxa1];
+            sx.z = sp[0][idxb0];
+            sx.w = sp[0][idxb1];
+            sy.x = sp[1][idxa0];
+            sy.y = sp[1][idxa1];
+            sy.z = sp[1][idxb0];
+            sy.w = sp[1][idxb1];
+            sz.x = sp[2][idxa0];
+            sz.y = sp[2][idxa1];
+            sz.z = sp[2][idxb0];
+            sz.w = sp[2][idxb1];
 
-            ex.x = ep[0][idxa0]; ex.y = ep[0][idxa1]; ex.z = ep[0][idxb0]; ex.w = ep[0][idxb1];
-            ey.x = ep[1][idxa0]; ey.y = ep[1][idxa1]; ey.z = ep[1][idxb0]; ey.w = ep[1][idxb1];
-            ez.x = ep[2][idxa0]; ez.y = ep[2][idxa1]; ez.z = ep[2][idxb0]; ez.w = ep[2][idxb1];
+            ex.x = ep[0][idxa0];
+            ex.y = ep[0][idxa1];
+            ex.z = ep[0][idxb0];
+            ex.w = ep[0][idxb1];
+            ey.x = ep[1][idxa0];
+            ey.y = ep[1][idxa1];
+            ey.z = ep[1][idxb0];
+            ey.w = ep[1][idxb1];
+            ez.x = ep[2][idxa0];
+            ez.y = ep[2][idxa1];
+            ez.z = ep[2][idxb0];
+            ez.w = ep[2][idxb1];
         }
 
         // Backoff used when both stacks are empty but other warps are
@@ -380,8 +398,11 @@ namespace sccd {
                 *inflight = 0;
             }
 
-            // Initialize the entire stack's qid array to "empty" first.
-            if (i < (size_t)g_capacity) {
+            // Tag the overflow region (beyond the seeded entries) as
+            // empty so future pushes see a "slot ready for write" state.
+            // The seeded entries below set g_qid[i] = (int)i and do not
+            // need the SCCD_QID_EMPTY transient.
+            if (i >= noverlaps && i < (size_t)g_capacity) {
                 g_qid[i] = SCCD_QID_EMPTY;
             }
 
@@ -462,10 +483,14 @@ namespace sccd {
                 q = atomicAdd(&s_qid[slot], 0);
             } while (q == SCCD_QID_EMPTY);
             __threadfence_block();
-            tl = s_tlower[slot]; tu = s_tupper[slot];
-            ul = s_ulower[slot]; uu = s_uupper[slot];
-            vl = s_vlower[slot]; vu = s_vupper[slot];
-            level = s_level[slot]; qid = q;
+            tl = s_tlower[slot];
+            tu = s_tupper[slot];
+            ul = s_ulower[slot];
+            uu = s_uupper[slot];
+            vl = s_vlower[slot];
+            vu = s_vupper[slot];
+            level = s_level[slot];
+            qid = q;
             // Reset valid tag so the slot is reusable.
             atomicExch(&s_qid[slot], SCCD_QID_EMPTY);
             return 1;
@@ -497,87 +522,134 @@ namespace sccd {
                 q = atomicAdd(&g_qid[slot], 0);
             } while (q == SCCD_QID_EMPTY);
             __threadfence();
-            tl = g_tlower[slot]; tu = g_tupper[slot];
-            ul = g_ulower[slot]; uu = g_uupper[slot];
-            vl = g_vlower[slot]; vu = g_vupper[slot];
-            level = g_level[slot]; qid = q;
+            tl = g_tlower[slot];
+            tu = g_tupper[slot];
+            ul = g_ulower[slot];
+            uu = g_uupper[slot];
+            vl = g_vlower[slot];
+            vu = g_vupper[slot];
+            level = g_level[slot];
+            qid = q;
             atomicExch(&g_qid[slot], SCCD_QID_EMPTY);
             return 1;
         }
 
-        // Push two child entries (lane 0 only).  Tries shared stack first;
-        // falls back to the global LIFO when shared is full.  Aborts in
-        // debug builds if the global LIFO is also full.
+        // Push up to two child entries (lane 0 only).  Any child whose
+        // tlower is already >= the current toi[qid] is culled; this
+        // rereads toi[qid] just before reserving slots so pushes see the
+        // freshest tight bound established by peer warps.  Tries the
+        // shared stack first; falls back to the global LIFO when shared
+        // is full.  Aborts in debug builds if the global LIFO is full.
         template <typename T>
-        static inline __device__ void push_two(int* SCCD_RESTRICT s_top,
-                                               T* SCCD_RESTRICT s_tlower,
-                                               T* SCCD_RESTRICT s_tupper,
-                                               T* SCCD_RESTRICT s_ulower,
-                                               T* SCCD_RESTRICT s_uupper,
-                                               T* SCCD_RESTRICT s_vlower,
-                                               T* SCCD_RESTRICT s_vupper,
-                                               int* SCCD_RESTRICT s_level,
-                                               int* SCCD_RESTRICT s_qid,
-                                               int s_capacity,
-                                               int* SCCD_RESTRICT g_top,
-                                               T* SCCD_RESTRICT g_tlower,
-                                               T* SCCD_RESTRICT g_tupper,
-                                               T* SCCD_RESTRICT g_ulower,
-                                               T* SCCD_RESTRICT g_uupper,
-                                               T* SCCD_RESTRICT g_vlower,
-                                               T* SCCD_RESTRICT g_vupper,
-                                               int* SCCD_RESTRICT g_level,
-                                               int* SCCD_RESTRICT g_qid,
-                                               int g_capacity,
-                                               const T tl0,
-                                               const T tu0,
-                                               const T ul0,
-                                               const T uu0,
-                                               const T vl0,
-                                               const T vu0,
-                                               const T tl1,
-                                               const T tu1,
-                                               const T ul1,
-                                               const T uu1,
-                                               const T vl1,
-                                               const T vu1,
-                                               const int level,
-                                               const int qid) {
-            int slot = reserve_slots(s_top, 2, s_capacity);
-            if (slot >= 0) {
-                s_tlower[slot]     = tl0; s_tupper[slot]     = tu0;
-                s_ulower[slot]     = ul0; s_uupper[slot]     = uu0;
-                s_vlower[slot]     = vl0; s_vupper[slot]     = vu0;
-                s_level[slot]      = level;
+        static inline __device__ void push_children(int* SCCD_RESTRICT s_top,
+                                                    T* SCCD_RESTRICT s_tlower,
+                                                    T* SCCD_RESTRICT s_tupper,
+                                                    T* SCCD_RESTRICT s_ulower,
+                                                    T* SCCD_RESTRICT s_uupper,
+                                                    T* SCCD_RESTRICT s_vlower,
+                                                    T* SCCD_RESTRICT s_vupper,
+                                                    int* SCCD_RESTRICT s_level,
+                                                    int* SCCD_RESTRICT s_qid,
+                                                    int s_capacity,
+                                                    int* SCCD_RESTRICT g_top,
+                                                    T* SCCD_RESTRICT g_tlower,
+                                                    T* SCCD_RESTRICT g_tupper,
+                                                    T* SCCD_RESTRICT g_ulower,
+                                                    T* SCCD_RESTRICT g_uupper,
+                                                    T* SCCD_RESTRICT g_vlower,
+                                                    T* SCCD_RESTRICT g_vupper,
+                                                    int* SCCD_RESTRICT g_level,
+                                                    int* SCCD_RESTRICT g_qid,
+                                                    int g_capacity,
+                                                    const T* SCCD_RESTRICT toi_qid,
+                                                    const T tl0,
+                                                    const T tu0,
+                                                    const T ul0,
+                                                    const T uu0,
+                                                    const T vl0,
+                                                    const T vu0,
+                                                    const T tl1,
+                                                    const T tu1,
+                                                    const T ul1,
+                                                    const T uu1,
+                                                    const T vl1,
+                                                    const T vu1,
+                                                    const int level,
+                                                    const int qid) {
+            // Relaxed load is fine: missing a freshly-tightened toi only
+            // results in an extra push that a later pop will cull.
+            const T cur = *toi_qid;
+            const bool keep0 = tl0 < cur;
+            const bool keep1 = tl1 < cur;
+            const int n = (keep0 ? 1 : 0) + (keep1 ? 1 : 0);
+            if (n == 0) return;
 
-                s_tlower[slot + 1] = tl1; s_tupper[slot + 1] = tu1;
-                s_ulower[slot + 1] = ul1; s_uupper[slot + 1] = uu1;
-                s_vlower[slot + 1] = vl1; s_vupper[slot + 1] = vu1;
-                s_level[slot + 1]  = level;
+            int slot = reserve_slots(s_top, n, s_capacity);
+            if (slot >= 0) {
+                int k = 0;
+                if (keep0) {
+                    s_tlower[slot + k] = tl0;
+                    s_tupper[slot + k] = tu0;
+                    s_ulower[slot + k] = ul0;
+                    s_uupper[slot + k] = uu0;
+                    s_vlower[slot + k] = vl0;
+                    s_vupper[slot + k] = vu0;
+                    s_level[slot + k] = level;
+                    ++k;
+                }
+                if (keep1) {
+                    s_tlower[slot + k] = tl1;
+                    s_tupper[slot + k] = tu1;
+                    s_ulower[slot + k] = ul1;
+                    s_uupper[slot + k] = uu1;
+                    s_vlower[slot + k] = vl1;
+                    s_vupper[slot + k] = vu1;
+                    s_level[slot + k] = level;
+                }
 
                 __threadfence_block();
                 // Publish qid LAST so a popper that observes a non-empty
                 // tag is guaranteed to see committed field writes.
-                atomicExch(&s_qid[slot],     qid);
-                atomicExch(&s_qid[slot + 1], qid);
+                atomicExch(&s_qid[slot], qid);
+                if (n == 2) atomicExch(&s_qid[slot + 1], qid);
+                // Fence again so the subsequent atomicSub(inflight, 1)
+                // in the caller is ordered AFTER this push is visible.
+                // Without this, a peer warp observing inflight==0 could
+                // still see a stale s_top and terminate prematurely.
+                __threadfence_block();
                 return;
             }
 
-            slot = reserve_slots(g_top, 2, g_capacity);
+            slot = reserve_slots(g_top, n, g_capacity);
             assert(slot >= 0);
-            g_tlower[slot]     = tl0; g_tupper[slot]     = tu0;
-            g_ulower[slot]     = ul0; g_uupper[slot]     = uu0;
-            g_vlower[slot]     = vl0; g_vupper[slot]     = vu0;
-            g_level[slot]      = level;
-
-            g_tlower[slot + 1] = tl1; g_tupper[slot + 1] = tu1;
-            g_ulower[slot + 1] = ul1; g_uupper[slot + 1] = uu1;
-            g_vlower[slot + 1] = vl1; g_vupper[slot + 1] = vu1;
-            g_level[slot + 1]  = level;
+            int k = 0;
+            if (keep0) {
+                g_tlower[slot + k] = tl0;
+                g_tupper[slot + k] = tu0;
+                g_ulower[slot + k] = ul0;
+                g_uupper[slot + k] = uu0;
+                g_vlower[slot + k] = vl0;
+                g_vupper[slot + k] = vu0;
+                g_level[slot + k] = level;
+                ++k;
+            }
+            if (keep1) {
+                g_tlower[slot + k] = tl1;
+                g_tupper[slot + k] = tu1;
+                g_ulower[slot + k] = ul1;
+                g_uupper[slot + k] = uu1;
+                g_vlower[slot + k] = vl1;
+                g_vupper[slot + k] = vu1;
+                g_level[slot + k] = level;
+            }
 
             __threadfence();
-            atomicExch(&g_qid[slot],     qid);
-            atomicExch(&g_qid[slot + 1], qid);
+            atomicExch(&g_qid[slot], qid);
+            if (n == 2) atomicExch(&g_qid[slot + 1], qid);
+            // Device-scope fence so any peer block observing the
+            // caller's upcoming atomicSub(inflight, 1) also sees g_top
+            // and the published qids.
+            __threadfence();
         }
 
         // ----------------------------------------------------------------
@@ -630,10 +702,10 @@ namespace sccd {
 
             // Per-warp slot used by lane 0 to publish the popped entry to
             // the rest of the warp (avoids needing a stream of shfls).
-            __shared__ int   w_status[W];   // 0=work, 1=backoff, 2=terminate
-            __shared__ T     w_tl[W], w_tu[W], w_ul[W], w_uu[W], w_vl[W], w_vu[W];
-            __shared__ int   w_level[W];
-            __shared__ int   w_qid[W];
+            __shared__ int w_status[W];  // 0=work, 1=backoff, 2=terminate
+            __shared__ T w_tl[W], w_tu[W], w_ul[W], w_uu[W], w_vl[W], w_vu[W];
+            __shared__ int w_level[W];
+            __shared__ int w_qid[W];
 
             const int lane = threadIdx.x;
             const int warp = threadIdx.y;
@@ -662,24 +734,49 @@ namespace sccd {
                     T tl, tu, ul, uu, vl, vu;
                     int level, qid;
                     int got = try_pop_shared<T>(&s_top,
-                                                s_tlower, s_tupper,
-                                                s_ulower, s_uupper,
-                                                s_vlower, s_vupper,
-                                                s_level, s_qid,
-                                                tl, tu, ul, uu, vl, vu, level, qid);
+                                                s_tlower,
+                                                s_tupper,
+                                                s_ulower,
+                                                s_uupper,
+                                                s_vlower,
+                                                s_vupper,
+                                                s_level,
+                                                s_qid,
+                                                tl,
+                                                tu,
+                                                ul,
+                                                uu,
+                                                vl,
+                                                vu,
+                                                level,
+                                                qid);
                     if (!got) {
                         got = try_pop_global<T>(g_top,
-                                                g_tlower, g_tupper,
-                                                g_ulower, g_uupper,
-                                                g_vlower, g_vupper,
-                                                g_level, g_qid,
-                                                tl, tu, ul, uu, vl, vu, level, qid);
+                                                g_tlower,
+                                                g_tupper,
+                                                g_ulower,
+                                                g_uupper,
+                                                g_vlower,
+                                                g_vupper,
+                                                g_level,
+                                                g_qid,
+                                                tl,
+                                                tu,
+                                                ul,
+                                                uu,
+                                                vl,
+                                                vu,
+                                                level,
+                                                qid);
                     }
 
                     if (got) {
-                        w_tl[warp] = tl; w_tu[warp] = tu;
-                        w_ul[warp] = ul; w_uu[warp] = uu;
-                        w_vl[warp] = vl; w_vu[warp] = vu;
+                        w_tl[warp] = tl;
+                        w_tu[warp] = tu;
+                        w_ul[warp] = ul;
+                        w_uu[warp] = uu;
+                        w_vl[warp] = vl;
+                        w_vu[warp] = vu;
                         w_level[warp] = level;
                         w_qid[warp] = qid;
                         w_status[warp] = 0;
@@ -712,18 +809,23 @@ namespace sccd {
                 }
                 backoff = 64;
 
-                const T   tl    = w_tl[warp];
-                const T   tu    = w_tu[warp];
-                const T   ul    = w_ul[warp];
-                const T   uu    = w_uu[warp];
-                const T   vl    = w_vl[warp];
-                const T   vu    = w_vu[warp];
+                const T tl = w_tl[warp];
+                const T tu = w_tu[warp];
+                const T ul = w_ul[warp];
+                const T uu = w_uu[warp];
+                const T vl = w_vl[warp];
+                const T vu = w_vu[warp];
                 const int level = w_level[warp];
-                const int qid   = w_qid[warp];
+                const int qid = w_qid[warp];
 
                 // Early cull if a tighter toi has already been recorded
-                // for this query.
-                const T cur_toi = toi[qid];
+                // for this query.  Read once on lane 0 and broadcast so
+                // all 32 lanes agree on the value; otherwise a concurrent
+                // atomic_min by another warp could make the plain load
+                // diverge across lanes and break the __syncwarp() below.
+                T cur_toi = T(0);
+                if (lane == 0) cur_toi = toi[qid];
+                cur_toi = __shfl_sync(0xffffffffu, cur_toi, 0);
                 if (tl >= cur_toi) {
                     if (lane == 0) atomicSub(inflight, 1);
                     __syncwarp();
@@ -731,12 +833,11 @@ namespace sccd {
                 }
 
                 Vec4 sx, sy, sz, ex, ey, ez;
-                load_query_ee<T, Vec4, I>(qid, e0overlap, e1overlap, sp, ep, edge_stride, edges,
-                                          sx, sy, sz, ex, ey, ez);
+                load_query_ee<T, Vec4, I>(
+                    qid, e0overlap, e1overlap, sp, ep, edge_stride, edges, sx, sy, sz, ex, ey, ez);
 
                 T atol[3];
-                compute_edge_edge_tolerance_soa<T, Vec4>(
-                    tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
+                compute_edge_edge_tolerance_soa<T, Vec4>(tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
 
                 // 2 x 4 x 4 lane decomposition.
                 const int ti = lane >> 4;
@@ -744,15 +845,33 @@ namespace sccd {
                 const int vi = lane & 0x3;
 
                 int contains = 0;
-                int accept   = 0;
-                T   cell_tl  = tl;
-                sample_cell_3d<T, Vec4>(ti, ui, vi, 2, 4, 4,
-                                        tl, tu, ul, uu, vl, vu,
-                                        sx, sy, sz, ex, ey, ez,
-                                        tol, atol,
-                                        contains, accept, cell_tl);
+                int accept = 0;
+                T cell_tl = tl;
+                sample_cell_3d<T, Vec4>(ti,
+                                        ui,
+                                        vi,
+                                        2,
+                                        4,
+                                        4,
+                                        tl,
+                                        tu,
+                                        ul,
+                                        uu,
+                                        vl,
+                                        vu,
+                                        sx,
+                                        sy,
+                                        sz,
+                                        ex,
+                                        ey,
+                                        ez,
+                                        tol,
+                                        atol,
+                                        contains,
+                                        accept,
+                                        cell_tl);
 
-                const unsigned acc_mask  = __ballot_sync(0xffffffffu, accept);
+                const unsigned acc_mask = __ballot_sync(0xffffffffu, accept);
                 const unsigned cont_mask = __ballot_sync(0xffffffffu, contains);
 
                 if (acc_mask) {
@@ -778,33 +897,67 @@ namespace sccd {
                     const T uw = uu - ul;
                     const T vw = vu - vl;
                     int axis = 0;
-                    T   width = tw;
-                    if (uw > width) { axis = 1; width = uw; }
-                    if (vw > width) { axis = 2; }
+                    T width = tw;
+                    if (uw > width) {
+                        axis = 1;
+                        width = uw;
+                    }
+                    if (vw > width) {
+                        axis = 2;
+                    }
 
                     T tl0 = tl, tu0 = tu, ul0 = ul, uu0 = uu, vl0 = vl, vu0 = vu;
                     T tl1 = tl, tu1 = tu, ul1 = ul, uu1 = uu, vl1 = vl, vu1 = vu;
                     if (axis == 0) {
                         const T m = (tl + tu) * T(0.5);
-                        tu0 = m; tl1 = m;
+                        tu0 = m;
+                        tl1 = m;
                     } else if (axis == 1) {
                         const T m = (ul + uu) * T(0.5);
-                        uu0 = m; ul1 = m;
+                        uu0 = m;
+                        ul1 = m;
                     } else {
                         const T m = (vl + vu) * T(0.5);
-                        vu0 = m; vl1 = m;
+                        vu0 = m;
+                        vl1 = m;
                     }
 
                     if (lane == 0) {
-                        push_two<T>(&s_top,
-                                    s_tlower, s_tupper, s_ulower, s_uupper, s_vlower, s_vupper,
-                                    s_level, s_qid, S_CAP,
-                                    g_top,
-                                    g_tlower, g_tupper, g_ulower, g_uupper, g_vlower, g_vupper,
-                                    g_level, g_qid, g_capacity,
-                                    tl0, tu0, ul0, uu0, vl0, vu0,
-                                    tl1, tu1, ul1, uu1, vl1, vu1,
-                                    level + 1, qid);
+                        push_children<T>(&s_top,
+                                         s_tlower,
+                                         s_tupper,
+                                         s_ulower,
+                                         s_uupper,
+                                         s_vlower,
+                                         s_vupper,
+                                         s_level,
+                                         s_qid,
+                                         S_CAP,
+                                         g_top,
+                                         g_tlower,
+                                         g_tupper,
+                                         g_ulower,
+                                         g_uupper,
+                                         g_vlower,
+                                         g_vupper,
+                                         g_level,
+                                         g_qid,
+                                         g_capacity,
+                                         &toi[qid],
+                                         tl0,
+                                         tu0,
+                                         ul0,
+                                         uu0,
+                                         vl0,
+                                         vu0,
+                                         tl1,
+                                         tu1,
+                                         ul1,
+                                         uu1,
+                                         vl1,
+                                         vu1,
+                                         level + 1,
+                                         qid);
                         atomicSub(inflight, 1);
                     }
                     __syncwarp();
@@ -849,15 +1002,15 @@ namespace sccd {
             cudaMalloc(&d_toi, noverlaps * sizeof(T));
 
             // Global LIFO stack arrays.
-            T*   g_tlower = nullptr;
-            T*   g_tupper = nullptr;
-            T*   g_ulower = nullptr;
-            T*   g_uupper = nullptr;
-            T*   g_vlower = nullptr;
-            T*   g_vupper = nullptr;
-            int* g_level  = nullptr;
-            int* g_qid    = nullptr;
-            int* g_top    = nullptr;
+            T* g_tlower = nullptr;
+            T* g_tupper = nullptr;
+            T* g_ulower = nullptr;
+            T* g_uupper = nullptr;
+            T* g_vlower = nullptr;
+            T* g_vupper = nullptr;
+            int* g_level = nullptr;
+            int* g_qid = nullptr;
+            int* g_top = nullptr;
             int* inflight = nullptr;
             cudaMalloc(&g_tlower, gstack_cap * sizeof(T));
             cudaMalloc(&g_tupper, gstack_cap * sizeof(T));
@@ -865,26 +1018,31 @@ namespace sccd {
             cudaMalloc(&g_uupper, gstack_cap * sizeof(T));
             cudaMalloc(&g_vlower, gstack_cap * sizeof(T));
             cudaMalloc(&g_vupper, gstack_cap * sizeof(T));
-            cudaMalloc(&g_level,  gstack_cap * sizeof(int));
-            cudaMalloc(&g_qid,    gstack_cap * sizeof(int));
-            cudaMalloc(&g_top,    sizeof(int));
+            cudaMalloc(&g_level, gstack_cap * sizeof(int));
+            cudaMalloc(&g_qid, gstack_cap * sizeof(int));
+            cudaMalloc(&g_top, sizeof(int));
             cudaMalloc(&inflight, sizeof(int));
 
             // Seed.  Grid is sized over MAX(noverlaps, gstack_cap) so the
             // kernel can also initialize all qid tags to SCCD_QID_EMPTY.
             {
-                const int block   = 256;
+                const int block = 256;
                 const size_t work = (gstack_cap > (int)noverlaps) ? (size_t)gstack_cap : noverlaps;
-                const int grid    = (int)((work + block - 1) / block);
+                const int grid = (int)((work + block - 1) / block);
                 seed_narrow_phase_ee_kernel<T><<<grid, block>>>(noverlaps,
                                                                 gstack_cap,
                                                                 max_toi,
                                                                 d_toi,
-                                                                g_tlower, g_tupper,
-                                                                g_ulower, g_uupper,
-                                                                g_vlower, g_vupper,
-                                                                g_level, g_qid,
-                                                                g_top, inflight);
+                                                                g_tlower,
+                                                                g_tupper,
+                                                                g_ulower,
+                                                                g_uupper,
+                                                                g_vlower,
+                                                                g_vupper,
+                                                                g_level,
+                                                                g_qid,
+                                                                g_top,
+                                                                inflight);
                 SCCD_CUDA_LAST_ERROR();
             }
 
@@ -904,15 +1062,24 @@ namespace sccd {
             dim3 block(32, SCCD_NP_WARPS_PER_BLOCK, 1);
             dim3 grid(grid_blocks, 1, 1);
 
-            narrow_phase_ee_kernel<T, I><<<grid, block>>>(e0overalp, e1overalp,
-                                                          v0, v1, edge_stride, edges,
+            narrow_phase_ee_kernel<T, I><<<grid, block>>>(e0overalp,
+                                                          e1overalp,
+                                                          v0,
+                                                          v1,
+                                                          edge_stride,
+                                                          edges,
                                                           tol,
                                                           d_toi,
-                                                          g_tlower, g_tupper,
-                                                          g_ulower, g_uupper,
-                                                          g_vlower, g_vupper,
-                                                          g_level, g_qid,
-                                                          g_top, gstack_cap,
+                                                          g_tlower,
+                                                          g_tupper,
+                                                          g_ulower,
+                                                          g_uupper,
+                                                          g_vlower,
+                                                          g_vupper,
+                                                          g_level,
+                                                          g_qid,
+                                                          g_top,
+                                                          gstack_cap,
                                                           inflight);
             SCCD_CUDA_LAST_ERROR();
 
@@ -923,11 +1090,16 @@ namespace sccd {
                                      thrust::minimum<T>());
 
             cudaFree(d_toi);
-            cudaFree(g_tlower); cudaFree(g_tupper);
-            cudaFree(g_ulower); cudaFree(g_uupper);
-            cudaFree(g_vlower); cudaFree(g_vupper);
-            cudaFree(g_level);  cudaFree(g_qid);
-            cudaFree(g_top);    cudaFree(inflight);
+            cudaFree(g_tlower);
+            cudaFree(g_tupper);
+            cudaFree(g_ulower);
+            cudaFree(g_uupper);
+            cudaFree(g_vlower);
+            cudaFree(g_vupper);
+            cudaFree(g_level);
+            cudaFree(g_qid);
+            cudaFree(g_top);
+            cudaFree(inflight);
 
             SCCD_CUDA_LAST_ERROR();
             return h_toi;
