@@ -4,6 +4,7 @@
 #include <stdlib.h>
 
 #include <cassert>
+#include <climits>
 
 #include <thrust/device_ptr.h>
 #include <thrust/functional.h>
@@ -23,6 +24,37 @@
 
 namespace sccd {
     namespace device {
+
+        // Axis-aligned subdomain in (t, u, v) parameter space.
+        template <typename T>
+        struct Domain {
+            T tlower;
+            T tupper;
+            T ulower;
+            T uupper;
+            T vlower;
+            T vupper;
+        };
+
+        // A LIFO of subdomains.  `top` is a POINTER to the counter so the
+        // same struct can represent either a shared-memory stack (top
+        // lives in shared) or a device-global stack (top lives in
+        // global), and atomics on *top hit the appropriate memory
+        // scope.  All array fields use an SoA layout for coalesced
+        // access during push/pop by peer warps.
+        template <typename T>
+        struct Stack {
+            T* tlower;
+            T* tupper;
+            T* ulower;
+            T* uupper;
+            T* vlower;
+            T* vupper;
+            int* level;
+            int* qid;
+            int* top;
+            int capacity;
+        };
 
         template <typename T, typename Vec4>
         static inline __device__ void compute_edge_edge_tolerance_soa(const T codomain_tol,
@@ -247,12 +279,7 @@ namespace sccd {
                                                      const int nt,
                                                      const int nu,
                                                      const int nv,
-                                                     const T tlower,
-                                                     const T tupper,
-                                                     const T ulower,
-                                                     const T uupper,
-                                                     const T vlower,
-                                                     const T vupper,
+                                                     const Domain<T>& parent,
                                                      const Vec4 sx,
                                                      const Vec4 sy,
                                                      const Vec4 sz,
@@ -263,19 +290,21 @@ namespace sccd {
                                                      const T* const SCCD_RESTRICT adaptive_tol,
                                                      int& contains_origin,
                                                      int& accept,
-                                                     T& cell_tlower) {
-            const T t_h = (tupper - tlower) / nt;
-            const T u_h = (uupper - ulower) / nu;
-            const T v_h = (vupper - vlower) / nv;
+                                                     Domain<T>& cell) {
+            const T t_h = (parent.tupper - parent.tlower) / nt;
+            const T u_h = (parent.uupper - parent.ulower) / nu;
+            const T v_h = (parent.vupper - parent.vlower) / nv;
 
-            const T tl = tlower + ti * t_h;
-            const T tu = tl + t_h;
-            const T ul = ulower + ui * u_h;
-            const T uu = ul + u_h;
-            const T vl = vlower + vi * v_h;
-            const T vu = vl + v_h;
+            cell.tlower = parent.tlower + ti * t_h;
+            cell.tupper = cell.tlower + t_h;
+            cell.ulower = parent.ulower + ui * u_h;
+            cell.uupper = cell.ulower + u_h;
+            cell.vlower = parent.vlower + vi * v_h;
+            cell.vupper = cell.vlower + v_h;
 
-            cell_tlower = tl;
+            const T tl = cell.tlower, tu = cell.tupper;
+            const T ul = cell.ulower, uu = cell.uupper;
+            const T vl = cell.vlower, vu = cell.vupper;
 
             T fmin, fmax;
             T f[8];
@@ -368,6 +397,15 @@ namespace sccd {
 #endif
         }
 
+        // We use the qid array of each stack as a per-slot "valid" tag:
+        //   qid == SCCD_QID_EMPTY  --> slot empty / being written
+        //   qid != SCCD_QID_EMPTY  --> fields fully published
+        // Writers store qid LAST (after a fence); readers spin on qid
+        // becoming non-empty after their CAS pop, then clear it.
+        // This avoids the race where a popper observes a counter
+        // increment ahead of the corresponding field writes.
+        static constexpr int SCCD_QID_EMPTY = -1;
+
         // ----------------------------------------------------------------
         // One-time init
         //  - toi[i] = max_toi for i in [0, noverlaps)
@@ -432,228 +470,116 @@ namespace sccd {
             }
         }
 
-        // We use the qid array of each stack as a per-slot "valid" tag:
-        //   qid == SCCD_QID_EMPTY  --> slot empty / being written
-        //   qid != SCCD_QID_EMPTY  --> fields fully published
-        // Writers store qid LAST (after a fence); readers spin on qid
-        // becoming non-empty after their CAS pop, then clear it.
-        // This avoids the race where a popper observes a counter
-        // increment ahead of the corresponding field writes.
-        static constexpr int SCCD_QID_EMPTY = -1;
-
-        // Pop one entry from the shared stack into out params (lane 0 only).
-        template <typename T>
-        static inline __device__ int try_pop_shared(int* SCCD_RESTRICT s_top,
-                                                    T* SCCD_RESTRICT s_tlower,
-                                                    T* SCCD_RESTRICT s_tupper,
-                                                    T* SCCD_RESTRICT s_ulower,
-                                                    T* SCCD_RESTRICT s_uupper,
-                                                    T* SCCD_RESTRICT s_vlower,
-                                                    T* SCCD_RESTRICT s_vupper,
-                                                    int* SCCD_RESTRICT s_level,
-                                                    int* SCCD_RESTRICT s_qid,
-                                                    T& tl,
-                                                    T& tu,
-                                                    T& ul,
-                                                    T& uu,
-                                                    T& vl,
-                                                    T& vu,
-                                                    int& level,
-                                                    int& qid) {
-            const int slot = release_slot(s_top);
+        // Pop one entry from a stack into Domain + level + qid.
+        // `Shared` selects the memory scope of the fence that orders
+        // the validity-tag read against the field reads.  Both variants
+        // share identical logic otherwise; template dispatch lets the
+        // compiler pick the cheaper `__threadfence_block` for the
+        // intra-block case.
+        template <bool Shared, typename T>
+        static inline __device__ int try_pop(const Stack<T>& stk, Domain<T>& d, int& level, int& qid) {
+            const int slot = release_slot(stk.top);
             if (slot < 0) return 0;
             // Spin until the writer publishes qid (they fenced first).
             int q;
             do {
-                q = atomicAdd(&s_qid[slot], 0);
+                q = atomicAdd(&stk.qid[slot], 0);
             } while (q == SCCD_QID_EMPTY);
-            __threadfence_block();
-            tl = s_tlower[slot];
-            tu = s_tupper[slot];
-            ul = s_ulower[slot];
-            uu = s_uupper[slot];
-            vl = s_vlower[slot];
-            vu = s_vupper[slot];
-            level = s_level[slot];
+            if (Shared) {
+                __threadfence_block();
+            } else {
+                __threadfence();
+            }
+            d.tlower = stk.tlower[slot];
+            d.tupper = stk.tupper[slot];
+            d.ulower = stk.ulower[slot];
+            d.uupper = stk.uupper[slot];
+            d.vlower = stk.vlower[slot];
+            d.vupper = stk.vupper[slot];
+            level = stk.level[slot];
             qid = q;
             // Reset valid tag so the slot is reusable.
-            atomicExch(&s_qid[slot], SCCD_QID_EMPTY);
+            atomicExch(&stk.qid[slot], SCCD_QID_EMPTY);
             return 1;
         }
 
-        // Pop one entry from the global stack into out params (lane 0 only).
-        template <typename T>
-        static inline __device__ int try_pop_global(int* SCCD_RESTRICT g_top,
-                                                    T* SCCD_RESTRICT g_tlower,
-                                                    T* SCCD_RESTRICT g_tupper,
-                                                    T* SCCD_RESTRICT g_ulower,
-                                                    T* SCCD_RESTRICT g_uupper,
-                                                    T* SCCD_RESTRICT g_vlower,
-                                                    T* SCCD_RESTRICT g_vupper,
-                                                    int* SCCD_RESTRICT g_level,
-                                                    int* SCCD_RESTRICT g_qid,
-                                                    T& tl,
-                                                    T& tu,
-                                                    T& ul,
-                                                    T& uu,
-                                                    T& vl,
-                                                    T& vu,
-                                                    int& level,
-                                                    int& qid) {
-            const int slot = release_slot(g_top);
-            if (slot < 0) return 0;
-            int q;
-            do {
-                q = atomicAdd(&g_qid[slot], 0);
-            } while (q == SCCD_QID_EMPTY);
-            __threadfence();
-            tl = g_tlower[slot];
-            tu = g_tupper[slot];
-            ul = g_ulower[slot];
-            uu = g_uupper[slot];
-            vl = g_vlower[slot];
-            vu = g_vupper[slot];
-            level = g_level[slot];
-            qid = q;
-            atomicExch(&g_qid[slot], SCCD_QID_EMPTY);
-            return 1;
-        }
-
-        // Push up to two child entries (lane 0 only).  Any child whose
-        // tlower is already >= the current toi[qid] is culled; this
-        // rereads toi[qid] just before reserving slots so pushes see the
-        // freshest tight bound established by peer warps.
+        // Warp-cooperative push.  Each lane holds one candidate cell
+        // (its own slice of the parent's 2 x 4 x 4 subdivision); the
+        // `keep` bit indicates whether this lane's cell should be
+        // enqueued for further subdivision.  All keeping lanes push
+        // in a single contiguous reservation, written in parallel.
         //
-        // Memory discipline.  The global stack is split into two zones:
-        //   [0, g_normal_cap)              : normal pushes
-        //   [g_normal_cap, g_capacity)     : reserve for halt-flush
-        //
-        // If the shared stack is full AND the normal zone is full, the
-        // push raises the halt flag and uses the reserve zone.  The
-        // reserve is sized by the host (R = grid_blocks * (S_CAP + 2*W))
-        // to guarantee that every block can later flush its shared
-        // stack and every in-flight warp can finalize its push, so this
-        // fallback path always succeeds.
+        // Memory discipline (same as before): the global stack is split
+        // into [0, g_normal_cap) for normal pushes and
+        // [g_normal_cap, g_capacity) for halt-flush.  If both the
+        // shared stack and the normal global zone can't fit the group
+        // of `n = __popc(keep_mask)` children, halt is raised and the
+        // push goes into the reserve.  Host sizing (R) guarantees the
+        // reserve can always absorb at most 32 children per warp plus
+        // the block-flush.
         template <typename T>
-        static inline __device__ void push_children(int* SCCD_RESTRICT s_top,
-                                                    T* SCCD_RESTRICT s_tlower,
-                                                    T* SCCD_RESTRICT s_tupper,
-                                                    T* SCCD_RESTRICT s_ulower,
-                                                    T* SCCD_RESTRICT s_uupper,
-                                                    T* SCCD_RESTRICT s_vlower,
-                                                    T* SCCD_RESTRICT s_vupper,
-                                                    int* SCCD_RESTRICT s_level,
-                                                    int* SCCD_RESTRICT s_qid,
-                                                    int s_capacity,
-                                                    int* SCCD_RESTRICT g_top,
-                                                    T* SCCD_RESTRICT g_tlower,
-                                                    T* SCCD_RESTRICT g_tupper,
-                                                    T* SCCD_RESTRICT g_ulower,
-                                                    T* SCCD_RESTRICT g_uupper,
-                                                    T* SCCD_RESTRICT g_vlower,
-                                                    T* SCCD_RESTRICT g_vupper,
-                                                    int* SCCD_RESTRICT g_level,
-                                                    int* SCCD_RESTRICT g_qid,
-                                                    int g_capacity,
-                                                    int g_normal_cap,
-                                                    int* SCCD_RESTRICT halt,
-                                                    const T* SCCD_RESTRICT toi_qid,
-                                                    const T tl0,
-                                                    const T tu0,
-                                                    const T ul0,
-                                                    const T uu0,
-                                                    const T vl0,
-                                                    const T vu0,
-                                                    const T tl1,
-                                                    const T tu1,
-                                                    const T ul1,
-                                                    const T uu1,
-                                                    const T vl1,
-                                                    const T vu1,
-                                                    const int level,
-                                                    const int qid) {
-            // Relaxed load is fine: missing a freshly-tightened toi only
-            // results in an extra push that a later pop will cull.
-            const T cur = *toi_qid;
-            const bool keep0 = tl0 < cur;
-            const bool keep1 = tl1 < cur;
-            const int n = (keep0 ? 1 : 0) + (keep1 ? 1 : 0);
+        static inline __device__ void push_warp_cells(const Stack<T>& s_stack,
+                                                      const Stack<T>& g_stack,
+                                                      const int g_normal_cap,
+                                                      int* SCCD_RESTRICT halt,
+                                                      const int lane,
+                                                      const bool keep,
+                                                      const Domain<T>& cell,
+                                                      const int level,
+                                                      const int qid) {
+            const unsigned keep_mask = __ballot_sync(0xffffffffu, keep);
+            const int n = __popc(keep_mask);
             if (n == 0) return;
 
-            int slot = reserve_slots(s_top, n, s_capacity);
-            if (slot >= 0) {
-                int k = 0;
-                if (keep0) {
-                    s_tlower[slot + k] = tl0;
-                    s_tupper[slot + k] = tu0;
-                    s_ulower[slot + k] = ul0;
-                    s_uupper[slot + k] = uu0;
-                    s_vlower[slot + k] = vl0;
-                    s_vupper[slot + k] = vu0;
-                    s_level[slot + k] = level;
-                    ++k;
+            // Lane 0 reserves contiguous slots: shared first, then
+            // global normal, then global reserve (under halt).
+            int slot_base = -1;
+            int is_shared = 0;
+            if (lane == 0) {
+                slot_base = reserve_slots(s_stack.top, n, s_stack.capacity);
+                if (slot_base >= 0) {
+                    is_shared = 1;
+                } else {
+                    slot_base = reserve_slots(g_stack.top, n, g_normal_cap);
+                    if (slot_base < 0) {
+                        atomicExch(halt, 1);
+                        slot_base = reserve_slots(g_stack.top, n, g_stack.capacity);
+                        assert(slot_base >= 0);
+                    }
                 }
-                if (keep1) {
-                    s_tlower[slot + k] = tl1;
-                    s_tupper[slot + k] = tu1;
-                    s_ulower[slot + k] = ul1;
-                    s_uupper[slot + k] = uu1;
-                    s_vlower[slot + k] = vl1;
-                    s_vupper[slot + k] = vu1;
-                    s_level[slot + k] = level;
-                }
+            }
+            slot_base = __shfl_sync(0xffffffffu, slot_base, 0);
+            is_shared = __shfl_sync(0xffffffffu, is_shared, 0);
 
+            // Each keeping lane writes into slot_base + (its rank among
+            // keepers).  `keep_mask & ((1u << lane) - 1u)` is the
+            // prefix, popc gives the rank.  `is_shared` is uniform
+            // across the warp (it came from a single-source shfl), so
+            // the ternary below never diverges.
+            const int rank = __popc(keep_mask & ((1u << lane) - 1u));
+            const int slot = slot_base + rank;
+
+            if (keep) {
+                const Stack<T>& dst = is_shared ? s_stack : g_stack;
+                dst.tlower[slot] = cell.tlower;
+                dst.tupper[slot] = cell.tupper;
+                dst.ulower[slot] = cell.ulower;
+                dst.uupper[slot] = cell.uupper;
+                dst.vlower[slot] = cell.vlower;
+                dst.vupper[slot] = cell.vupper;
+                dst.level[slot] = level;
+            }
+            // Make sure all field writes retire before any qid publish.
+            __syncwarp();
+            if (is_shared) {
                 __threadfence_block();
-                // Publish qid LAST so a popper that observes a non-empty
-                // tag is guaranteed to see committed field writes.
-                atomicExch(&s_qid[slot], qid);
-                if (n == 2) atomicExch(&s_qid[slot + 1], qid);
-                // Fence again so the subsequent atomicSub(inflight, 1)
-                // in the caller is ordered AFTER this push is visible.
-                // Without this, a peer warp observing inflight==0 could
-                // still see a stale s_top and terminate prematurely.
+                if (keep) atomicExch(&s_stack.qid[slot], qid);
                 __threadfence_block();
-                return;
+            } else {
+                __threadfence();
+                if (keep) atomicExch(&g_stack.qid[slot], qid);
+                __threadfence();
             }
-
-            // Normal zone first.  If it's full, raise halt and spill
-            // into the reserve zone -- which, by construction, always
-            // has room for in-flight pushes plus the eventual shared-
-            // stack flushes.
-            slot = reserve_slots(g_top, n, g_normal_cap);
-            if (slot < 0) {
-                atomicExch(halt, 1);
-                slot = reserve_slots(g_top, n, g_capacity);
-                assert(slot >= 0);
-            }
-            int k = 0;
-            if (keep0) {
-                g_tlower[slot + k] = tl0;
-                g_tupper[slot + k] = tu0;
-                g_ulower[slot + k] = ul0;
-                g_uupper[slot + k] = uu0;
-                g_vlower[slot + k] = vl0;
-                g_vupper[slot + k] = vu0;
-                g_level[slot + k] = level;
-                ++k;
-            }
-            if (keep1) {
-                g_tlower[slot + k] = tl1;
-                g_tupper[slot + k] = tu1;
-                g_ulower[slot + k] = ul1;
-                g_uupper[slot + k] = uu1;
-                g_vlower[slot + k] = vl1;
-                g_vupper[slot + k] = vu1;
-                g_level[slot + k] = level;
-            }
-
-            __threadfence();
-            atomicExch(&g_qid[slot], qid);
-            if (n == 2) atomicExch(&g_qid[slot + 1], qid);
-            // Device-scope fence so any peer block observing the
-            // caller's upcoming atomicSub(inflight, 1) also sees g_top
-            // and the published qids.
-            __threadfence();
         }
 
         // ----------------------------------------------------------------
@@ -687,17 +613,8 @@ namespace sccd {
                                                I** const SCCD_RESTRICT edges,
                                                const T tol,
                                                T* SCCD_RESTRICT toi,
-                                               T* SCCD_RESTRICT g_tlower,
-                                               T* SCCD_RESTRICT g_tupper,
-                                               T* SCCD_RESTRICT g_ulower,
-                                               T* SCCD_RESTRICT g_uupper,
-                                               T* SCCD_RESTRICT g_vlower,
-                                               T* SCCD_RESTRICT g_vupper,
-                                               int* SCCD_RESTRICT g_level,
-                                               int* SCCD_RESTRICT g_qid,
-                                               int* SCCD_RESTRICT g_top,
-                                               int g_capacity,
-                                               int g_normal_cap,
+                                               Stack<T> g_stack,
+                                               const int g_normal_cap,
                                                int* SCCD_RESTRICT inflight,
                                                int* SCCD_RESTRICT seed_cursor,
                                                const int seed_end,
@@ -707,6 +624,7 @@ namespace sccd {
             constexpr int S_CAP = SCCD_NP_SHARED_STACK_CAP;
             constexpr int W = SCCD_NP_WARPS_PER_BLOCK;
 
+            // Per-block shared stack storage.
             __shared__ T s_tlower[S_CAP];
             __shared__ T s_tupper[S_CAP];
             __shared__ T s_ulower[S_CAP];
@@ -718,38 +636,39 @@ namespace sccd {
             __shared__ int s_top;
 
             // Per-warp slot used by lane 0 to publish the popped entry to
-            // the rest of the warp (avoids needing a stream of shfls).
+            // the rest of the warp.
             __shared__ int w_status[W];  // 0=work, 1=backoff, 2=terminate
-            __shared__ T w_tl[W], w_tu[W], w_ul[W], w_uu[W], w_vl[W], w_vu[W];
+            __shared__ Domain<T> w_domain[W];
             __shared__ int w_level[W];
             __shared__ int w_qid[W];
 
             const int lane = threadIdx.x;
             const int warp = threadIdx.y;
-
-            // Initialize shared stack header and tag all slots as empty
-            // before any warp can touch them.
             const int tid_in_block = lane + warp * 32;
-            const int threads_in_block = 32 * SCCD_NP_WARPS_PER_BLOCK;
+            const int threads_in_block = 32 * W;
+
+            // Initialize shared-stack validity tags and counter, then
+            // assemble a Stack<T> view over the shared arrays.
             for (int i = tid_in_block; i < S_CAP; i += threads_in_block) {
                 s_qid[i] = SCCD_QID_EMPTY;
             }
-            if (tid_in_block == 0) {
-                s_top = 0;
-            }
+            if (tid_in_block == 0) s_top = 0;
             __syncthreads();
+
+            Stack<T> s_stack = {
+                s_tlower, s_tupper, s_ulower, s_uupper, s_vlower, s_vupper, s_level, s_qid, &s_top, S_CAP};
 
             unsigned int backoff = 64;
 
             while (true) {
                 if (lane == 0) {
                     // Fast-path abort if another warp raised the halt
-                    // flag (global stack hit its normal-zone cap).  We
-                    // leave in-flight warps to finish their current
-                    // iteration; at next top-of-loop they'll also exit
-                    // here.  The block-flush below moves remaining
-                    // shared-stack work to global so the host can
-                    // relaunch and pick it up.
+                    // flag (global normal zone was full on a push).
+                    // In-flight warps still finish their current
+                    // iteration; they'll exit here next time around.
+                    // The block-flush below drains the shared stack
+                    // into global so the host can relaunch and pick
+                    // up any residual work.
                     w_status[warp] = (atomicAdd(halt, 0) != 0) ? 2 : 0;
                 }
                 __syncwarp();
@@ -761,44 +680,10 @@ namespace sccd {
                     // ahead of an in-progress pop.
                     atomicAdd(inflight, 1);
 
-                    T tl, tu, ul, uu, vl, vu;
+                    Domain<T> d;
                     int level, qid;
-                    int got = try_pop_shared<T>(&s_top,
-                                                s_tlower,
-                                                s_tupper,
-                                                s_ulower,
-                                                s_uupper,
-                                                s_vlower,
-                                                s_vupper,
-                                                s_level,
-                                                s_qid,
-                                                tl,
-                                                tu,
-                                                ul,
-                                                uu,
-                                                vl,
-                                                vu,
-                                                level,
-                                                qid);
-                    if (!got) {
-                        got = try_pop_global<T>(g_top,
-                                                g_tlower,
-                                                g_tupper,
-                                                g_ulower,
-                                                g_uupper,
-                                                g_vlower,
-                                                g_vupper,
-                                                g_level,
-                                                g_qid,
-                                                tl,
-                                                tu,
-                                                ul,
-                                                uu,
-                                                vl,
-                                                vu,
-                                                level,
-                                                qid);
-                    }
+                    int got = try_pop<true, T>(s_stack, d, level, qid);
+                    if (!got) got = try_pop<false, T>(g_stack, d, level, qid);
 
                     // Source 3: lazy seed claim.  Synthesizes the root
                     // entry for query `old` in registers -- no global
@@ -808,12 +693,7 @@ namespace sccd {
                     if (!got) {
                         const int old = atomicAdd(seed_cursor, 1);
                         if (old < seed_end) {
-                            tl = T(0);
-                            tu = T(1);
-                            ul = T(0);
-                            uu = T(1);
-                            vl = T(0);
-                            vu = T(1);
+                            d = {T(0), T(1), T(0), T(1), T(0), T(1)};
                             level = 0;
                             qid = old;
                             got = 1;
@@ -821,12 +701,7 @@ namespace sccd {
                     }
 
                     if (got) {
-                        w_tl[warp] = tl;
-                        w_tu[warp] = tu;
-                        w_ul[warp] = ul;
-                        w_uu[warp] = uu;
-                        w_vl[warp] = vl;
-                        w_vu[warp] = vu;
+                        w_domain[warp] = d;
                         w_level[warp] = level;
                         w_qid[warp] = qid;
                         w_status[warp] = 0;
@@ -836,8 +711,8 @@ namespace sccd {
                         // releasing can other warps observe a true
                         // 'no inflight' state.
                         atomicSub(inflight, 1);
-                        const int gtop_now = atomicAdd(g_top, 0);
-                        const int stop_now = atomicAdd(&s_top, 0);
+                        const int gtop_now = atomicAdd(g_stack.top, 0);
+                        const int stop_now = atomicAdd(s_stack.top, 0);
                         const int infl_now = atomicAdd(inflight, 0);
                         const int seed_now = atomicAdd(seed_cursor, 0);
                         if (gtop_now <= 0 && stop_now <= 0 && infl_now <= 0 && seed_now >= seed_end) {
@@ -850,9 +725,7 @@ namespace sccd {
                 __syncwarp();
 
                 const int status = w_status[warp];
-                if (status == 2) {
-                    break;
-                }
+                if (status == 2) break;
                 if (status == 1) {
                     backoff_ns(backoff);
                     if (backoff < 4096) backoff <<= 1;
@@ -860,24 +733,19 @@ namespace sccd {
                 }
                 backoff = 64;
 
-                const T tl = w_tl[warp];
-                const T tu = w_tu[warp];
-                const T ul = w_ul[warp];
-                const T uu = w_uu[warp];
-                const T vl = w_vl[warp];
-                const T vu = w_vu[warp];
+                const Domain<T> parent = w_domain[warp];
                 const int level = w_level[warp];
                 const int qid = w_qid[warp];
 
                 // Early cull if a tighter toi has already been recorded
                 // for this query.  Read once on lane 0 and broadcast so
-                // all 32 lanes agree on the value; otherwise a concurrent
-                // atomic_min by another warp could make the plain load
-                // diverge across lanes and break the __syncwarp() below.
+                // all 32 lanes agree; otherwise a concurrent atomic_min
+                // by another warp could make the plain load diverge
+                // across lanes and break the __syncwarp() below.
                 T cur_toi = T(0);
                 if (lane == 0) cur_toi = toi[qid];
                 cur_toi = __shfl_sync(0xffffffffu, cur_toi, 0);
-                if (tl >= cur_toi) {
+                if (parent.tlower >= cur_toi) {
                     if (lane == 0) atomicSub(inflight, 1);
                     __syncwarp();
                     continue;
@@ -890,134 +758,44 @@ namespace sccd {
                 T atol[3];
                 compute_edge_edge_tolerance_soa<T, Vec4>(tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
 
-                // 2 x 4 x 4 lane decomposition.
+                // 2 x 4 x 4 lane decomposition: each lane evaluates one
+                // cell of the parent subdomain.
                 const int ti = lane >> 4;
                 const int ui = (lane >> 2) & 0x3;
                 const int vi = lane & 0x3;
 
                 int contains = 0;
                 int accept = 0;
-                T cell_tl = tl;
-                sample_cell_3d<T, Vec4>(ti,
-                                        ui,
-                                        vi,
-                                        2,
-                                        4,
-                                        4,
-                                        tl,
-                                        tu,
-                                        ul,
-                                        uu,
-                                        vl,
-                                        vu,
-                                        sx,
-                                        sy,
-                                        sz,
-                                        ex,
-                                        ey,
-                                        ez,
-                                        tol,
-                                        atol,
-                                        contains,
-                                        accept,
-                                        cell_tl);
+                Domain<T> cell;
+                sample_cell_3d<T, Vec4>(
+                    ti, ui, vi, 2, 4, 4, parent, sx, sy, sz, ex, ey, ez, tol, atol, contains, accept, cell);
 
                 const unsigned acc_mask = __ballot_sync(0xffffffffu, accept);
-                const unsigned cont_mask = __ballot_sync(0xffffffffu, contains);
 
                 if (acc_mask) {
-                    // Reduce min(cell_tl) over accepting lanes.  Use the
-                    // parent subdomain upper-bound as a sentinel so that
-                    // non-accepting lanes never win the reduction.
-                    T best = accept ? cell_tl : tu;
+                    // Reduce min(cell.tlower) over accepting lanes.  Use
+                    // the parent's tupper as a sentinel so non-accepting
+                    // lanes never win the reduction.
+                    T best = accept ? cell.tlower : parent.tupper;
                     for (int o = 16; o > 0; o >>= 1) {
                         T other = __shfl_xor_sync(0xffffffffu, best, o);
                         best = (best < other) ? best : other;
                     }
-                    if (lane == 0) {
-                        device::atomic_min(&toi[qid], best);
-                        atomicSub(inflight, 1);
-                    }
-                    __syncwarp();
-                    continue;
+                    if (lane == 0) device::atomic_min(&toi[qid], best);
                 }
 
-                if (cont_mask) {
-                    // Bisect the widest of (t, u, v) at the parent level.
-                    const T tw = tu - tl;
-                    const T uw = uu - ul;
-                    const T vw = vu - vl;
-                    int axis = 0;
-                    T width = tw;
-                    if (uw > width) {
-                        axis = 1;
-                        width = uw;
-                    }
-                    if (vw > width) {
-                        axis = 2;
-                    }
+                // Refine every lane whose cell still contains the origin
+                // AND has not yet been accepted AND is still competitive
+                // with the current best toi[qid].  One 2x4x4 sampling
+                // produces up to 32 children (one per lane), fully
+                // using the work done by all 32 lanes in sample_cell_3d.
+                T cur_toi_now = T(0);
+                if (lane == 0) cur_toi_now = toi[qid];
+                cur_toi_now = __shfl_sync(0xffffffffu, cur_toi_now, 0);
+                const bool keep_cell = contains && !accept && (cell.tlower < cur_toi_now);
 
-                    T tl0 = tl, tu0 = tu, ul0 = ul, uu0 = uu, vl0 = vl, vu0 = vu;
-                    T tl1 = tl, tu1 = tu, ul1 = ul, uu1 = uu, vl1 = vl, vu1 = vu;
-                    if (axis == 0) {
-                        const T m = (tl + tu) * T(0.5);
-                        tu0 = m;
-                        tl1 = m;
-                    } else if (axis == 1) {
-                        const T m = (ul + uu) * T(0.5);
-                        uu0 = m;
-                        ul1 = m;
-                    } else {
-                        const T m = (vl + vu) * T(0.5);
-                        vu0 = m;
-                        vl1 = m;
-                    }
+                push_warp_cells<T>(s_stack, g_stack, g_normal_cap, halt, lane, keep_cell, cell, level + 1, qid);
 
-                    if (lane == 0) {
-                        push_children<T>(&s_top,
-                                         s_tlower,
-                                         s_tupper,
-                                         s_ulower,
-                                         s_uupper,
-                                         s_vlower,
-                                         s_vupper,
-                                         s_level,
-                                         s_qid,
-                                         S_CAP,
-                                         g_top,
-                                         g_tlower,
-                                         g_tupper,
-                                         g_ulower,
-                                         g_uupper,
-                                         g_vlower,
-                                         g_vupper,
-                                         g_level,
-                                         g_qid,
-                                         g_capacity,
-                                         g_normal_cap,
-                                         halt,
-                                         &toi[qid],
-                                         tl0,
-                                         tu0,
-                                         ul0,
-                                         uu0,
-                                         vl0,
-                                         vu0,
-                                         tl1,
-                                         tu1,
-                                         ul1,
-                                         uu1,
-                                         vl1,
-                                         vu1,
-                                         level + 1,
-                                         qid);
-                        atomicSub(inflight, 1);
-                    }
-                    __syncwarp();
-                    continue;
-                }
-
-                // Neither accept nor contains-origin: discard.
                 if (lane == 0) atomicSub(inflight, 1);
                 __syncwarp();
             }
@@ -1038,9 +816,9 @@ namespace sccd {
             __shared__ int flush_base;
             if (tid_in_block == 0) {
                 flush_n = s_top;
-                flush_base = (flush_n > 0) ? reserve_slots(g_top, flush_n, g_capacity) : 0;
+                flush_base = (flush_n > 0) ? reserve_slots(g_stack.top, flush_n, g_stack.capacity) : 0;
                 // By construction (host sizes g_capacity with reserve
-                // >= grid_blocks * S_CAP) this reserve must succeed.
+                // R >= grid_blocks * (S_CAP + 32*W)) this must succeed.
                 if (flush_n > 0) assert(flush_base >= 0);
             }
             __syncthreads();
@@ -1048,20 +826,20 @@ namespace sccd {
             for (int i = tid_in_block; i < flush_n; i += threads_in_block) {
                 const int src = i;
                 const int dst = flush_base + i;
-                g_tlower[dst] = s_tlower[src];
-                g_tupper[dst] = s_tupper[src];
-                g_ulower[dst] = s_ulower[src];
-                g_uupper[dst] = s_uupper[src];
-                g_vlower[dst] = s_vlower[src];
-                g_vupper[dst] = s_vupper[src];
-                g_level[dst] = s_level[src];
+                g_stack.tlower[dst] = s_stack.tlower[src];
+                g_stack.tupper[dst] = s_stack.tupper[src];
+                g_stack.ulower[dst] = s_stack.ulower[src];
+                g_stack.uupper[dst] = s_stack.uupper[src];
+                g_stack.vlower[dst] = s_stack.vlower[src];
+                g_stack.vupper[dst] = s_stack.vupper[src];
+                g_stack.level[dst] = s_stack.level[src];
                 // s_qid[src] must be a published (non-EMPTY) tag because
                 // the invariant is that slots in [0, s_top) are fully
-                // committed.  Republish on the global side last, after a
-                // fence, so future popper sees fields first.
-                const int q = s_qid[src];
+                // committed.  Republish on the global side last, after
+                // a fence, so a future popper sees fields first.
+                const int q = s_stack.qid[src];
                 __threadfence();
-                atomicExch(&g_qid[dst], q);
+                atomicExch(&g_stack.qid[dst], q);
             }
         }
 
@@ -1087,22 +865,37 @@ namespace sccd {
                 tol = (T)SCCD_TOL;
             }
 
-            // Candidates-per-kernel cap.  Default 0 == unbounded (all
-            // overlaps in one worker launch).  When positive, the host
-            // splits the input into contiguous [begin, end) batches and
-            // relaunches the worker for each one, reusing all device
-            // buffers across batches.
-            int SCCD_BATCH_SIZE = 0;
-            SCCD_READ_ENV(SCCD_BATCH_SIZE, atoi);
-            const size_t batch_size = (SCCD_BATCH_SIZE > 0) ? (size_t)SCCD_BATCH_SIZE : noverlaps;
-
-            // Grid sizing up front: we need it to bound the reserve R.
+            // ----------------------------------------------------------------
+            // Auto-sized hyperparameters.
+            //
+            //   SCCD_BLOCKS_PER_SM  -> from CUDA occupancy API
+            //   SCCD_GSTACK_CAP     -> from cudaMemGetInfo, capped by a
+            //                          heuristic to avoid over-allocation
+            //                          when noverlaps is small
+            //   SCCD_BATCH_SIZE     -> from gstack headroom, so a single
+            //                          launch is likely to finish a batch
+            //                          without halt-flush
+            //
+            // Any of these can be overridden via the matching env var.
+            // ----------------------------------------------------------------
             int dev = 0;
             cudaGetDevice(&dev);
             cudaDeviceProp prop{};
             cudaGetDeviceProperties(&prop, dev);
 
+            const int W = SCCD_NP_WARPS_PER_BLOCK;
+            const int block_threads = 32 * W;
+
+            // Occupancy-derived blocks-per-SM (0 dynamic shared mem).
             int SCCD_BLOCKS_PER_SM = 4;
+            {
+                int occ = 0;
+                if (cudaOccupancyMaxActiveBlocksPerMultiprocessor(
+                        &occ, (const void*)narrow_phase_ee_kernel<T, I>, block_threads, 0) == cudaSuccess &&
+                    occ > 0) {
+                    SCCD_BLOCKS_PER_SM = occ;
+                }
+            }
             SCCD_READ_ENV(SCCD_BLOCKS_PER_SM, atoi);
 
             int base_grid_blocks = prop.multiProcessorCount * SCCD_BLOCKS_PER_SM;
@@ -1110,20 +903,60 @@ namespace sccd {
 
             // Reserve count R sized so that at halt time every block can
             // flush its entire shared stack (S_CAP) and every warp can
-            // complete an in-flight push (2 children) without running
-            // out of global-stack slots.
-            const int W = SCCD_NP_WARPS_PER_BLOCK;
-            const int reserve_R = base_grid_blocks * (SCCD_NP_SHARED_STACK_CAP + 2 * W);
+            // complete an in-flight push of up to 32 children (one per
+            // lane, from the 2 x 4 x 4 cell subdivision) without
+            // running out of global-stack slots.
+            const int reserve_R = base_grid_blocks * (SCCD_NP_SHARED_STACK_CAP + 32 * W);
 
-            // Global stack cap.  Caller's env value is a starting point;
-            // we enforce gstack_cap >= 2*R so there's a non-trivial
-            // normal zone on top of the reserve.  With tiny caps the
-            // host simply relaunches more times.
-            int SCCD_GSTACK_CAP = (int)(noverlaps * 16) + 1024;
+            // Memory-derived default global-stack cap.  We budget a
+            // fraction (default 0.25) of currently-free device memory
+            // for the narrowphase scratch buffers, subtract the toi
+            // array, and convert the remainder into stack slots.  The
+            // effective cap is further clamped below by 2*R (needed
+            // for the halt reserve) and above by a heuristic tied to
+            // noverlaps so we don't reserve gigabytes for tiny inputs.
+            size_t free_bytes = 0, total_bytes = 0;
+            cudaMemGetInfo(&free_bytes, &total_bytes);
+
+            double SCCD_MEM_FRACTION = 0.25;
+            SCCD_READ_ENV(SCCD_MEM_FRACTION, atof);
+            if (SCCD_MEM_FRACTION <= 0.0 || SCCD_MEM_FRACTION > 1.0) SCCD_MEM_FRACTION = 0.25;
+
+            const size_t per_slot_bytes = 6 * sizeof(T) + 2 * sizeof(int);
+            const size_t toi_bytes = noverlaps * sizeof(T);
+            const size_t scratch_overhead = 4 * sizeof(int);  // counters
+            const size_t budget = (size_t)((double)free_bytes * SCCD_MEM_FRACTION);
+
+            size_t slots_from_mem = 0;
+            if (budget > toi_bytes + scratch_overhead) {
+                slots_from_mem = (budget - toi_bytes - scratch_overhead) / per_slot_bytes;
+            }
+            const size_t slots_heuristic = noverlaps * 32 + 4096;
+            size_t auto_slots = (slots_from_mem < slots_heuristic) ? slots_from_mem : slots_heuristic;
+            if (auto_slots < (size_t)(2 * reserve_R)) auto_slots = (size_t)(2 * reserve_R);
+            if (auto_slots > (size_t)INT_MAX) auto_slots = (size_t)INT_MAX;
+
+            int SCCD_GSTACK_CAP = (int)auto_slots;
             SCCD_READ_ENV(SCCD_GSTACK_CAP, atoi);
             int gstack_cap = SCCD_GSTACK_CAP;
             if (gstack_cap < 2 * reserve_R) gstack_cap = 2 * reserve_R;
             const int g_normal_cap = gstack_cap - reserve_R;
+
+            // Candidates-per-kernel cap.  Default: sized so the normal
+            // zone can (on average) hold a modest expansion per seed
+            // without triggering a halt-flush.  We budget ~8 slots of
+            // normal headroom per seed, so batch_size = normal_cap/8
+            // -- clamped to [1, noverlaps].  Override via SCCD_BATCH_SIZE.
+            int SCCD_BATCH_SIZE = 0;
+            {
+                size_t auto_batch = (size_t)g_normal_cap / 8;
+                if (auto_batch < 1) auto_batch = 1;
+                if (auto_batch > noverlaps) auto_batch = noverlaps;
+                if (auto_batch > (size_t)INT_MAX) auto_batch = (size_t)INT_MAX;
+                SCCD_BATCH_SIZE = (int)auto_batch;
+            }
+            SCCD_READ_ENV(SCCD_BATCH_SIZE, atoi);
+            const size_t batch_size = (SCCD_BATCH_SIZE > 0) ? (size_t)SCCD_BATCH_SIZE : noverlaps;
 
             // Per-query toi output (allocated once across all batches).
             T* d_toi = nullptr;
@@ -1162,11 +995,7 @@ namespace sccd {
                 const int block = 256;
                 const size_t work = (gstack_cap > (int)noverlaps) ? (size_t)gstack_cap : noverlaps;
                 const int grid = (int)((work + block - 1) / block);
-                init_narrow_phase_ee_kernel<T><<<grid, block>>>(noverlaps,
-                                                                gstack_cap,
-                                                                max_toi,
-                                                                d_toi,
-                                                                g_qid);
+                init_narrow_phase_ee_kernel<T><<<grid, block>>>(noverlaps, gstack_cap, max_toi, d_toi, g_qid);
                 SCCD_CUDA_LAST_ERROR();
             }
 
@@ -1190,6 +1019,9 @@ namespace sccd {
                     if (grid_blocks > this_batch) grid_blocks = this_batch;
                     dim3 grid(grid_blocks, 1, 1);
 
+                    Stack<T> g_stack = {
+                        g_tlower, g_tupper, g_ulower, g_uupper, g_vlower, g_vupper, g_level, g_qid, g_top, gstack_cap};
+
                     narrow_phase_ee_kernel<T, I><<<grid, block>>>(e0overalp,
                                                                   e1overalp,
                                                                   v0,
@@ -1198,16 +1030,7 @@ namespace sccd {
                                                                   edges,
                                                                   tol,
                                                                   d_toi,
-                                                                  g_tlower,
-                                                                  g_tupper,
-                                                                  g_ulower,
-                                                                  g_uupper,
-                                                                  g_vlower,
-                                                                  g_vupper,
-                                                                  g_level,
-                                                                  g_qid,
-                                                                  g_top,
-                                                                  gstack_cap,
+                                                                  g_stack,
                                                                   g_normal_cap,
                                                                   inflight,
                                                                   seed_cursor,
