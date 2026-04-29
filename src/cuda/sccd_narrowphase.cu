@@ -22,6 +22,10 @@
 #define SCCD_NP_SHARED_STACK_CAP 128
 #endif
 
+#ifndef SCCD_NP_THREADS_PER_BLOCK
+#define SCCD_NP_THREADS_PER_BLOCK 128
+#endif
+
 namespace sccd {
     namespace device {
 
@@ -555,6 +559,298 @@ namespace sccd {
             }
         }
 
+        template <int N>
+        struct DfsSplit;
+
+        template <>
+        struct DfsSplit<64> {
+            static constexpr int NT = 4;
+            static constexpr int NU = 4;
+            static constexpr int NV = 4;
+        };
+
+        template <>
+        struct DfsSplit<128> {
+            static constexpr int NT = 4;
+            static constexpr int NU = 4;
+            static constexpr int NV = 8;
+        };
+
+        template <>
+        struct DfsSplit<256> {
+            static constexpr int NT = 4;
+            static constexpr int NU = 8;
+            static constexpr int NV = 8;
+        };
+
+        template <int N>
+        static inline __device__ int block_popc(const int pred, int* SCCD_RESTRICT warp_sums) {
+            const int lane = threadIdx.x & 31;
+            const int warp = threadIdx.x >> 5;
+            int v = pred;
+            for (int o = 16; o > 0; o >>= 1) {
+                v += __shfl_xor_sync(0xffffffffu, v, o);
+            }
+            if (lane == 0) warp_sums[warp] = v;
+            __syncthreads();
+            if (warp == 0) {
+                v = (lane < (N >> 5)) ? warp_sums[lane] : 0;
+                for (int o = 16; o > 0; o >>= 1) {
+                    v += __shfl_xor_sync(0xffffffffu, v, o);
+                }
+                if (lane == 0) warp_sums[0] = v;
+            }
+            __syncthreads();
+            return warp_sums[0];
+        }
+
+        template <typename T>
+        static inline __device__ void bisect_longest_axis(const Domain<T>& in,
+                                                          const T* const SCCD_RESTRICT atol,
+                                                          Domain<T>& left,
+                                                          Domain<T>& right) {
+            left = in;
+            right = in;
+
+            const T dt = (in.tupper - in.tlower) / atol[0];
+            const T du = (in.uupper - in.ulower) / atol[1];
+            const T dv = (in.vupper - in.vlower) / atol[2];
+
+            if (dt >= du && dt >= dv) {
+                const T m = (in.tlower + in.tupper) * T(0.5);
+                left.tupper = m;
+                right.tlower = m;
+            } else if (du >= dv) {
+                const T m = (in.ulower + in.uupper) * T(0.5);
+                left.uupper = m;
+                right.ulower = m;
+            } else {
+                const T m = (in.vlower + in.vupper) * T(0.5);
+                left.vupper = m;
+                right.vlower = m;
+            }
+        }
+
+        template <typename T>
+        static inline __device__ int push_shared_single(const Stack<T>& s_stack,
+                                                        const Domain<T>& d,
+                                                        const int level,
+                                                        const int qid) {
+            const int base = reserve_slots(s_stack.top, 1, s_stack.capacity);
+            if (base < 0) return 0;
+            while (atomicCAS(&s_stack.qid[base], SCCD_QID_EMPTY, SCCD_QID_WRITING) != SCCD_QID_EMPTY) {
+            }
+            s_stack.tlower[base] = d.tlower;
+            s_stack.tupper[base] = d.tupper;
+            s_stack.ulower[base] = d.ulower;
+            s_stack.uupper[base] = d.uupper;
+            s_stack.vlower[base] = d.vlower;
+            s_stack.vupper[base] = d.vupper;
+            s_stack.level[base] = level;
+            __threadfence_block();
+            atomicExch(&s_stack.qid[base], qid);
+            __threadfence_block();
+            return 1;
+        }
+
+        template <typename T>
+        static inline __device__ int push_global_single(const Stack<T>& g_stack,
+                                                        const int g_normal_cap,
+                                                        int* SCCD_RESTRICT halt,
+                                                        const Domain<T>& d,
+                                                        const int level,
+                                                        const int qid) {
+            int base = reserve_slots(g_stack.top, 1, g_normal_cap);
+            if (base < 0) {
+                atomicExch(halt, 1);
+                base = reserve_slots(g_stack.top, 1, g_stack.capacity);
+                if (base < 0) return 0;
+            }
+            while (atomicCAS(&g_stack.qid[base], SCCD_QID_EMPTY, SCCD_QID_WRITING) != SCCD_QID_EMPTY) {
+            }
+            g_stack.tlower[base] = d.tlower;
+            g_stack.tupper[base] = d.tupper;
+            g_stack.ulower[base] = d.ulower;
+            g_stack.uupper[base] = d.uupper;
+            g_stack.vlower[base] = d.vlower;
+            g_stack.vupper[base] = d.vupper;
+            g_stack.level[base] = level;
+            __threadfence();
+            atomicExch(&g_stack.qid[base], qid);
+            __threadfence();
+            return 1;
+        }
+
+        template <int N, typename T, typename I>
+        __global__ void narrow_phase_ee_dfs_kernel(const I* const SCCD_RESTRICT e0overlap,
+                                                   const I* const SCCD_RESTRICT e1overlap,
+                                                   T** const SCCD_RESTRICT sp,
+                                                   T** const SCCD_RESTRICT ep,
+                                                   const size_t edge_stride,
+                                                   I** const SCCD_RESTRICT edges,
+                                                   const T tol,
+                                                   T* SCCD_RESTRICT toi,
+                                                   Stack<T> g_stack,
+                                                   const int g_normal_cap,
+                                                   int* SCCD_RESTRICT halt,
+                                                   const T alpha,
+                                                   const int seed_begin,
+                                                   const int seed_end) {
+            static_assert(N == 64 || N == 128 || N == 256, "SCCD_NP_THREADS_PER_BLOCK must be one of 64/128/256");
+            using Vec4 = typename device::Vec4Type<T>::type;
+            constexpr int NT = DfsSplit<N>::NT;
+            constexpr int NU = DfsSplit<N>::NU;
+            constexpr int NV = DfsSplit<N>::NV;
+            constexpr int S_CAP = SCCD_NP_SHARED_STACK_CAP;
+
+            const int tid = threadIdx.x;
+            const int qid = seed_begin + (int)blockIdx.x;
+            if (qid >= seed_end) return;
+
+            __shared__ T s_tlower[S_CAP];
+            __shared__ T s_tupper[S_CAP];
+            __shared__ T s_ulower[S_CAP];
+            __shared__ T s_uupper[S_CAP];
+            __shared__ T s_vlower[S_CAP];
+            __shared__ T s_vupper[S_CAP];
+            __shared__ int s_level[S_CAP];
+            __shared__ int s_qid[S_CAP];
+            __shared__ int s_top;
+            __shared__ T s_toi;
+            __shared__ int s_hard;
+            __shared__ int s_defer_base;
+            __shared__ int s_defer_cursor;
+            __shared__ int warp_sums[N >> 5];
+
+            for (int i = tid; i < S_CAP; i += N) s_qid[i] = SCCD_QID_EMPTY;
+            if (tid == 0) {
+                s_top = 0;
+                s_toi = toi[qid];
+                s_hard = 0;
+                s_defer_base = -1;
+                s_defer_cursor = 0;
+            }
+            __syncthreads();
+
+            Stack<T> s_stack = {
+                s_tlower, s_tupper, s_ulower, s_uupper, s_vlower, s_vupper, s_level, s_qid, &s_top, S_CAP};
+
+            Vec4 sx, sy, sz, ex, ey, ez;
+            load_query_ee<T, Vec4, I>(qid, e0overlap, e1overlap, sp, ep, edge_stride, edges, sx, sy, sz, ex, ey, ez);
+            T atol[3];
+            compute_edge_edge_tolerance_soa<T, Vec4>(tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
+
+            const int ti = tid / (NU * NV);
+            const int rem = tid % (NU * NV);
+            const int ui = rem / NV;
+            const int vi = rem % NV;
+
+            Domain<T> root = {T(0), T(1), T(0), T(1), T(0), T(1)};
+            Domain<T> cur;
+            int contains = 0;
+            int accept = 0;
+            sample_cell_3d<T, Vec4>(ti, ui, vi, NT, NU, NV, root, sx, sy, sz, ex, ey, ez, tol, atol, contains, accept, cur);
+
+            if (accept) {
+                device::atomic_min(&s_toi, cur.tlower);
+                contains = 0;
+            }
+
+            const int co_count = block_popc<N>(contains, warp_sums);
+            if (tid == 0 && (T)co_count > alpha * (T)N) {
+                s_hard = 1;
+                int base = reserve_slots(g_stack.top, co_count, g_normal_cap);
+                if (base < 0) {
+                    atomicExch(halt, 1);
+                    base = reserve_slots(g_stack.top, co_count, g_stack.capacity);
+                }
+                s_defer_base = base;
+                s_defer_cursor = 0;
+            }
+            __syncthreads();
+
+            if (s_hard) {
+                if (contains && s_defer_base >= 0) {
+                    const int rank = atomicAdd(&s_defer_cursor, 1);
+                    const int slot = s_defer_base + rank;
+                    while (atomicCAS(&g_stack.qid[slot], SCCD_QID_EMPTY, SCCD_QID_WRITING) != SCCD_QID_EMPTY) {
+                    }
+                    g_stack.tlower[slot] = cur.tlower;
+                    g_stack.tupper[slot] = cur.tupper;
+                    g_stack.ulower[slot] = cur.ulower;
+                    g_stack.uupper[slot] = cur.uupper;
+                    g_stack.vlower[slot] = cur.vlower;
+                    g_stack.vupper[slot] = cur.vupper;
+                    g_stack.level[slot] = 0;
+                    __threadfence();
+                    atomicExch(&g_stack.qid[slot], qid);
+                    __threadfence();
+                }
+                return;
+            }
+
+            int active = contains;
+            int level = 1;
+            while (true) {
+                if (active && cur.tlower >= s_toi) active = 0;
+
+                if (active) {
+                    Domain<T> left, right;
+                    bisect_longest_axis<T>(cur, atol, left, right);
+                    int cl = 0, cr = 0, al = 0, ar = 0;
+                    Domain<T> lbox, rbox;
+                    sample_cell_3d<T, Vec4>(0, 0, 0, 1, 1, 1, left, sx, sy, sz, ex, ey, ez, tol, atol, cl, al, lbox);
+                    sample_cell_3d<T, Vec4>(0, 0, 0, 1, 1, 1, right, sx, sy, sz, ex, ey, ez, tol, atol, cr, ar, rbox);
+
+                    if (al) {
+                        device::atomic_min(&s_toi, lbox.tlower);
+                        cl = 0;
+                    }
+                    if (ar) {
+                        device::atomic_min(&s_toi, rbox.tlower);
+                        cr = 0;
+                    }
+
+                    if (cl && cr) {
+                        const bool left_first = lbox.tlower <= rbox.tlower;
+                        const Domain<T>& keep = left_first ? lbox : rbox;
+                        const Domain<T>& push = left_first ? rbox : lbox;
+                        cur = keep;
+                        if (push.tlower < s_toi) {
+                            if (!push_shared_single<T>(s_stack, push, level + 1, qid)) {
+                                push_global_single<T>(g_stack, g_normal_cap, halt, push, level + 1, qid);
+                            }
+                        }
+                        level += 1;
+                    } else if (cl) {
+                        cur = lbox;
+                        level += 1;
+                    } else if (cr) {
+                        cur = rbox;
+                        level += 1;
+                    } else {
+                        active = 0;
+                    }
+                }
+
+                if (!active) {
+                    Domain<T> d;
+                    int lvl = 0;
+                    int q = 0;
+                    if (try_pop<true, T>(s_stack, d, lvl, q)) {
+                        cur = d;
+                        level = lvl;
+                        active = 1;
+                    }
+                }
+
+                const int n_active = block_popc<N>(active, warp_sums);
+                if (n_active == 0 && s_top == 0) break;
+            }
+
+            if (tid == 0) device::atomic_min(&toi[qid], s_toi);
+        }
+
         // ----------------------------------------------------------------
         // narrow_phase_ee_kernel (warp-per-query, persistent worker)
         //
@@ -843,6 +1139,12 @@ namespace sccd {
                 SCCD_READ_ENV(SCCD_TOL, atof);
                 tol = (T)SCCD_TOL;
             }
+            T SCCD_NP_ALPHA = T(0.5);
+            {
+                double alpha = (double)SCCD_NP_ALPHA;
+                SCCD_READ_ENV(SCCD_NP_ALPHA, atof);
+                SCCD_NP_ALPHA = (T)alpha;
+            }
 
             // ----------------------------------------------------------------
             // Auto-sized hyperparameters.
@@ -981,7 +1283,8 @@ namespace sccd {
                 SCCD_CUDA_LAST_ERROR();
             }
 
-            dim3 block(32, SCCD_NP_WARPS_PER_BLOCK, 1);
+            dim3 block_pass2(32, SCCD_NP_WARPS_PER_BLOCK, 1);
+            dim3 block_pass1(SCCD_NP_THREADS_PER_BLOCK, 1, 1);
 
             // Batch loop.  Each iteration claims [begin, end) of the
             // input.  Inside, we may relaunch the worker multiple times
@@ -996,15 +1299,41 @@ namespace sccd {
                 reset_batch_narrow_phase_ee_kernel<<<1, 1>>>(g_top, inflight, seed_cursor, halt, (int)begin);
                 SCCD_CUDA_LAST_ERROR();
 
+                Stack<T> g_stack = {
+                    g_tlower, g_tupper, g_ulower, g_uupper, g_vlower, g_vupper, g_level, g_qid, g_top, gstack_cap};
+
+                dim3 grid_pass1(this_batch, 1, 1);
+                narrow_phase_ee_dfs_kernel<SCCD_NP_THREADS_PER_BLOCK, T, I><<<grid_pass1, block_pass1>>>(e0overalp,
+                                                                                                           e1overalp,
+                                                                                                           v0,
+                                                                                                           v1,
+                                                                                                           edge_stride,
+                                                                                                           edges,
+                                                                                                           tol,
+                                                                                                           d_toi,
+                                                                                                           g_stack,
+                                                                                                           g_normal_cap,
+                                                                                                           halt,
+                                                                                                           SCCD_NP_ALPHA,
+                                                                                                           (int)begin,
+                                                                                                           (int)end);
+                SCCD_CUDA_LAST_ERROR();
+
+                int h_g_top = 0;
+                cudaMemcpy(&h_g_top, g_top, sizeof(int), cudaMemcpyDeviceToHost);
+                if (h_g_top <= 0) continue;
+
+                const int pass2_seed = (int)end;
+                cudaMemcpy(seed_cursor, &pass2_seed, sizeof(int), cudaMemcpyHostToDevice);
+                cudaMemsetAsync(inflight, 0, sizeof(int));
+                cudaMemsetAsync(halt, 0, sizeof(int));
+
                 while (true) {
                     int grid_blocks = base_grid_blocks;
                     if (grid_blocks > this_batch) grid_blocks = this_batch;
-                    dim3 grid(grid_blocks, 1, 1);
+                    dim3 grid_pass2(grid_blocks, 1, 1);
 
-                    Stack<T> g_stack = {
-                        g_tlower, g_tupper, g_ulower, g_uupper, g_vlower, g_vupper, g_level, g_qid, g_top, gstack_cap};
-
-                    narrow_phase_ee_kernel<T, I><<<grid, block>>>(e0overalp,
+                    narrow_phase_ee_kernel<T, I><<<grid_pass2, block_pass2>>>(e0overalp,
                                                                   e1overalp,
                                                                   v0,
                                                                   v1,
@@ -1023,7 +1352,6 @@ namespace sccd {
                     // Check whether the batch is fully drained.  A D2H
                     // copy per relaunch is cheap compared to the kernel
                     // runtime and is only paid once per overflow event.
-                    int h_g_top = 0;
                     int h_seed_cursor = 0;
                     cudaMemcpy(&h_g_top, g_top, sizeof(int), cudaMemcpyDeviceToHost);
                     cudaMemcpy(&h_seed_cursor, seed_cursor, sizeof(int), cudaMemcpyDeviceToHost);
