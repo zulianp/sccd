@@ -26,6 +26,14 @@
 #define SCCD_NP_THREADS_PER_BLOCK 128
 #endif
 
+// Maximum number of bisections (per-thread DFS depth) before a candidate
+// subdomain is "accepted" with cur.tlower as a conservative TOI for that
+// cell.  This bounds the depth of the depth-first traversal in
+// narrow_phase_ee_dfs_kernel and prevents pathologically deep recursion.
+#ifndef SCCD_NP_MAX_BISECTIONS
+#define SCCD_NP_MAX_BISECTIONS 24
+#endif
+
 namespace sccd {
     namespace device {
 
@@ -621,9 +629,9 @@ namespace sccd {
             left = in;
             right = in;
 
-            const T dt = (in.tupper - in.tlower) / atol[0];
-            const T du = (in.uupper - in.ulower) / atol[1];
-            const T dv = (in.vupper - in.vlower) / atol[2];
+            const T dt = (in.tupper - in.tlower);  // / atol[0];
+            const T du = (in.uupper - in.ulower);  // / atol[1];
+            const T dv = (in.vupper - in.vlower);  // / atol[2];
 
             if (dt >= du && dt >= dv) {
                 const T m = (in.tlower + in.tupper) * T(0.5);
@@ -754,10 +762,21 @@ namespace sccd {
                 return;
             }
 
+            constexpr int max_bisections = SCCD_NP_MAX_BISECTIONS;
+
             int active = active_seed;
             int level = 1;
             while (true) {
                 if (active && cur.tlower >= s_toi) active = 0;
+
+                // Depth cap: cur is origin-containing by construction (we
+                // only keep origin-containing halves during DFS).  At max
+                // depth, accept its tlower as a conservative TOI for this
+                // cell instead of bisecting further.
+                if (active && level >= max_bisections) {
+                    device::atomic_min(&s_toi, cur.tlower);
+                    active = 0;
+                }
 
                 Domain<T> push_box;
                 int push_level = 0;
@@ -872,6 +891,8 @@ namespace sccd {
                 __syncthreads();
 
                 const int n_active = block_popc<N>(active, warp_sums);
+
+                if (!tid) printf("n_active: %d, s_top: %d\n", n_active, s_top);
                 if (n_active == 0 && s_top == 0) break;
             }
 
@@ -1345,6 +1366,9 @@ namespace sccd {
                                                                                                          (int)begin,
                                                                                                          (int)end);
                 SCCD_CUDA_LAST_ERROR();
+                fflush(stdout);
+                fflush(stderr);
+                printf("pass1 done\n");
 
                 int h_g_top = 0;
                 cudaMemcpy(&h_g_top, g_top, sizeof(int), cudaMemcpyDeviceToHost);
