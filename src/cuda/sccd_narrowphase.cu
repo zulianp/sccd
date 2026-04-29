@@ -19,7 +19,7 @@
 #endif
 
 #ifndef SCCD_NP_SHARED_STACK_CAP
-#define SCCD_NP_SHARED_STACK_CAP 128
+#define SCCD_NP_SHARED_STACK_CAP 1024
 #endif
 
 #ifndef SCCD_NP_THREADS_PER_BLOCK
@@ -640,56 +640,6 @@ namespace sccd {
             }
         }
 
-        template <typename T>
-        static inline __device__ int push_shared_single(const Stack<T>& s_stack,
-                                                        const Domain<T>& d,
-                                                        const int level,
-                                                        const int qid) {
-            const int base = reserve_slots(s_stack.top, 1, s_stack.capacity);
-            if (base < 0) return 0;
-            while (atomicCAS(&s_stack.qid[base], SCCD_QID_EMPTY, SCCD_QID_WRITING) != SCCD_QID_EMPTY) {
-            }
-            s_stack.tlower[base] = d.tlower;
-            s_stack.tupper[base] = d.tupper;
-            s_stack.ulower[base] = d.ulower;
-            s_stack.uupper[base] = d.uupper;
-            s_stack.vlower[base] = d.vlower;
-            s_stack.vupper[base] = d.vupper;
-            s_stack.level[base] = level;
-            __threadfence_block();
-            atomicExch(&s_stack.qid[base], qid);
-            __threadfence_block();
-            return 1;
-        }
-
-        template <typename T>
-        static inline __device__ int push_global_single(const Stack<T>& g_stack,
-                                                        const int g_normal_cap,
-                                                        int* SCCD_RESTRICT halt,
-                                                        const Domain<T>& d,
-                                                        const int level,
-                                                        const int qid) {
-            int base = reserve_slots(g_stack.top, 1, g_normal_cap);
-            if (base < 0) {
-                atomicExch(halt, 1);
-                base = reserve_slots(g_stack.top, 1, g_stack.capacity);
-                if (base < 0) return 0;
-            }
-            while (atomicCAS(&g_stack.qid[base], SCCD_QID_EMPTY, SCCD_QID_WRITING) != SCCD_QID_EMPTY) {
-            }
-            g_stack.tlower[base] = d.tlower;
-            g_stack.tupper[base] = d.tupper;
-            g_stack.ulower[base] = d.ulower;
-            g_stack.uupper[base] = d.uupper;
-            g_stack.vlower[base] = d.vlower;
-            g_stack.vupper[base] = d.vupper;
-            g_stack.level[base] = level;
-            __threadfence();
-            atomicExch(&g_stack.qid[base], qid);
-            __threadfence();
-            return 1;
-        }
-
         template <int N, typename T, typename I>
         __global__ void narrow_phase_ee_dfs_kernel(const I* const SCCD_RESTRICT e0overlap,
                                                    const I* const SCCD_RESTRICT e1overlap,
@@ -771,6 +721,10 @@ namespace sccd {
             if (!co_count) return;
 
             if (tid == 0) {
+                printf("co_count: %d\n", co_count);
+            }
+
+            if (tid == 0) {
                 if ((T)co_count > alpha * (T)N) {
                     s_hard = 1;
                     int base = reserve_slots(g_stack.top, co_count, g_normal_cap);
@@ -788,8 +742,6 @@ namespace sccd {
                 if (active_seed && s_defer_base >= 0) {
                     const int rank = atomicAdd(&s_defer_cursor, 1);
                     const int slot = s_defer_base + rank;
-                    while (atomicCAS(&g_stack.qid[slot], SCCD_QID_EMPTY, SCCD_QID_WRITING) != SCCD_QID_EMPTY) {
-                    }
                     g_stack.tlower[slot] = cur.tlower;
                     g_stack.tupper[slot] = cur.tupper;
                     g_stack.ulower[slot] = cur.ulower;
@@ -797,9 +749,7 @@ namespace sccd {
                     g_stack.vlower[slot] = cur.vlower;
                     g_stack.vupper[slot] = cur.vupper;
                     g_stack.level[slot] = 0;
-                    __threadfence();
-                    atomicExch(&g_stack.qid[slot], qid);
-                    __threadfence();
+                    g_stack.qid[slot] = qid;
                 }
                 return;
             }
@@ -808,6 +758,10 @@ namespace sccd {
             int level = 1;
             while (true) {
                 if (active && cur.tlower >= s_toi) active = 0;
+
+                Domain<T> push_box;
+                int push_level = 0;
+                int will_push = 0;
 
                 if (active) {
                     Domain<T> left, right;
@@ -828,14 +782,10 @@ namespace sccd {
 
                     if (cl && cr) {
                         const bool left_first = lbox.tlower <= rbox.tlower;
-                        const Domain<T>& keep = left_first ? lbox : rbox;
-                        const Domain<T>& push = left_first ? rbox : lbox;
-                        cur = keep;
-                        if (push.tlower < s_toi) {
-                            if (!push_shared_single<T>(s_stack, push, level + 1, qid)) {
-                                push_global_single<T>(g_stack, g_normal_cap, halt, push, level + 1, qid);
-                            }
-                        }
+                        cur = left_first ? lbox : rbox;
+                        push_box = left_first ? rbox : lbox;
+                        push_level = level + 1;
+                        will_push = (push_box.tlower < s_toi) ? 1 : 0;
                         level += 1;
                     } else if (cl) {
                         cur = lbox;
@@ -848,16 +798,78 @@ namespace sccd {
                     }
                 }
 
-                if (!active) {
-                    Domain<T> d;
-                    int lvl = 0;
-                    int q = 0;
-                    if (try_pop<true, T>(s_stack, d, lvl, q)) {
-                        cur = d;
-                        level = lvl;
-                        active = 1;
+                // Phase A: pushes. Bounded-CAS reserve, no spin against
+                // any other thread's progress. Overflow spills to global
+                // stack (Pass 2 will pick those up).  No qid-tag protocol
+                // is needed: each reserved slot is touched by a single
+                // thread, and the producer/consumer ordering is provided
+                // by the __syncthreads at the end of this iteration and
+                // the kernel-launch boundary between Pass 1 and Pass 2.
+                if (will_push) {
+                    const int slot = reserve_slots(&s_top, 1, S_CAP);
+                    if (slot >= 0) {
+                        s_stack.tlower[slot] = push_box.tlower;
+                        s_stack.tupper[slot] = push_box.tupper;
+                        s_stack.ulower[slot] = push_box.ulower;
+                        s_stack.uupper[slot] = push_box.uupper;
+                        s_stack.vlower[slot] = push_box.vlower;
+                        s_stack.vupper[slot] = push_box.vupper;
+                        s_stack.level[slot] = push_level;
+                        s_stack.qid[slot] = qid;
+                    } else {
+                        printf("push_global_single: qid: %d, [%f, %f] x [%f, %f] x [%f, %f], level: %d\n",
+                               qid,
+                               push_box.tlower,
+                               push_box.tupper,
+                               push_box.ulower,
+                               push_box.uupper,
+                               push_box.vlower,
+                               push_box.vupper,
+                               push_level);
+                        int g_slot = reserve_slots(g_stack.top, 1, g_normal_cap);
+                        if (g_slot < 0) {
+                            atomicExch(halt, 1);
+                            g_slot = reserve_slots(g_stack.top, 1, g_stack.capacity);
+                        }
+                        if (g_slot >= 0) {
+                            g_stack.tlower[g_slot] = push_box.tlower;
+                            g_stack.tupper[g_slot] = push_box.tupper;
+                            g_stack.ulower[g_slot] = push_box.ulower;
+                            g_stack.uupper[g_slot] = push_box.uupper;
+                            g_stack.vlower[g_slot] = push_box.vlower;
+                            g_stack.vupper[g_slot] = push_box.vupper;
+                            g_stack.level[g_slot] = push_level;
+                            g_stack.qid[g_slot] = qid;
+                        }
                     }
                 }
+
+                __syncthreads();
+
+                // Phase B: pops. Bounded-CAS decrement, no spin against
+                // any other thread's progress. Each popper gets a unique
+                // slot in [0, s_top); pushes from Phase A are visible.
+                if (!active) {
+                    int t = atomicAdd(&s_top, 0);
+                    while (t > 0) {
+                        const int prev = atomicCAS(&s_top, t, t - 1);
+                        if (prev == t) {
+                            const int slot = t - 1;
+                            cur.tlower = s_stack.tlower[slot];
+                            cur.tupper = s_stack.tupper[slot];
+                            cur.ulower = s_stack.ulower[slot];
+                            cur.uupper = s_stack.uupper[slot];
+                            cur.vlower = s_stack.vlower[slot];
+                            cur.vupper = s_stack.vupper[slot];
+                            level = s_stack.level[slot];
+                            active = 1;
+                            break;
+                        }
+                        t = prev;
+                    }
+                }
+
+                __syncthreads();
 
                 const int n_active = block_popc<N>(active, warp_sums);
                 if (n_active == 0 && s_top == 0) break;
