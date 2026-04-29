@@ -160,22 +160,31 @@ namespace sccd {
             // Compute spatial displacements range
             Vec4 dx = ex - sx;
 
-            // Compute temporal displacements for lower bound
+            // f(t,u,v) = position_on_edge_a(t,u) - position_on_edge_b(t,v)
+            // Vec4 layout: (.x,.y) = edge a vertices (P0_a, P1_a)
+            //              (.z,.w) = edge b vertices (P0_b, P1_b).
             {
                 Vec4 xt = tl * dx + sx;
-                f[0] = ((xt.y - xt.x) * ul + xt.x - (xt.w - xt.y) * vl + xt.y);
-                f[1] = ((xt.y - xt.x) * ul + xt.x - (xt.w - xt.y) * vu + xt.y);
-                f[2] = ((xt.y - xt.x) * uu + xt.x - (xt.w - xt.y) * vl + xt.y);
-                f[3] = ((xt.y - xt.x) * uu + xt.x - (xt.w - xt.y) * vu + xt.y);
+                const T pa_l = (xt.y - xt.x) * ul + xt.x;
+                const T pa_u = (xt.y - xt.x) * uu + xt.x;
+                const T pb_l = (xt.w - xt.z) * vl + xt.z;
+                const T pb_u = (xt.w - xt.z) * vu + xt.z;
+                f[0] = pa_l - pb_l;
+                f[1] = pa_l - pb_u;
+                f[2] = pa_u - pb_l;
+                f[3] = pa_u - pb_u;
             }
 
-            // Compute temporal displacements for upper bound
             {
                 Vec4 xt = tu * dx + sx;
-                f[4] = ((xt.y - xt.x) * ul + xt.x - (xt.w - xt.y) * vl + xt.y);
-                f[5] = ((xt.y - xt.x) * ul + xt.x - (xt.w - xt.y) * vu + xt.y);
-                f[6] = ((xt.y - xt.x) * uu + xt.x - (xt.w - xt.y) * vl + xt.y);
-                f[7] = ((xt.y - xt.x) * uu + xt.x - (xt.w - xt.y) * vu + xt.y);
+                const T pa_l = (xt.y - xt.x) * ul + xt.x;
+                const T pa_u = (xt.y - xt.x) * uu + xt.x;
+                const T pb_l = (xt.w - xt.z) * vl + xt.z;
+                const T pb_u = (xt.w - xt.z) * vu + xt.z;
+                f[4] = pa_l - pb_l;
+                f[5] = pa_l - pb_u;
+                f[6] = pa_u - pb_l;
+                f[7] = pa_u - pb_u;
             }
         }
 
@@ -749,28 +758,34 @@ namespace sccd {
             Domain<T> cur;
             int contains = 0;
             int accept = 0;
-            sample_cell_3d<T, Vec4>(ti, ui, vi, NT, NU, NV, root, sx, sy, sz, ex, ey, ez, tol, atol, contains, accept, cur);
+            sample_cell_3d<T, Vec4>(
+                ti, ui, vi, NT, NU, NV, root, sx, sy, sz, ex, ey, ez, tol, atol, contains, accept, cur);
 
+            const int contains_origin = contains;
             if (accept) {
                 device::atomic_min(&s_toi, cur.tlower);
-                contains = 0;
             }
+            const int active_seed = contains_origin && !accept;
 
-            const int co_count = block_popc<N>(contains, warp_sums);
-            if (tid == 0 && (T)co_count > alpha * (T)N) {
-                s_hard = 1;
-                int base = reserve_slots(g_stack.top, co_count, g_normal_cap);
-                if (base < 0) {
-                    atomicExch(halt, 1);
-                    base = reserve_slots(g_stack.top, co_count, g_stack.capacity);
+            const int co_count = block_popc<N>(active_seed, warp_sums);
+            if (!co_count) return;
+
+            if (tid == 0) {
+                if ((T)co_count > alpha * (T)N) {
+                    s_hard = 1;
+                    int base = reserve_slots(g_stack.top, co_count, g_normal_cap);
+                    if (base < 0) {
+                        atomicExch(halt, 1);
+                        base = reserve_slots(g_stack.top, co_count, g_stack.capacity);
+                    }
+                    s_defer_base = base;
+                    s_defer_cursor = 0;
                 }
-                s_defer_base = base;
-                s_defer_cursor = 0;
             }
             __syncthreads();
 
             if (s_hard) {
-                if (contains && s_defer_base >= 0) {
+                if (active_seed && s_defer_base >= 0) {
                     const int rank = atomicAdd(&s_defer_cursor, 1);
                     const int slot = s_defer_base + rank;
                     while (atomicCAS(&g_stack.qid[slot], SCCD_QID_EMPTY, SCCD_QID_WRITING) != SCCD_QID_EMPTY) {
@@ -789,7 +804,7 @@ namespace sccd {
                 return;
             }
 
-            int active = contains;
+            int active = active_seed;
             int level = 1;
             while (true) {
                 if (active && cur.tlower >= s_toi) active = 0;
@@ -1304,19 +1319,19 @@ namespace sccd {
 
                 dim3 grid_pass1(this_batch, 1, 1);
                 narrow_phase_ee_dfs_kernel<SCCD_NP_THREADS_PER_BLOCK, T, I><<<grid_pass1, block_pass1>>>(e0overalp,
-                                                                                                           e1overalp,
-                                                                                                           v0,
-                                                                                                           v1,
-                                                                                                           edge_stride,
-                                                                                                           edges,
-                                                                                                           tol,
-                                                                                                           d_toi,
-                                                                                                           g_stack,
-                                                                                                           g_normal_cap,
-                                                                                                           halt,
-                                                                                                           SCCD_NP_ALPHA,
-                                                                                                           (int)begin,
-                                                                                                           (int)end);
+                                                                                                         e1overalp,
+                                                                                                         v0,
+                                                                                                         v1,
+                                                                                                         edge_stride,
+                                                                                                         edges,
+                                                                                                         tol,
+                                                                                                         d_toi,
+                                                                                                         g_stack,
+                                                                                                         g_normal_cap,
+                                                                                                         halt,
+                                                                                                         SCCD_NP_ALPHA,
+                                                                                                         (int)begin,
+                                                                                                         (int)end);
                 SCCD_CUDA_LAST_ERROR();
 
                 int h_g_top = 0;
@@ -1334,19 +1349,19 @@ namespace sccd {
                     dim3 grid_pass2(grid_blocks, 1, 1);
 
                     narrow_phase_ee_kernel<T, I><<<grid_pass2, block_pass2>>>(e0overalp,
-                                                                  e1overalp,
-                                                                  v0,
-                                                                  v1,
-                                                                  edge_stride,
-                                                                  edges,
-                                                                  tol,
-                                                                  d_toi,
-                                                                  g_stack,
-                                                                  g_normal_cap,
-                                                                  inflight,
-                                                                  seed_cursor,
-                                                                  (int)end,
-                                                                  halt);
+                                                                              e1overalp,
+                                                                              v0,
+                                                                              v1,
+                                                                              edge_stride,
+                                                                              edges,
+                                                                              tol,
+                                                                              d_toi,
+                                                                              g_stack,
+                                                                              g_normal_cap,
+                                                                              inflight,
+                                                                              seed_cursor,
+                                                                              (int)end,
+                                                                              halt);
                     SCCD_CUDA_LAST_ERROR();
 
                     // Check whether the batch is fully drained.  A D2H
