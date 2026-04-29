@@ -28,4 +28,7 @@ db_to_raw $case/"$mesh_t1".ply "$mesh_t1"
 # refine $mesh_t0 $mesh_t0 
 # refine $mesh_t1 $mesh_t1 
 
+export OMP_PROC_BIND=true
+export OMP_NUM_THREADS=8
+
 ./mesh_sccd $mesh_t0 $mesh_t1
