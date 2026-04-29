@@ -202,67 +202,11 @@ namespace sccd {
             cond_mask |= (cond2 ? MASK_BOX_INSIDE_EPSILON_BOX : 0);
             cond_mask |= (cond3 ? MASK_REAL_TOLERANCE_SMALLER_THAN_INT_TOLERANCE : 0);
             cond_mask |= (cond4 ? MASK_INTERVAL_TERMINAL : 0);
-            cond_mask &= ((fmin <= tol) & ((fmax >= -tol) ? MASK_FULL : 0));
+            // Gate the flags on the origin-containment test in this axis.
+            // Without MASK_FULL the bitwise-AND would clip bits 1..3 (see
+            // operator precedence: the ternary binds tighter than &).
+            cond_mask &= ((fmin <= tol) && (fmax >= -tol)) ? MASK_FULL : 0;
             return cond_mask;
-        }
-
-        template <typename T, typename Vec4>
-        __device__ void contains_origin_ee(const int nx,
-                                           const int ny,
-                                           const int x,
-                                           const int y,
-                                           const T tlower,
-                                           const T tupper,
-                                           const T ulower,
-                                           const T uupper,
-                                           const T vlower,
-                                           const T vupper,
-                                           const Vec4 sx,
-                                           const Vec4 sy,
-                                           const Vec4 sz,
-                                           const Vec4 ex,
-                                           const Vec4 ey,
-                                           const Vec4 ez,
-                                           const T tol,
-                                           const T* const SCCD_RESTRICT adaptive_tol,
-                                           int* const SCCD_RESTRICT contains_origin,
-                                           int* const SCCD_RESTRICT accept) {
-            const T u_h = (uupper - ulower) / nx;
-            const T v_h = (vupper - vlower) / ny;
-
-            const T ul = ulower + x * u_h;
-            const T vl = vlower + y * v_h;
-            const T uu = ulower + (x + 1) * u_h;
-            const T vu = vlower + (y + 1) * v_h;
-
-            T fmin, fmax;
-            T f[8];
-
-            sample_f_ee(tlower, tupper, ul, uu, vl, vu, sx, ex, f);
-            fminmax(f, fmin, fmax);
-            const uint8_t x_mask = cond_mask(fmin, fmax, tol, adaptive_tol[0]);
-            *contains_origin = (fmin <= tol) & (fmax >= -tol);
-
-            sample_f_ee(tlower, tupper, ul, uu, vl, vu, sy, ey, f);
-            fminmax(f, fmin, fmax);
-            const uint8_t y_mask = cond_mask(fmin, fmax, tol, adaptive_tol[1]);
-            *contains_origin &= (fmin <= tol) & (fmax >= -tol);
-
-            sample_f_ee(tlower, tupper, ul, uu, vl, vu, sz, ez, f);
-            fminmax(f, fmin, fmax);
-            const uint8_t z_mask = cond_mask(fmin, fmax, tol, adaptive_tol[2]);
-            *contains_origin &= (fmin <= tol) & (fmax >= -tol);
-
-            const uint8_t and_mask = (x_mask & y_mask & z_mask);
-            const uint8_t or_mask = (x_mask | y_mask | z_mask);
-
-            const bool cond1 = and_mask & MASK_DOMAIN_SMALLER_THAN_TOL;
-            const bool cond2 = and_mask & MASK_BOX_INSIDE_EPSILON_BOX;
-            const bool cond3 = or_mask & MASK_REAL_TOLERANCE_SMALLER_THAN_INT_TOLERANCE;
-            const bool cond4 = and_mask & MASK_INTERVAL_TERMINAL;
-
-            *accept = *contains_origin && (cond1 || cond2 || cond3 || cond4);
-            // If contains origin and does not accept, it is a nutcase (should we handle it separately?)
         }
 
         // ----------------------------------------------------------------
@@ -397,14 +341,27 @@ namespace sccd {
 #endif
         }
 
-        // We use the qid array of each stack as a per-slot "valid" tag:
-        //   qid == SCCD_QID_EMPTY  --> slot empty / being written
-        //   qid != SCCD_QID_EMPTY  --> fields fully published
-        // Writers store qid LAST (after a fence); readers spin on qid
-        // becoming non-empty after their CAS pop, then clear it.
-        // This avoids the race where a popper observes a counter
-        // increment ahead of the corresponding field writes.
+        // Per-slot validity tag stored in the qid array.  Three states:
+        //   SCCD_QID_EMPTY   (-1): free, available to be claimed by a writer
+        //   SCCD_QID_WRITING (-2): claimed by a writer, fields being filled
+        //   qid >= 0              : committed, fields are safe to read
+        //
+        // Writer:
+        //   1. reserve_slots bumps `top` (exclusive ownership of the slot index)
+        //   2. CAS qid[slot] EMPTY -> WRITING (spin-wait until the previous
+        //      popper, if any, clears the slot)
+        //   3. write fields, fence, atomicExch qid[slot] -> real qid
+        //
+        // Popper:
+        //   1. release_slot decrements `top`
+        //   2. spin until qid[slot] >= 0 (committed)
+        //   3. fence, read fields, atomicExch qid[slot] -> EMPTY
+        //
+        // The WRITING state is essential: without it, a pusher that reserves
+        // a slot just after a popper decremented `top` would clobber the
+        // still-in-use fields the popper is about to read.
         static constexpr int SCCD_QID_EMPTY = -1;
+        static constexpr int SCCD_QID_WRITING = -2;
 
         // ----------------------------------------------------------------
         // One-time init
@@ -480,11 +437,14 @@ namespace sccd {
         static inline __device__ int try_pop(const Stack<T>& stk, Domain<T>& d, int& level, int& qid) {
             const int slot = release_slot(stk.top);
             if (slot < 0) return 0;
-            // Spin until the writer publishes qid (they fenced first).
+            // Spin until the writer publishes a committed (non-negative)
+            // qid.  EMPTY (-1) and WRITING (-2) both mean "not yet
+            // published"; any q >= 0 means the writer's field writes
+            // retired before the qid publish (they fenced first).
             int q;
             do {
                 q = atomicAdd(&stk.qid[slot], 0);
-            } while (q == SCCD_QID_EMPTY);
+            } while (q < 0);
             if (Shared) {
                 __threadfence_block();
             } else {
@@ -550,6 +510,11 @@ namespace sccd {
             }
             slot_base = __shfl_sync(0xffffffffu, slot_base, 0);
             is_shared = __shfl_sync(0xffffffffu, is_shared, 0);
+            // If even the reserve zone overflowed (host under-sized R, or
+            // NDEBUG disabled the assert above), bail out before issuing
+            // out-of-bounds writes.  halt is already raised so the host
+            // will observe the failure and can relaunch.
+            if (slot_base < 0) return;
 
             // Each keeping lane writes into slot_base + (its rank among
             // keepers).  `keep_mask & ((1u << lane) - 1u)` is the
@@ -561,6 +526,14 @@ namespace sccd {
 
             if (keep) {
                 const Stack<T>& dst = is_shared ? s_stack : g_stack;
+                // Claim the slot by transitioning qid EMPTY -> WRITING.
+                // A concurrent popper that decremented `top` past this
+                // index still holds an outstanding read on the old
+                // fields; spin until it finishes (atomicExch to EMPTY)
+                // before we overwrite them.
+                while (atomicCAS(&dst.qid[slot], SCCD_QID_EMPTY, SCCD_QID_WRITING) != SCCD_QID_EMPTY) {
+                    // busy-wait
+                }
                 dst.tlower[slot] = cell.tlower;
                 dst.tupper[slot] = cell.tupper;
                 dst.ulower[slot] = cell.ulower;
@@ -826,6 +799,12 @@ namespace sccd {
             for (int i = tid_in_block; i < flush_n; i += threads_in_block) {
                 const int src = i;
                 const int dst = flush_base + i;
+                // Same claim protocol as push_warp_cells: other blocks
+                // may still be popping/pushing on g_stack while this
+                // block flushes.
+                while (atomicCAS(&g_stack.qid[dst], SCCD_QID_EMPTY, SCCD_QID_WRITING) != SCCD_QID_EMPTY) {
+                    // busy-wait
+                }
                 g_stack.tlower[dst] = s_stack.tlower[src];
                 g_stack.tupper[dst] = s_stack.tupper[src];
                 g_stack.ulower[dst] = s_stack.ulower[src];
@@ -833,10 +812,10 @@ namespace sccd {
                 g_stack.vlower[dst] = s_stack.vlower[src];
                 g_stack.vupper[dst] = s_stack.vupper[src];
                 g_stack.level[dst] = s_stack.level[src];
-                // s_qid[src] must be a published (non-EMPTY) tag because
-                // the invariant is that slots in [0, s_top) are fully
-                // committed.  Republish on the global side last, after
-                // a fence, so a future popper sees fields first.
+                // s_qid[src] must be a published (non-negative) tag
+                // because the invariant is that slots in [0, s_top) are
+                // fully committed.  Republish on the global side last,
+                // after a fence, so a future popper sees fields first.
                 const int q = s_stack.qid[src];
                 __threadfence();
                 atomicExch(&g_stack.qid[dst], q);
@@ -993,8 +972,11 @@ namespace sccd {
             // empty here (no per-query push-then-pop bookkeeping).
             {
                 const int block = 256;
-                const size_t work = (gstack_cap > (int)noverlaps) ? (size_t)gstack_cap : noverlaps;
-                const int grid = (int)((work + block - 1) / block);
+                // Compare in size_t; (int)noverlaps would be UB when
+                // noverlaps > INT_MAX.
+                const size_t work = ((size_t)gstack_cap > noverlaps) ? (size_t)gstack_cap : noverlaps;
+                const size_t grid_sz = (work + block - 1) / block;
+                const int grid = (grid_sz > (size_t)INT_MAX) ? INT_MAX : (int)grid_sz;
                 init_narrow_phase_ee_kernel<T><<<grid, block>>>(noverlaps, gstack_cap, max_toi, d_toi, g_qid);
                 SCCD_CUDA_LAST_ERROR();
             }
