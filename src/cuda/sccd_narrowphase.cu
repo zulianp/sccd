@@ -31,7 +31,7 @@
 // cell.  This bounds the depth of the depth-first traversal in
 // narrow_phase_ee_dfs_kernel and prevents pathologically deep recursion.
 #ifndef SCCD_NP_MAX_BISECTIONS
-#define SCCD_NP_MAX_BISECTIONS 36
+#define SCCD_NP_MAX_BISECTIONS 64
 #endif
 
 namespace sccd {
@@ -901,6 +901,7 @@ namespace sccd {
                 __syncthreads();
 
                 const int n_active = block_popc<N>(active, warp_sums);
+                if (!tid) printf("n_active: %d, s_top: %d\n", n_active, s_top);
                 if (n_active == 0 && s_top == 0) break;
             }
 
@@ -1383,6 +1384,9 @@ namespace sccd {
                                                                                                          (int)begin,
                                                                                                          (int)end);
                 SCCD_CUDA_LAST_ERROR();
+                fflush(stdout);
+                fflush(stderr);
+                printf("pass1 done\n");
 
                 int h_g_top = 0;
                 SCCD_CHECK_CUDA(cudaMemcpy(&h_g_top, g_top, sizeof(int), cudaMemcpyDeviceToHost));
