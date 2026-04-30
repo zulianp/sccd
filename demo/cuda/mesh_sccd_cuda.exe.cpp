@@ -6,6 +6,7 @@
 
 #include "broadphase.hpp"
 #include "narrowphase.hpp"
+#include "sccd_base.hpp"
 #include "sccd_config.hpp"
 
 #include "sccd_broadphase.cuh"
@@ -185,6 +186,8 @@ int main(int argc, char** argv) {
 
         {
             SMESH_TRACE_SCOPE("Narrow phase: E2E");
+            int SCCD_NP_TOI_STRIDE = 1;
+            SCCD_READ_ENV(SCCD_NP_TOI_STRIDE, atoi);
             toi_ee = sccd::device::narrow_phase_ee<smesh::geom_t, smesh::idx_t>(e0_overlap->size(),
                                                                                 e0_overlap->data(),
                                                                                 e1_overlap->data(),
@@ -192,7 +195,8 @@ int main(int argc, char** argv) {
                                                                                 points1->data(),
                                                                                 1,
                                                                                 edges->data(),
-                                                                                toi);
+                                                                                toi,
+                                                                                SCCD_NP_TOI_STRIDE);
             toi = toi_ee;
         }
 
