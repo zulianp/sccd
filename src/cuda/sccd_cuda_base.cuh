@@ -24,6 +24,7 @@ namespace sccd {
         static void cuda_check(const cudaError_t error) {
             if (error != cudaSuccess) {
                 fprintf(stderr, "CUDA error: %s\n", cudaGetErrorString(error));
+                fflush(stderr);
                 exit(1);
             }
         }
@@ -31,6 +32,7 @@ namespace sccd {
         static void cuda_check(const cudaError_t error, const char* file, const int line) {
             if (error != cudaSuccess) {
                 fprintf(stderr, "CUDA error: %s in %s:%d\n", cudaGetErrorString(error), file, line);
+                fflush(stderr);
                 exit(1);
             }
         }

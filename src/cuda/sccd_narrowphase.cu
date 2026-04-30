@@ -19,7 +19,7 @@
 #endif
 
 #ifndef SCCD_NP_SHARED_STACK_CAP
-#define SCCD_NP_SHARED_STACK_CAP 1024
+#define SCCD_NP_SHARED_STACK_CAP 2048
 #endif
 
 #ifndef SCCD_NP_THREADS_PER_BLOCK
@@ -649,6 +649,36 @@ namespace sccd {
         }
 
         template <int N, typename T, typename I>
+        __global__ void narrow_phase_ee_dfs_zero_stride_kernel(const I* const SCCD_RESTRICT e0overlap,
+                                                               const I* const SCCD_RESTRICT e1overlap,
+                                                               T** const SCCD_RESTRICT sp,
+                                                               T** const SCCD_RESTRICT ep,
+                                                               const size_t edge_stride,
+                                                               I** const SCCD_RESTRICT edges,
+                                                               const T tol,
+                                                               //    One global toi for all candidates
+                                                               T* SCCD_RESTRICT toi,
+                                                               Stack<T> g_stack,
+                                                               const int g_normal_cap,
+                                                               int* SCCD_RESTRICT halt,
+                                                               const T alpha,
+                                                               const int seed_begin,
+                                                               const int seed_end) {
+            // 1. Each thread loads a query
+            // 2. Compute the tolerance
+            // 3. Check if the query contains the origin
+            // 4. Bisects based on longest axis
+            // 5. If more than one subinterval contains the origin choose the one with smallest tlower and use it as
+            // current cell, push the other onto the shared memory stack. If no space left in the shared memory stack,
+            // push the other onto the global memory stack. If no space left in the global memory stack, set the halt
+            // flag.
+            // 6. If only one subinterval contains the origin, use it as current cell
+            // 7. If no subinterval contains the origin check the shared memory stack, then the global
+            // memory stack for more work
+            // 8. if the cell is accepted update the global toi
+        }
+
+        template <int N, typename T, typename I>
         __global__ void narrow_phase_ee_dfs_kernel(const I* const SCCD_RESTRICT e0overlap,
                                                    const I* const SCCD_RESTRICT e1overlap,
                                                    T** const SCCD_RESTRICT sp,
@@ -722,14 +752,26 @@ namespace sccd {
             sample_cell_3d<T, Vec4>(
                 ti, ui, vi, NT, NU, NV, root, sx, sy, sz, ex, ey, ez, tol, atol, contains, accept, cur);
 
-            const int contains_origin = contains;
+            // Fold accepted cells into s_toi first, so the prune below can
+            // use the tightest bound available within this block.
             if (accept) {
                 device::atomic_min(&s_toi, cur.tlower);
             }
-            const int active_seed = contains_origin && !accept;
+            __syncthreads();
+
+            // Drop any seed cell whose time interval is already dominated
+            // by s_toi: the smallest TOI it could ever produce is tlower,
+            // which is >= the current best, so further bisection is wasted.
+            const int active_seed = contains && !accept && (cur.tlower < s_toi);
 
             const int co_count = block_popc<N>(active_seed, warp_sums);
-            if (!co_count) return;
+            if (!co_count) {
+                // Block has no work left, but s_toi may have been improved
+                // by accepts in the initial seed -- flush it to the global
+                // toi before exiting so the resu   lt is not lost.
+                if (tid == 0) device::atomic_min(&toi[toi_idx], s_toi);
+                return;
+            }
 
             if (tid == 0) {
                 if ((T)co_count > alpha * (T)N) {
@@ -760,6 +802,7 @@ namespace sccd {
                         g_stack.qid[slot] = qid;
                     }
                 }
+                if (tid == 0) device::atomic_min(&toi[toi_idx], s_toi);
                 return;
             }
 
@@ -901,7 +944,7 @@ namespace sccd {
                 __syncthreads();
 
                 const int n_active = block_popc<N>(active, warp_sums);
-                if (!tid) printf("n_active: %d, s_top: %d\n", n_active, s_top);
+                // if (!tid) printf("n_active: %d, s_top: %d\n", n_active, s_top);
                 if (n_active == 0 && s_top == 0) break;
             }
 
@@ -1207,7 +1250,7 @@ namespace sccd {
             T SCCD_NP_ALPHA = T(0.5);
             {
                 double alpha = (double)SCCD_NP_ALPHA;
-                SCCD_READ_ENV(SCCD_NP_ALPHA, atof);
+                SCCD_READ_ENV(alpha, atof);
                 SCCD_NP_ALPHA = (T)alpha;
             }
 
@@ -1384,13 +1427,12 @@ namespace sccd {
                                                                                                          (int)begin,
                                                                                                          (int)end);
                 SCCD_CUDA_LAST_ERROR();
-                fflush(stdout);
-                fflush(stderr);
-                printf("pass1 done\n");
 
                 int h_g_top = 0;
                 SCCD_CHECK_CUDA(cudaMemcpy(&h_g_top, g_top, sizeof(int), cudaMemcpyDeviceToHost));
                 if (h_g_top <= 0) continue;
+
+                printf("h_g_top: %d\n", h_g_top);
 
                 const int pass2_seed = (int)end;
                 cudaMemcpy(seed_cursor, &pass2_seed, sizeof(int), cudaMemcpyHostToDevice);

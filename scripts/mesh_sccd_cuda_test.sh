@@ -30,6 +30,8 @@ db_to_raw $case/"$mesh_t1".ply "$mesh_t1"
 
 echo "CUDA: "
 ./mesh_sccd_cuda $mesh_t0 $mesh_t1
+grep "phase" smesh.trace.csv 
 
 echo "CPU: "
 SCCD_MAX_ITER=24 ./mesh_sccd      $mesh_t0 $mesh_t1
+grep "phase" smesh.trace.csv 
