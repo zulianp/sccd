@@ -231,42 +231,23 @@ namespace sccd {
         }
 
         // ----------------------------------------------------------------
-        // Per-cell evaluation: each lane processes one (ti, ui, vi) cell
-        // of a 2 x 4 x 4 decomposition (or any other nt x nu x nv) of the
-        // current (t, u, v) subdomain and returns whether the cell
-        // contains the origin and whether it satisfies the accept
-        // termination criteria.
+        // Pure cell evaluation: tests an already-built (t, u, v) domain
+        // for origin containment and the four accept conditions.  Use
+        // this when the caller already has the cell box in hand (e.g.
+        // after a bisection) and no subdivision is needed.
         // ----------------------------------------------------------------
         template <typename T, typename Vec4>
-        static inline __device__ void sample_cell_3d(const int ti,
-                                                     const int ui,
-                                                     const int vi,
-                                                     const int nt,
-                                                     const int nu,
-                                                     const int nv,
-                                                     const Domain<T>& parent,
-                                                     const Vec4 sx,
-                                                     const Vec4 sy,
-                                                     const Vec4 sz,
-                                                     const Vec4 ex,
-                                                     const Vec4 ey,
-                                                     const Vec4 ez,
-                                                     const T tol,
-                                                     const T* const SCCD_RESTRICT adaptive_tol,
-                                                     int& contains_origin,
-                                                     int& accept,
-                                                     Domain<T>& cell) {
-            const T t_h = (parent.tupper - parent.tlower) / nt;
-            const T u_h = (parent.uupper - parent.ulower) / nu;
-            const T v_h = (parent.vupper - parent.vlower) / nv;
-
-            cell.tlower = parent.tlower + ti * t_h;
-            cell.tupper = cell.tlower + t_h;
-            cell.ulower = parent.ulower + ui * u_h;
-            cell.uupper = cell.ulower + u_h;
-            cell.vlower = parent.vlower + vi * v_h;
-            cell.vupper = cell.vlower + v_h;
-
+        static inline __device__ void evaluate_cell_3d(const Domain<T>& cell,
+                                                       const Vec4 sx,
+                                                       const Vec4 sy,
+                                                       const Vec4 sz,
+                                                       const Vec4 ex,
+                                                       const Vec4 ey,
+                                                       const Vec4 ez,
+                                                       const T tol,
+                                                       const T* const SCCD_RESTRICT adaptive_tol,
+                                                       int& contains_origin,
+                                                       int& accept) {
             const T tl = cell.tlower, tu = cell.tupper;
             const T ul = cell.ulower, uu = cell.uupper;
             const T vl = cell.vlower, vu = cell.vupper;
@@ -299,6 +280,46 @@ namespace sccd {
 
             contains_origin = co;
             accept = co && (cond1 || cond2 || cond3 || cond4);
+        }
+
+        // ----------------------------------------------------------------
+        // Per-cell evaluation with subdivision: each lane processes one
+        // (ti, ui, vi) cell of a 2 x 4 x 4 decomposition (or any other
+        // nt x nu x nv) of the parent (t, u, v) subdomain.  The built
+        // sub-cell is returned via `cell`; the rest delegates to
+        // evaluate_cell_3d.
+        // ----------------------------------------------------------------
+        template <typename T, typename Vec4>
+        static inline __device__ void sample_cell_3d(const int ti,
+                                                     const int ui,
+                                                     const int vi,
+                                                     const int nt,
+                                                     const int nu,
+                                                     const int nv,
+                                                     const Domain<T>& parent,
+                                                     const Vec4 sx,
+                                                     const Vec4 sy,
+                                                     const Vec4 sz,
+                                                     const Vec4 ex,
+                                                     const Vec4 ey,
+                                                     const Vec4 ez,
+                                                     const T tol,
+                                                     const T* const SCCD_RESTRICT adaptive_tol,
+                                                     int& contains_origin,
+                                                     int& accept,
+                                                     Domain<T>& cell) {
+            const T t_h = (parent.tupper - parent.tlower) / nt;
+            const T u_h = (parent.uupper - parent.ulower) / nu;
+            const T v_h = (parent.vupper - parent.vlower) / nv;
+
+            cell.tlower = parent.tlower + ti * t_h;
+            cell.tupper = cell.tlower + t_h;
+            cell.ulower = parent.ulower + ui * u_h;
+            cell.uupper = cell.ulower + u_h;
+            cell.vlower = parent.vlower + vi * v_h;
+            cell.vupper = cell.vlower + v_h;
+
+            evaluate_cell_3d<T, Vec4>(cell, sx, sy, sz, ex, ey, ez, tol, adaptive_tol, contains_origin, accept);
         }
 
         // Load the 4 endpoint coordinates (sx,sy,sz,ex,ey,ez) for a
@@ -648,6 +669,18 @@ namespace sccd {
             }
         }
 
+        // Per-thread DFS variant for the toi_stride==0 case (one global toi
+        // shared across all candidates).  Each thread owns one initial seed
+        // and its own DFS register state; the block shares a stack used as
+        // a load-balancing reservoir, with overflow spilling to the global
+        // stack so other blocks can pick it up.
+        //
+        // Layout: blockDim.x == N, qid = seed_begin + blockIdx.x * N + tid
+        // (static assignment).  Termination is best-effort: a block exits
+        // when it observes its own threads idle, the shared stack empty,
+        // and the global stack empty for several consecutive iterations.
+        // Any work still in g_stack at exit is drained by the existing
+        // warp-cooperative kernel from the host driver.
         template <int N, typename T, typename I>
         __global__ void narrow_phase_ee_dfs_zero_stride_kernel(const I* const SCCD_RESTRICT e0overlap,
                                                                const I* const SCCD_RESTRICT e1overlap,
@@ -664,18 +697,292 @@ namespace sccd {
                                                                const T alpha,
                                                                const int seed_begin,
                                                                const int seed_end) {
-            // 1. Each thread loads a query
-            // 2. Compute the tolerance
-            // 3. Check if the query contains the origin
-            // 4. Bisects based on longest axis
-            // 5. If more than one subinterval contains the origin choose the one with smallest tlower and use it as
-            // current cell, push the other onto the shared memory stack. If no space left in the shared memory stack,
-            // push the other onto the global memory stack. If no space left in the global memory stack, set the halt
-            // flag.
-            // 6. If only one subinterval contains the origin, use it as current cell
-            // 7. If no subinterval contains the origin check the shared memory stack, then the global
-            // memory stack for more work
-            // 8. if the cell is accepted update the global toi
+            static_assert(N == 64 || N == 128 || N == 256, "SCCD_NP_THREADS_PER_BLOCK must be one of 64/128/256");
+            (void)alpha;  // unused: this kernel does not hard-defer.
+            using Vec4 = typename device::Vec4Type<T>::type;
+            constexpr int S_CAP = SCCD_NP_SHARED_STACK_CAP;
+            constexpr int max_bisections = SCCD_NP_MAX_BISECTIONS;
+            // Number of consecutive iterations the block must observe an
+            // empty workload before declaring termination.  Higher values
+            // reduce the chance of exiting just before another block
+            // pushes new work into g_stack.
+            constexpr int MAX_IDLE_ITERS = 8;
+
+            __shared__ T s_tlower[S_CAP];
+            __shared__ T s_tupper[S_CAP];
+            __shared__ T s_ulower[S_CAP];
+            __shared__ T s_uupper[S_CAP];
+            __shared__ T s_vlower[S_CAP];
+            __shared__ T s_vupper[S_CAP];
+            __shared__ int s_level[S_CAP];
+            __shared__ int s_qid[S_CAP];
+            __shared__ int s_top;
+            __shared__ T s_toi;
+            __shared__ int warp_sums[N >> 5];
+
+            const int tid = threadIdx.x;
+            const int my_seed = seed_begin + (int)blockIdx.x * N + tid;
+            const bool has_seed = my_seed < seed_end;
+
+            // Init shared validity tags (only needed for global stack -- the
+            // shared stack uses Phase A/B sync separation), s_top, s_toi.
+            for (int i = tid; i < S_CAP; i += N) s_qid[i] = SCCD_QID_EMPTY;
+            if (tid == 0) {
+                s_top = 0;
+                s_toi = toi[0];
+            }
+            __syncthreads();
+
+            Stack<T> s_stack = {
+                s_tlower, s_tupper, s_ulower, s_uupper, s_vlower, s_vupper, s_level, s_qid, &s_top, S_CAP};
+
+            // Per-thread DFS state.  qid identifies the candidate currently
+            // owning `cur`; it changes when the thread pops a slot tagged
+            // with a different candidate, in which case geometry/atol must
+            // be reloaded.
+            int qid = -1;
+            Domain<T> cur = {T(0), T(0), T(0), T(0), T(0), T(0)};
+            int level = 0;
+            int active = 0;
+            Vec4 sx, sy, sz, ex, ey, ez;
+            T atol[3] = {T(0), T(0), T(0)};
+
+            // Initial seed: load geometry, probe the root box.
+            if (has_seed) {
+                qid = my_seed;
+                load_query_ee<T, Vec4, I>(
+                    qid, e0overlap, e1overlap, sp, ep, edge_stride, edges, sx, sy, sz, ex, ey, ez);
+                compute_edge_edge_tolerance_soa<T, Vec4>(
+                    tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
+
+                Domain<T> root = {T(0), T(1), T(0), T(1), T(0), T(1)};
+                int contains = 0;
+                int accept = 0;
+                evaluate_cell_3d<T, Vec4>(root, sx, sy, sz, ex, ey, ez, tol, atol, contains, accept);
+                if (accept) device::atomic_min(&s_toi, root.tlower);
+                if (contains && !accept && (root.tlower < s_toi)) {
+                    cur = root;
+                    level = 0;
+                    active = 1;
+                }
+            }
+
+            int idle_iters = 0;
+
+            while (true) {
+                // Cross-block prune: fold s_toi into the global toi and
+                // refresh s_toi with whichever side is tighter.  The block
+                // can then prune dominated cells before any further work.
+                if (tid == 0) {
+                    const T g = device::atomic_min(&toi[0], s_toi);
+                    if (g < s_toi) s_toi = g;
+                }
+                __syncthreads();
+
+                if (active && cur.tlower >= s_toi) active = 0;
+
+                // Depth cap: cur is origin-containing by construction; at
+                // max depth take its tlower as a conservative TOI for this
+                // cell instead of bisecting further.
+                if (active && level >= max_bisections) {
+                    device::atomic_min(&s_toi, cur.tlower);
+                    active = 0;
+                }
+
+                // ----------- Phase A: bisect & decide what to push -----------
+                Domain<T> push_box;
+                int push_level = 0;
+                int will_push = 0;
+
+                if (active) {
+                    Domain<T> left, right;
+                    bisect_longest_axis<T>(cur, atol, left, right);
+                    int cl = 0, cr = 0, al = 0, ar = 0;
+                    evaluate_cell_3d<T, Vec4>(left, sx, sy, sz, ex, ey, ez, tol, atol, cl, al);
+                    evaluate_cell_3d<T, Vec4>(right, sx, sy, sz, ex, ey, ez, tol, atol, cr, ar);
+                    if (al) {
+                        device::atomic_min(&s_toi, left.tlower);
+                        cl = 0;
+                    }
+                    if (ar) {
+                        device::atomic_min(&s_toi, right.tlower);
+                        cr = 0;
+                    }
+
+                    if (cl && cr) {
+                        const bool left_first = left.tlower <= right.tlower;
+                        cur = left_first ? left : right;
+                        push_box = left_first ? right : left;
+                        push_level = level + 1;
+                        will_push = (push_box.tlower < s_toi) ? 1 : 0;
+                        level += 1;
+                    } else if (cl) {
+                        cur = left;
+                        level += 1;
+                    } else if (cr) {
+                        cur = right;
+                        level += 1;
+                    } else {
+                        active = 0;
+                    }
+                }
+
+                // Push: try shared first (single-writer slot, no tag needed
+                // because the __syncthreads below separates writers from
+                // readers).  Overflow into global uses the EMPTY/WRITING
+                // tag protocol because cross-block pop/push interleave.
+                if (will_push) {
+                    const int slot = reserve_slots(&s_top, 1, S_CAP);
+                    if (slot >= 0 && slot < S_CAP) {
+                        s_stack.tlower[slot] = push_box.tlower;
+                        s_stack.tupper[slot] = push_box.tupper;
+                        s_stack.ulower[slot] = push_box.ulower;
+                        s_stack.uupper[slot] = push_box.uupper;
+                        s_stack.vlower[slot] = push_box.vlower;
+                        s_stack.vupper[slot] = push_box.vupper;
+                        s_stack.level[slot] = push_level;
+                        s_stack.qid[slot] = qid;
+                    } else {
+                        int g_slot = reserve_slots(g_stack.top, 1, g_normal_cap);
+                        if (g_slot < 0) {
+                            atomicExch(halt, 1);
+                            g_slot = reserve_slots(g_stack.top, 1, g_stack.capacity);
+                        }
+                        if (g_slot >= 0 && g_slot < g_stack.capacity) {
+                            while (atomicCAS(&g_stack.qid[g_slot], SCCD_QID_EMPTY, SCCD_QID_WRITING) !=
+                                   SCCD_QID_EMPTY) {
+                                // Slot still being read by a popper that
+                                // released the index but has not yet
+                                // exchanged the qid back to EMPTY.
+                            }
+                            g_stack.tlower[g_slot] = push_box.tlower;
+                            g_stack.tupper[g_slot] = push_box.tupper;
+                            g_stack.ulower[g_slot] = push_box.ulower;
+                            g_stack.uupper[g_slot] = push_box.uupper;
+                            g_stack.vlower[g_slot] = push_box.vlower;
+                            g_stack.vupper[g_slot] = push_box.vupper;
+                            g_stack.level[g_slot] = push_level;
+                            __threadfence();
+                            atomicExch(&g_stack.qid[g_slot], qid);
+                        }
+                    }
+                }
+
+                __syncthreads();
+
+                // ----------- Phase B: idle threads pull more work -----------
+                if (!active) {
+                    // Shared pop: bounded CAS decrement, then plain reads.
+                    // Pushes from Phase A are already visible across the
+                    // barrier above.
+                    int t = atomicAdd(&s_top, 0);
+                    int got = 0;
+                    while (t > 0 && !got) {
+                        const int prev = atomicCAS(&s_top, t, t - 1);
+                        if (prev == t) {
+                            const int slot = t - 1;
+                            if (slot >= 0 && slot < S_CAP) {
+                                const int new_qid = s_stack.qid[slot];
+                                cur.tlower = s_stack.tlower[slot];
+                                cur.tupper = s_stack.tupper[slot];
+                                cur.ulower = s_stack.ulower[slot];
+                                cur.uupper = s_stack.uupper[slot];
+                                cur.vlower = s_stack.vlower[slot];
+                                cur.vupper = s_stack.vupper[slot];
+                                level = s_stack.level[slot];
+                                if (new_qid != qid) {
+                                    qid = new_qid;
+                                    load_query_ee<T, Vec4, I>(qid,
+                                                              e0overlap,
+                                                              e1overlap,
+                                                              sp,
+                                                              ep,
+                                                              edge_stride,
+                                                              edges,
+                                                              sx,
+                                                              sy,
+                                                              sz,
+                                                              ex,
+                                                              ey,
+                                                              ez);
+                                    compute_edge_edge_tolerance_soa<T, Vec4>(
+                                        tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
+                                }
+                                active = 1;
+                                got = 1;
+                            }
+                            break;
+                        }
+                        t = prev;
+                    }
+
+                    // Global pop: tag protocol.  Spin until the writer
+                    // commits a non-negative qid, then drain fields and
+                    // recycle the slot back to EMPTY.
+                    if (!got) {
+                        const int g_slot = release_slot(g_stack.top);
+                        if (g_slot >= 0 && g_slot < g_stack.capacity) {
+                            int q;
+                            do {
+                                q = atomicAdd(&g_stack.qid[g_slot], 0);
+                            } while (q < 0);
+                            __threadfence();
+                            cur.tlower = g_stack.tlower[g_slot];
+                            cur.tupper = g_stack.tupper[g_slot];
+                            cur.ulower = g_stack.ulower[g_slot];
+                            cur.uupper = g_stack.uupper[g_slot];
+                            cur.vlower = g_stack.vlower[g_slot];
+                            cur.vupper = g_stack.vupper[g_slot];
+                            level = g_stack.level[g_slot];
+                            atomicExch(&g_stack.qid[g_slot], SCCD_QID_EMPTY);
+                            if (q != qid) {
+                                qid = q;
+                                load_query_ee<T, Vec4, I>(qid,
+                                                          e0overlap,
+                                                          e1overlap,
+                                                          sp,
+                                                          ep,
+                                                          edge_stride,
+                                                          edges,
+                                                          sx,
+                                                          sy,
+                                                          sz,
+                                                          ex,
+                                                          ey,
+                                                          ez);
+                                compute_edge_edge_tolerance_soa<T, Vec4>(
+                                    tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
+                            }
+                            active = 1;
+                        }
+                    }
+                }
+
+                __syncthreads();
+
+                // Termination (best-effort): block exits once it has seen
+                // no active thread and both stacks empty for MAX_IDLE_ITERS
+                // consecutive iterations.  A halt flag also forces exit so
+                // the host can react to a full g_stack.
+                const int n_active = block_popc<N>(active, warp_sums);
+                if (n_active == 0) {
+                    const int s_now = atomicAdd(&s_top, 0);
+                    const int g_now = atomicAdd(g_stack.top, 0);
+                    const int h_now = atomicAdd(halt, 0);
+                    if ((s_now <= 0 && g_now <= 0) || h_now != 0) {
+                        idle_iters += 1;
+                        if (idle_iters >= MAX_IDLE_ITERS) break;
+                    } else {
+                        idle_iters = 0;
+                    }
+                } else {
+                    idle_iters = 0;
+                }
+            }
+
+            // Final flush: ensure this block's tightest s_toi is folded
+            // into the global toi before exit.
+            if (tid == 0) device::atomic_min(&toi[0], s_toi);
         }
 
         template <int N, typename T, typename I>
@@ -846,31 +1153,30 @@ namespace sccd {
                     Domain<T> left, right;
                     bisect_longest_axis<T>(cur, atol, left, right);
                     int cl = 0, cr = 0, al = 0, ar = 0;
-                    Domain<T> lbox, rbox;
-                    sample_cell_3d<T, Vec4>(0, 0, 0, 1, 1, 1, left, sx, sy, sz, ex, ey, ez, tol, atol, cl, al, lbox);
-                    sample_cell_3d<T, Vec4>(0, 0, 0, 1, 1, 1, right, sx, sy, sz, ex, ey, ez, tol, atol, cr, ar, rbox);
+                    evaluate_cell_3d<T, Vec4>(left, sx, sy, sz, ex, ey, ez, tol, atol, cl, al);
+                    evaluate_cell_3d<T, Vec4>(right, sx, sy, sz, ex, ey, ez, tol, atol, cr, ar);
 
                     if (al) {
-                        device::atomic_min(&s_toi, lbox.tlower);
+                        device::atomic_min(&s_toi, left.tlower);
                         cl = 0;
                     }
                     if (ar) {
-                        device::atomic_min(&s_toi, rbox.tlower);
+                        device::atomic_min(&s_toi, right.tlower);
                         cr = 0;
                     }
 
                     if (cl && cr) {
-                        const bool left_first = lbox.tlower <= rbox.tlower;
-                        cur = left_first ? lbox : rbox;
-                        push_box = left_first ? rbox : lbox;
+                        const bool left_first = left.tlower <= right.tlower;
+                        cur = left_first ? left : right;
+                        push_box = left_first ? right : left;
                         push_level = level + 1;
                         will_push = (push_box.tlower < s_toi) ? 1 : 0;
                         level += 1;
                     } else if (cl) {
-                        cur = lbox;
+                        cur = left;
                         level += 1;
                     } else if (cr) {
-                        cur = rbox;
+                        cur = right;
                         level += 1;
                     } else {
                         active = 0;
@@ -1410,29 +1716,54 @@ namespace sccd {
                 Stack<T> g_stack = {
                     g_tlower, g_tupper, g_ulower, g_uupper, g_vlower, g_vupper, g_level, g_qid, g_top, gstack_cap};
 
-                dim3 grid_pass1(this_batch, 1, 1);
-                narrow_phase_ee_dfs_kernel<SCCD_NP_THREADS_PER_BLOCK, T, I><<<grid_pass1, block_pass1>>>(e0overalp,
-                                                                                                         e1overalp,
-                                                                                                         v0,
-                                                                                                         v1,
-                                                                                                         edge_stride,
-                                                                                                         edges,
-                                                                                                         tol,
-                                                                                                         d_toi,
-                                                                                                         toi_stride,
-                                                                                                         g_stack,
-                                                                                                         g_normal_cap,
-                                                                                                         halt,
-                                                                                                         SCCD_NP_ALPHA,
-                                                                                                         (int)begin,
-                                                                                                         (int)end);
+                // Pass 1 has two flavors selected by toi_stride:
+                //   stride == 0 : per-thread DFS, one global toi shared
+                //                 across candidates.  Grid is sized to
+                //                 cover this_batch threads (N per block).
+                //   stride == 1 : per-block DFS, one toi per candidate.
+                //                 Grid is one block per candidate.
+                if (toi_stride == 0) {
+                    constexpr int N = SCCD_NP_THREADS_PER_BLOCK;
+                    const int grid_blocks_zs = (this_batch + N - 1) / N;
+                    dim3 grid_pass1_zs(grid_blocks_zs, 1, 1);
+                    narrow_phase_ee_dfs_zero_stride_kernel<N, T, I><<<grid_pass1_zs, block_pass1>>>(e0overalp,
+                                                                                                    e1overalp,
+                                                                                                    v0,
+                                                                                                    v1,
+                                                                                                    edge_stride,
+                                                                                                    edges,
+                                                                                                    tol,
+                                                                                                    d_toi,
+                                                                                                    g_stack,
+                                                                                                    g_normal_cap,
+                                                                                                    halt,
+                                                                                                    SCCD_NP_ALPHA,
+                                                                                                    (int)begin,
+                                                                                                    (int)end);
+                } else {
+                    dim3 grid_pass1(this_batch, 1, 1);
+                    narrow_phase_ee_dfs_kernel<SCCD_NP_THREADS_PER_BLOCK, T, I><<<grid_pass1, block_pass1>>>(
+                        e0overalp,
+                        e1overalp,
+                        v0,
+                        v1,
+                        edge_stride,
+                        edges,
+                        tol,
+                        d_toi,
+                        toi_stride,
+                        g_stack,
+                        g_normal_cap,
+                        halt,
+                        SCCD_NP_ALPHA,
+                        (int)begin,
+                        (int)end);
+                }
                 SCCD_CUDA_LAST_ERROR();
 
                 int h_g_top = 0;
                 SCCD_CHECK_CUDA(cudaMemcpy(&h_g_top, g_top, sizeof(int), cudaMemcpyDeviceToHost));
                 if (h_g_top <= 0) continue;
-
-                printf("h_g_top: %d\n", h_g_top);
 
                 const int pass2_seed = (int)end;
                 cudaMemcpy(seed_cursor, &pass2_seed, sizeof(int), cudaMemcpyHostToDevice);
