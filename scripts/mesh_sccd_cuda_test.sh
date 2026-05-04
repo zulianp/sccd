@@ -5,14 +5,25 @@ set -e
 
 export PATH=$INSTALL_DIR/smesh/bin:$PATH
 
+####################
+# DO not use to compare!!!
+####################
 
-case=../data/n-body-simulation/frames/
-mesh_t0=balls16_1
-mesh_t1=balls16_2
+# case=../data/n-body-simulation/frames/
+# mesh_t0=balls16_1
+# mesh_t1=balls16_2
 
 # case=../data/armadillo-rollers/frames 
 # mesh_t0="296"
 # mesh_t1="297"
+
+####################
+# Use to compare!!!
+####################
+
+# case=/capstor/scratch/cscs/zulianp/Scalable-CCD/tests/data/armadillo-rollers/frames
+# mesh_t0=326
+# mesh_t1=327
 
 # case=/capstor/scratch/cscs/zulianp/Scalable-CCD/tests/data/cloth-ball/frames
 # mesh_t0=cloth_ball92
@@ -26,9 +37,9 @@ mesh_t1=balls16_2
 # mesh_t0=balls16_18
 # mesh_t1=balls16_19
 
-# case=/capstor/scratch/cscs/zulianp/Scalable-CCD/tests/data/rod-twist/frames/
-# mesh_t0=3036
-# mesh_t1=3037
+case=/capstor/scratch/cscs/zulianp/Scalable-CCD/tests/data/rod-twist/frames/
+mesh_t0=3036
+mesh_t1=3037
 
 set -x
 
