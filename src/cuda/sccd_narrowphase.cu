@@ -119,7 +119,7 @@ namespace sccd {
             const T ssa12 = ssa11 + v1ey;
             const T ssa13 = -v1sz;
             const T ssa14 = ssa13 + v1ez;
-            const T ssa15 = (1.0 / 3.0) * codomain_tol;
+            const T ssa15 = T(1.0 / 3.0) * codomain_tol;
             const T ssa16 =
                 ssa15 / device::max<T>(
                             device::abs<T>(ssa0 + ssa1),
@@ -153,6 +153,110 @@ namespace sccd {
                                                       device::max<T>(device::abs<T>(v0ex - v1ex),
                                                                      device::max<T>(device::abs<T>(v0ey - v1ey),
                                                                                     device::abs<T>(v0ez - v1ez))))));
+        }
+
+        template <typename T, typename Vec4>
+        static inline void compute_face_vertex_tolerance_soa(const T codomain_tol,
+                                                             const Vec4 sx,
+                                                             const Vec4 sy,
+                                                             const Vec4 sz,
+                                                             const Vec4 ex,
+                                                             const Vec4 ey,
+                                                             const Vec4 ez,
+                                                             T* const SCCD_RESTRICT tol0,
+                                                             T* const SCCD_RESTRICT tol1,
+                                                             T* const SCCD_RESTRICT tol2) {
+            const T v0sx = sx.x;
+            const T v0sy = sy.x;
+            const T v0sz = sz.x;
+
+            const T v1sx = sx.y;
+            const T v1sy = sy.y;
+            const T v1sz = sz.y;
+
+            const T v2sx = sx.z;
+            const T v2sy = sy.z;
+            const T v2sz = sz.z;
+
+            const T v3sx = sx.w;
+            const T v3sy = sy.w;
+            const T v3sz = sz.w;
+
+            const T v0ex = ex.x;
+            const T v0ey = ey.x;
+            const T v0ez = ez.x;
+
+            const T v1ex = ex.y;
+            const T v1ey = ey.y;
+            const T v1ez = ez.y;
+
+            const T v2ex = ex.z;
+            const T v2ey = ey.z;
+            const T v2ez = ez.z;
+
+            const T v3ex = ex.w;
+            const T v3ey = ey.w;
+            const T v3ez = ez.w;
+
+            const T ssa0 = v0ex - v0sx;
+            const T ssa1 = -v2ex;
+            const T ssa2 = ssa0 + v2sx;
+            const T ssa3 = -v3ex;
+            const T ssa4 = ssa3 + v3sx;
+            const T ssa5 = v0ey - v0sy;
+            const T ssa6 = -v2ey;
+            const T ssa7 = ssa5 + v2sy;
+            const T ssa8 = -v3ey;
+            const T ssa9 = ssa8 + v3sy;
+            const T ssa10 = v0ez - v0sz;
+            const T ssa11 = -v2ez;
+            const T ssa12 = ssa10 + v2sz;
+            const T ssa13 = -v3ez;
+            const T ssa14 = ssa13 + v3sz;
+            const T ssa15 = ssa1 + v1ex;
+            const T ssa16 = ssa6 + v1ey;
+            const T ssa17 = ssa11 + v1ez;
+            const T ssa18 = T(1.0 / 3.0) * codomain_tol;
+            *tol0 = ssa18 /
+                    device::max<T>(
+                        device::abs<T>(ssa0 + ssa4),
+                        device::max<T>(
+                            device::abs<T>(ssa1 + ssa2),
+                            device::max<T>(
+                                device::abs<T>(ssa10 + ssa14),
+                                device::max<T>(
+                                    device::abs<T>(ssa11 + ssa12),
+                                    device::max<T>(
+                                        device::abs<T>(ssa5 + ssa9),
+                                        device::max<T>(
+                                            device::abs<T>(ssa6 + ssa7),
+                                            device::max<T>(
+                                                device::abs<T>(ssa0 - v1ex + v1sx),
+                                                device::max<T>(
+                                                    device::abs<T>(ssa10 - v1ez + v1sz),
+                                                    device::max<T>(
+                                                        device::abs<T>(ssa5 - v1ey + v1sy),
+                                                        device::max<T>(
+                                                            device::abs<T>(ssa12 + ssa14 + ssa17 - v1sz),
+                                                            device::max<T>(
+                                                                device::abs<T>(ssa15 + ssa2 + ssa4 - v1sx),
+                                                                device::abs<T>(ssa16 + ssa7 + ssa9 - v1sy))))))))))));
+            *tol1 = ssa18 /
+                    device::max<T>(
+                        device::abs<T>(ssa15),
+                        device::max<T>(device::abs<T>(ssa16),
+                                       device::max<T>(device::abs<T>(ssa17),
+                                                      device::max<T>(device::abs<T>(v1sx - v2sx),
+                                                                     device::max<T>(device::abs<T>(v1sy - v2sy),
+                                                                                    device::abs<T>(v1sz - v2sz))))));
+            *tol2 = ssa18 /
+                    device::max<T>(
+                        device::abs<T>(ssa13 + v1ez),
+                        device::max<T>(device::abs<T>(ssa3 + v1ex),
+                                       device::max<T>(device::abs<T>(ssa8 + v1ey),
+                                                      device::max<T>(device::abs<T>(v1sx - v3sx),
+                                                                     device::max<T>(device::abs<T>(v1sy - v3sy),
+                                                                                    device::abs<T>(v1sz - v3sz))))));
         }
 
         template <typename T, typename Vec4>
@@ -193,6 +297,49 @@ namespace sccd {
                 f[5] = pa_l - pb_u;
                 f[6] = pa_u - pb_l;
                 f[7] = pa_u - pb_u;
+            }
+        }
+
+        template <typename T, typename Vec4>
+        __device__ void sample_F_vf(const T tl,
+                                    const T tu,
+                                    const T ul,
+                                    const T uu,
+                                    const T vl,
+                                    const T vu,
+                                    const Vec4 sx,
+                                    const Vec4 ex,
+                                    T* const SCCD_RESTRICT F) {
+            Vec4 dx = ex - sx;
+
+            {
+                Vec4 xt = tl * dx + sx;
+                const T vertex = xt.x;
+
+                const T face0 = (xt.z - xt.y) * ul + (xt.w - xt.y) * vl + xt.y;
+                const T face1 = (xt.z - xt.y) * ul + (xt.w - xt.y) * vu + xt.y;
+                const T face2 = (xt.z - xt.y) * uu + (xt.w - xt.y) * vl + xt.y;
+                const T face3 = (xt.z - xt.y) * uu + (xt.w - xt.y) * vu + xt.y;
+
+                F[0] = vertex - face0;
+                F[1] = vertex - face1;
+                F[2] = vertex - face2;
+                F[3] = vertex - face3;
+            }
+
+            {
+                Vec4 xt = tu * dx + sx;
+                const T vertex = xt.x;
+
+                const T face0 = (xt.z - xt.y) * ul + (xt.w - xt.y) * vl + xt.y;
+                const T face1 = (xt.z - xt.y) * ul + (xt.w - xt.y) * vu + xt.y;
+                const T face2 = (xt.z - xt.y) * uu + (xt.w - xt.y) * vl + xt.y;
+                const T face3 = (xt.z - xt.y) * uu + (xt.w - xt.y) * vu + xt.y;
+
+                F[4] = vertex - face0;
+                F[5] = vertex - face1;
+                F[6] = vertex - face2;
+                F[7] = vertex - face3;
             }
         }
 
@@ -371,6 +518,65 @@ namespace sccd {
             ez.y = ep[2][idxa1];
             ez.z = ep[2][idxb0];
             ez.w = ep[2][idxb1];
+        }
+
+        template <typename T, typename Vec4, typename I>
+        static inline __device__ void load_query_vf(const int qid,
+                                                    const I* const SCCD_RESTRICT voverlap,
+                                                    const I* const SCCD_RESTRICT foverlap,
+                                                    T** const SCCD_RESTRICT sp,
+                                                    T** const SCCD_RESTRICT ep,
+                                                    const size_t face_stride,
+                                                    I** const SCCD_RESTRICT faces,
+                                                    Vec4& sx,
+                                                    Vec4& sy,
+                                                    Vec4& sz,
+                                                    Vec4& ex,
+                                                    Vec4& ey,
+                                                    Vec4& ez) {
+            // TODO: Implement this
+            const I va = voverlap[qid];
+            const I vb = foverlap[qid];
+
+            const auto i0 = faces[0][vb * face_stride];
+            const auto i1 = faces[1][vb * face_stride];
+            const auto i2 = faces[2][vb * face_stride];
+
+            // ---------------
+            // Start
+            // ---------------
+            sx.x = sp[0][va];
+            sx.y = sp[0][i0];
+            sx.z = sp[0][i1];
+            sx.w = sp[0][i2];
+
+            sy.x = sp[1][va];
+            sy.y = sp[1][i0];
+            sy.z = sp[1][i1];
+            sy.w = sp[1][i2];
+
+            sz.x = sp[2][va];
+            sz.y = sp[2][i0];
+            sz.z = sp[2][i1];
+            sz.w = sp[2][i2];
+
+            // ---------------
+            // End
+            // ---------------
+            ex.x = ep[0][va];
+            ex.y = ep[0][i0];
+            ex.z = ep[0][i1];
+            ex.w = ep[0][i2];
+
+            ey.x = ep[1][va];
+            ey.y = ep[1][i0];
+            ey.z = ep[1][i1];
+            ey.w = ep[1][i2];
+
+            ez.x = ep[2][va];
+            ez.y = ep[2][i0];
+            ez.z = ep[2][i1];
+            ez.w = ep[2][i2];
         }
 
         // Backoff used when both stacks are empty but other warps are
