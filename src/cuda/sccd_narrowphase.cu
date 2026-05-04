@@ -752,8 +752,7 @@ namespace sccd {
                 qid = my_seed;
                 load_query_ee<T, Vec4, I>(
                     qid, e0overlap, e1overlap, sp, ep, edge_stride, edges, sx, sy, sz, ex, ey, ez);
-                compute_edge_edge_tolerance_soa<T, Vec4>(
-                    tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
+                compute_edge_edge_tolerance_soa<T, Vec4>(tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
 
                 Domain<T> root = {T(0), T(1), T(0), T(1), T(0), T(1)};
                 int contains = 0;
@@ -892,19 +891,8 @@ namespace sccd {
                                 level = s_stack.level[slot];
                                 if (new_qid != qid) {
                                     qid = new_qid;
-                                    load_query_ee<T, Vec4, I>(qid,
-                                                              e0overlap,
-                                                              e1overlap,
-                                                              sp,
-                                                              ep,
-                                                              edge_stride,
-                                                              edges,
-                                                              sx,
-                                                              sy,
-                                                              sz,
-                                                              ex,
-                                                              ey,
-                                                              ez);
+                                    load_query_ee<T, Vec4, I>(
+                                        qid, e0overlap, e1overlap, sp, ep, edge_stride, edges, sx, sy, sz, ex, ey, ez);
                                     compute_edge_edge_tolerance_soa<T, Vec4>(
                                         tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
                                 }
@@ -937,19 +925,8 @@ namespace sccd {
                             atomicExch(&g_stack.qid[g_slot], SCCD_QID_EMPTY);
                             if (q != qid) {
                                 qid = q;
-                                load_query_ee<T, Vec4, I>(qid,
-                                                          e0overlap,
-                                                          e1overlap,
-                                                          sp,
-                                                          ep,
-                                                          edge_stride,
-                                                          edges,
-                                                          sx,
-                                                          sy,
-                                                          sz,
-                                                          ex,
-                                                          ey,
-                                                          ez);
+                                load_query_ee<T, Vec4, I>(
+                                    qid, e0overlap, e1overlap, sp, ep, edge_stride, edges, sx, sy, sz, ex, ey, ez);
                                 compute_edge_edge_tolerance_soa<T, Vec4>(
                                     tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
                             }
@@ -1723,6 +1700,7 @@ namespace sccd {
                 //   stride == 1 : per-block DFS, one toi per candidate.
                 //                 Grid is one block per candidate.
                 if (toi_stride == 0) {
+                    printf("Using narrow_phase_ee_dfs_zero_stride_kernel (%d)\n", this_batch);
                     constexpr int N = SCCD_NP_THREADS_PER_BLOCK;
                     const int grid_blocks_zs = (this_batch + N - 1) / N;
                     dim3 grid_pass1_zs(grid_blocks_zs, 1, 1);
@@ -1741,29 +1719,32 @@ namespace sccd {
                                                                                                     (int)begin,
                                                                                                     (int)end);
                 } else {
+                    printf("Using narrow_phase_ee_dfs_kernel (%d)\n", this_batch);
                     dim3 grid_pass1(this_batch, 1, 1);
-                    narrow_phase_ee_dfs_kernel<SCCD_NP_THREADS_PER_BLOCK, T, I><<<grid_pass1, block_pass1>>>(
-                        e0overalp,
-                        e1overalp,
-                        v0,
-                        v1,
-                        edge_stride,
-                        edges,
-                        tol,
-                        d_toi,
-                        toi_stride,
-                        g_stack,
-                        g_normal_cap,
-                        halt,
-                        SCCD_NP_ALPHA,
-                        (int)begin,
-                        (int)end);
+                    narrow_phase_ee_dfs_kernel<SCCD_NP_THREADS_PER_BLOCK, T, I>
+                        <<<grid_pass1, block_pass1>>>(e0overalp,
+                                                      e1overalp,
+                                                      v0,
+                                                      v1,
+                                                      edge_stride,
+                                                      edges,
+                                                      tol,
+                                                      d_toi,
+                                                      toi_stride,
+                                                      g_stack,
+                                                      g_normal_cap,
+                                                      halt,
+                                                      SCCD_NP_ALPHA,
+                                                      (int)begin,
+                                                      (int)end);
                 }
                 SCCD_CUDA_LAST_ERROR();
 
                 int h_g_top = 0;
                 SCCD_CHECK_CUDA(cudaMemcpy(&h_g_top, g_top, sizeof(int), cudaMemcpyDeviceToHost));
                 if (h_g_top <= 0) continue;
+
+                printf("gtop = %d\n", h_g_top);
 
                 const int pass2_seed = (int)end;
                 cudaMemcpy(seed_cursor, &pass2_seed, sizeof(int), cudaMemcpyHostToDevice);

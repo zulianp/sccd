@@ -89,9 +89,13 @@ int main(int argc, char** argv) {
 
         auto scratch = smesh::create_device_buffer<smesh::geom_t>(std::max(n_nodes, std::max(n_faces, n_edges)));
 
-        sccd::device::sort_along_axis(dim, n_nodes, sort_axis, vaabb->data(), vidx->data(), scratch->data());
-        sccd::device::sort_along_axis(dim, n_faces, sort_axis, faabb->data(), fidx->data(), scratch->data());
-        sccd::device::sort_along_axis(dim, n_edges, sort_axis, eaabb->data(), eidx->data(), scratch->data());
+        {
+            SMESH_TRACE_SCOPE("Sorting AABBs");
+
+            sccd::device::sort_along_axis(dim, n_nodes, sort_axis, vaabb->data(), vidx->data(), scratch->data());
+            sccd::device::sort_along_axis(dim, n_faces, sort_axis, faabb->data(), fidx->data(), scratch->data());
+            sccd::device::sort_along_axis(dim, n_edges, sort_axis, eaabb->data(), eidx->data(), scratch->data());
+        }
 
         ptrdiff_t max_ccdptr_size = std::max(n_faces, n_edges) + 1;
         auto ccdptr = smesh::create_device_buffer<ptrdiff_t>(max_ccdptr_size);
@@ -186,7 +190,7 @@ int main(int argc, char** argv) {
 
         {
             SMESH_TRACE_SCOPE("Narrow phase: E2E");
-            int SCCD_NP_TOI_STRIDE = 1;
+            int SCCD_NP_TOI_STRIDE = 0;
             SCCD_READ_ENV(SCCD_NP_TOI_STRIDE, atoi);
             toi_ee = sccd::device::narrow_phase_ee<smesh::geom_t, smesh::idx_t>(e0_overlap->size(),
                                                                                 e0_overlap->data(),
