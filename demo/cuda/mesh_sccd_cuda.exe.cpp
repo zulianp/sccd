@@ -11,7 +11,9 @@
 #include "sccd_config.hpp"
 
 #include "sccd_broadphase.cuh"
+#include "sccd_broadphase_warp.cuh"
 #include "sccd_narrowphase.cuh"
+
 #include "sccd_vaabb.cuh"
 
 #include <cuda_runtime_api.h>
@@ -126,8 +128,12 @@ int main(int argc, char** argv) {
             // Results of the broadphase
             {
                 SMESH_TRACE_SCOPE("Broadphase: E2E");
-                sccd::device::count_self_overlaps<2>(
-                    sort_axis, n_edges, eaabb->data(), eidx->data(), 1, edges->data(), ccdptr->data());
+
+                {
+                    SMESH_TRACE_SCOPE("count_self_overlaps");
+                    sccd::device::count_self_overlaps<2>(
+                        sort_axis, n_edges, eaabb->data(), eidx->data(), 1, edges->data(), ccdptr->data());
+                }
 
                 ptrdiff_t n_edge_overlaps = 0;
                 cudaMemcpy(&n_edge_overlaps, ccdptr->data() + n_edges, sizeof(n_edge_overlaps), cudaMemcpyDeviceToHost);
@@ -135,15 +141,18 @@ int main(int argc, char** argv) {
                 e0_overlap = smesh::create_device_buffer<smesh::idx_t>(n_edge_overlaps);
                 e1_overlap = smesh::create_device_buffer<smesh::idx_t>(n_edge_overlaps);
 
-                sccd::device::collect_self_overlaps<2>(sort_axis,
-                                                       n_edges,
-                                                       eaabb->data(),
-                                                       eidx->data(),
-                                                       1,
-                                                       edges->data(),
-                                                       ccdptr->data(),
-                                                       e0_overlap->data(),
-                                                       e1_overlap->data());
+                {
+                    SMESH_TRACE_SCOPE("collect_self_overlaps");
+                    sccd::device::collect_self_overlaps<2>(sort_axis,
+                                                           n_edges,
+                                                           eaabb->data(),
+                                                           eidx->data(),
+                                                           1,
+                                                           edges->data(),
+                                                           ccdptr->data(),
+                                                           e0_overlap->data(),
+                                                           e1_overlap->data());
+                }
             }
 
             {
@@ -153,21 +162,28 @@ int main(int argc, char** argv) {
                 cudaMemcpy(
                     &vaabb_max_axis, vaabb->data() + dim + sort_axis, sizeof(vaabb_max_axis), cudaMemcpyDeviceToHost);
 
-                sccd::device::cummax(n_nodes, vaabb_max_axis, cm->data());
+                {
+                    SMESH_TRACE_SCOPE("cummax");
+                    sccd::device::cummax(n_nodes, vaabb_max_axis, cm->data());
+                }
 
-                sccd::device::count_overlaps<3, 1>(sort_axis,
-                                                   n_faces,
-                                                   faabb->data(),
-                                                   fidx->data(),
-                                                   1,
-                                                   faces->data(),
-                                                   n_nodes,
-                                                   vaabb->data(),
-                                                   vidx->data(),
-                                                   0,
-                                                   (smesh::idx_t**)nullptr,
-                                                   ccdptr->data(),
-                                                   cm->data());
+                {
+                    SMESH_TRACE_SCOPE("count_overlaps");
+                    // !!!
+                    sccd::device::count_overlaps_warp<3, 1>(sort_axis,
+                                                            n_faces,
+                                                            faabb->data(),
+                                                            fidx->data(),
+                                                            1,
+                                                            faces->data(),
+                                                            n_nodes,
+                                                            vaabb->data(),
+                                                            vidx->data(),
+                                                            0,
+                                                            (smesh::idx_t**)nullptr,
+                                                            ccdptr->data(),
+                                                            cm->data());
+                }
 
                 ptrdiff_t n_face_overlaps = 0;
                 cudaMemcpy(&n_face_overlaps, ccdptr->data() + n_faces, sizeof(n_face_overlaps), cudaMemcpyDeviceToHost);
@@ -175,21 +191,24 @@ int main(int argc, char** argv) {
                 f_overlap = smesh::create_device_buffer<smesh::idx_t>(n_face_overlaps);
                 v_overlap = smesh::create_device_buffer<smesh::idx_t>(n_face_overlaps);
 
-                sccd::device::collect_overlaps<3, 1>(sort_axis,
-                                                     n_faces,
-                                                     faabb->data(),
-                                                     fidx->data(),
-                                                     1,
-                                                     faces->data(),
-                                                     n_nodes,
-                                                     vaabb->data(),
-                                                     vidx->data(),
-                                                     0,
-                                                     (smesh::idx_t**)nullptr,
-                                                     ccdptr->data(),
-                                                     cm->data(),
-                                                     f_overlap->data(),
-                                                     v_overlap->data());
+                {
+                    SMESH_TRACE_SCOPE("collect_overlaps");
+                    sccd::device::collect_overlaps<3, 1>(sort_axis,
+                                                         n_faces,
+                                                         faabb->data(),
+                                                         fidx->data(),
+                                                         1,
+                                                         faces->data(),
+                                                         n_nodes,
+                                                         vaabb->data(),
+                                                         vidx->data(),
+                                                         0,
+                                                         (smesh::idx_t**)nullptr,
+                                                         ccdptr->data(),
+                                                         cm->data(),
+                                                         f_overlap->data(),
+                                                         v_overlap->data());
+                }
             }
         }
 
