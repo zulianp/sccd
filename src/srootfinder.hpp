@@ -922,7 +922,8 @@ namespace sccd {
 
                                     if (found && t_approx < toi) {
                                         // Conservative trick??
-                                        toi = sccd::min<T>(box.tuv[0].upper, sccd::max<T>(box.tuv[0].lower, 0.99 * t_approx));
+                                        toi = sccd::min<T>(box.tuv[0].upper,
+                                                           sccd::max<T>(box.tuv[0].lower, 0.99 * t_approx));
                                         u = u_approx;
                                         v = v_approx;
                                     }

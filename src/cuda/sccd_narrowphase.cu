@@ -434,27 +434,30 @@ namespace sccd {
             sample_f<is_vf, T, Vec4>(tl, tu, ul, uu, vl, vu, sx, ex, f);
 
             fminmax<T>(f, fmin, fmax);
+            const T x_width = fmax - fmin;
             const uint8_t x_mask = cond_mask<T>(fmin, fmax, tol, adaptive_tol[0]);
             int co = (fmin <= tol) & (fmax >= -tol);
 
             sample_f<is_vf, T, Vec4>(tl, tu, ul, uu, vl, vu, sy, ey, f);
 
             fminmax<T>(f, fmin, fmax);
+            const T y_width = fmax - fmin;
             const uint8_t y_mask = cond_mask<T>(fmin, fmax, tol, adaptive_tol[1]);
             co &= (fmin <= tol) & (fmax >= -tol);
 
             sample_f<is_vf, T, Vec4>(tl, tu, ul, uu, vl, vu, sz, ez, f);
 
             fminmax<T>(f, fmin, fmax);
+            const T z_width = fmax - fmin;
             const uint8_t z_mask = cond_mask<T>(fmin, fmax, tol, adaptive_tol[2]);
             co &= (fmin <= tol) & (fmax >= -tol);
 
             const uint8_t and_mask = (x_mask & y_mask & z_mask);
-            const uint8_t or_mask = (x_mask | y_mask | z_mask);
+            const T true_tol = device::max<T>(x_width, device::max<T>(y_width, z_width));
 
             const bool cond1 = and_mask & MASK_DOMAIN_SMALLER_THAN_TOL;
             const bool cond2 = and_mask & MASK_BOX_INSIDE_EPSILON_BOX;
-            const bool cond3 = or_mask & MASK_REAL_TOLERANCE_SMALLER_THAN_INT_TOLERANCE;
+            const bool cond3 = (tl > T(0)) && (true_tol < tol);
             const bool cond4 = and_mask & MASK_INTERVAL_TERMINAL;
 
             contains_origin = co;
@@ -1012,7 +1015,9 @@ namespace sccd {
             Vec4 sx, sy, sz, ex, ey, ez;
             T atol[3] = {T(0), T(0), T(0)};
 
-            // Initial seed: load geometry, probe the root box.
+            // Initial seed: load geometry and use the root only as a
+            // refinement seed.  Do not accept the full [0,1]^3 root domain:
+            // its tlower is exactly 0 and creates a false zero TOI.
             if (has_seed) {
                 qid = my_seed;
                 load_query_and_tol<is_vf, T, Vec4, I>(
@@ -1022,8 +1027,7 @@ namespace sccd {
                 int contains = 0;
                 int accept = 0;
                 evaluate_cell_3d<is_vf, T, Vec4>(root, sx, sy, sz, ex, ey, ez, tol, atol, contains, accept);
-                if (accept && is_domain_valid<is_vf>(root, s_toi, atol)) device::atomic_min(&s_toi, root.tlower);
-                if (contains && !accept && (root.tlower < s_toi)) {
+                if (contains && is_domain_valid<is_vf>(root, s_toi, atol)) {
                     cur = root;
                     level = 0;
                     active = 1;
@@ -1832,7 +1836,7 @@ namespace sccd {
             //             noverlaps when stride==1 (one toi per candidate).
             const size_t toi_n = (toi_stride == 0) ? 1 : noverlaps;
 
-            T tol = T(1e-8);
+            T tol = std::is_same_v<T, float> ? T(1e-8) : T(1e-12);
             {
                 double SCCD_TOL = (double)tol;
                 SCCD_READ_ENV(SCCD_TOL, atof);
