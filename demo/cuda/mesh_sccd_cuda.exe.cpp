@@ -18,7 +18,8 @@
 
 #include <type_traits>
 
-using scalar_t = smesh::geom_t;
+// using scalar_t = smesh::geom_t;
+using scalar_t = double;
 
 template <typename T, typename MeshT>
 smesh::SharedBuffer<T*> device_points_as(const MeshT& mesh) {
@@ -194,6 +195,9 @@ int main(int argc, char** argv) {
         scalar_t toi = std::numeric_limits<scalar_t>::max();
         scalar_t toi_vf, toi_ee;
 
+        int SCCD_NP_TOI_STRIDE = 0;
+        SCCD_READ_ENV(SCCD_NP_TOI_STRIDE, atoi);
+
         {
             SMESH_TRACE_SCOPE("Narrow phase");
 
@@ -206,14 +210,13 @@ int main(int argc, char** argv) {
                                                           points1->data(),
                                                           1,
                                                           faces->data(),
-                                                          toi);
+                                                          toi,
+                                                          SCCD_NP_TOI_STRIDE);
                 toi = toi_vf;
             }
 
             {
                 SMESH_TRACE_SCOPE("Narrow phase: E2E");
-                int SCCD_NP_TOI_STRIDE = 0;
-                SCCD_READ_ENV(SCCD_NP_TOI_STRIDE, atoi);
                 toi_ee = sccd::device::narrow_phase_ee(e0_overlap->size(),
                                                        e0_overlap->data(),
                                                        e1_overlap->data(),
