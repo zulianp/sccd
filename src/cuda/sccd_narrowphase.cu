@@ -31,8 +31,8 @@
 // cell.  This bounds the depth of the depth-first traversal in
 // narrow_phase_dfs_kernel and prevents pathologically deep recursion.
 #ifndef SCCD_NP_MAX_BISECTIONS
-// #define SCCD_NP_MAX_BISECTIONS 64
-#define SCCD_NP_MAX_BISECTIONS 256
+#define SCCD_NP_MAX_BISECTIONS 69
+// #define SCCD_NP_MAX_BISECTIONS 128
 #endif
 
 namespace sccd {

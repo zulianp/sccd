@@ -21,13 +21,13 @@ export PATH=$INSTALL_DIR/smesh/bin:$PATH
 # Use to compare!!!
 ####################
 
-# case=/capstor/scratch/cscs/zulianp/Scalable-CCD/tests/data/armadillo-rollers/frames
-# mesh_t0=326
-# mesh_t1=327
+case=/capstor/scratch/cscs/zulianp/Scalable-CCD/tests/data/armadillo-rollers/frames
+mesh_t0=326
+mesh_t1=327
 
-case=/capstor/scratch/cscs/zulianp/Scalable-CCD/tests/data/cloth-ball/frames
-mesh_t0=cloth_ball92
-mesh_t1=cloth_ball93
+# case=/capstor/scratch/cscs/zulianp/Scalable-CCD/tests/data/cloth-ball/frames
+# mesh_t0=cloth_ball92
+# mesh_t1=cloth_ball93
 
 # case=/capstor/scratch/cscs/zulianp/Scalable-CCD/tests/data/cloth-funnel/frames/
 # mesh_t0=227
@@ -64,6 +64,6 @@ grep "phase" smesh.trace.csv
 cp smesh.trace.csv ccd_GPU.csv
 
 echo "CPU: "
-SCCD_MAX_ITER=32 ./mesh_sccd      $mesh_t0 $mesh_t1
+SCCD_TOL=1e-12 SCCD_MAX_ITER=35 ./mesh_sccd      $mesh_t0 $mesh_t1
 grep "phase" smesh.trace.csv 
 cp smesh.trace.csv ccd_CPU.csv
