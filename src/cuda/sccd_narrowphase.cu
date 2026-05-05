@@ -29,9 +29,10 @@
 // Maximum number of bisections (per-thread DFS depth) before a candidate
 // subdomain is "accepted" with cur.tlower as a conservative TOI for that
 // cell.  This bounds the depth of the depth-first traversal in
-// narrow_phase_ee_dfs_kernel and prevents pathologically deep recursion.
+// narrow_phase_dfs_kernel and prevents pathologically deep recursion.
 #ifndef SCCD_NP_MAX_BISECTIONS
-#define SCCD_NP_MAX_BISECTIONS 64
+// #define SCCD_NP_MAX_BISECTIONS 64
+#define SCCD_NP_MAX_BISECTIONS 128
 #endif
 
 namespace sccd {
@@ -156,16 +157,16 @@ namespace sccd {
         }
 
         template <typename T, typename Vec4>
-        static inline void compute_face_vertex_tolerance_soa(const T codomain_tol,
-                                                             const Vec4 sx,
-                                                             const Vec4 sy,
-                                                             const Vec4 sz,
-                                                             const Vec4 ex,
-                                                             const Vec4 ey,
-                                                             const Vec4 ez,
-                                                             T* const SCCD_RESTRICT tol0,
-                                                             T* const SCCD_RESTRICT tol1,
-                                                             T* const SCCD_RESTRICT tol2) {
+        static inline __device__ void compute_face_vertex_tolerance_soa(const T codomain_tol,
+                                                                        const Vec4 sx,
+                                                                        const Vec4 sy,
+                                                                        const Vec4 sz,
+                                                                        const Vec4 ex,
+                                                                        const Vec4 ey,
+                                                                        const Vec4 ez,
+                                                                        T* const SCCD_RESTRICT tol0,
+                                                                        T* const SCCD_RESTRICT tol1,
+                                                                        T* const SCCD_RESTRICT tol2) {
             const T v0sx = sx.x;
             const T v0sy = sy.x;
             const T v0sz = sz.x;
@@ -301,7 +302,7 @@ namespace sccd {
         }
 
         template <typename T, typename Vec4>
-        __device__ void sample_F_vf(const T tl,
+        __device__ void sample_f_vf(const T tl,
                                     const T tu,
                                     const T ul,
                                     const T uu,
@@ -383,7 +384,7 @@ namespace sccd {
         // this when the caller already has the cell box in hand (e.g.
         // after a bisection) and no subdivision is needed.
         // ----------------------------------------------------------------
-        template <typename T, typename Vec4>
+        template <bool is_vf, typename T, typename Vec4>
         static inline __device__ void evaluate_cell_3d(const Domain<T>& cell,
                                                        const Vec4 sx,
                                                        const Vec4 sy,
@@ -402,17 +403,32 @@ namespace sccd {
             T fmin, fmax;
             T f[8];
 
-            sample_f_ee<T, Vec4>(tl, tu, ul, uu, vl, vu, sx, ex, f);
+            if constexpr (is_vf) {
+                sample_f_vf<T, Vec4>(tl, tu, ul, uu, vl, vu, sx, ex, f);
+            } else {
+                sample_f_ee<T, Vec4>(tl, tu, ul, uu, vl, vu, sx, ex, f);
+            }
+
             fminmax<T>(f, fmin, fmax);
             const uint8_t x_mask = cond_mask<T>(fmin, fmax, tol, adaptive_tol[0]);
             int co = (fmin <= tol) & (fmax >= -tol);
 
-            sample_f_ee<T, Vec4>(tl, tu, ul, uu, vl, vu, sy, ey, f);
+            if constexpr (is_vf) {
+                sample_f_vf<T, Vec4>(tl, tu, ul, uu, vl, vu, sy, ey, f);
+            } else {
+                sample_f_ee<T, Vec4>(tl, tu, ul, uu, vl, vu, sy, ey, f);
+            }
+
             fminmax<T>(f, fmin, fmax);
             const uint8_t y_mask = cond_mask<T>(fmin, fmax, tol, adaptive_tol[1]);
             co &= (fmin <= tol) & (fmax >= -tol);
 
-            sample_f_ee<T, Vec4>(tl, tu, ul, uu, vl, vu, sz, ez, f);
+            if constexpr (is_vf) {
+                sample_f_vf<T, Vec4>(tl, tu, ul, uu, vl, vu, sz, ez, f);
+            } else {
+                sample_f_ee<T, Vec4>(tl, tu, ul, uu, vl, vu, sz, ez, f);
+            }
+
             fminmax<T>(f, fmin, fmax);
             const uint8_t z_mask = cond_mask<T>(fmin, fmax, tol, adaptive_tol[2]);
             co &= (fmin <= tol) & (fmax >= -tol);
@@ -436,7 +452,7 @@ namespace sccd {
         // sub-cell is returned via `cell`; the rest delegates to
         // evaluate_cell_3d.
         // ----------------------------------------------------------------
-        template <typename T, typename Vec4>
+        template <bool is_vf, typename T, typename Vec4>
         static inline __device__ void sample_cell_3d(const int ti,
                                                      const int ui,
                                                      const int vi,
@@ -466,32 +482,32 @@ namespace sccd {
             cell.vlower = parent.vlower + vi * v_h;
             cell.vupper = cell.vlower + v_h;
 
-            evaluate_cell_3d<T, Vec4>(cell, sx, sy, sz, ex, ey, ez, tol, adaptive_tol, contains_origin, accept);
+            evaluate_cell_3d<is_vf, T, Vec4>(cell, sx, sy, sz, ex, ey, ez, tol, adaptive_tol, contains_origin, accept);
         }
 
         // Load the 4 endpoint coordinates (sx,sy,sz,ex,ey,ez) for a
         // given query (overlap candidate) into registers.
         template <typename T, typename Vec4, typename I>
         static inline __device__ void load_query_ee(const int qid,
-                                                    const I* const SCCD_RESTRICT e0overlap,
-                                                    const I* const SCCD_RESTRICT e1overlap,
+                                                    const I* const SCCD_RESTRICT overlap0,
+                                                    const I* const SCCD_RESTRICT overlap1,
                                                     T** const SCCD_RESTRICT sp,
                                                     T** const SCCD_RESTRICT ep,
-                                                    const size_t edge_stride,
-                                                    I** const SCCD_RESTRICT edges,
+                                                    const size_t element_stride,
+                                                    I** const SCCD_RESTRICT elements,
                                                     Vec4& sx,
                                                     Vec4& sy,
                                                     Vec4& sz,
                                                     Vec4& ex,
                                                     Vec4& ey,
                                                     Vec4& ez) {
-            const I ea = e0overlap[qid];
-            const I eb = e1overlap[qid];
+            const I ea = overlap0[qid];
+            const I eb = overlap1[qid];
 
-            const ptrdiff_t idxa0 = edges[0][ea * edge_stride];
-            const ptrdiff_t idxa1 = edges[1][ea * edge_stride];
-            const ptrdiff_t idxb0 = edges[0][eb * edge_stride];
-            const ptrdiff_t idxb1 = edges[1][eb * edge_stride];
+            const ptrdiff_t idxa0 = elements[0][ea * element_stride];
+            const ptrdiff_t idxa1 = elements[1][ea * element_stride];
+            const ptrdiff_t idxb0 = elements[0][eb * element_stride];
+            const ptrdiff_t idxb1 = elements[1][eb * element_stride];
 
             sx.x = sp[0][idxa0];
             sx.y = sp[0][idxa1];
@@ -526,8 +542,8 @@ namespace sccd {
                                                     const I* const SCCD_RESTRICT foverlap,
                                                     T** const SCCD_RESTRICT sp,
                                                     T** const SCCD_RESTRICT ep,
-                                                    const size_t face_stride,
-                                                    I** const SCCD_RESTRICT faces,
+                                                    const size_t element_stride,
+                                                    I** const SCCD_RESTRICT elements,
                                                     Vec4& sx,
                                                     Vec4& sy,
                                                     Vec4& sz,
@@ -538,9 +554,9 @@ namespace sccd {
             const I va = voverlap[qid];
             const I vb = foverlap[qid];
 
-            const auto i0 = faces[0][vb * face_stride];
-            const auto i1 = faces[1][vb * face_stride];
-            const auto i2 = faces[2][vb * face_stride];
+            const auto i0 = elements[0][vb * element_stride];
+            const auto i1 = elements[1][vb * element_stride];
+            const auto i2 = elements[2][vb * element_stride];
 
             // ---------------
             // Start
@@ -625,11 +641,11 @@ namespace sccd {
         // writes-then-reads.
         // ----------------------------------------------------------------
         template <typename T>
-        __global__ void init_narrow_phase_ee_kernel(const size_t toi_n,
-                                                    const int g_capacity,
-                                                    const T max_toi,
-                                                    T* SCCD_RESTRICT toi,
-                                                    int* SCCD_RESTRICT g_qid) {
+        __global__ void init_narrow_phase_kernel(const size_t toi_n,
+                                                 const int g_capacity,
+                                                 const T max_toi,
+                                                 T* SCCD_RESTRICT toi,
+                                                 int* SCCD_RESTRICT g_qid) {
             const size_t i = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
             if (i < toi_n) toi[i] = max_toi;
             if (i < (size_t)g_capacity) g_qid[i] = SCCD_QID_EMPTY;
@@ -638,11 +654,11 @@ namespace sccd {
         // Per-batch reset.  Launched as <<<1,1>>> between batches; much
         // cheaper than a memset+memcpy dance.  Stream-ordered against
         // the preceding worker launch, so no explicit sync is needed.
-        __global__ void reset_batch_narrow_phase_ee_kernel(int* SCCD_RESTRICT g_top,
-                                                           int* SCCD_RESTRICT inflight,
-                                                           int* SCCD_RESTRICT seed_cursor,
-                                                           int* SCCD_RESTRICT halt,
-                                                           const int seed_begin) {
+        __global__ void reset_batch_narrow_phase_kernel(int* SCCD_RESTRICT g_top,
+                                                        int* SCCD_RESTRICT inflight,
+                                                        int* SCCD_RESTRICT seed_cursor,
+                                                        int* SCCD_RESTRICT halt,
+                                                        const int seed_begin) {
             *g_top = 0;
             *inflight = 0;
             *seed_cursor = seed_begin;
@@ -887,22 +903,22 @@ namespace sccd {
         // and the global stack empty for several consecutive iterations.
         // Any work still in g_stack at exit is drained by the existing
         // warp-cooperative kernel from the host driver.
-        template <int N, typename T, typename I>
-        __global__ void narrow_phase_ee_dfs_zero_stride_kernel(const I* const SCCD_RESTRICT e0overlap,
-                                                               const I* const SCCD_RESTRICT e1overlap,
-                                                               T** const SCCD_RESTRICT sp,
-                                                               T** const SCCD_RESTRICT ep,
-                                                               const size_t edge_stride,
-                                                               I** const SCCD_RESTRICT edges,
-                                                               const T tol,
-                                                               //    One global toi for all candidates
-                                                               T* SCCD_RESTRICT toi,
-                                                               Stack<T> g_stack,
-                                                               const int g_normal_cap,
-                                                               int* SCCD_RESTRICT halt,
-                                                               const T alpha,
-                                                               const int seed_begin,
-                                                               const int seed_end) {
+        template <bool is_vf, int N, typename T, typename I>
+        __global__ void narrow_phase_dfs_zero_stride_kernel(const I* const SCCD_RESTRICT overlap0,
+                                                            const I* const SCCD_RESTRICT overlap1,
+                                                            T** const SCCD_RESTRICT sp,
+                                                            T** const SCCD_RESTRICT ep,
+                                                            const size_t element_stride,
+                                                            I** const SCCD_RESTRICT elements,
+                                                            const T tol,
+                                                            //    One global toi for all candidates
+                                                            T* SCCD_RESTRICT toi,
+                                                            Stack<T> g_stack,
+                                                            const int g_normal_cap,
+                                                            int* SCCD_RESTRICT halt,
+                                                            const T alpha,
+                                                            const int seed_begin,
+                                                            const int seed_end) {
             static_assert(N == 64 || N == 128 || N == 256, "SCCD_NP_THREADS_PER_BLOCK must be one of 64/128/256");
             (void)alpha;  // unused: this kernel does not hard-defer.
             using Vec4 = typename device::Vec4Type<T>::type;
@@ -956,14 +972,21 @@ namespace sccd {
             // Initial seed: load geometry, probe the root box.
             if (has_seed) {
                 qid = my_seed;
-                load_query_ee<T, Vec4, I>(
-                    qid, e0overlap, e1overlap, sp, ep, edge_stride, edges, sx, sy, sz, ex, ey, ez);
-                compute_edge_edge_tolerance_soa<T, Vec4>(tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
+                if constexpr (is_vf) {
+                    load_query_vf<T, Vec4, I>(
+                        qid, overlap0, overlap1, sp, ep, element_stride, elements, sx, sy, sz, ex, ey, ez);
+                    compute_face_vertex_tolerance_soa<T, Vec4>(
+                        tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
+                } else {
+                    load_query_ee<T, Vec4, I>(
+                        qid, overlap0, overlap1, sp, ep, element_stride, elements, sx, sy, sz, ex, ey, ez);
+                    compute_edge_edge_tolerance_soa<T, Vec4>(tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
+                }
 
                 Domain<T> root = {T(0), T(1), T(0), T(1), T(0), T(1)};
                 int contains = 0;
                 int accept = 0;
-                evaluate_cell_3d<T, Vec4>(root, sx, sy, sz, ex, ey, ez, tol, atol, contains, accept);
+                evaluate_cell_3d<is_vf, T, Vec4>(root, sx, sy, sz, ex, ey, ez, tol, atol, contains, accept);
                 if (accept) device::atomic_min(&s_toi, root.tlower);
                 if (contains && !accept && (root.tlower < s_toi)) {
                     cur = root;
@@ -1003,8 +1026,8 @@ namespace sccd {
                     Domain<T> left, right;
                     bisect_longest_axis<T>(cur, atol, left, right);
                     int cl = 0, cr = 0, al = 0, ar = 0;
-                    evaluate_cell_3d<T, Vec4>(left, sx, sy, sz, ex, ey, ez, tol, atol, cl, al);
-                    evaluate_cell_3d<T, Vec4>(right, sx, sy, sz, ex, ey, ez, tol, atol, cr, ar);
+                    evaluate_cell_3d<is_vf, T, Vec4>(left, sx, sy, sz, ex, ey, ez, tol, atol, cl, al);
+                    evaluate_cell_3d<is_vf, T, Vec4>(right, sx, sy, sz, ex, ey, ez, tol, atol, cr, ar);
                     if (al) {
                         device::atomic_min(&s_toi, left.tlower);
                         cl = 0;
@@ -1097,10 +1120,42 @@ namespace sccd {
                                 level = s_stack.level[slot];
                                 if (new_qid != qid) {
                                     qid = new_qid;
-                                    load_query_ee<T, Vec4, I>(
-                                        qid, e0overlap, e1overlap, sp, ep, edge_stride, edges, sx, sy, sz, ex, ey, ez);
-                                    compute_edge_edge_tolerance_soa<T, Vec4>(
-                                        tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
+
+                                    if constexpr (is_vf) {
+                                        load_query_vf<T, Vec4, I>(qid,
+                                                                  overlap0,
+                                                                  overlap1,
+                                                                  sp,
+                                                                  ep,
+                                                                  element_stride,
+                                                                  elements,
+                                                                  sx,
+                                                                  sy,
+                                                                  sz,
+                                                                  ex,
+                                                                  ey,
+                                                                  ez);
+
+                                        compute_face_vertex_tolerance_soa<T, Vec4>(
+                                            tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
+                                    } else {
+                                        load_query_ee<T, Vec4, I>(qid,
+                                                                  overlap0,
+                                                                  overlap1,
+                                                                  sp,
+                                                                  ep,
+                                                                  element_stride,
+                                                                  elements,
+                                                                  sx,
+                                                                  sy,
+                                                                  sz,
+                                                                  ex,
+                                                                  ey,
+                                                                  ez);
+
+                                        compute_edge_edge_tolerance_soa<T, Vec4>(
+                                            tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
+                                    }
                                 }
                                 active = 1;
                                 got = 1;
@@ -1131,10 +1186,40 @@ namespace sccd {
                             atomicExch(&g_stack.qid[g_slot], SCCD_QID_EMPTY);
                             if (q != qid) {
                                 qid = q;
-                                load_query_ee<T, Vec4, I>(
-                                    qid, e0overlap, e1overlap, sp, ep, edge_stride, edges, sx, sy, sz, ex, ey, ez);
-                                compute_edge_edge_tolerance_soa<T, Vec4>(
-                                    tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
+
+                                if constexpr (is_vf) {
+                                    load_query_vf<T, Vec4, I>(qid,
+                                                              overlap0,
+                                                              overlap1,
+                                                              sp,
+                                                              ep,
+                                                              element_stride,
+                                                              elements,
+                                                              sx,
+                                                              sy,
+                                                              sz,
+                                                              ex,
+                                                              ey,
+                                                              ez);
+                                    compute_face_vertex_tolerance_soa<T, Vec4>(
+                                        tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
+                                } else {
+                                    load_query_ee<T, Vec4, I>(qid,
+                                                              overlap0,
+                                                              overlap1,
+                                                              sp,
+                                                              ep,
+                                                              element_stride,
+                                                              elements,
+                                                              sx,
+                                                              sy,
+                                                              sz,
+                                                              ex,
+                                                              ey,
+                                                              ez);
+                                    compute_edge_edge_tolerance_soa<T, Vec4>(
+                                        tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
+                                }
                             }
                             active = 1;
                         }
@@ -1168,22 +1253,22 @@ namespace sccd {
             if (tid == 0) device::atomic_min(&toi[0], s_toi);
         }
 
-        template <int N, typename T, typename I>
-        __global__ void narrow_phase_ee_dfs_kernel(const I* const SCCD_RESTRICT e0overlap,
-                                                   const I* const SCCD_RESTRICT e1overlap,
-                                                   T** const SCCD_RESTRICT sp,
-                                                   T** const SCCD_RESTRICT ep,
-                                                   const size_t edge_stride,
-                                                   I** const SCCD_RESTRICT edges,
-                                                   const T tol,
-                                                   T* SCCD_RESTRICT toi,
-                                                   const int toi_stride,
-                                                   Stack<T> g_stack,
-                                                   const int g_normal_cap,
-                                                   int* SCCD_RESTRICT halt,
-                                                   const T alpha,
-                                                   const int seed_begin,
-                                                   const int seed_end) {
+        template <bool is_vf, int N, typename T, typename I>
+        __global__ void narrow_phase_dfs_kernel(const I* const SCCD_RESTRICT overlap0,
+                                                const I* const SCCD_RESTRICT overlap1,
+                                                T** const SCCD_RESTRICT sp,
+                                                T** const SCCD_RESTRICT ep,
+                                                const size_t element_stride,
+                                                I** const SCCD_RESTRICT elements,
+                                                const T tol,
+                                                T* SCCD_RESTRICT toi,
+                                                const int toi_stride,
+                                                Stack<T> g_stack,
+                                                const int g_normal_cap,
+                                                int* SCCD_RESTRICT halt,
+                                                const T alpha,
+                                                const int seed_begin,
+                                                const int seed_end) {
             static_assert(N == 64 || N == 128 || N == 256, "SCCD_NP_THREADS_PER_BLOCK must be one of 64/128/256");
             using Vec4 = typename device::Vec4Type<T>::type;
             constexpr int NT = DfsSplit<N>::NT;
@@ -1225,10 +1310,18 @@ namespace sccd {
             Stack<T> s_stack = {
                 s_tlower, s_tupper, s_ulower, s_uupper, s_vlower, s_vupper, s_level, s_qid, &s_top, S_CAP};
 
-            Vec4 sx, sy, sz, ex, ey, ez;
-            load_query_ee<T, Vec4, I>(qid, e0overlap, e1overlap, sp, ep, edge_stride, edges, sx, sy, sz, ex, ey, ez);
             T atol[3];
-            compute_edge_edge_tolerance_soa<T, Vec4>(tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
+            Vec4 sx, sy, sz, ex, ey, ez;
+
+            if constexpr (is_vf) {
+                load_query_vf<T, Vec4, I>(
+                    qid, overlap0, overlap1, sp, ep, element_stride, elements, sx, sy, sz, ex, ey, ez);
+                compute_face_vertex_tolerance_soa<T, Vec4>(tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
+            } else {
+                load_query_ee<T, Vec4, I>(
+                    qid, overlap0, overlap1, sp, ep, element_stride, elements, sx, sy, sz, ex, ey, ez);
+                compute_edge_edge_tolerance_soa<T, Vec4>(tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
+            }
 
             const int ti = tid / (NU * NV);
             const int rem = tid % (NU * NV);
@@ -1239,7 +1332,7 @@ namespace sccd {
             Domain<T> cur;
             int contains = 0;
             int accept = 0;
-            sample_cell_3d<T, Vec4>(
+            sample_cell_3d<is_vf, T, Vec4>(
                 ti, ui, vi, NT, NU, NV, root, sx, sy, sz, ex, ey, ez, tol, atol, contains, accept, cur);
 
             // Fold accepted cells into s_toi first, so the prune below can
@@ -1336,8 +1429,8 @@ namespace sccd {
                     Domain<T> left, right;
                     bisect_longest_axis<T>(cur, atol, left, right);
                     int cl = 0, cr = 0, al = 0, ar = 0;
-                    evaluate_cell_3d<T, Vec4>(left, sx, sy, sz, ex, ey, ez, tol, atol, cl, al);
-                    evaluate_cell_3d<T, Vec4>(right, sx, sy, sz, ex, ey, ez, tol, atol, cr, ar);
+                    evaluate_cell_3d<is_vf, T, Vec4>(left, sx, sy, sz, ex, ey, ez, tol, atol, cl, al);
+                    evaluate_cell_3d<is_vf, T, Vec4>(right, sx, sy, sz, ex, ey, ez, tol, atol, cr, ar);
 
                     if (al) {
                         device::atomic_min(&s_toi, left.tlower);
@@ -1441,7 +1534,7 @@ namespace sccd {
         }
 
         // ----------------------------------------------------------------
-        // narrow_phase_ee_kernel (warp-per-query, persistent worker)
+        // narrow_phase_kernel (warp-per-query, persistent worker)
         //
         // Block layout: (32, W, 1).  Each warp consumes one subdomain at
         // a time; lane 0 manages stack ops on behalf of the warp.  All
@@ -1462,22 +1555,22 @@ namespace sccd {
         // is incremented before any work-claim attempt to prevent
         // termination from racing ahead.
         // ----------------------------------------------------------------
-        template <typename T, typename I>
-        __global__ void narrow_phase_ee_kernel(const I* const SCCD_RESTRICT e0overlap,
-                                               const I* const SCCD_RESTRICT e1overlap,
-                                               T** const SCCD_RESTRICT sp,
-                                               T** const SCCD_RESTRICT ep,
-                                               const size_t edge_stride,
-                                               I** const SCCD_RESTRICT edges,
-                                               const T tol,
-                                               T* SCCD_RESTRICT toi,
-                                               const int toi_stride,
-                                               Stack<T> g_stack,
-                                               const int g_normal_cap,
-                                               int* SCCD_RESTRICT inflight,
-                                               int* SCCD_RESTRICT seed_cursor,
-                                               const int seed_end,
-                                               int* SCCD_RESTRICT halt) {
+        template <bool is_vf, typename T, typename I>
+        __global__ void narrow_phase_kernel(const I* const SCCD_RESTRICT overlap0,
+                                            const I* const SCCD_RESTRICT overlap1,
+                                            T** const SCCD_RESTRICT sp,
+                                            T** const SCCD_RESTRICT ep,
+                                            const size_t element_stride,
+                                            I** const SCCD_RESTRICT elements,
+                                            const T tol,
+                                            T* SCCD_RESTRICT toi,
+                                            const int toi_stride,
+                                            Stack<T> g_stack,
+                                            const int g_normal_cap,
+                                            int* SCCD_RESTRICT inflight,
+                                            int* SCCD_RESTRICT seed_cursor,
+                                            const int seed_end,
+                                            int* SCCD_RESTRICT halt) {
             using Vec4 = typename device::Vec4Type<T>::type;
 
             constexpr int S_CAP = SCCD_NP_SHARED_STACK_CAP;
@@ -1613,11 +1706,18 @@ namespace sccd {
                 }
 
                 Vec4 sx, sy, sz, ex, ey, ez;
-                load_query_ee<T, Vec4, I>(
-                    qid, e0overlap, e1overlap, sp, ep, edge_stride, edges, sx, sy, sz, ex, ey, ez);
-
                 T atol[3];
-                compute_edge_edge_tolerance_soa<T, Vec4>(tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
+
+                if constexpr (is_vf) {
+                    load_query_vf<T, Vec4, I>(
+                        qid, overlap0, overlap1, sp, ep, element_stride, elements, sx, sy, sz, ex, ey, ez);
+                    compute_face_vertex_tolerance_soa<T, Vec4>(
+                        tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
+                } else {
+                    load_query_ee<T, Vec4, I>(
+                        qid, overlap0, overlap1, sp, ep, element_stride, elements, sx, sy, sz, ex, ey, ez);
+                    compute_edge_edge_tolerance_soa<T, Vec4>(tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
+                }
 
                 // 2 x 4 x 4 lane decomposition: each lane evaluates one
                 // cell of the parent subdomain.
@@ -1628,7 +1728,7 @@ namespace sccd {
                 int contains = 0;
                 int accept = 0;
                 Domain<T> cell;
-                sample_cell_3d<T, Vec4>(
+                sample_cell_3d<is_vf, T, Vec4>(
                     ti, ui, vi, 2, 4, 4, parent, sx, sy, sz, ex, ey, ez, tol, atol, contains, accept, cell);
 
                 const unsigned acc_mask = __ballot_sync(0xffffffffu, accept);
@@ -1710,18 +1810,18 @@ namespace sccd {
             }
         }
 
-        template <typename T, typename I>
-        T narrow_phase_ee(const size_t noverlaps,
-                          const I* const SCCD_RESTRICT e0overalp,
-                          const I* const SCCD_RESTRICT e1overalp,
-                          // Geometric data
-                          T** const SCCD_RESTRICT v0,
-                          T** const SCCD_RESTRICT v1,
-                          const size_t edge_stride,
-                          I** const SCCD_RESTRICT edges,
-                          // Output
-                          const T max_toi,
-                          const int toi_stride) {
+        template <bool is_vf, typename T, typename I>
+        T narrow_phase_generic(const size_t noverlaps,
+                               const I* const SCCD_RESTRICT overlap0,
+                               const I* const SCCD_RESTRICT overlap1,
+                               // Geometric data
+                               T** const SCCD_RESTRICT v0,
+                               T** const SCCD_RESTRICT v1,
+                               const size_t element_stride,
+                               I** const SCCD_RESTRICT elements,
+                               // Output
+                               const T max_toi,
+                               const int toi_stride) {
             SCCD_CUDA_LAST_ERROR();
 
             if (noverlaps == 0) return max_toi;
@@ -1769,7 +1869,7 @@ namespace sccd {
             {
                 int occ = 0;
                 if (cudaOccupancyMaxActiveBlocksPerMultiprocessor(
-                        &occ, (const void*)narrow_phase_ee_kernel<T, I>, block_threads, 0) == cudaSuccess &&
+                        &occ, (const void*)narrow_phase_kernel<is_vf, T, I>, block_threads, 0) == cudaSuccess &&
                     occ > 0) {
                     SCCD_BLOCKS_PER_SM = occ;
                 }
@@ -1876,7 +1976,7 @@ namespace sccd {
                 const size_t work = ((size_t)gstack_cap > toi_n) ? (size_t)gstack_cap : toi_n;
                 const size_t grid_sz = (work + block - 1) / block;
                 const int grid = (grid_sz > (size_t)INT_MAX) ? INT_MAX : (int)grid_sz;
-                init_narrow_phase_ee_kernel<T><<<grid, block>>>(toi_n, gstack_cap, max_toi, d_toi, g_qid);
+                init_narrow_phase_kernel<T><<<grid, block>>>(toi_n, gstack_cap, max_toi, d_toi, g_qid);
                 SCCD_CUDA_LAST_ERROR();
             }
 
@@ -1893,7 +1993,7 @@ namespace sccd {
                 const size_t end = (begin + batch_size < noverlaps) ? (begin + batch_size) : noverlaps;
                 const int this_batch = (int)(end - begin);
 
-                reset_batch_narrow_phase_ee_kernel<<<1, 1>>>(g_top, inflight, seed_cursor, halt, (int)begin);
+                reset_batch_narrow_phase_kernel<<<1, 1>>>(g_top, inflight, seed_cursor, halt, (int)begin);
                 SCCD_CUDA_LAST_ERROR();
 
                 Stack<T> g_stack = {
@@ -1906,34 +2006,34 @@ namespace sccd {
                 //   stride == 1 : per-block DFS, one toi per candidate.
                 //                 Grid is one block per candidate.
                 if (toi_stride == 0) {
-                    printf("Using narrow_phase_ee_dfs_zero_stride_kernel (%d)\n", this_batch);
+                    printf("Using narrow_phase_dfs_zero_stride_kernel (%d)\n", this_batch);
                     constexpr int N = SCCD_NP_THREADS_PER_BLOCK;
                     const int grid_blocks_zs = (this_batch + N - 1) / N;
                     dim3 grid_pass1_zs(grid_blocks_zs, 1, 1);
-                    narrow_phase_ee_dfs_zero_stride_kernel<N, T, I><<<grid_pass1_zs, block_pass1>>>(e0overalp,
-                                                                                                    e1overalp,
-                                                                                                    v0,
-                                                                                                    v1,
-                                                                                                    edge_stride,
-                                                                                                    edges,
-                                                                                                    tol,
-                                                                                                    d_toi,
-                                                                                                    g_stack,
-                                                                                                    g_normal_cap,
-                                                                                                    halt,
-                                                                                                    SCCD_NP_ALPHA,
-                                                                                                    (int)begin,
-                                                                                                    (int)end);
+                    narrow_phase_dfs_zero_stride_kernel<is_vf, N, T, I><<<grid_pass1_zs, block_pass1>>>(overlap0,
+                                                                                                        overlap1,
+                                                                                                        v0,
+                                                                                                        v1,
+                                                                                                        element_stride,
+                                                                                                        elements,
+                                                                                                        tol,
+                                                                                                        d_toi,
+                                                                                                        g_stack,
+                                                                                                        g_normal_cap,
+                                                                                                        halt,
+                                                                                                        SCCD_NP_ALPHA,
+                                                                                                        (int)begin,
+                                                                                                        (int)end);
                 } else {
-                    printf("Using narrow_phase_ee_dfs_kernel (%d)\n", this_batch);
+                    printf("Using narrow_phase_dfs_kernel (%d)\n", this_batch);
                     dim3 grid_pass1(this_batch, 1, 1);
-                    narrow_phase_ee_dfs_kernel<SCCD_NP_THREADS_PER_BLOCK, T, I>
-                        <<<grid_pass1, block_pass1>>>(e0overalp,
-                                                      e1overalp,
+                    narrow_phase_dfs_kernel<is_vf, SCCD_NP_THREADS_PER_BLOCK, T, I>
+                        <<<grid_pass1, block_pass1>>>(overlap0,
+                                                      overlap1,
                                                       v0,
                                                       v1,
-                                                      edge_stride,
-                                                      edges,
+                                                      element_stride,
+                                                      elements,
                                                       tol,
                                                       d_toi,
                                                       toi_stride,
@@ -1962,21 +2062,21 @@ namespace sccd {
                     if (grid_blocks > this_batch) grid_blocks = this_batch;
                     dim3 grid_pass2(grid_blocks, 1, 1);
 
-                    narrow_phase_ee_kernel<T, I><<<grid_pass2, block_pass2>>>(e0overalp,
-                                                                              e1overalp,
-                                                                              v0,
-                                                                              v1,
-                                                                              edge_stride,
-                                                                              edges,
-                                                                              tol,
-                                                                              d_toi,
-                                                                              toi_stride,
-                                                                              g_stack,
-                                                                              g_normal_cap,
-                                                                              inflight,
-                                                                              seed_cursor,
-                                                                              (int)end,
-                                                                              halt);
+                    narrow_phase_kernel<is_vf, T, I><<<grid_pass2, block_pass2>>>(overlap0,
+                                                                                  overlap1,
+                                                                                  v0,
+                                                                                  v1,
+                                                                                  element_stride,
+                                                                                  elements,
+                                                                                  tol,
+                                                                                  d_toi,
+                                                                                  toi_stride,
+                                                                                  g_stack,
+                                                                                  g_normal_cap,
+                                                                                  inflight,
+                                                                                  seed_cursor,
+                                                                                  (int)end,
+                                                                                  halt);
                     SCCD_CUDA_LAST_ERROR();
 
                     // Check whether the batch is fully drained.  A D2H
@@ -2019,6 +2119,22 @@ namespace sccd {
             return h_toi;
         }
 
+        template <typename T, typename I>
+        T narrow_phase_ee(const size_t noverlaps,
+                          const I* const SCCD_RESTRICT overlap0,
+                          const I* const SCCD_RESTRICT overlap1,
+                          // Geometric data
+                          T** const SCCD_RESTRICT v0,
+                          T** const SCCD_RESTRICT v1,
+                          const size_t edge_stride,
+                          I** const SCCD_RESTRICT edges,
+                          // Output
+                          const T max_toi,
+                          const int toi_stride) {
+            return narrow_phase_generic<false, T, I>(
+                noverlaps, overlap0, overlap1, v0, v1, edge_stride, edges, max_toi, toi_stride);
+        }
+
         template <int nxe, typename T, typename I>
         T narrow_phase_vf(const size_t noverlaps,
                           const I* const SCCD_RESTRICT voveralp,
@@ -2028,22 +2144,24 @@ namespace sccd {
                           T** const SCCD_RESTRICT v1,
                           const size_t face_stride,
                           I** const SCCD_RESTRICT faces,
-                          const T max_toi) {
-            return max_toi;
+                          const T max_toi,
+                          const int toi_stride) {
+            return narrow_phase_generic<true, T, I>(
+                noverlaps, voveralp, foveralp, v0, v1, face_stride, faces, max_toi, toi_stride);
         }
 
     }  // namespace device
 }  // namespace sccd
 
-#define INSTANTIATE_NARROW_PHASE_EE(T, I)                                                  \
-    template T sccd::device::narrow_phase_ee<T, I>(const size_t noverlaps,                 \
-                                                   const I* const SCCD_RESTRICT e0overalp, \
-                                                   const I* const SCCD_RESTRICT e1overalp, \
-                                                   T** const SCCD_RESTRICT v0,             \
-                                                   T** const SCCD_RESTRICT v1,             \
-                                                   const size_t edge_stride,               \
-                                                   I** const SCCD_RESTRICT edges,          \
-                                                   const T max_toi,                        \
+#define INSTANTIATE_NARROW_PHASE_EE(T, I)                                                 \
+    template T sccd::device::narrow_phase_ee<T, I>(const size_t noverlaps,                \
+                                                   const I* const SCCD_RESTRICT overlap0, \
+                                                   const I* const SCCD_RESTRICT overlap1, \
+                                                   T** const SCCD_RESTRICT v0,            \
+                                                   T** const SCCD_RESTRICT v1,            \
+                                                   const size_t element_stride,           \
+                                                   I** const SCCD_RESTRICT elements,      \
+                                                   const T max_toi,                       \
                                                    const int toi_stride);
 
 #define INSTANTIATE_NARROW_PHASE_VF(NXE, T, I)                                                 \
@@ -2052,9 +2170,10 @@ namespace sccd {
                                                         const I* const SCCD_RESTRICT foveralp, \
                                                         T** const SCCD_RESTRICT v0,            \
                                                         T** const SCCD_RESTRICT v1,            \
-                                                        const size_t face_stride,              \
-                                                        I** const SCCD_RESTRICT faces,         \
-                                                        const T max_toi);
+                                                        const size_t element_stride,           \
+                                                        I** const SCCD_RESTRICT elements,      \
+                                                        const T max_toi,                       \
+                                                        const int toi_stride);
 
 INSTANTIATE_NARROW_PHASE_EE(float, int32_t);
 INSTANTIATE_NARROW_PHASE_EE(float, int64_t);

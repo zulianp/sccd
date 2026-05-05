@@ -32,7 +32,8 @@ namespace sccd {
                           T** const SCCD_RESTRICT v1,
                           const size_t face_stride,
                           I** const SCCD_RESTRICT faces,
-                          const T max_toi);
+                          const T max_toi,
+                          const int toi_stride = 0);
 
     }  // namespace device
 }  // namespace sccd
