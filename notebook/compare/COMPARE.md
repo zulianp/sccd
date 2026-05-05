@@ -101,8 +101,9 @@ For `cloth-ball`, steps 92-93:
 In `sccd`:
 
 ```c
-EE: 33.4055 [ms], TOI: 7.3699e-06
-FV: TBA     [ms]
+EE: 17.664     [ms]
+FV: 8.0297     [ms]
+EE+FV: 25.6937 [ms], TOI:  7.49206e-06
 ```
 
 # Single vs Double (Rod-Twist)
