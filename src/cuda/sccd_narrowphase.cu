@@ -32,7 +32,7 @@
 // narrow_phase_dfs_kernel and prevents pathologically deep recursion.
 #ifndef SCCD_NP_MAX_BISECTIONS
 // #define SCCD_NP_MAX_BISECTIONS 64
-#define SCCD_NP_MAX_BISECTIONS 128
+#define SCCD_NP_MAX_BISECTIONS 256
 #endif
 
 namespace sccd {
@@ -68,6 +68,17 @@ namespace sccd {
             int* top;
             int capacity;
         };
+
+        template <bool is_vf, typename T>
+        static inline __device__ bool valid_refinement(const Domain<T>& domain,
+                                                       const T toi,
+                                                       const T* const SCCD_RESTRICT tols) {
+            if constexpr (is_vf) {
+                return domain.tlower < toi && (domain.ulower + domain.vlower < 1 + tols[1] + tols[2]);
+            } else {
+                return domain.tlower < toi;
+            }
+        }
 
         template <typename T, typename Vec4>
         static inline __device__ void compute_edge_edge_tolerance_soa(const T codomain_tol,
@@ -354,6 +365,23 @@ namespace sccd {
             }
         }
 
+        template <bool is_vf, typename T, typename Vec4>
+        static inline __device__ void sample_f(const T tl,
+                                               const T tu,
+                                               const T ul,
+                                               const T uu,
+                                               const T vl,
+                                               const T vu,
+                                               const Vec4 s,
+                                               const Vec4 e,
+                                               T* const SCCD_RESTRICT f) {
+            if constexpr (is_vf) {
+                sample_f_vf<T, Vec4>(tl, tu, ul, uu, vl, vu, s, e, f);
+            } else {
+                sample_f_ee<T, Vec4>(tl, tu, ul, uu, vl, vu, s, e, f);
+            }
+        }
+
 #define MASK_FULL 0xf
 #define MASK_DOMAIN_SMALLER_THAN_TOL 1
 #define MASK_BOX_INSIDE_EPSILON_BOX 2
@@ -403,31 +431,19 @@ namespace sccd {
             T fmin, fmax;
             T f[8];
 
-            if constexpr (is_vf) {
-                sample_f_vf<T, Vec4>(tl, tu, ul, uu, vl, vu, sx, ex, f);
-            } else {
-                sample_f_ee<T, Vec4>(tl, tu, ul, uu, vl, vu, sx, ex, f);
-            }
+            sample_f<is_vf, T, Vec4>(tl, tu, ul, uu, vl, vu, sx, ex, f);
 
             fminmax<T>(f, fmin, fmax);
             const uint8_t x_mask = cond_mask<T>(fmin, fmax, tol, adaptive_tol[0]);
             int co = (fmin <= tol) & (fmax >= -tol);
 
-            if constexpr (is_vf) {
-                sample_f_vf<T, Vec4>(tl, tu, ul, uu, vl, vu, sy, ey, f);
-            } else {
-                sample_f_ee<T, Vec4>(tl, tu, ul, uu, vl, vu, sy, ey, f);
-            }
+            sample_f<is_vf, T, Vec4>(tl, tu, ul, uu, vl, vu, sy, ey, f);
 
             fminmax<T>(f, fmin, fmax);
             const uint8_t y_mask = cond_mask<T>(fmin, fmax, tol, adaptive_tol[1]);
             co &= (fmin <= tol) & (fmax >= -tol);
 
-            if constexpr (is_vf) {
-                sample_f_vf<T, Vec4>(tl, tu, ul, uu, vl, vu, sz, ez, f);
-            } else {
-                sample_f_ee<T, Vec4>(tl, tu, ul, uu, vl, vu, sz, ez, f);
-            }
+            sample_f<is_vf, T, Vec4>(tl, tu, ul, uu, vl, vu, sz, ez, f);
 
             fminmax<T>(f, fmin, fmax);
             const uint8_t z_mask = cond_mask<T>(fmin, fmax, tol, adaptive_tol[2]);
@@ -593,6 +609,33 @@ namespace sccd {
             ez.y = ep[2][i0];
             ez.z = ep[2][i1];
             ez.w = ep[2][i2];
+        }
+
+        template <bool is_vf, typename T, typename Vec4, typename I>
+        static inline __device__ void load_query_and_tol(const int qid,
+                                                         const I* const SCCD_RESTRICT overlap0,
+                                                         const I* const SCCD_RESTRICT overlap1,
+                                                         T** const SCCD_RESTRICT sp,
+                                                         T** const SCCD_RESTRICT ep,
+                                                         const size_t element_stride,
+                                                         I** const SCCD_RESTRICT elements,
+                                                         const T tol,
+                                                         Vec4& sx,
+                                                         Vec4& sy,
+                                                         Vec4& sz,
+                                                         Vec4& ex,
+                                                         Vec4& ey,
+                                                         Vec4& ez,
+                                                         T* const SCCD_RESTRICT atol) {
+            if constexpr (is_vf) {
+                load_query_vf<T, Vec4, I>(
+                    qid, overlap0, overlap1, sp, ep, element_stride, elements, sx, sy, sz, ex, ey, ez);
+                compute_face_vertex_tolerance_soa<T, Vec4>(tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
+            } else {
+                load_query_ee<T, Vec4, I>(
+                    qid, overlap0, overlap1, sp, ep, element_stride, elements, sx, sy, sz, ex, ey, ez);
+                compute_edge_edge_tolerance_soa<T, Vec4>(tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
+            }
         }
 
         // Backoff used when both stacks are empty but other warps are
@@ -972,16 +1015,8 @@ namespace sccd {
             // Initial seed: load geometry, probe the root box.
             if (has_seed) {
                 qid = my_seed;
-                if constexpr (is_vf) {
-                    load_query_vf<T, Vec4, I>(
-                        qid, overlap0, overlap1, sp, ep, element_stride, elements, sx, sy, sz, ex, ey, ez);
-                    compute_face_vertex_tolerance_soa<T, Vec4>(
-                        tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
-                } else {
-                    load_query_ee<T, Vec4, I>(
-                        qid, overlap0, overlap1, sp, ep, element_stride, elements, sx, sy, sz, ex, ey, ez);
-                    compute_edge_edge_tolerance_soa<T, Vec4>(tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
-                }
+                load_query_and_tol<is_vf, T, Vec4, I>(
+                    qid, overlap0, overlap1, sp, ep, element_stride, elements, tol, sx, sy, sz, ex, ey, ez, atol);
 
                 Domain<T> root = {T(0), T(1), T(0), T(1), T(0), T(1)};
                 int contains = 0;
@@ -1028,6 +1063,17 @@ namespace sccd {
                     int cl = 0, cr = 0, al = 0, ar = 0;
                     evaluate_cell_3d<is_vf, T, Vec4>(left, sx, sy, sz, ex, ey, ez, tol, atol, cl, al);
                     evaluate_cell_3d<is_vf, T, Vec4>(right, sx, sy, sz, ex, ey, ez, tol, atol, cr, ar);
+
+                    if (!valid_refinement<is_vf>(left, s_toi, atol)) {
+                        cl = 0;
+                        al = 0;
+                    }
+
+                    if (!valid_refinement<is_vf>(right, s_toi, atol)) {
+                        cr = 0;
+                        ar = 0;
+                    }
+
                     if (al) {
                         device::atomic_min(&s_toi, left.tlower);
                         cl = 0;
@@ -1042,7 +1088,7 @@ namespace sccd {
                         cur = left_first ? left : right;
                         push_box = left_first ? right : left;
                         push_level = level + 1;
-                        will_push = (push_box.tlower < s_toi) ? 1 : 0;
+                        will_push = 1;
                         level += 1;
                     } else if (cl) {
                         cur = left;
@@ -1120,42 +1166,21 @@ namespace sccd {
                                 level = s_stack.level[slot];
                                 if (new_qid != qid) {
                                     qid = new_qid;
-
-                                    if constexpr (is_vf) {
-                                        load_query_vf<T, Vec4, I>(qid,
-                                                                  overlap0,
-                                                                  overlap1,
-                                                                  sp,
-                                                                  ep,
-                                                                  element_stride,
-                                                                  elements,
-                                                                  sx,
-                                                                  sy,
-                                                                  sz,
-                                                                  ex,
-                                                                  ey,
-                                                                  ez);
-
-                                        compute_face_vertex_tolerance_soa<T, Vec4>(
-                                            tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
-                                    } else {
-                                        load_query_ee<T, Vec4, I>(qid,
-                                                                  overlap0,
-                                                                  overlap1,
-                                                                  sp,
-                                                                  ep,
-                                                                  element_stride,
-                                                                  elements,
-                                                                  sx,
-                                                                  sy,
-                                                                  sz,
-                                                                  ex,
-                                                                  ey,
-                                                                  ez);
-
-                                        compute_edge_edge_tolerance_soa<T, Vec4>(
-                                            tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
-                                    }
+                                    load_query_and_tol<is_vf, T, Vec4, I>(qid,
+                                                                          overlap0,
+                                                                          overlap1,
+                                                                          sp,
+                                                                          ep,
+                                                                          element_stride,
+                                                                          elements,
+                                                                          tol,
+                                                                          sx,
+                                                                          sy,
+                                                                          sz,
+                                                                          ex,
+                                                                          ey,
+                                                                          ez,
+                                                                          atol);
                                 }
                                 active = 1;
                                 got = 1;
@@ -1186,40 +1211,21 @@ namespace sccd {
                             atomicExch(&g_stack.qid[g_slot], SCCD_QID_EMPTY);
                             if (q != qid) {
                                 qid = q;
-
-                                if constexpr (is_vf) {
-                                    load_query_vf<T, Vec4, I>(qid,
-                                                              overlap0,
-                                                              overlap1,
-                                                              sp,
-                                                              ep,
-                                                              element_stride,
-                                                              elements,
-                                                              sx,
-                                                              sy,
-                                                              sz,
-                                                              ex,
-                                                              ey,
-                                                              ez);
-                                    compute_face_vertex_tolerance_soa<T, Vec4>(
-                                        tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
-                                } else {
-                                    load_query_ee<T, Vec4, I>(qid,
-                                                              overlap0,
-                                                              overlap1,
-                                                              sp,
-                                                              ep,
-                                                              element_stride,
-                                                              elements,
-                                                              sx,
-                                                              sy,
-                                                              sz,
-                                                              ex,
-                                                              ey,
-                                                              ez);
-                                    compute_edge_edge_tolerance_soa<T, Vec4>(
-                                        tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
-                                }
+                                load_query_and_tol<is_vf, T, Vec4, I>(qid,
+                                                                      overlap0,
+                                                                      overlap1,
+                                                                      sp,
+                                                                      ep,
+                                                                      element_stride,
+                                                                      elements,
+                                                                      tol,
+                                                                      sx,
+                                                                      sy,
+                                                                      sz,
+                                                                      ex,
+                                                                      ey,
+                                                                      ez,
+                                                                      atol);
                             }
                             active = 1;
                         }
@@ -1313,15 +1319,8 @@ namespace sccd {
             T atol[3];
             Vec4 sx, sy, sz, ex, ey, ez;
 
-            if constexpr (is_vf) {
-                load_query_vf<T, Vec4, I>(
-                    qid, overlap0, overlap1, sp, ep, element_stride, elements, sx, sy, sz, ex, ey, ez);
-                compute_face_vertex_tolerance_soa<T, Vec4>(tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
-            } else {
-                load_query_ee<T, Vec4, I>(
-                    qid, overlap0, overlap1, sp, ep, element_stride, elements, sx, sy, sz, ex, ey, ez);
-                compute_edge_edge_tolerance_soa<T, Vec4>(tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
-            }
+            load_query_and_tol<is_vf, T, Vec4, I>(
+                qid, overlap0, overlap1, sp, ep, element_stride, elements, tol, sx, sy, sz, ex, ey, ez, atol);
 
             const int ti = tid / (NU * NV);
             const int rem = tid % (NU * NV);
@@ -1432,6 +1431,16 @@ namespace sccd {
                     evaluate_cell_3d<is_vf, T, Vec4>(left, sx, sy, sz, ex, ey, ez, tol, atol, cl, al);
                     evaluate_cell_3d<is_vf, T, Vec4>(right, sx, sy, sz, ex, ey, ez, tol, atol, cr, ar);
 
+                    if (!valid_refinement<is_vf>(left, s_toi, atol)) {
+                        cl = 0;
+                        al = 0;
+                    }
+
+                    if (!valid_refinement<is_vf>(right, s_toi, atol)) {
+                        cr = 0;
+                        ar = 0;
+                    }
+
                     if (al) {
                         device::atomic_min(&s_toi, left.tlower);
                         cl = 0;
@@ -1446,7 +1455,7 @@ namespace sccd {
                         cur = left_first ? left : right;
                         push_box = left_first ? right : left;
                         push_level = level + 1;
-                        will_push = (push_box.tlower < s_toi) ? 1 : 0;
+                        will_push = 1;
                         level += 1;
                     } else if (cl) {
                         cur = left;
@@ -1708,16 +1717,8 @@ namespace sccd {
                 Vec4 sx, sy, sz, ex, ey, ez;
                 T atol[3];
 
-                if constexpr (is_vf) {
-                    load_query_vf<T, Vec4, I>(
-                        qid, overlap0, overlap1, sp, ep, element_stride, elements, sx, sy, sz, ex, ey, ez);
-                    compute_face_vertex_tolerance_soa<T, Vec4>(
-                        tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
-                } else {
-                    load_query_ee<T, Vec4, I>(
-                        qid, overlap0, overlap1, sp, ep, element_stride, elements, sx, sy, sz, ex, ey, ez);
-                    compute_edge_edge_tolerance_soa<T, Vec4>(tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
-                }
+                load_query_and_tol<is_vf, T, Vec4, I>(
+                    qid, overlap0, overlap1, sp, ep, element_stride, elements, tol, sx, sy, sz, ex, ey, ez, atol);
 
                 // 2 x 4 x 4 lane decomposition: each lane evaluates one
                 // cell of the parent subdomain.
