@@ -16,6 +16,8 @@
 
 #include <cuda_runtime_api.h>
 
+#include <algorithm>
+#include <limits>
 #include <type_traits>
 
 // using scalar_t = smesh::geom_t;
@@ -192,41 +194,86 @@ int main(int argc, char** argv) {
         }
 
         // Narrow phase
-        scalar_t toi = std::numeric_limits<scalar_t>::max();
-        scalar_t toi_vf, toi_ee;
+        scalar_t toi = 1;
+        scalar_t toi_vf = toi;
+        scalar_t toi_ee = toi;
 
         int SCCD_NP_TOI_STRIDE = 0;
         SCCD_READ_ENV(SCCD_NP_TOI_STRIDE, atoi);
+        const auto toi_storage_size = [SCCD_NP_TOI_STRIDE](const size_t noverlaps) {
+            return SCCD_NP_TOI_STRIDE == 0 ? size_t(1) : noverlaps;
+        };
+
+        const auto scalar_device_to_host = [](scalar_t* const d_toi) {
+            scalar_t h_toi = std::numeric_limits<scalar_t>::max();
+            cudaMemcpy(&h_toi, d_toi, sizeof(h_toi), cudaMemcpyDeviceToHost);
+            return h_toi;
+        };
 
         {
             SMESH_TRACE_SCOPE("Narrow phase");
+            smesh::SharedBuffer<scalar_t> vf_toi;
+            smesh::SharedBuffer<scalar_t> ee_toi;
 
             {
                 SMESH_TRACE_SCOPE("Narrow phase: F2V");
-                toi_vf = sccd::device::narrow_phase_vf<3>(v_overlap->size(),
-                                                          v_overlap->data(),
-                                                          f_overlap->data(),
-                                                          points0->data(),
-                                                          points1->data(),
-                                                          1,
-                                                          faces->data(),
-                                                          toi,
-                                                          SCCD_NP_TOI_STRIDE);
-                toi = toi_vf;
+                vf_toi = smesh::create_device_buffer<scalar_t>(toi_storage_size(v_overlap->size()));
+                sccd::device::narrow_phase_vf<3>(v_overlap->size(),
+                                                 v_overlap->data(),
+                                                 f_overlap->data(),
+                                                 points0->data(),
+                                                 points1->data(),
+                                                 1,
+                                                 faces->data(),
+                                                 toi,
+                                                 vf_toi->data(),
+                                                 SCCD_NP_TOI_STRIDE);
+
+                if (SCCD_NP_TOI_STRIDE == 0 && v_overlap->size() != 0) {
+                    toi_vf = scalar_device_to_host(vf_toi->data());
+                    toi = toi_vf;
+                }
             }
 
             {
                 SMESH_TRACE_SCOPE("Narrow phase: E2E");
-                toi_ee = sccd::device::narrow_phase_ee(e0_overlap->size(),
-                                                       e0_overlap->data(),
-                                                       e1_overlap->data(),
-                                                       points0->data(),
-                                                       points1->data(),
-                                                       1,
-                                                       edges->data(),
-                                                       toi,
-                                                       SCCD_NP_TOI_STRIDE);
-                toi = toi_ee;
+                ee_toi = smesh::create_device_buffer<scalar_t>(toi_storage_size(e0_overlap->size()));
+                sccd::device::narrow_phase_ee(e0_overlap->size(),
+                                              e0_overlap->data(),
+                                              e1_overlap->data(),
+                                              points0->data(),
+                                              points1->data(),
+                                              1,
+                                              edges->data(),
+                                              toi,
+                                              ee_toi->data(),
+                                              SCCD_NP_TOI_STRIDE);
+                if (SCCD_NP_TOI_STRIDE == 0 && e0_overlap->size() != 0) {
+                    toi_ee = scalar_device_to_host(ee_toi->data());
+                    toi = toi_ee;
+                }
+            }
+
+            if (SCCD_NP_TOI_STRIDE == 1) {
+                const auto device_minmax_to_host =
+                    [](scalar_t* const d_values, const size_t nvalues, scalar_t* const h_min, scalar_t* const h_max) {
+                        if (nvalues == 0) {
+                            *h_min = std::numeric_limits<scalar_t>::max();
+                            *h_max = std::numeric_limits<scalar_t>::lowest();
+                            return;
+                        }
+
+                        sccd::device::minmax(d_values, nvalues, h_min, h_max);
+                    };
+
+                scalar_t vf_toi_max = std::numeric_limits<scalar_t>::lowest();
+                scalar_t ee_toi_max = std::numeric_limits<scalar_t>::lowest();
+                device_minmax_to_host(vf_toi->data(), v_overlap->size(), &toi_vf, &vf_toi_max);
+                device_minmax_to_host(ee_toi->data(), e0_overlap->size(), &toi_ee, &ee_toi_max);
+                toi = std::min(toi_vf, toi_ee);
+
+                printf("vt_toi_min: %g, ee_toi_min: %g\n", toi_vf, toi_ee);
+                printf("vf_toi_max: %g, ee_toi_max: %g\n", vf_toi_max, ee_toi_max);
             }
         }
 
