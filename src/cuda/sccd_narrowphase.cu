@@ -70,9 +70,9 @@ namespace sccd {
         };
 
         template <bool is_vf, typename T>
-        static inline __device__ bool valid_refinement(const Domain<T>& domain,
-                                                       const T toi,
-                                                       const T* const SCCD_RESTRICT tols) {
+        static inline __device__ bool is_domain_valid(const Domain<T>& domain,
+                                                      const T toi,
+                                                      const T* const SCCD_RESTRICT tols) {
             if constexpr (is_vf) {
                 return domain.tlower < toi && (domain.ulower + domain.vlower < 1 + tols[1] + tols[2]);
             } else {
@@ -1022,7 +1022,7 @@ namespace sccd {
                 int contains = 0;
                 int accept = 0;
                 evaluate_cell_3d<is_vf, T, Vec4>(root, sx, sy, sz, ex, ey, ez, tol, atol, contains, accept);
-                if (accept) device::atomic_min(&s_toi, root.tlower);
+                if (accept && is_domain_valid<is_vf>(root, s_toi, atol)) device::atomic_min(&s_toi, root.tlower);
                 if (contains && !accept && (root.tlower < s_toi)) {
                     cur = root;
                     level = 0;
@@ -1064,12 +1064,12 @@ namespace sccd {
                     evaluate_cell_3d<is_vf, T, Vec4>(left, sx, sy, sz, ex, ey, ez, tol, atol, cl, al);
                     evaluate_cell_3d<is_vf, T, Vec4>(right, sx, sy, sz, ex, ey, ez, tol, atol, cr, ar);
 
-                    if (!valid_refinement<is_vf>(left, s_toi, atol)) {
+                    if (!is_domain_valid<is_vf>(left, s_toi, atol)) {
                         cl = 0;
                         al = 0;
                     }
 
-                    if (!valid_refinement<is_vf>(right, s_toi, atol)) {
+                    if (!is_domain_valid<is_vf>(right, s_toi, atol)) {
                         cr = 0;
                         ar = 0;
                     }
@@ -1336,7 +1336,7 @@ namespace sccd {
 
             // Fold accepted cells into s_toi first, so the prune below can
             // use the tightest bound available within this block.
-            if (accept) {
+            if (accept && is_domain_valid<is_vf>(cur, s_toi, atol)) {
                 device::atomic_min(&s_toi, cur.tlower);
             }
             __syncthreads();
@@ -1431,12 +1431,12 @@ namespace sccd {
                     evaluate_cell_3d<is_vf, T, Vec4>(left, sx, sy, sz, ex, ey, ez, tol, atol, cl, al);
                     evaluate_cell_3d<is_vf, T, Vec4>(right, sx, sy, sz, ex, ey, ez, tol, atol, cr, ar);
 
-                    if (!valid_refinement<is_vf>(left, s_toi, atol)) {
+                    if (!is_domain_valid<is_vf>(left, s_toi, atol)) {
                         cl = 0;
                         al = 0;
                     }
 
-                    if (!valid_refinement<is_vf>(right, s_toi, atol)) {
+                    if (!is_domain_valid<is_vf>(right, s_toi, atol)) {
                         cr = 0;
                         ar = 0;
                     }
@@ -1732,13 +1732,14 @@ namespace sccd {
                 sample_cell_3d<is_vf, T, Vec4>(
                     ti, ui, vi, 2, 4, 4, parent, sx, sy, sz, ex, ey, ez, tol, atol, contains, accept, cell);
 
-                const unsigned acc_mask = __ballot_sync(0xffffffffu, accept);
+                const bool accept_valid = accept && is_domain_valid<is_vf>(cell, cur_toi, atol);
+                const unsigned acc_mask = __ballot_sync(0xffffffffu, accept_valid);
 
                 if (acc_mask) {
                     // Reduce min(cell.tlower) over accepting lanes.  Use
                     // the parent's tupper as a sentinel so non-accepting
                     // lanes never win the reduction.
-                    T best = accept ? cell.tlower : parent.tupper;
+                    T best = accept_valid ? cell.tlower : parent.tupper;
                     for (int o = 16; o > 0; o >>= 1) {
                         T other = __shfl_xor_sync(0xffffffffu, best, o);
                         best = (best < other) ? best : other;
