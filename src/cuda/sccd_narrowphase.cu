@@ -5,9 +5,12 @@
 
 #include <cassert>
 #include <climits>
+#include <limits>
 
 #include <thrust/device_ptr.h>
+#include <thrust/extrema.h>
 #include <thrust/functional.h>
+#include <thrust/memory.h>
 #include <thrust/reduce.h>
 
 #include "sccd_cuda_base.cuh"
@@ -1817,20 +1820,23 @@ namespace sccd {
         }
 
         template <bool is_vf, typename T, typename I>
-        T narrow_phase_generic(const size_t noverlaps,
-                               const I* const SCCD_RESTRICT overlap0,
-                               const I* const SCCD_RESTRICT overlap1,
-                               // Geometric data
-                               T** const SCCD_RESTRICT v0,
-                               T** const SCCD_RESTRICT v1,
-                               const size_t element_stride,
-                               I** const SCCD_RESTRICT elements,
-                               // Output
-                               const T max_toi,
-                               const int toi_stride) {
+        int narrow_phase_generic(const size_t noverlaps,
+                                 const I* const SCCD_RESTRICT overlap0,
+                                 const I* const SCCD_RESTRICT overlap1,
+                                 // Geometric data
+                                 T** const SCCD_RESTRICT v0,
+                                 T** const SCCD_RESTRICT v1,
+                                 const size_t element_stride,
+                                 I** const SCCD_RESTRICT elements,
+                                 // Output
+                                 const T max_toi,
+                                 T* const SCCD_RESTRICT d_toi,
+                                 const int toi_stride) {
             SCCD_CUDA_LAST_ERROR();
 
             if (noverlaps == 0) return max_toi;
+            assert(d_toi != nullptr);
+            assert(toi_stride == 0 || toi_stride == 1);
 
             // toi length: 1 when stride==0 (all candidates share toi[0]),
             //             noverlaps when stride==1 (one toi per candidate).
@@ -1907,13 +1913,12 @@ namespace sccd {
             if (SCCD_MEM_FRACTION <= 0.0 || SCCD_MEM_FRACTION > 1.0) SCCD_MEM_FRACTION = 0.25;
 
             const size_t per_slot_bytes = 6 * sizeof(T) + 2 * sizeof(int);
-            const size_t toi_bytes = toi_n * sizeof(T);
             const size_t scratch_overhead = 4 * sizeof(int);  // counters
             const size_t budget = (size_t)((double)free_bytes * SCCD_MEM_FRACTION);
 
             size_t slots_from_mem = 0;
-            if (budget > toi_bytes + scratch_overhead) {
-                slots_from_mem = (budget - toi_bytes - scratch_overhead) / per_slot_bytes;
+            if (budget > scratch_overhead) {
+                slots_from_mem = (budget - scratch_overhead) / per_slot_bytes;
             }
             const size_t slots_heuristic = noverlaps * 32 + 4096;
             size_t auto_slots = (slots_from_mem < slots_heuristic) ? slots_from_mem : slots_heuristic;
@@ -1941,10 +1946,6 @@ namespace sccd {
             }
             SCCD_READ_ENV(SCCD_BATCH_SIZE, atoi);
             const size_t batch_size = (SCCD_BATCH_SIZE > 0) ? (size_t)SCCD_BATCH_SIZE : noverlaps;
-
-            // Per-query toi output (allocated once across all batches).
-            T* d_toi = nullptr;
-            cudaMalloc(&d_toi, toi_n * sizeof(T));
 
             // Global LIFO stack arrays (shared across batches).
             T* g_tlower = nullptr;
@@ -2100,14 +2101,6 @@ namespace sccd {
                 }
             }
 
-            // Reduce per-query toi to a single value on device, then copy.
-            // For toi_stride==0 this is a trivial 1-element reduce.
-            T h_toi = thrust::reduce(thrust::device_pointer_cast(d_toi),
-                                     thrust::device_pointer_cast(d_toi) + toi_n,
-                                     max_toi,
-                                     thrust::minimum<T>());
-
-            cudaFree(d_toi);
             cudaFree(g_tlower);
             cudaFree(g_tupper);
             cudaFree(g_ulower);
@@ -2122,64 +2115,85 @@ namespace sccd {
             cudaFree(halt);
 
             SCCD_CUDA_LAST_ERROR();
-            return h_toi;
+            return 0;
         }
 
         template <typename T, typename I>
-        T narrow_phase_ee(const size_t noverlaps,
-                          const I* const SCCD_RESTRICT overlap0,
-                          const I* const SCCD_RESTRICT overlap1,
-                          // Geometric data
-                          T** const SCCD_RESTRICT v0,
-                          T** const SCCD_RESTRICT v1,
-                          const size_t edge_stride,
-                          I** const SCCD_RESTRICT edges,
-                          // Output
-                          const T max_toi,
-                          const int toi_stride) {
+        int narrow_phase_ee(const size_t noverlaps,
+                            const I* const SCCD_RESTRICT overlap0,
+                            const I* const SCCD_RESTRICT overlap1,
+                            // Geometric data
+                            T** const SCCD_RESTRICT v0,
+                            T** const SCCD_RESTRICT v1,
+                            const size_t edge_stride,
+                            I** const SCCD_RESTRICT edges,
+                            // Output
+                            const T max_toi,
+                            T* const SCCD_RESTRICT toi,
+                            const int toi_stride) {
             return narrow_phase_generic<false, T, I>(
-                noverlaps, overlap0, overlap1, v0, v1, edge_stride, edges, max_toi, toi_stride);
+                noverlaps, overlap0, overlap1, v0, v1, edge_stride, edges, max_toi, toi, toi_stride);
         }
 
         template <int nxe, typename T, typename I>
-        T narrow_phase_vf(const size_t noverlaps,
-                          const I* const SCCD_RESTRICT voveralp,
-                          const I* const SCCD_RESTRICT foveralp,
-                          // Geometric data
-                          T** const SCCD_RESTRICT v0,
-                          T** const SCCD_RESTRICT v1,
-                          const size_t face_stride,
-                          I** const SCCD_RESTRICT faces,
-                          const T max_toi,
-                          const int toi_stride) {
+        int narrow_phase_vf(const size_t noverlaps,
+                            const I* const SCCD_RESTRICT voveralp,
+                            const I* const SCCD_RESTRICT foveralp,
+                            // Geometric data
+                            T** const SCCD_RESTRICT v0,
+                            T** const SCCD_RESTRICT v1,
+                            const size_t face_stride,
+                            I** const SCCD_RESTRICT faces,
+                            const T max_toi,
+                            T* const SCCD_RESTRICT toi,
+                            const int toi_stride) {
             return narrow_phase_generic<true, T, I>(
-                noverlaps, voveralp, foveralp, v0, v1, face_stride, faces, max_toi, toi_stride);
+                noverlaps, voveralp, foveralp, v0, v1, face_stride, faces, max_toi, toi, toi_stride);
+        }
+
+        template <typename T>
+        int minmax(const T* const SCCD_RESTRICT data, const size_t n, T* const h_min, T* const h_max) {
+            if (n == 0) {
+                *h_min = std::numeric_limits<T>::max();
+                *h_max = std::numeric_limits<T>::lowest();
+                return 0;
+            }
+
+            auto begin = thrust::device_pointer_cast(data);
+            auto minmax = thrust::minmax_element(begin, begin + n);
+            SCCD_CHECK_CUDA(
+                cudaMemcpy(h_min, thrust::raw_pointer_cast(minmax.first), sizeof(*h_min), cudaMemcpyDeviceToHost));
+            SCCD_CHECK_CUDA(
+                cudaMemcpy(h_max, thrust::raw_pointer_cast(minmax.second), sizeof(*h_max), cudaMemcpyDeviceToHost));
+            return 0;
         }
 
     }  // namespace device
 }  // namespace sccd
 
-#define INSTANTIATE_NARROW_PHASE_EE(T, I)                                                 \
-    template T sccd::device::narrow_phase_ee<T, I>(const size_t noverlaps,                \
-                                                   const I* const SCCD_RESTRICT overlap0, \
-                                                   const I* const SCCD_RESTRICT overlap1, \
-                                                   T** const SCCD_RESTRICT v0,            \
-                                                   T** const SCCD_RESTRICT v1,            \
-                                                   const size_t element_stride,           \
-                                                   I** const SCCD_RESTRICT elements,      \
-                                                   const T max_toi,                       \
-                                                   const int toi_stride);
+#define INSTANTIATE_NARROW_PHASE_EE(T, I)                                                   \
+    template int sccd::device::narrow_phase_ee<T, I>(const size_t noverlaps,                \
+                                                     const I* const SCCD_RESTRICT overlap0, \
+                                                     const I* const SCCD_RESTRICT overlap1, \
+                                                     T** const SCCD_RESTRICT v0,            \
+                                                     T** const SCCD_RESTRICT v1,            \
+                                                     const size_t element_stride,           \
+                                                     I** const SCCD_RESTRICT elements,      \
+                                                     const T max_toi,                       \
+                                                     T* const SCCD_RESTRICT toi,            \
+                                                     const int toi_stride);
 
-#define INSTANTIATE_NARROW_PHASE_VF(NXE, T, I)                                                 \
-    template T sccd::device::narrow_phase_vf<NXE, T, I>(const size_t noverlaps,                \
-                                                        const I* const SCCD_RESTRICT voveralp, \
-                                                        const I* const SCCD_RESTRICT foveralp, \
-                                                        T** const SCCD_RESTRICT v0,            \
-                                                        T** const SCCD_RESTRICT v1,            \
-                                                        const size_t element_stride,           \
-                                                        I** const SCCD_RESTRICT elements,      \
-                                                        const T max_toi,                       \
-                                                        const int toi_stride);
+#define INSTANTIATE_NARROW_PHASE_VF(NXE, T, I)                                                   \
+    template int sccd::device::narrow_phase_vf<NXE, T, I>(const size_t noverlaps,                \
+                                                          const I* const SCCD_RESTRICT voveralp, \
+                                                          const I* const SCCD_RESTRICT foveralp, \
+                                                          T** const SCCD_RESTRICT v0,            \
+                                                          T** const SCCD_RESTRICT v1,            \
+                                                          const size_t element_stride,           \
+                                                          I** const SCCD_RESTRICT elements,      \
+                                                          const T max_toi,                       \
+                                                          T* const SCCD_RESTRICT toi,            \
+                                                          const int toi_stride);
 
 INSTANTIATE_NARROW_PHASE_EE(float, int32_t);
 INSTANTIATE_NARROW_PHASE_EE(float, int64_t);
@@ -2190,6 +2204,15 @@ INSTANTIATE_NARROW_PHASE_VF(3, float, int32_t);
 INSTANTIATE_NARROW_PHASE_VF(3, float, int64_t);
 INSTANTIATE_NARROW_PHASE_VF(3, double, int32_t);
 INSTANTIATE_NARROW_PHASE_VF(3, double, int64_t);
+
+template int sccd::device::minmax<float>(const float* const SCCD_RESTRICT data,
+                                         const size_t n,
+                                         float* const h_min,
+                                         float* const h_max);
+template int sccd::device::minmax<double>(const double* const SCCD_RESTRICT data,
+                                          const size_t n,
+                                          double* const h_min,
+                                          double* const h_max);
 
 #undef INSTANTIATE_NARROW_PHASE_EE
 #undef INSTANTIATE_NARROW_PHASE_VF
