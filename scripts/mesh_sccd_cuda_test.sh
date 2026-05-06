@@ -21,9 +21,9 @@ export PATH=$INSTALL_DIR/smesh/bin:$PATH
 # Use to compare!!!
 ####################
 
-case=/capstor/scratch/cscs/zulianp/Scalable-CCD/tests/data/armadillo-rollers/frames
-mesh_t0=326
-mesh_t1=327
+# case=/capstor/scratch/cscs/zulianp/Scalable-CCD/tests/data/armadillo-rollers/frames
+# mesh_t0=326
+# mesh_t1=327
 
 # case=/capstor/scratch/cscs/zulianp/Scalable-CCD/tests/data/cloth-ball/frames
 # mesh_t0=cloth_ball92
@@ -37,9 +37,9 @@ mesh_t1=327
 # mesh_t0=balls16_18
 # mesh_t1=balls16_19
 
-# case=/capstor/scratch/cscs/zulianp/Scalable-CCD/tests/data/rod-twist/frames/
-# mesh_t0=3036
-# mesh_t1=3037
+case=/capstor/scratch/cscs/zulianp/Scalable-CCD/tests/data/rod-twist/frames/
+mesh_t0=3036
+mesh_t1=3037
 
 set -x
 
@@ -58,12 +58,27 @@ db_to_raw $case/"$mesh_t1".ply "$mesh_t1"
 # refine $mesh_t0 $mesh_t0 
 # refine $mesh_t1 $mesh_t1 
 
+set +x
+
+ITERATIONS=4
+
 echo "CUDA: "
-$LAUNCH ./mesh_sccd_cuda $mesh_t0 $mesh_t1
-grep "phase" smesh.trace.csv 
-cp smesh.trace.csv ccd_GPU.csv
+rm -rf cuda_traces
+mkdir -p cuda_traces
+for ((i=1; i<=ITERATIONS; i++)); do
+    echo "Iteration $i"
+    $LAUNCH ./mesh_sccd_cuda $mesh_t0 $mesh_t1
+    mv smesh.trace.csv cuda_traces/ccd_GPU_$i.csv
+done
 
 echo "CPU: "
-SCCD_TOL=1e-12 SCCD_MAX_ITER=35 ./mesh_sccd      $mesh_t0 $mesh_t1
-grep "phase" smesh.trace.csv 
-cp smesh.trace.csv ccd_CPU.csv
+rm -rf cpu_traces
+mkdir -p cpu_traces
+for ((i=1; i<=ITERATIONS; i++)); do
+    echo "Iteration $i"
+    SCCD_TOL=1e-12 SCCD_MAX_ITER=35 ./mesh_sccd      $mesh_t0 $mesh_t1
+    mv smesh.trace.csv cpu_traces/ccd_CPU_$i.csv
+done
+
+tar -czvf cuda_traces.tar.gz cuda_traces
+tar -czvf cpu_traces.tar.gz cpu_traces

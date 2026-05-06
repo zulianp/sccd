@@ -3,7 +3,6 @@
 #include "sccd_cuda_base.cuh"
 
 #include <algorithm>
-#include <cassert>
 #include <cstddef>
 #ifdef SCCD_ENABLE_OPENMP
 #include <omp.h>
@@ -113,11 +112,30 @@ namespace sccd {
         }
 
         template <typename T, typename I>
+        __global__ void lower_bound_all_to_all_two_per_thread_kernel(const ptrdiff_t count_search_keys,
+                                                                     const T* const SCCD_RESTRICT sorted_search_keys,
+                                                                     const ptrdiff_t count_sorted_keys,
+                                                                     const T* const SCCD_RESTRICT sorted_keys,
+                                                                     I* const SCCD_RESTRICT indices) {
+            const ptrdiff_t i = (blockIdx.x * blockDim.x + threadIdx.x) * 2;
+            if (i >= count_search_keys) return;
+            indices[i] = lower_bound(sorted_keys, sorted_keys + count_sorted_keys, sorted_search_keys[i]) - sorted_keys;
+
+            if (i + 1 >= count_search_keys) return;
+
+            indices[i + 1] =
+                lower_bound(sorted_keys + indices[i], sorted_keys + count_sorted_keys, sorted_search_keys[i + 1]) -
+                sorted_keys;
+        }
+
+        template <typename T, typename I>
         void lower_bound_all_to_all(const ptrdiff_t count_search_keys,
                                     const T* const SCCD_RESTRICT sorted_search_keys,
                                     const ptrdiff_t count_sorted_keys,
                                     const T* const SCCD_RESTRICT sorted_keys,
                                     I* const SCCD_RESTRICT indices) {
+            SCCD_CUDA_LAST_ERROR();
+
             int SCCD_LB_BASELINE = 1;
             SCCD_READ_ENV(SCCD_LB_BASELINE, atoi);
 
@@ -130,7 +148,13 @@ namespace sccd {
 
                 SCCD_CUDA_LAST_ERROR();
             } else {
-                assert(false);
+                dim3 block(128, 1, 1);
+                dim3 grid((count_search_keys / 2 + 1 + block.x - 1) / block.x, 1, 1);
+
+                lower_bound_all_to_all_two_per_thread_kernel<T, I>
+                    <<<grid, block>>>(count_search_keys, sorted_search_keys, count_sorted_keys, sorted_keys, indices);
+
+                SCCD_CUDA_LAST_ERROR();
             }
         }
     }  // namespace device

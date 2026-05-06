@@ -58,9 +58,9 @@ int main(int argc, char** argv) {
             return 1;
         }
 
-        int SCCD_LB_REPEAT = 1;
-        SCCD_READ_ENV(SCCD_LB_REPEAT, atoi);
-        for (int i = 0; i < SCCD_LB_REPEAT; i++) {
+        int SCCD_REPEAT = 1;
+        SCCD_READ_ENV(SCCD_REPEAT, atoi);
+        for (int i = 0; i < SCCD_REPEAT; i++) {
             auto faces = t0->block(0)->device_elements_SoA();
 
             auto points0 = device_points_as<scalar_t>(t0);
@@ -127,8 +127,7 @@ int main(int argc, char** argv) {
                 SMESH_TRACE_SCOPE("device");
 
                 scalar_t* faabb_min_axis = nullptr;
-                cudaMemcpy(
-                    &faabb_min_axis, h_faabb->data() + sort_axis, sizeof(faabb_min_axis), cudaMemcpyDeviceToHost);
+                cudaMemcpy(&faabb_min_axis, faabb->data() + sort_axis, sizeof(faabb_min_axis), cudaMemcpyDeviceToHost);
                 sccd::device::lower_bound_all_to_all(n_faces, faabb_min_axis, n_nodes, cm->data(), lb->data());
             }
 
