@@ -1,6 +1,5 @@
 #include "smesh_buffer.hpp"
 #include "smesh_context.hpp"
-#include "smesh_glob.hpp"
 #include "smesh_graph.hpp"
 #include "smesh_mesh.hpp"
 #include "smesh_path.hpp"
@@ -21,6 +20,7 @@
 #include <cuda_runtime_api.h>
 
 #include <algorithm>
+#include <filesystem>
 #include <limits>
 #include <type_traits>
 
@@ -392,7 +392,7 @@ int main(int argc, char** argv) {
                     SCCD_READ_ENV(SCCD_EXPORT_COLLISIONS, atoi);
                     if (SCCD_EXPORT_COLLISIONS) {
                         auto folder = smesh::Path("collisions");
-                        smesh::create_directory(folder);
+                        std::filesystem::create_directories("collisions");
                         smesh::to_host(v_overlap)->to_file(folder / "v_overlap.int32");
                         smesh::to_host(f_overlap)->to_file(folder / "f_overlap.int32");
                         smesh::to_host(vf_toi)->to_file(folder / "vf_toi.float64");
