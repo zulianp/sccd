@@ -58,83 +58,86 @@ int main(int argc, char** argv) {
             return 1;
         }
 
-        auto faces = t0->block(0)->device_elements_SoA();
-
-        auto points0 = device_points_as<scalar_t>(t0);
-        auto points1 = device_points_as<scalar_t>(t1);
-
-        // AABB faces
-        const ptrdiff_t n_faces = t0->block(0)->n_elements();
-
-        // AABB nodes
-        const ptrdiff_t n_nodes = t0->n_nodes();
-
-        auto vaabb = smesh::create_device_buffer<scalar_t>(2 * dim, n_nodes);
-        sccd::device::compute_aabbs(dim, t0->n_nodes(), points0->data(), points1->data(), vaabb->data());
-
-        auto faabb = smesh::create_device_buffer<scalar_t>(2 * dim, t0->block(0)->n_elements());
-        sccd::device::compute_aabbs(t0->block(0)->n_nodes_per_element(),
-                                    n_faces,
-                                    faces->data(),
-                                    dim,
-                                    points0->data(),
-                                    points1->data(),
-                                    faabb->data());
-
-        int sort_axis = sccd::device::choose_axis(dim, n_nodes, vaabb->data());
-
-        auto vidx = smesh::create_device_buffer<smesh::idx_t>(n_nodes);
-        auto fidx = smesh::create_device_buffer<smesh::idx_t>(n_faces);
-
-        auto scratch = smesh::create_device_buffer<scalar_t>(std::max(n_nodes, n_faces));
-
-        {
-            SMESH_TRACE_SCOPE("sort");
-
-            sccd::device::sort_along_axis(dim, n_nodes, sort_axis, vaabb->data(), vidx->data(), scratch->data());
-            sccd::device::sort_along_axis(dim, n_faces, sort_axis, faabb->data(), fidx->data(), scratch->data());
-        }
-
-        auto lb = smesh::create_device_buffer<ptrdiff_t>(n_faces);
-
-        scalar_t* vaabb_max_axis = nullptr;
-        auto cm = smesh::create_device_buffer<scalar_t>(n_nodes);
-        {
-            SMESH_TRACE_SCOPE("cummax");
-
-            cudaMemcpy(
-                &vaabb_max_axis, vaabb->data() + dim + sort_axis, sizeof(vaabb_max_axis), cudaMemcpyDeviceToHost);
-
-            sccd::device::cummax(n_nodes, vaabb_max_axis, cm->data());
-        }
-
-        auto h_vaabb = smesh::to_host(vaabb);
-        auto h_faabb = smesh::to_host(faabb);
-        auto h_cm = smesh::to_host(cm);
-        auto h_lb = smesh::create_host_buffer<ptrdiff_t>(n_faces);
-
         int SCCD_LB_REPEAT = 1;
         SCCD_READ_ENV(SCCD_LB_REPEAT, atoi);
         for (int i = 0; i < SCCD_LB_REPEAT; i++) {
-            SMESH_TRACE_SCOPE("host");
+            auto faces = t0->block(0)->device_elements_SoA();
 
-            sccd::host::lower_bound_all_to_all(
-                n_faces, h_faabb->data()[sort_axis], n_nodes, h_cm->data(), h_lb->data());
-        }
+            auto points0 = device_points_as<scalar_t>(t0);
+            auto points1 = device_points_as<scalar_t>(t1);
 
-        for (int i = 0; i < SCCD_LB_REPEAT; i++) {
-            SMESH_TRACE_SCOPE("device");
+            // AABB faces
+            const ptrdiff_t n_faces = t0->block(0)->n_elements();
 
-            scalar_t* faabb_min_axis = nullptr;
-            cudaMemcpy(&faabb_min_axis, h_faabb->data() + sort_axis, sizeof(faabb_min_axis), cudaMemcpyDeviceToHost);
-            sccd::device::lower_bound_all_to_all(n_faces, faabb_min_axis, n_nodes, cm->data(), lb->data());
-        }
+            // AABB nodes
+            const ptrdiff_t n_nodes = t0->n_nodes();
 
-        auto h_acutal = smesh::to_host(lb);
-        for (int i = 0; i < n_faces; i++) {
-            if (h_acutal->data()[i] != h_lb->data()[i]) {
-                SMESH_ERROR("Lower bound mismatch at face %d: %d != %d\n", i, h_acutal->data()[i], h_lb->data()[i]);
-                return 1;
+            auto vaabb = smesh::create_device_buffer<scalar_t>(2 * dim, n_nodes);
+            sccd::device::compute_aabbs(dim, t0->n_nodes(), points0->data(), points1->data(), vaabb->data());
+
+            auto faabb = smesh::create_device_buffer<scalar_t>(2 * dim, t0->block(0)->n_elements());
+            sccd::device::compute_aabbs(t0->block(0)->n_nodes_per_element(),
+                                        n_faces,
+                                        faces->data(),
+                                        dim,
+                                        points0->data(),
+                                        points1->data(),
+                                        faabb->data());
+
+            int sort_axis = sccd::device::choose_axis(dim, n_nodes, vaabb->data());
+
+            auto vidx = smesh::create_device_buffer<smesh::idx_t>(n_nodes);
+            auto fidx = smesh::create_device_buffer<smesh::idx_t>(n_faces);
+
+            auto scratch = smesh::create_device_buffer<scalar_t>(std::max(n_nodes, n_faces));
+
+            {
+                SMESH_TRACE_SCOPE("sort");
+
+                sccd::device::sort_along_axis(dim, n_nodes, sort_axis, vaabb->data(), vidx->data(), scratch->data());
+                sccd::device::sort_along_axis(dim, n_faces, sort_axis, faabb->data(), fidx->data(), scratch->data());
+            }
+
+            auto lb = smesh::create_device_buffer<ptrdiff_t>(n_faces);
+
+            scalar_t* vaabb_max_axis = nullptr;
+            auto cm = smesh::create_device_buffer<scalar_t>(n_nodes);
+            {
+                SMESH_TRACE_SCOPE("cummax");
+
+                cudaMemcpy(
+                    &vaabb_max_axis, vaabb->data() + dim + sort_axis, sizeof(vaabb_max_axis), cudaMemcpyDeviceToHost);
+
+                sccd::device::cummax(n_nodes, vaabb_max_axis, cm->data());
+            }
+
+            auto h_vaabb = smesh::to_host(vaabb);
+            auto h_faabb = smesh::to_host(faabb);
+            auto h_cm = smesh::to_host(cm);
+            auto h_lb = smesh::create_host_buffer<ptrdiff_t>(n_faces);
+
+            {
+                SMESH_TRACE_SCOPE("host");
+
+                sccd::host::lower_bound_all_to_all(
+                    n_faces, h_faabb->data()[sort_axis], n_nodes, h_cm->data(), h_lb->data());
+            }
+
+            {
+                SMESH_TRACE_SCOPE("device");
+
+                scalar_t* faabb_min_axis = nullptr;
+                cudaMemcpy(
+                    &faabb_min_axis, h_faabb->data() + sort_axis, sizeof(faabb_min_axis), cudaMemcpyDeviceToHost);
+                sccd::device::lower_bound_all_to_all(n_faces, faabb_min_axis, n_nodes, cm->data(), lb->data());
+            }
+
+            auto h_acutal = smesh::to_host(lb);
+            for (int i = 0; i < n_faces; i++) {
+                if (h_acutal->data()[i] != h_lb->data()[i]) {
+                    SMESH_ERROR("Lower bound mismatch at face %d: %d != %d\n", i, h_acutal->data()[i], h_lb->data()[i]);
+                    return 1;
+                }
             }
         }
     }
