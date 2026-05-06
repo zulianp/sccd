@@ -5,6 +5,9 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
+#ifdef SCCD_ENABLE_OPENMP
+#include <omp.h>
+#endif
 
 namespace sccd {
 
@@ -15,6 +18,8 @@ namespace sccd {
                                      const ptrdiff_t count_sorted_keys,
                                      const T* const SCCD_RESTRICT sorted_keys,
                                      I* const SCCD_RESTRICT indices) {
+            if (count_search_keys <= 0) return;
+
             auto first = std::lower_bound(sorted_keys, sorted_keys + count_sorted_keys, sorted_search_keys[0]);
             if (first == sorted_keys + count_sorted_keys) {
                 for (ptrdiff_t i = 0; i < count_search_keys; i++) {
@@ -23,7 +28,10 @@ namespace sccd {
                 return;
             }
 
+            indices[0] = first - sorted_keys;
+
             for (ptrdiff_t i = 1; i < count_search_keys; i++) {
+                indices[i] = count_sorted_keys;
                 for (ptrdiff_t j = indices[i - 1]; j < count_sorted_keys; j++) {
                     if (sorted_keys[j] >= sorted_search_keys[i]) {
                         indices[i] = j;
@@ -39,37 +47,35 @@ namespace sccd {
                                     const ptrdiff_t count_sorted_keys,
                                     const T* const SCCD_RESTRICT sorted_keys,
                                     I* const SCCD_RESTRICT indices) {
-#if 1
-            //             static const ptrdiff_t TILE_SIZE = 128;
-            // #pragma omp parallel for
-            //             for (ptrdiff_t i = 0; i < count_search_keys; i += TILE_SIZE) {
-            //                 ptrdiff_t iend = min(i + TILE_SIZE, count_search_keys);
+            if (count_search_keys <= 0) return;
 
-            //                 ptrdiff_t start = 0;
-            //                 for (ptrdiff_t j = i; j < iend; j++) {
-            //                     start =
-            //                         std::lower_bound(sorted_keys + start, sorted_keys + count_sorted_keys,
-            //                         sorted_search_keys[j]) - sorted_keys;
-            //                     indices[j] = start;
-            //                 }
-            //             }
+#if 1 && defined(SCCD_ENABLE_OPENMP)
+#pragma omp parallel
+            {
+                const ptrdiff_t nthreads = omp_get_num_threads();
+                const ptrdiff_t tid = omp_get_thread_num();
+                const ptrdiff_t begin = (tid * count_search_keys) / nthreads;
+                const ptrdiff_t end = ((tid + 1) * count_search_keys) / nthreads;
 
-            static const ptrdiff_t TILE_SIZE = 128;
-#pragma omp parallel for
-            for (ptrdiff_t tile = 0; tile < count_search_keys; tile += TILE_SIZE) {
-                ptrdiff_t iend = std::min(tile + TILE_SIZE, count_search_keys);
                 lower_bound_progressive(
-                    iend - tile, sorted_search_keys + tile, count_sorted_keys, sorted_keys, indices + tile);
+                    end - begin, sorted_search_keys + begin, count_sorted_keys, sorted_keys, indices + begin);
             }
 #else
+
+            // #pragma omp parallel for
+            //             for (ptrdiff_t i = 0; i < count_search_keys; i += TILE_SIZE) {
+            //                 ptrdiff_t iend = std::min(i + TILE_SIZE, count_search_keys);
+            //                 lower_bound_progressive(iend - i, sorted_search_keys + i, count_sorted_keys, sorted_keys,
+            //                 indices + i);
+            //             }
 
 #pragma omp parallel for
             for (ptrdiff_t i = 0; i < count_search_keys; i++) {
                 indices[i] =
                     std::lower_bound(sorted_keys, sorted_keys + count_sorted_keys, sorted_search_keys[i]) - sorted_keys;
             }
-
 #endif
+            // #endif
         }
     }  // namespace host
 
