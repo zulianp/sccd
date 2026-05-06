@@ -1,5 +1,6 @@
 #include "smesh_buffer.hpp"
 #include "smesh_context.hpp"
+#include "smesh_glob.hpp"
 #include "smesh_graph.hpp"
 #include "smesh_mesh.hpp"
 #include "smesh_path.hpp"
@@ -12,6 +13,7 @@
 
 #include "sccd_broadphase.cuh"
 #include "sccd_broadphase_warp.cuh"
+#include "sccd_lower_bound_all_to_all.cuh"
 #include "sccd_narrowphase.cuh"
 
 #include "sccd_vaabb.cuh"
@@ -85,197 +87,289 @@ int main(int argc, char** argv) {
         auto col_idx = smesh::to_device(n2n_crs->colidx());
         auto edges = smesh::create_2d(std::vector{row_idx, col_idx});
 
-        // CCD: Broadphase
-        smesh::SharedBuffer<smesh::idx_t> e0_overlap, e1_overlap, f_overlap, v_overlap;
-        {
-            SMESH_TRACE_SCOPE("Broadphase");
-
-            auto vaabb = smesh::create_device_buffer<scalar_t>(2 * dim, n_nodes);
-            sccd::device::compute_aabbs(dim, t0->n_nodes(), points0->data(), points1->data(), vaabb->data());
-
-            auto faabb = smesh::create_device_buffer<scalar_t>(2 * dim, t0->block(0)->n_elements());
-            sccd::device::compute_aabbs(t0->block(0)->n_nodes_per_element(),
-                                        n_faces,
-                                        faces->data(),
-                                        dim,
-                                        points0->data(),
-                                        points1->data(),
-                                        faabb->data());
-
-            auto eaabb = smesh::create_device_buffer<scalar_t>(2 * dim, n_edges);
-            sccd::device::compute_aabbs(
-                2, n_edges, edges->data(), dim, points0->data(), points1->data(), eaabb->data());
-
-            int sort_axis = sccd::device::choose_axis(dim, n_nodes, vaabb->data());
-
-            auto vidx = smesh::create_device_buffer<smesh::idx_t>(n_nodes);
-            auto fidx = smesh::create_device_buffer<smesh::idx_t>(n_faces);
-            auto eidx = smesh::create_device_buffer<smesh::idx_t>(n_edges);
-
-            auto scratch = smesh::create_device_buffer<scalar_t>(std::max(n_nodes, std::max(n_faces, n_edges)));
-
-            {
-                SMESH_TRACE_SCOPE("Sorting AABBs");
-
-                sccd::device::sort_along_axis(dim, n_nodes, sort_axis, vaabb->data(), vidx->data(), scratch->data());
-                sccd::device::sort_along_axis(dim, n_faces, sort_axis, faabb->data(), fidx->data(), scratch->data());
-                sccd::device::sort_along_axis(dim, n_edges, sort_axis, eaabb->data(), eidx->data(), scratch->data());
-            }
-
-            ptrdiff_t max_ccdptr_size = std::max(n_faces, n_edges) + 1;
-            auto ccdptr = smesh::create_device_buffer<ptrdiff_t>(max_ccdptr_size);
-
-            // Results of the broadphase
-            {
-                SMESH_TRACE_SCOPE("Broadphase: E2E");
-
-                {
-                    SMESH_TRACE_SCOPE("count_self_overlaps");
-                    sccd::device::count_self_overlaps<2>(
-                        sort_axis, n_edges, eaabb->data(), eidx->data(), 1, edges->data(), ccdptr->data());
-                }
-
-                ptrdiff_t n_edge_overlaps = 0;
-                cudaMemcpy(&n_edge_overlaps, ccdptr->data() + n_edges, sizeof(n_edge_overlaps), cudaMemcpyDeviceToHost);
-
-                e0_overlap = smesh::create_device_buffer<smesh::idx_t>(n_edge_overlaps);
-                e1_overlap = smesh::create_device_buffer<smesh::idx_t>(n_edge_overlaps);
-
-                {
-                    SMESH_TRACE_SCOPE("collect_self_overlaps");
-                    sccd::device::collect_self_overlaps<2>(sort_axis,
-                                                           n_edges,
-                                                           eaabb->data(),
-                                                           eidx->data(),
-                                                           1,
-                                                           edges->data(),
-                                                           ccdptr->data(),
-                                                           e0_overlap->data(),
-                                                           e1_overlap->data());
-                }
-            }
-
-            {
-                SMESH_TRACE_SCOPE("Broadphase: F2V");
-                auto cm = smesh::create_device_buffer<scalar_t>(n_nodes);
-                scalar_t* vaabb_max_axis = nullptr;
-                cudaMemcpy(
-                    &vaabb_max_axis, vaabb->data() + dim + sort_axis, sizeof(vaabb_max_axis), cudaMemcpyDeviceToHost);
-
-                {
-                    SMESH_TRACE_SCOPE("cummax");
-                    sccd::device::cummax(n_nodes, vaabb_max_axis, cm->data());
-                }
-
-                {
-                    SMESH_TRACE_SCOPE("count_overlaps");
-                    // !!!
-                    sccd::device::count_overlaps_warp<3, 1>(sort_axis,
-                                                            n_faces,
-                                                            faabb->data(),
-                                                            fidx->data(),
-                                                            1,
-                                                            faces->data(),
-                                                            n_nodes,
-                                                            vaabb->data(),
-                                                            vidx->data(),
-                                                            0,
-                                                            (smesh::idx_t**)nullptr,
-                                                            ccdptr->data(),
-                                                            cm->data());
-                }
-
-                ptrdiff_t n_face_overlaps = 0;
-                cudaMemcpy(&n_face_overlaps, ccdptr->data() + n_faces, sizeof(n_face_overlaps), cudaMemcpyDeviceToHost);
-
-                f_overlap = smesh::create_device_buffer<smesh::idx_t>(n_face_overlaps);
-                v_overlap = smesh::create_device_buffer<smesh::idx_t>(n_face_overlaps);
-
-                {
-                    SMESH_TRACE_SCOPE("collect_overlaps");
-                    sccd::device::collect_overlaps<3, 1>(sort_axis,
-                                                         n_faces,
-                                                         faabb->data(),
-                                                         fidx->data(),
-                                                         1,
-                                                         faces->data(),
-                                                         n_nodes,
-                                                         vaabb->data(),
-                                                         vidx->data(),
-                                                         0,
-                                                         (smesh::idx_t**)nullptr,
-                                                         ccdptr->data(),
-                                                         cm->data(),
-                                                         f_overlap->data(),
-                                                         v_overlap->data());
-                }
-            }
-        }
-
-        // Narrow phase
         scalar_t toi = 1;
-        scalar_t toi_vf = toi;
-        scalar_t toi_ee = toi;
+        smesh::SharedBuffer<smesh::idx_t> e0_overlap, e1_overlap, f_overlap, v_overlap;
 
-        int SCCD_NP_TOI_STRIDE = 0;
-        SCCD_READ_ENV(SCCD_NP_TOI_STRIDE, atoi);
-        const auto toi_storage_size = [SCCD_NP_TOI_STRIDE](const size_t noverlaps) {
-            return SCCD_NP_TOI_STRIDE == 0 ? size_t(1) : noverlaps;
-        };
-
-        const auto scalar_device_to_host = [](scalar_t* const d_toi) {
-            scalar_t h_toi = std::numeric_limits<scalar_t>::max();
-            cudaMemcpy(&h_toi, d_toi, sizeof(h_toi), cudaMemcpyDeviceToHost);
-            return h_toi;
-        };
-
-        {
-            SMESH_TRACE_SCOPE("Narrow phase");
-            smesh::SharedBuffer<scalar_t> vf_toi;
-            smesh::SharedBuffer<scalar_t> ee_toi;
+        int SCCD_REPEAT = 1;
+        SCCD_READ_ENV(SCCD_REPEAT, atoi);
+        for (int i = 0; i < SCCD_REPEAT; i++) {
+            // CCD: Broadphase
 
             {
-                SMESH_TRACE_SCOPE("Narrow phase: F2V");
-                vf_toi = smesh::create_device_buffer<scalar_t>(toi_storage_size(v_overlap->size()));
-                sccd::device::narrow_phase_vf<3>(v_overlap->size(),
-                                                 v_overlap->data(),
-                                                 f_overlap->data(),
-                                                 points0->data(),
-                                                 points1->data(),
-                                                 1,
-                                                 faces->data(),
-                                                 toi,
-                                                 vf_toi->data(),
-                                                 SCCD_NP_TOI_STRIDE);
+                SMESH_TRACE_SCOPE("Broadphase");
 
-                if (SCCD_NP_TOI_STRIDE == 0 && v_overlap->size() != 0) {
-                    toi_vf = scalar_device_to_host(vf_toi->data());
-                    toi = toi_vf;
+                auto vaabb = smesh::create_device_buffer<scalar_t>(2 * dim, n_nodes);
+                sccd::device::compute_aabbs(dim, t0->n_nodes(), points0->data(), points1->data(), vaabb->data());
+
+                auto faabb = smesh::create_device_buffer<scalar_t>(2 * dim, t0->block(0)->n_elements());
+                sccd::device::compute_aabbs(t0->block(0)->n_nodes_per_element(),
+                                            n_faces,
+                                            faces->data(),
+                                            dim,
+                                            points0->data(),
+                                            points1->data(),
+                                            faabb->data());
+
+                auto eaabb = smesh::create_device_buffer<scalar_t>(2 * dim, n_edges);
+                sccd::device::compute_aabbs(
+                    2, n_edges, edges->data(), dim, points0->data(), points1->data(), eaabb->data());
+
+                int sort_axis = sccd::device::choose_axis(dim, n_nodes, vaabb->data());
+
+                auto vidx = smesh::create_device_buffer<smesh::idx_t>(n_nodes);
+                auto fidx = smesh::create_device_buffer<smesh::idx_t>(n_faces);
+                auto eidx = smesh::create_device_buffer<smesh::idx_t>(n_edges);
+
+                auto scratch = smesh::create_device_buffer<scalar_t>(std::max(n_nodes, std::max(n_faces, n_edges)));
+
+                {
+                    SMESH_TRACE_SCOPE("Sorting AABBs");
+
+                    sccd::device::sort_along_axis(
+                        dim, n_nodes, sort_axis, vaabb->data(), vidx->data(), scratch->data());
+                    sccd::device::sort_along_axis(
+                        dim, n_faces, sort_axis, faabb->data(), fidx->data(), scratch->data());
+                    sccd::device::sort_along_axis(
+                        dim, n_edges, sort_axis, eaabb->data(), eidx->data(), scratch->data());
+                }
+
+                ptrdiff_t max_ccdptr_size = std::max(n_faces, n_edges) + 1;
+                auto ccdptr = smesh::create_device_buffer<ptrdiff_t>(max_ccdptr_size);
+
+                // Results of the broadphase
+                {
+                    SMESH_TRACE_SCOPE("Broadphase: E2E");
+
+                    {
+                        SMESH_TRACE_SCOPE("count_self_overlaps");
+                        sccd::device::count_self_overlaps<2>(
+                            sort_axis, n_edges, eaabb->data(), eidx->data(), 1, edges->data(), ccdptr->data());
+                    }
+
+                    ptrdiff_t n_edge_overlaps = 0;
+                    cudaMemcpy(
+                        &n_edge_overlaps, ccdptr->data() + n_edges, sizeof(n_edge_overlaps), cudaMemcpyDeviceToHost);
+
+                    {
+                        SMESH_TRACE_SCOPE("e2e allocations");
+                        e0_overlap = smesh::create_device_buffer<smesh::idx_t>(n_edge_overlaps);
+                        e1_overlap = smesh::create_device_buffer<smesh::idx_t>(n_edge_overlaps);
+                    }
+
+                    {
+                        SMESH_TRACE_SCOPE("collect_self_overlaps");
+                        sccd::device::collect_self_overlaps<2>(sort_axis,
+                                                               n_edges,
+                                                               eaabb->data(),
+                                                               eidx->data(),
+                                                               1,
+                                                               edges->data(),
+                                                               ccdptr->data(),
+                                                               e0_overlap->data(),
+                                                               e1_overlap->data());
+                    }
+                }
+
+                int SCCD_BP_F2V_USE_STARTS = 0;
+                SCCD_READ_ENV(SCCD_BP_F2V_USE_STARTS, atoi);
+                {
+                    SMESH_TRACE_SCOPE("Broadphase: F2V");
+                    auto cm = smesh::create_device_buffer<scalar_t>(n_nodes);
+                    scalar_t* vaabb_max_axis = nullptr;
+                    cudaMemcpy(&vaabb_max_axis,
+                               vaabb->data() + dim + sort_axis,
+                               sizeof(vaabb_max_axis),
+                               cudaMemcpyDeviceToHost);
+
+                    {
+                        SMESH_TRACE_SCOPE("cummax");
+                        sccd::device::cummax(n_nodes, vaabb_max_axis, cm->data());
+                    }
+
+                    if (SCCD_BP_F2V_USE_STARTS) {
+                        //
+                        auto starts = smesh::create_device_buffer<smesh::idx_t>(n_faces);
+                        {
+                            SMESH_TRACE_SCOPE("lower_bound_all_to_all");
+
+                            scalar_t* faabb_min_axis = nullptr;
+                            cudaMemcpy(&faabb_min_axis,
+                                       faabb->data() + sort_axis,
+                                       sizeof(faabb_min_axis),
+                                       cudaMemcpyDeviceToHost);
+                            sccd::device::lower_bound_all_to_all(
+                                n_faces, faabb_min_axis, n_nodes, cm->data(), starts->data());
+                        }
+
+                        {
+                            SMESH_TRACE_SCOPE("count_overlaps_with_starts");
+
+                            sccd::device::count_overlaps_with_starts<3, 1>(sort_axis,
+                                                                           n_faces,
+                                                                           faabb->data(),
+                                                                           fidx->data(),
+                                                                           1,
+                                                                           faces->data(),
+                                                                           n_nodes,
+                                                                           vaabb->data(),
+                                                                           vidx->data(),
+                                                                           0,
+                                                                           (smesh::idx_t**)nullptr,
+                                                                           ccdptr->data(),
+                                                                           starts->data());
+                        }
+
+                        ptrdiff_t n_face_overlaps = 0;
+                        cudaMemcpy(&n_face_overlaps,
+                                   ccdptr->data() + n_faces,
+                                   sizeof(n_face_overlaps),
+                                   cudaMemcpyDeviceToHost);
+
+                        {
+                            SMESH_TRACE_SCOPE("f2v allocations");
+
+                            f_overlap = smesh::create_device_buffer<smesh::idx_t>(n_face_overlaps);
+                            v_overlap = smesh::create_device_buffer<smesh::idx_t>(n_face_overlaps);
+                        }
+
+                        {
+                            SMESH_TRACE_SCOPE("collect_overlaps_with_starts");
+                            sccd::device::collect_overlaps_with_starts<3, 1>(sort_axis,
+                                                                             n_faces,
+                                                                             faabb->data(),
+                                                                             fidx->data(),
+                                                                             1,
+                                                                             faces->data(),
+                                                                             n_nodes,
+                                                                             vaabb->data(),
+                                                                             vidx->data(),
+                                                                             0,
+                                                                             (smesh::idx_t**)nullptr,
+                                                                             ccdptr->data(),
+                                                                             starts->data(),
+                                                                             f_overlap->data(),
+                                                                             v_overlap->data());
+                        }
+
+                    } else {
+                        {
+                            SMESH_TRACE_SCOPE("count_overlaps");
+                            // !!!
+                            sccd::device::count_overlaps<3, 1>(sort_axis,
+                                                               n_faces,
+                                                               faabb->data(),
+                                                               fidx->data(),
+                                                               1,
+                                                               faces->data(),
+                                                               n_nodes,
+                                                               vaabb->data(),
+                                                               vidx->data(),
+                                                               0,
+                                                               (smesh::idx_t**)nullptr,
+                                                               ccdptr->data(),
+                                                               cm->data());
+                        }
+
+                        ptrdiff_t n_face_overlaps = 0;
+                        cudaMemcpy(&n_face_overlaps,
+                                   ccdptr->data() + n_faces,
+                                   sizeof(n_face_overlaps),
+                                   cudaMemcpyDeviceToHost);
+
+                        {
+                            SMESH_TRACE_SCOPE("f2v allocations");
+
+                            f_overlap = smesh::create_device_buffer<smesh::idx_t>(n_face_overlaps);
+                            v_overlap = smesh::create_device_buffer<smesh::idx_t>(n_face_overlaps);
+                        }
+
+                        {
+                            SMESH_TRACE_SCOPE("collect_overlaps");
+                            sccd::device::collect_overlaps<3, 1>(sort_axis,
+                                                                 n_faces,
+                                                                 faabb->data(),
+                                                                 fidx->data(),
+                                                                 1,
+                                                                 faces->data(),
+                                                                 n_nodes,
+                                                                 vaabb->data(),
+                                                                 vidx->data(),
+                                                                 0,
+                                                                 (smesh::idx_t**)nullptr,
+                                                                 ccdptr->data(),
+                                                                 cm->data(),
+                                                                 f_overlap->data(),
+                                                                 v_overlap->data());
+                        }
+                    }
                 }
             }
 
-            {
-                SMESH_TRACE_SCOPE("Narrow phase: E2E");
-                ee_toi = smesh::create_device_buffer<scalar_t>(toi_storage_size(e0_overlap->size()));
-                sccd::device::narrow_phase_ee(e0_overlap->size(),
-                                              e0_overlap->data(),
-                                              e1_overlap->data(),
-                                              points0->data(),
-                                              points1->data(),
-                                              1,
-                                              edges->data(),
-                                              toi,
-                                              ee_toi->data(),
-                                              SCCD_NP_TOI_STRIDE);
-                if (SCCD_NP_TOI_STRIDE == 0 && e0_overlap->size() != 0) {
-                    toi_ee = scalar_device_to_host(ee_toi->data());
-                    toi = toi_ee;
-                }
-            }
+            // Narrow phase
+            scalar_t toi_vf = toi;
+            scalar_t toi_ee = toi;
 
-            if (SCCD_NP_TOI_STRIDE == 1) {
-                const auto device_minmax_to_host =
-                    [](scalar_t* const d_values, const size_t nvalues, scalar_t* const h_min, scalar_t* const h_max) {
+            int SCCD_NP_TOI_STRIDE = 0;
+            SCCD_READ_ENV(SCCD_NP_TOI_STRIDE, atoi);
+            const auto toi_storage_size = [SCCD_NP_TOI_STRIDE](const size_t noverlaps) {
+                return SCCD_NP_TOI_STRIDE == 0 ? size_t(1) : noverlaps;
+            };
+
+            const auto scalar_device_to_host = [](scalar_t* const d_toi) {
+                scalar_t h_toi = std::numeric_limits<scalar_t>::max();
+                cudaMemcpy(&h_toi, d_toi, sizeof(h_toi), cudaMemcpyDeviceToHost);
+                return h_toi;
+            };
+
+            {
+                SMESH_TRACE_SCOPE("Narrow phase");
+                smesh::SharedBuffer<scalar_t> vf_toi;
+                smesh::SharedBuffer<scalar_t> ee_toi;
+
+                {
+                    SMESH_TRACE_SCOPE("Narrow phase: F2V");
+                    vf_toi = smesh::create_device_buffer<scalar_t>(toi_storage_size(v_overlap->size()));
+                    sccd::device::narrow_phase_vf<3>(v_overlap->size(),
+                                                     v_overlap->data(),
+                                                     f_overlap->data(),
+                                                     points0->data(),
+                                                     points1->data(),
+                                                     1,
+                                                     faces->data(),
+                                                     toi,
+                                                     vf_toi->data(),
+                                                     SCCD_NP_TOI_STRIDE);
+
+                    if (SCCD_NP_TOI_STRIDE == 0 && v_overlap->size() != 0) {
+                        toi_vf = scalar_device_to_host(vf_toi->data());
+                        toi = toi_vf;
+                    }
+                }
+
+                {
+                    SMESH_TRACE_SCOPE("Narrow phase: E2E");
+                    ee_toi = smesh::create_device_buffer<scalar_t>(toi_storage_size(e0_overlap->size()));
+                    sccd::device::narrow_phase_ee(e0_overlap->size(),
+                                                  e0_overlap->data(),
+                                                  e1_overlap->data(),
+                                                  points0->data(),
+                                                  points1->data(),
+                                                  1,
+                                                  edges->data(),
+                                                  toi,
+                                                  ee_toi->data(),
+                                                  SCCD_NP_TOI_STRIDE);
+                    if (SCCD_NP_TOI_STRIDE == 0 && e0_overlap->size() != 0) {
+                        toi_ee = scalar_device_to_host(ee_toi->data());
+                        toi = toi_ee;
+                    }
+                }
+
+                if (SCCD_NP_TOI_STRIDE == 1) {
+                    const auto device_minmax_to_host = [](scalar_t* const d_values,
+                                                          const size_t nvalues,
+                                                          scalar_t* const h_min,
+                                                          scalar_t* const h_max) {
                         if (nvalues == 0) {
                             *h_min = std::numeric_limits<scalar_t>::max();
                             *h_max = std::numeric_limits<scalar_t>::lowest();
@@ -285,14 +379,28 @@ int main(int argc, char** argv) {
                         sccd::device::minmax(d_values, nvalues, h_min, h_max);
                     };
 
-                scalar_t vf_toi_max = std::numeric_limits<scalar_t>::lowest();
-                scalar_t ee_toi_max = std::numeric_limits<scalar_t>::lowest();
-                device_minmax_to_host(vf_toi->data(), v_overlap->size(), &toi_vf, &vf_toi_max);
-                device_minmax_to_host(ee_toi->data(), e0_overlap->size(), &toi_ee, &ee_toi_max);
-                toi = std::min(toi_vf, toi_ee);
+                    scalar_t vf_toi_max = std::numeric_limits<scalar_t>::lowest();
+                    scalar_t ee_toi_max = std::numeric_limits<scalar_t>::lowest();
+                    device_minmax_to_host(vf_toi->data(), v_overlap->size(), &toi_vf, &vf_toi_max);
+                    device_minmax_to_host(ee_toi->data(), e0_overlap->size(), &toi_ee, &ee_toi_max);
+                    toi = std::min(toi_vf, toi_ee);
 
-                printf("vt_toi_min: %g, ee_toi_min: %g\n", toi_vf, toi_ee);
-                printf("vf_toi_max: %g, ee_toi_max: %g\n", vf_toi_max, ee_toi_max);
+                    printf("vt_toi_min: %g, ee_toi_min: %g\n", toi_vf, toi_ee);
+                    printf("vf_toi_max: %g, ee_toi_max: %g\n", vf_toi_max, ee_toi_max);
+
+                    int SCCD_EXPORT_COLLISIONS = 0;
+                    SCCD_READ_ENV(SCCD_EXPORT_COLLISIONS, atoi);
+                    if (SCCD_EXPORT_COLLISIONS) {
+                        auto folder = smesh::Path("collisions");
+                        smesh::create_directory(folder);
+                        smesh::to_host(v_overlap)->to_file(folder / "v_overlap.int32");
+                        smesh::to_host(f_overlap)->to_file(folder / "f_overlap.int32");
+                        smesh::to_host(vf_toi)->to_file(folder / "vf_toi.float64");
+                        smesh::to_host(e0_overlap)->to_file(folder / "e0_overlap.int32");
+                        smesh::to_host(e1_overlap)->to_file(folder / "e1_overlap.int32");
+                        smesh::to_host(ee_toi)->to_file(folder / "ee_toi.float64");
+                    }
+                }
             }
         }
 
@@ -303,7 +411,7 @@ int main(int argc, char** argv) {
                n_nodes,
                e0_overlap->size(),
                f_overlap->size(),
-               tock - tick,
+               (tock - tick) / SCCD_REPEAT,
                (double)toi);
     }
 
