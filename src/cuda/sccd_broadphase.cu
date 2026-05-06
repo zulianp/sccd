@@ -503,6 +503,7 @@ namespace sccd {
         template <typename T>
         void cummax(const ptrdiff_t n, const T* const SCCD_RESTRICT in, T* const SCCD_RESTRICT out) {
             if (n <= 0) return;
+            SCCD_CUDA_LAST_ERROR();
 
             void* tmp_storage = nullptr;
             size_t tmp_storage_bytes = 0;
@@ -512,6 +513,8 @@ namespace sccd {
             SCCD_CHECK_CUDA(
                 cub::DeviceScan::InclusiveScan(tmp_storage, tmp_storage_bytes, in, out, device_max_op<T>(), n));
             SCCD_CHECK_CUDA(cudaFree(tmp_storage));
+
+            SCCD_CUDA_LAST_ERROR();
         }
 
         template <int first_nxe, int second_nxe, typename T, typename I>
