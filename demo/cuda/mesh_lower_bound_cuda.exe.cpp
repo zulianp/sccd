@@ -127,7 +127,7 @@ int main(int argc, char** argv) {
 
             scalar_t* faabb_min_axis = nullptr;
             cudaMemcpy(&faabb_min_axis, h_faabb->data() + sort_axis, sizeof(faabb_min_axis), cudaMemcpyDeviceToHost);
-            sccd::device::lower_bound_all_to_all(n_faces, faabb_min_axis, n_nodes, vaabb_max_axis, lb->data());
+            sccd::device::lower_bound_all_to_all(n_faces, faabb_min_axis, n_nodes, cm->data(), lb->data());
         }
 
         auto h_acutal = smesh::to_host(lb);
