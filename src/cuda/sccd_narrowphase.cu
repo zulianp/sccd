@@ -1423,7 +1423,9 @@ namespace sccd {
                 // depth, accept its tlower as a conservative TOI for this
                 // cell instead of bisecting further.
                 if (active && level >= max_bisections) {
-                    device::atomic_min(&s_toi, cur.tlower);
+                    if (is_domain_valid<is_vf>(cur, s_toi, atol)) {
+                        device::atomic_min(&s_toi, cur.tlower);
+                    }
                     active = 0;
                 }
 

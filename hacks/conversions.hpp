@@ -509,6 +509,13 @@ namespace sccd {
         geom_t narrow_phase() {
             geom_t* v0[3] = {x0.data(), y0.data(), z0.data()};
             geom_t* v1[3] = {x1.data(), y1.data(), z1.data()};
+            const auto min_toi = [](const std::vector<geom_t>& values, const geom_t fallback) {
+                geom_t result = fallback;
+                for (const geom_t value : values) {
+                    result = sccd::min(result, value);
+                }
+                return result;
+            };
 
             Timer timer;
             timer.start();
@@ -517,16 +524,19 @@ namespace sccd {
 
             geom_t max_toi = 100000;
 
-            geom_t toi_vf = sccd::narrow_phase_vf<3, geom_t>(voverlap.size(),
-                                                             voverlap.data(),
-                                                             foverlap.data(),
-                                                             // Geometric data
-                                                             v0,
-                                                             v1,
-                                                             3,
-                                                             soafaces,
-                                                             max_toi);
+            sccd::narrow_phase_vf<3, geom_t>(voverlap.size(),
+                                             voverlap.data(),
+                                             foverlap.data(),
+                                             // Geometric data
+                                             v0,
+                                             v1,
+                                             3,
+                                             soafaces,
+                                             max_toi,
+                                             vf_toi.data(),
+                                             1);
 
+            geom_t toi_vf = min_toi(vf_toi, max_toi);
             max_toi = toi_vf;
 
             timer.stop();
@@ -535,16 +545,19 @@ namespace sccd {
 
             ee_toi.resize(e0_overlap.size());
 
-            geom_t toi_ee = sccd::narrow_phase_ee<geom_t>(e0_overlap.size(),
-                                                          e0_overlap.data(),
-                                                          e1_overlap.data(),
-                                                          // Geometric data
-                                                          v0,
-                                                          v1,
-                                                          2,
-                                                          soaedges,
-                                                          max_toi);
+            sccd::narrow_phase_ee<geom_t>(e0_overlap.size(),
+                                          e0_overlap.data(),
+                                          e1_overlap.data(),
+                                          // Geometric data
+                                          v0,
+                                          v1,
+                                          2,
+                                          soaedges,
+                                          max_toi,
+                                          ee_toi.data(),
+                                          1);
 
+            geom_t toi_ee = min_toi(ee_toi, max_toi);
             max_toi = toi_ee;
             timer.stop();
             printf("NP EE(%lu): %g [ms]\n", ee_toi.size(), timer.getElapsedTimeInMilliSec());

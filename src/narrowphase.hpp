@@ -29,17 +29,26 @@ namespace sccd {
     }
 
     template <int nxe, typename T, typename I>
-    T narrow_phase_vf(const size_t noverlaps,
-                      const I* const SCCD_RESTRICT voveralp,
-                      const I* const SCCD_RESTRICT foveralp,
-                      // Geometric data
-                      T** const SCCD_RESTRICT v0,
-                      T** const SCCD_RESTRICT v1,
-                      const size_t face_stride,
-                      I** const SCCD_RESTRICT faces,
-                      const T max_toi) {
+    int narrow_phase_vf(const size_t noverlaps,
+                        const I* const SCCD_RESTRICT voveralp,
+                        const I* const SCCD_RESTRICT foveralp,
+                        // Geometric data
+                        T** const SCCD_RESTRICT v0,
+                        T** const SCCD_RESTRICT v1,
+                        const size_t face_stride,
+                        I** const SCCD_RESTRICT faces,
+                        const T max_toi,
+                        T* const SCCD_RESTRICT toi,
+                        const int toi_stride = 0) {
         using T_HP = double;
         const T infty = 100000;
+
+        assert(toi_stride == 0 || toi_stride == 1);
+        if (noverlaps == 0) {
+            if (toi != nullptr && toi_stride == 0) toi[0] = max_toi;
+            return 0;
+        }
+        assert(toi != nullptr);
 
         int SCCD_USE_TI = 0;
         SCCD_READ_ENV(SCCD_USE_TI, atoi);
@@ -54,10 +63,13 @@ namespace sccd {
         SCCD_READ_ENV(SCCD_REFINE, atoi);
 
         std::atomic<T> min_t = max_toi;
+        if (toi_stride == 0) toi[0] = max_toi;
         sccd::parallel_for_br(0, noverlaps, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
             std::vector<Box<T_HP>> stack;
 
             for (ptrdiff_t i = rbegin; i < rend; i++) {
+                if (toi_stride == 1) toi[i] = max_toi;
+
                 const I vi = voveralp[i];
                 const I fi = foveralp[i];
 
@@ -85,7 +97,11 @@ namespace sccd {
                     // Make sure to increase SCCD_MAX_ITER from the command line
                     if (find_root_tight_inclusion_vf<T_HP>(
                             SCCD_MAX_ITER, SCCD_TOL, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v)) {
-                        atomic_min<T>(min_t, t);
+                        if (toi_stride == 0) {
+                            atomic_min<T>(min_t, t);
+                        } else {
+                            toi[i] = t;
+                        }
                     }
                     continue;
                 }
@@ -93,27 +109,41 @@ namespace sccd {
                 // if (find_root_grid_rotate_vf<T_HP>(
                 if (find_root_grid_vf<T_HP>(
                         SCCD_MAX_ITER, SCCD_TOL, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack, SCCD_REFINE)) {
-                    atomic_min<T>(min_t, t);
+                    if (toi_stride == 0) {
+                        atomic_min<T>(min_t, t);
+                    } else {
+                        toi[i] = t;
+                    }
                 }
             }
         });
 
-        return min_t;
+        if (toi_stride == 0) toi[0] = min_t;
+        return 0;
     }
 
     template <typename T, typename I>
-    T narrow_phase_ee(const size_t noverlaps,
-                      const I* const SCCD_RESTRICT e0overalp,
-                      const I* const SCCD_RESTRICT e1overalp,
-                      // Geometric data
-                      T** const SCCD_RESTRICT v0,
-                      T** const SCCD_RESTRICT v1,
-                      const size_t edge_stride,
-                      I** const SCCD_RESTRICT edges,
-                      // Output
-                      const T max_toi) {
+    int narrow_phase_ee(const size_t noverlaps,
+                        const I* const SCCD_RESTRICT e0overalp,
+                        const I* const SCCD_RESTRICT e1overalp,
+                        // Geometric data
+                        T** const SCCD_RESTRICT v0,
+                        T** const SCCD_RESTRICT v1,
+                        const size_t edge_stride,
+                        I** const SCCD_RESTRICT edges,
+                        // Output
+                        const T max_toi,
+                        T* const SCCD_RESTRICT toi,
+                        const int toi_stride = 0) {
         using T_HP = double;
         const T infty = 100000;
+
+        assert(toi_stride == 0 || toi_stride == 1);
+        if (noverlaps == 0) {
+            if (toi != nullptr && toi_stride == 0) toi[0] = max_toi;
+            return 0;
+        }
+        assert(toi != nullptr);
 
         int SCCD_USE_TI = 0;
         SCCD_READ_ENV(SCCD_USE_TI, atoi);
@@ -125,10 +155,13 @@ namespace sccd {
         SCCD_READ_ENV(SCCD_TOL, atof);
 
         std::atomic<T> min_t = max_toi;
+        if (toi_stride == 0) toi[0] = max_toi;
         sccd::parallel_for_br(0, noverlaps, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
             std::vector<Box<T_HP>> stack;
 
             for (ptrdiff_t i = rbegin; i < rend; i++) {
+                if (toi_stride == 1) toi[i] = max_toi;
+
                 const I i0 = e0overalp[i];
                 const I i1 = e1overalp[i];
 
@@ -158,18 +191,27 @@ namespace sccd {
                     // Make sure to increase SCCD_MAX_ITER from the command line
                     if (find_root_tight_inclusion_ee<T_HP>(
                             SCCD_MAX_ITER, SCCD_TOL, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v)) {
-                        atomic_min<T>(min_t, t);
+                        if (toi_stride == 0) {
+                            atomic_min<T>(min_t, t);
+                        } else {
+                            toi[i] = t;
+                        }
                     }
                     continue;
                 }
 #endif
                 if (find_root_grid_ee<T_HP>(SCCD_MAX_ITER, SCCD_TOL, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v, stack)) {
-                    atomic_min<T>(min_t, t);
+                    if (toi_stride == 0) {
+                        atomic_min<T>(min_t, t);
+                    } else {
+                        toi[i] = t;
+                    }
                 }
             }
         });
 
-        return min_t;
+        if (toi_stride == 0) toi[0] = min_t;
+        return 0;
     }
 
 }  // namespace sccd
