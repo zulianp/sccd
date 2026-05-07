@@ -156,3 +156,5 @@ if(SCCD_ENABLE_SMESH)
     endforeach()
   endif()
 endif()
+
+include(SCCDTests)
