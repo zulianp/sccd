@@ -285,18 +285,18 @@ namespace sccd {
         }
 
         template <typename T>
-        static inline __device__ uint32_t disjoint(const T aminx,
-                                                   const T aminy,
-                                                   const T aminz,
-                                                   const T amaxx,
-                                                   const T amaxy,
-                                                   const T amaxz,
-                                                   const T bminx,
-                                                   const T bminy,
-                                                   const T bminz,
-                                                   const T bmaxx,
-                                                   const T bmaxy,
-                                                   const T bmaxz) {
+        static __device__ __forceinline__ uint32_t disjoint(const T aminx,
+                                                            const T aminy,
+                                                            const T aminz,
+                                                            const T amaxx,
+                                                            const T amaxy,
+                                                            const T amaxz,
+                                                            const T bminx,
+                                                            const T bminy,
+                                                            const T bminz,
+                                                            const T bmaxx,
+                                                            const T bmaxy,
+                                                            const T bmaxz) {
             return aminx > bmaxx | aminy > bmaxy | aminz > bmaxz | bminx > amaxx | bminy > amaxy | bminz > amaxz;
         }
 

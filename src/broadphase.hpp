@@ -94,7 +94,11 @@ namespace sccd {
         }
 
         const T *const SCCD_RESTRICT x = arrays[sort_axis];
-        sccd::parallel_sort(idx, idx + n, [x](const I l, const I r) { return x[l] < x[r]; });
+        sccd::parallel_sort(idx, idx + n, [x](const I l, const I r) {
+            if (x[l] < x[r]) return true;
+            if (x[r] < x[l]) return false;
+            return l < r;
+        });
 
         for (int d = 0; d < 6; d++) {
             memcpy(scratch, arrays[d], sizeof(T) * n);
