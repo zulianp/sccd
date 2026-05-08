@@ -6,13 +6,13 @@ set -e
 export PATH=$INSTALL_DIR/smesh/bin:$PATH
 
 
-case=../data/n-body-simulation/frames/
-mesh_t0=balls16_1
-mesh_t1=balls16_2
+# case=../data/n-body-simulation/frames/
+# mesh_t0=balls16_1
+# mesh_t1=balls16_2
 
-# case=../data/armadillo-rollers/frames 
-# mesh_t0="296"
-# mesh_t1="297"
+case=../data/armadillo-rollers/frames 
+mesh_t0="296"
+mesh_t1="297"
 
 set -x
 
