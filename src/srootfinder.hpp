@@ -1182,49 +1182,57 @@ namespace sccd {
         const T mid_v = (domain.tuv[2].lower + domain.tuv[2].upper) * T(0.5);
         const T eps = std::numeric_limits<T>::epsilon();
 
-        // TODO precompute quantites that are constant within the Newton iteration
+        alignas(64) T xmin[N];
+        alignas(64) T xmax[N];
+        T F_base[3];
+        T J_axis[3];
+        T H_axis = T(0);
 
-#pragma omp simd aligned(splitters : 64)
+        const T base_t = SplitDim == 0 ? T(0) : mid_t;
+        const T base_u = SplitDim == 1 ? T(0) : mid_u;
+        const T base_v = SplitDim == 2 ? T(0) : mid_v;
+        const T base_omt = T(1) - base_t;
+        const T base_o = T(1) - base_u - base_v;
+
+        for (int d = 0; d < 3; ++d) {
+            const T vertex = base_omt * sv[d] + base_t * ev[d];
+            const T face = base_omt * (base_o * s1[d] + base_u * s2[d] + base_v * s3[d]) +
+                           base_t * (base_o * e1[d] + base_u * e2[d] + base_v * e3[d]);
+            F_base[d] = vertex - face;
+
+            if constexpr (SplitDim == 0) {
+                const T o = T(1) - mid_u - mid_v;
+                J_axis[d] = (ev[d] - sv[d]) - (o * (e1[d] - s1[d]) + mid_u * (e2[d] - s2[d]) + mid_v * (e3[d] - s3[d]));
+            } else if constexpr (SplitDim == 1) {
+                J_axis[d] = -((T(1) - mid_t) * (s2[d] - s1[d]) + mid_t * (e2[d] - e1[d]));
+            } else {
+                J_axis[d] = -((T(1) - mid_t) * (s3[d] - s1[d]) + mid_t * (e3[d] - e1[d]));
+            }
+            H_axis += J_axis[d] * J_axis[d];
+        }
+        const T step_scale = H_axis > eps ? T(1) / H_axis : T(0.00001);
+
+#pragma omp simd aligned(splitters, xmin, xmax : 64)
         for (int i = 0; i < N; ++i) {
             const T x0 = lo + h * T(i + 1);
             splitters[i] = x0;
+            xmin[i] = sccd::max<T>(lo, x0 - radius);
+            xmax[i] = sccd::min<T>(hi, x0 + radius);
         }
 
         for (int it = 0; it < 4; ++it) {
-#pragma omp simd aligned(splitters : 64)
+#pragma omp simd aligned(splitters, xmin, xmax : 64)
             for (int i = 0; i < N; ++i) {
-                const T x0 = lo + h * T(i + 1);
-                const T xmin = sccd::max<T>(lo, x0 - radius);
-                const T xmax = sccd::min<T>(hi, x0 + radius);
                 const T x = splitters[i];
 
-                const T t = SplitDim == 0 ? x : mid_t;
-                const T u = SplitDim == 1 ? x : mid_u;
-                const T v = SplitDim == 2 ? x : mid_v;
-                const T omt = T(1) - t;
-                const T o = T(1) - u - v;
-
                 T g = T(0);
-                T H = T(0);
                 for (int d = 0; d < 3; ++d) {
-                    const T vertex = omt * sv[d] + t * ev[d];
-                    const T face = omt * (o * s1[d] + u * s2[d] + v * s3[d]) + t * (o * e1[d] + u * e2[d] + v * e3[d]);
-                    const T F = vertex - face;
-
-                    T J;
-                    if constexpr (SplitDim == 0) {
-                        J = (ev[d] - sv[d]) - (o * (e1[d] - s1[d]) + u * (e2[d] - s2[d]) + v * (e3[d] - s3[d]));
-                    } else if constexpr (SplitDim == 1) {
-                        J = -(omt * (s2[d] - s1[d]) + t * (e2[d] - e1[d]));
-                    } else {
-                        J = -(omt * (s3[d] - s1[d]) + t * (e3[d] - e1[d]));
-                    }
-                    g += F * J;
-                    H += J * J;
+                    const T J = J_axis[d];
+                    g += (F_base[d] + x * J) * J;
                 }
 
-                const T step = H > eps ? g / H : 0.00001 * g;
-                splitters[i] = sccd::min<T>(xmax, sccd::max<T>(xmin, x - step));
+                const T step = g * step_scale;
+                splitters[i] = sccd::min<T>(xmax[i], sccd::max<T>(xmin[i], x - step));
             }
         }
     }
