@@ -1017,6 +1017,323 @@ namespace sccd {
     }
 
     template <typename T>
+    inline static void clamp_newton_axis_splitters(T x[4], const T lo, const T hi) {
+        const T eps = std::numeric_limits<T>::epsilon() * sccd::max<T>(T(1), hi - lo);
+        x[1] = sccd::min<T>(hi - eps, sccd::max<T>(lo + eps, x[1]));
+        x[2] = sccd::min<T>(hi - eps, sccd::max<T>(lo + eps, x[2]));
+        if (x[1] > x[2]) {
+            const T tmp = x[1];
+            x[1] = x[2];
+            x[2] = tmp;
+        }
+    }
+
+    template <typename T>
+    inline static void newton_splitter_vf(const T sv[3],
+                                          const T s1[3],
+                                          const T s2[3],
+                                          const T s3[3],
+                                          const T ev[3],
+                                          const T e1[3],
+                                          const T e2[3],
+                                          const T e3[3],
+                                          T &t,
+                                          T &u,
+                                          T &v,
+                                          const T rt,
+                                          const T ru,
+                                          const T rv) {
+        T s4[3] = {0, 0, 0};
+        T e4[3] = {0, 0, 0};
+
+        for (int iter = 0; iter < 2; ++iter) {
+            T f = 0;
+            T p[3] = {0, 0, 0};
+            vf_objective_dir<T>(sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, t, u, v, &f, p);
+
+            if (!std::isfinite(p[0]) || !std::isfinite(p[1]) || !std::isfinite(p[2])) {
+                return;
+            }
+
+            const T dt = sccd::min<T>(rt, sccd::max<T>(-rt, p[0]));
+            const T du = sccd::min<T>(ru, sccd::max<T>(-ru, p[1]));
+            const T dv = sccd::min<T>(rv, sccd::max<T>(-rv, p[2]));
+            t -= dt;
+            u -= du;
+            v -= dv;
+        }
+    }
+
+    template <typename T>
+    inline static void newton_splitters_vf(const Box<T> &domain,
+                                           const T sv[3],
+                                           const T s1[3],
+                                           const T s2[3],
+                                           const T s3[3],
+                                           const T ev[3],
+                                           const T e1[3],
+                                           const T e2[3],
+                                           const T e3[3],
+                                           T xs[3][4]) {
+        const T t_min = domain.tuv[0].lower;
+        const T u_min = domain.tuv[1].lower;
+        const T v_min = domain.tuv[2].lower;
+        const T t_max = domain.tuv[0].upper;
+        const T u_max = domain.tuv[1].upper;
+        const T v_max = domain.tuv[2].upper;
+
+        xs[0][0] = t_min;
+        xs[0][1] = t_min + (t_max - t_min) * T(1.0 / 3.0);
+        xs[0][2] = t_min + (t_max - t_min) * T(2.0 / 3.0);
+        xs[0][3] = t_max;
+        xs[1][0] = u_min;
+        xs[1][1] = u_min + (u_max - u_min) * T(1.0 / 3.0);
+        xs[1][2] = u_min + (u_max - u_min) * T(2.0 / 3.0);
+        xs[1][3] = u_max;
+        xs[2][0] = v_min;
+        xs[2][1] = v_min + (v_max - v_min) * T(1.0 / 3.0);
+        xs[2][2] = v_min + (v_max - v_min) * T(2.0 / 3.0);
+        xs[2][3] = v_max;
+
+        const T rt = (t_max - t_min) * T(1.0 / 6.0);
+        const T ru = (u_max - u_min) * T(1.0 / 6.0);
+        const T rv = (v_max - v_min) * T(1.0 / 6.0);
+        T sum[3][2] = {{0, 0}, {0, 0}, {0, 0}};
+
+        for (int a = 1; a <= 2; ++a) {
+            for (int b = 1; b <= 2; ++b) {
+                for (int c = 1; c <= 2; ++c) {
+                    T t = xs[0][a];
+                    T u = xs[1][b];
+                    T v = xs[2][c];
+                    newton_splitter_vf<T>(sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, rt, ru, rv);
+                    sum[0][a - 1] += t;
+                    sum[1][b - 1] += u;
+                    sum[2][c - 1] += v;
+                }
+            }
+        }
+
+        xs[0][1] = sum[0][0] * T(0.25);
+        xs[0][2] = sum[0][1] * T(0.25);
+        xs[1][1] = sum[1][0] * T(0.25);
+        xs[1][2] = sum[1][1] * T(0.25);
+        xs[2][1] = sum[2][0] * T(0.25);
+        xs[2][2] = sum[2][1] * T(0.25);
+
+        clamp_newton_axis_splitters<T>(xs[0], t_min, t_max);
+        clamp_newton_axis_splitters<T>(xs[1], u_min, u_max);
+        clamp_newton_axis_splitters<T>(xs[2], v_min, v_max);
+    }
+
+    template <typename T>
+    inline static void grid_sample_F_vf_nonuniform(const T xs[3][4],
+                                                   const T sv[3],
+                                                   const T s1[3],
+                                                   const T s2[3],
+                                                   const T s3[3],
+                                                   const T ev[3],
+                                                   const T e1[3],
+                                                   const T e2[3],
+                                                   const T e3[3],
+                                                   T F[3][64]) {
+        for (int a = 0; a < 4; ++a) {
+            const T t = xs[0][a];
+            const T omt = T(1) - t;
+            for (int b = 0; b < 4; ++b) {
+                const T u = xs[1][b];
+                for (int c = 0; c < 4; ++c) {
+                    const int idx = a * 16 + b * 4 + c;
+                    const T v = xs[2][c];
+                    const T o = T(1) - u - v;
+                    for (int d = 0; d < 3; ++d) {
+                        const T vertex = omt * sv[d] + t * ev[d];
+                        const T face =
+                            omt * (o * s1[d] + u * s2[d] + v * s3[d]) + t * (o * e1[d] + u * e2[d] + v * e3[d]);
+                        F[d][idx] = vertex - face;
+                    }
+                }
+            }
+        }
+    }
+
+    template <typename T>
+    inline bool grid_search_newton_split_vf(const sccd::Box<T> &domain,
+                                            const int max_iter,
+                                            const T tol,
+                                            const T tols[3],
+                                            const T sv[3],
+                                            const T s1[3],
+                                            const T s2[3],
+                                            const T s3[3],
+                                            const T ev[3],
+                                            const T e1[3],
+                                            const T e2[3],
+                                            const T e3[3],
+                                            T &toi,
+                                            T &u,
+                                            T &v,
+                                            std::vector<sccd::Box<T>> &stack,
+                                            const bool refine) {
+        static constexpr int NT = 3;
+        static constexpr int NU = 3;
+        static constexpr int NV = 3;
+        static constexpr int N_cells = NT * NU * NV;
+
+        T xs[3][4];
+        newton_splitters_vf<T>(domain, sv, s1, s2, s3, ev, e1, e2, e3, xs);
+
+        T F[3][64];
+        grid_sample_F_vf_nonuniform<T>(xs, sv, s1, s2, s3, ev, e1, e2, e3, F);
+
+        using mask_t = uint32_t;
+        mask_t contains_zero_and_refine[N_cells];
+        mask_t accept[N_cells];
+        grid_zero_and_accept_all<NT, NU, NV, T, mask_t>(F[0], F[1], F[2], tol, tols, contains_zero_and_refine, accept);
+
+        bool found = false;
+        for (int a = 0; a < NT; ++a) {
+            const T t0 = xs[0][a];
+            if (t0 > toi) {
+                for (int bc = 0; bc < NU * NV; ++bc) {
+                    contains_zero_and_refine[a * NU * NV + bc] = false;
+                }
+                continue;
+            }
+
+            for (int b = 0; b < NU; ++b) {
+                for (int c = 0; c < NV; ++c) {
+                    const int i = a * NU * NV + b * NV + c;
+                    if (accept[i]) {
+                        toi = t0;
+                        u = xs[1][b];
+                        v = xs[2][c];
+                        found = true;
+                        contains_zero_and_refine[i] = false;
+                    }
+                }
+            }
+        }
+
+        for (int a = 0; a < NT; ++a) {
+            for (int b = 0; b < NU; ++b) {
+                for (int c = 0; c < NV; ++c) {
+                    const int i = a * NU * NV + b * NV + c;
+                    if (contains_zero_and_refine[i] && !accept[i]) {
+                        const T tt_min = xs[0][a];
+                        const T uu_min = xs[1][b];
+                        const T vv_min = xs[2][c];
+
+                        if (uu_min + vv_min >= T(1) + tol || tt_min >= toi) {
+                            continue;
+                        }
+
+                        Box<T> box(
+                            {tt_min, xs[0][a + 1]}, {uu_min, xs[1][b + 1]}, {vv_min, xs[2][c + 1]}, domain.depth + 1);
+                        if (box.depth > max_iter) {
+                            T t_approx = box.tuv[0].lower;
+                            if (t_approx < toi && box.tuv[1].lower + box.tuv[2].lower < T(1) + tols[1] + tols[2]) {
+                                T u_approx = box.tuv[1].lower;
+                                T v_approx = box.tuv[2].lower;
+
+                                if (refine) {
+                                    found = find_root_newton<T>(
+                                        40, tol, sv, s1, s2, s3, ev, e1, e2, e3, t_approx, u_approx, v_approx);
+
+                                    if (found && t_approx < toi) {
+                                        toi = sccd::min<T>(box.tuv[0].upper,
+                                                           sccd::max<T>(box.tuv[0].lower, T(0.99) * t_approx));
+                                        u = u_approx;
+                                        v = v_approx;
+                                    }
+                                } else {
+                                    toi = t_approx;
+                                    u = u_approx;
+                                    v = v_approx;
+                                    found = true;
+                                }
+                            }
+                            continue;
+                        }
+
+                        int split_dim = box.widest_dimension();
+                        box.bisect_vf(split_dim, toi, stack);
+                    }
+                }
+            }
+        }
+
+        return found;
+    }
+
+    template <typename T>
+    bool find_root_grid_newton_split_vf(const int max_iter,
+                                        const T tol,
+                                        const T sv[3],
+                                        const T s1[3],
+                                        const T s2[3],
+                                        const T s3[3],
+                                        const T ev[3],
+                                        const T e1[3],
+                                        const T e2[3],
+                                        const T e3[3],
+                                        T &t,
+                                        T &u,
+                                        T &v,
+                                        std::vector<Box<T>> &stack,
+                                        const bool refine = false) {
+        using Box = sccd::Box<T>;
+        using Interval = sccd::Interval<T>;
+
+        T tols[3];
+        compute_face_vertex_tolerance_soa<T>(tol,
+                                             sv[0],
+                                             sv[1],
+                                             sv[2],
+                                             s1[0],
+                                             s1[1],
+                                             s1[2],
+                                             s2[0],
+                                             s2[1],
+                                             s2[2],
+                                             s3[0],
+                                             s3[1],
+                                             s3[2],
+                                             ev[0],
+                                             ev[1],
+                                             ev[2],
+                                             e1[0],
+                                             e1[1],
+                                             e1[2],
+                                             e2[0],
+                                             e2[1],
+                                             e2[2],
+                                             e3[0],
+                                             e3[1],
+                                             e3[2],
+                                             &tols[0],
+                                             &tols[1],
+                                             &tols[2]);
+
+        bool found = false;
+        stack.clear();
+        stack.push_back(Box(Interval{T(0), T(1)}, Interval{T(0), T(1)}, Interval{T(0), T(1)}, 0));
+        while (!stack.empty()) {
+            Box box = stack.back();
+            stack.pop_back();
+
+            if (box.tuv[0].lower >= t) {
+                continue;
+            }
+
+            found |= grid_search_newton_split_vf<T>(
+                box, max_iter, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack, refine);
+        }
+
+        return found;
+    }
+
+    template <typename T>
     inline bool find_root_grid_rotate_vf(const int max_iter,
                                          const T tol,
                                          const T sv[3],
@@ -1378,9 +1695,11 @@ namespace sccd {
     // TODO: New idea (to be tested with vf first)
     // Exploit Newton steps with trust-region radius to determine better split points
     // sample the interval with N splitters then use fixed number of newton steps to move the splitter less than half
-    // the distance to the next splitter
-    // In the grid search with 3,3,3 elements we have 2 splitters per dimension which means we have 8 splitters in total
-    // This allows us to use simdized Newton to move the splitters at the same time
+    // the distance to the next splitter in total (the radius is not on the correction but in total)
+    // The splitting is done on the longest dimension of the box with  N splitters (eg., N=8) in total.
+    // The Newton optimization is done only on the splitting dimension while the rest is kept fixed.
+    // Vectorization is mandatory, the code needs to vectorize perfectly.
+    // This allows us to use simdized Newton to move the splitters at the same time.
     // Ideally this algorithm should
     // 1) do more compute and less control flow and filling of the stack
     // 2) converge faster to the roots

@@ -62,6 +62,9 @@ namespace sccd {
         int SCCD_REFINE = 0;
         SCCD_READ_ENV(SCCD_REFINE, atoi);
 
+        int SCCD_NEWTON_SPLIT_VF = 0;
+        SCCD_READ_ENV(SCCD_NEWTON_SPLIT_VF, atoi);
+
         std::atomic<T> min_t = max_toi;
         if (toi_stride == 0) toi[0] = max_toi;
         sccd::parallel_for_br(0, noverlaps, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
@@ -107,8 +110,38 @@ namespace sccd {
                 }
 #endif
                 // if (find_root_grid_rotate_vf<T_HP>(
-                if (find_root_grid_vf<T_HP>(
-                        SCCD_MAX_ITER, SCCD_TOL, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack, SCCD_REFINE)) {
+                const bool found = SCCD_NEWTON_SPLIT_VF
+                                       ? find_root_grid_newton_split_vf<T_HP>(SCCD_MAX_ITER,
+                                                                              SCCD_TOL,
+                                                                              sv,
+                                                                              s1,
+                                                                              s2,
+                                                                              s3,
+                                                                              ev,
+                                                                              e1,
+                                                                              e2,
+                                                                              e3,
+                                                                              t,
+                                                                              u,
+                                                                              v,
+                                                                              stack,
+                                                                              SCCD_REFINE)
+                                       : find_root_grid_vf<T_HP>(SCCD_MAX_ITER,
+                                                                 SCCD_TOL,
+                                                                 sv,
+                                                                 s1,
+                                                                 s2,
+                                                                 s3,
+                                                                 ev,
+                                                                 e1,
+                                                                 e2,
+                                                                 e3,
+                                                                 t,
+                                                                 u,
+                                                                 v,
+                                                                 stack,
+                                                                 SCCD_REFINE);
+                if (found) {
                     if (toi_stride == 0) {
                         atomic_min<T>(min_t, t);
                     } else {
