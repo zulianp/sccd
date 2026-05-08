@@ -15,13 +15,13 @@ DATA_PATH=/Users/patrickzulian/Desktop/code/installations/sources/Scalable-CCD/t
 # mesh_t0="296"
 # mesh_t1="297"
 
-case=$DATA_PATH/armadillo-rollers/frames
-mesh_t0=326
-mesh_t1=327
+# case=$DATA_PATH/armadillo-rollers/frames
+# mesh_t0=326
+# mesh_t1=327
 
-# case=$DATA_PATH/cloth-ball/frames
-# mesh_t0=cloth_ball92
-# mesh_t1=cloth_ball93
+case=$DATA_PATH/cloth-ball/frames
+mesh_t0=cloth_ball92
+mesh_t1=cloth_ball93
 
 # case=$DATA_PATH/cloth-funnel/frames/
 # mesh_t0=227

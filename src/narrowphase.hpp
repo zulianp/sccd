@@ -164,6 +164,12 @@ namespace sccd {
         T_HP SCCD_TOL = std::is_same_v<T, float> ? T(1e-8) : T(1e-14);
         SCCD_READ_ENV(SCCD_TOL, atof);
 
+        int SCCD_REFINE = 0;
+        SCCD_READ_ENV(SCCD_REFINE, atoi);
+
+        int SCCD_UNIFORM_SPLIT_EE = 1;
+        SCCD_READ_ENV(SCCD_UNIFORM_SPLIT_EE, atoi);
+
         std::atomic<T> min_t = max_toi;
         if (toi_stride == 0) toi[0] = max_toi;
         sccd::parallel_for_br(0, noverlaps, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
@@ -210,7 +216,15 @@ namespace sccd {
                     continue;
                 }
 #endif
-                if (find_root_grid_ee<T_HP>(SCCD_MAX_ITER, SCCD_TOL, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v, stack)) {
+                bool found = false;
+                if (SCCD_UNIFORM_SPLIT_EE) {
+                    found = find_root_grid_uniform_split_ee<T_HP>(
+                        SCCD_MAX_ITER, SCCD_TOL, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v, stack, SCCD_REFINE);
+                } else {
+                    found = find_root_grid_ee<T_HP>(SCCD_MAX_ITER, SCCD_TOL, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v, stack);
+                }
+
+                if (found) {
                     if (toi_stride == 0) {
                         atomic_min<T>(min_t, t);
                     } else {

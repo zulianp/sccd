@@ -191,8 +191,15 @@ int main(int argc, char** argv) {
 
         {
             SMESH_TRACE_SCOPE("Narrow phase: F2V");
-            sccd::narrow_phase_vf<3, smesh::geom_t>(
-                v_overlap->size(), v_overlap->data(), f_overlap->data(), p0, p1, 1, t0->elements(0)->data(), toi, &toi_vf);
+            sccd::narrow_phase_vf<3, smesh::geom_t>(v_overlap->size(),
+                                                    v_overlap->data(),
+                                                    f_overlap->data(),
+                                                    p0,
+                                                    p1,
+                                                    1,
+                                                    t0->elements(0)->data(),
+                                                    toi,
+                                                    &toi_vf);
             toi = toi_vf;
         }
 
