@@ -1374,6 +1374,18 @@ namespace sccd {
 
         return found;
     }
+
+    // TODO: New idea (to be tested with vf first)
+    // Exploit Newton steps with trust-region radius to determine better split points
+    // sample the interval with N splitters then use fixed number of newton steps to move the splitter less than half
+    // the distance to the next splitter
+    // In the grid search with 3,3,3 elements we have 2 splitters per dimension which means we have 8 splitters in total
+    // This allows us to use simdized Newton to move the splitters at the same time
+    // Ideally this algorithm should
+    // 1) do more compute and less control flow and filling of the stack
+    // 2) converge faster to the roots
+    // 3) better exploit hardware, hence reduce time to solution
+
 }  // namespace sccd
 
 #endif  // S_ROOT_FINDER_HPP
