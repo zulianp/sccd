@@ -21,7 +21,7 @@ for ds in ${datasets[@]}
 do
 	echo "---------------------------------------------------------"
 	echo "Testing on $ds"
-	# python3 $PROJECT_DIR/python/ccd_test.py $db_dir/$ds ee
+	python3 $PROJECT_DIR/python/ccd_test.py $db_dir/$ds ee
 	python3 $PROJECT_DIR/python/ccd_test.py $db_dir/$ds vf
 	mv *.csv $PROJECT_DIR/csv
 	echo "---------------------------------------------------------"
