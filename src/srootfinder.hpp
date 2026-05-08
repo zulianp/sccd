@@ -1064,67 +1064,69 @@ namespace sccd {
         }
     }
 
-    template <typename T>
-    inline static void newton_splitters_vf(const Box<T> &domain,
-                                           const T sv[3],
-                                           const T s1[3],
-                                           const T s2[3],
-                                           const T s3[3],
-                                           const T ev[3],
-                                           const T e1[3],
-                                           const T e2[3],
-                                           const T e3[3],
-                                           T xs[3][4]) {
-        const T t_min = domain.tuv[0].lower;
-        const T u_min = domain.tuv[1].lower;
-        const T v_min = domain.tuv[2].lower;
-        const T t_max = domain.tuv[0].upper;
-        const T u_max = domain.tuv[1].upper;
-        const T v_max = domain.tuv[2].upper;
+    // template <typename T>
+    // inline static void newton_splitters_vf(const Box<T> &domain,
+    //                                        const T sv[3],
+    //                                        const T s1[3],
+    //                                        const T s2[3],
+    //                                        const T s3[3],
+    //                                        const T ev[3],
+    //                                        const T e1[3],
+    //                                        const T e2[3],
+    //                                        const T e3[3],
+    //                                        T xs[3][4]) {
+    //     const T t_min = domain.tuv[0].lower;
+    //     const T u_min = domain.tuv[1].lower;
+    //     const T v_min = domain.tuv[2].lower;
+    //     const T t_max = domain.tuv[0].upper;
+    //     const T u_max = domain.tuv[1].upper;
+    //     const T v_max = domain.tuv[2].upper;
 
-        xs[0][0] = t_min;
-        xs[0][1] = t_min + (t_max - t_min) * T(1.0 / 3.0);
-        xs[0][2] = t_min + (t_max - t_min) * T(2.0 / 3.0);
-        xs[0][3] = t_max;
-        xs[1][0] = u_min;
-        xs[1][1] = u_min + (u_max - u_min) * T(1.0 / 3.0);
-        xs[1][2] = u_min + (u_max - u_min) * T(2.0 / 3.0);
-        xs[1][3] = u_max;
-        xs[2][0] = v_min;
-        xs[2][1] = v_min + (v_max - v_min) * T(1.0 / 3.0);
-        xs[2][2] = v_min + (v_max - v_min) * T(2.0 / 3.0);
-        xs[2][3] = v_max;
+    //     xs[0][0] = t_min;
+    //     xs[0][1] = t_min + (t_max - t_min) * T(1.0 / 3.0);
+    //     xs[0][2] = t_min + (t_max - t_min) * T(2.0 / 3.0);
+    //     xs[0][3] = t_max;
+    //     xs[1][0] = u_min;
+    //     xs[1][1] = u_min + (u_max - u_min) * T(1.0 / 3.0);
+    //     xs[1][2] = u_min + (u_max - u_min) * T(2.0 / 3.0);
+    //     xs[1][3] = u_max;
+    //     xs[2][0] = v_min;
+    //     xs[2][1] = v_min + (v_max - v_min) * T(1.0 / 3.0);
+    //     xs[2][2] = v_min + (v_max - v_min) * T(2.0 / 3.0);
+    //     xs[2][3] = v_max;
 
-        const T rt = (t_max - t_min) * T(1.0 / 6.0);
-        const T ru = (u_max - u_min) * T(1.0 / 6.0);
-        const T rv = (v_max - v_min) * T(1.0 / 6.0);
-        T sum[3][2] = {{0, 0}, {0, 0}, {0, 0}};
+    //     const T rt = (t_max - t_min) * T(1.0 / 6.0);
+    //     const T ru = (u_max - u_min) * T(1.0 / 6.0);
+    //     const T rv = (v_max - v_min) * T(1.0 / 6.0);
 
-        for (int a = 1; a <= 2; ++a) {
-            for (int b = 1; b <= 2; ++b) {
-                for (int c = 1; c <= 2; ++c) {
-                    T t = xs[0][a];
-                    T u = xs[1][b];
-                    T v = xs[2][c];
-                    newton_splitter_vf<T>(sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, rt, ru, rv);
-                    sum[0][a - 1] += t;
-                    sum[1][b - 1] += u;
-                    sum[2][c - 1] += v;
-                }
-            }
-        }
+    //     // TODO: Improve ve
+    //     T sum[3][2] = {{0, 0}, {0, 0}, {0, 0}};
 
-        xs[0][1] = sum[0][0] * T(0.25);
-        xs[0][2] = sum[0][1] * T(0.25);
-        xs[1][1] = sum[1][0] * T(0.25);
-        xs[1][2] = sum[1][1] * T(0.25);
-        xs[2][1] = sum[2][0] * T(0.25);
-        xs[2][2] = sum[2][1] * T(0.25);
+    //     for (int a = 1; a <= 2; ++a) {
+    //         for (int b = 1; b <= 2; ++b) {
+    //             for (int c = 1; c <= 2; ++c) {
+    //                 T t = xs[0][a];
+    //                 T u = xs[1][b];
+    //                 T v = xs[2][c];
+    //                 newton_splitter_vf<T>(sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, rt, ru, rv);
+    //                 sum[0][a - 1] += t;
+    //                 sum[1][b - 1] += u;
+    //                 sum[2][c - 1] += v;
+    //             }
+    //         }
+    //     }
 
-        clamp_newton_axis_splitters<T>(xs[0], t_min, t_max);
-        clamp_newton_axis_splitters<T>(xs[1], u_min, u_max);
-        clamp_newton_axis_splitters<T>(xs[2], v_min, v_max);
-    }
+    //     xs[0][1] = sum[0][0] * T(0.25);
+    //     xs[0][2] = sum[0][1] * T(0.25);
+    //     xs[1][1] = sum[1][0] * T(0.25);
+    //     xs[1][2] = sum[1][1] * T(0.25);
+    //     xs[2][1] = sum[2][0] * T(0.25);
+    //     xs[2][2] = sum[2][1] * T(0.25);
+
+    //     clamp_newton_axis_splitters<T>(xs[0], t_min, t_max);
+    //     clamp_newton_axis_splitters<T>(xs[1], u_min, u_max);
+    //     clamp_newton_axis_splitters<T>(xs[2], v_min, v_max);
+    // }
 
     template <typename T>
     inline static void grid_sample_F_vf_nonuniform(const T xs[3][4],
@@ -1182,13 +1184,16 @@ namespace sccd {
         splitters[0] = lo;
         splitters[N] = hi;
 
+        // TODO create temp solution array with correct alignment for vectorization and use that within the Newton
+        // iteration
+
 #pragma omp simd
         for (int i = 1; i < N; ++i) {
             const T x0 = lo + h * T(i);
             splitters[i] = x0;
         }
 
-        for (int it = 0; it < 4; ++it) {
+        for (int it = 0; it < 8; ++it) {
 #pragma omp simd
             for (int i = 1; i < N; ++i) {
                 const T x0 = lo + h * T(i);
@@ -1206,14 +1211,12 @@ namespace sccd {
                 T H = T(0);
                 for (int d = 0; d < 3; ++d) {
                     const T vertex = omt * sv[d] + t * ev[d];
-                    const T face =
-                        omt * (o * s1[d] + u * s2[d] + v * s3[d]) + t * (o * e1[d] + u * e2[d] + v * e3[d]);
+                    const T face = omt * (o * s1[d] + u * s2[d] + v * s3[d]) + t * (o * e1[d] + u * e2[d] + v * e3[d]);
                     const T F = vertex - face;
 
                     T J;
                     if constexpr (SplitDim == 0) {
-                        J = (ev[d] - sv[d]) -
-                            (o * (e1[d] - s1[d]) + u * (e2[d] - s2[d]) + v * (e3[d] - s3[d]));
+                        J = (ev[d] - sv[d]) - (o * (e1[d] - s1[d]) + u * (e2[d] - s2[d]) + v * (e3[d] - s3[d]));
                     } else if constexpr (SplitDim == 1) {
                         J = -(omt * (s2[d] - s1[d]) + t * (e2[d] - e1[d]));
                     } else {
@@ -1264,9 +1267,8 @@ namespace sccd {
             }
 
             T fmin[3] = {std::numeric_limits<T>::max(), std::numeric_limits<T>::max(), std::numeric_limits<T>::max()};
-            T fmax[3] = {std::numeric_limits<T>::lowest(),
-                         std::numeric_limits<T>::lowest(),
-                         std::numeric_limits<T>::lowest()};
+            T fmax[3] = {
+                std::numeric_limits<T>::lowest(), std::numeric_limits<T>::lowest(), std::numeric_limits<T>::lowest()};
 
             for (int mask = 0; mask < 8; ++mask) {
                 const T ct = (mask & 1) ? tt_max : tt_min;
