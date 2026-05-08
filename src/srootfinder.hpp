@@ -1692,7 +1692,7 @@ namespace sccd {
         return found;
     }
 
-    // TODO: New idea (to be tested with vf first)
+    // TODO: Rewrite from scratch find_root_grid_newton_split_vf
     // Exploit Newton steps with trust-region radius to determine better split points
     // sample the interval with N splitters then use fixed number of newton steps to move the splitter less than half
     // the distance to the next splitter in total (the radius is not on the correction but in total)
