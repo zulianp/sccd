@@ -932,6 +932,8 @@ namespace sccd {
                                     u = u_approx;
                                     v = v_approx;
                                     found = true;
+
+                                    // printf("level: %d\n", box.depth);
                                 }
                             }
                             continue;
@@ -1064,101 +1066,6 @@ namespace sccd {
         }
     }
 
-    // template <typename T>
-    // inline static void newton_splitters_vf(const Box<T> &domain,
-    //                                        const T sv[3],
-    //                                        const T s1[3],
-    //                                        const T s2[3],
-    //                                        const T s3[3],
-    //                                        const T ev[3],
-    //                                        const T e1[3],
-    //                                        const T e2[3],
-    //                                        const T e3[3],
-    //                                        T xs[3][4]) {
-    //     const T t_min = domain.tuv[0].lower;
-    //     const T u_min = domain.tuv[1].lower;
-    //     const T v_min = domain.tuv[2].lower;
-    //     const T t_max = domain.tuv[0].upper;
-    //     const T u_max = domain.tuv[1].upper;
-    //     const T v_max = domain.tuv[2].upper;
-
-    //     xs[0][0] = t_min;
-    //     xs[0][1] = t_min + (t_max - t_min) * T(1.0 / 3.0);
-    //     xs[0][2] = t_min + (t_max - t_min) * T(2.0 / 3.0);
-    //     xs[0][3] = t_max;
-    //     xs[1][0] = u_min;
-    //     xs[1][1] = u_min + (u_max - u_min) * T(1.0 / 3.0);
-    //     xs[1][2] = u_min + (u_max - u_min) * T(2.0 / 3.0);
-    //     xs[1][3] = u_max;
-    //     xs[2][0] = v_min;
-    //     xs[2][1] = v_min + (v_max - v_min) * T(1.0 / 3.0);
-    //     xs[2][2] = v_min + (v_max - v_min) * T(2.0 / 3.0);
-    //     xs[2][3] = v_max;
-
-    //     const T rt = (t_max - t_min) * T(1.0 / 6.0);
-    //     const T ru = (u_max - u_min) * T(1.0 / 6.0);
-    //     const T rv = (v_max - v_min) * T(1.0 / 6.0);
-
-    //     // TODO: Improve ve
-    //     T sum[3][2] = {{0, 0}, {0, 0}, {0, 0}};
-
-    //     for (int a = 1; a <= 2; ++a) {
-    //         for (int b = 1; b <= 2; ++b) {
-    //             for (int c = 1; c <= 2; ++c) {
-    //                 T t = xs[0][a];
-    //                 T u = xs[1][b];
-    //                 T v = xs[2][c];
-    //                 newton_splitter_vf<T>(sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, rt, ru, rv);
-    //                 sum[0][a - 1] += t;
-    //                 sum[1][b - 1] += u;
-    //                 sum[2][c - 1] += v;
-    //             }
-    //         }
-    //     }
-
-    //     xs[0][1] = sum[0][0] * T(0.25);
-    //     xs[0][2] = sum[0][1] * T(0.25);
-    //     xs[1][1] = sum[1][0] * T(0.25);
-    //     xs[1][2] = sum[1][1] * T(0.25);
-    //     xs[2][1] = sum[2][0] * T(0.25);
-    //     xs[2][2] = sum[2][1] * T(0.25);
-
-    //     clamp_newton_axis_splitters<T>(xs[0], t_min, t_max);
-    //     clamp_newton_axis_splitters<T>(xs[1], u_min, u_max);
-    //     clamp_newton_axis_splitters<T>(xs[2], v_min, v_max);
-    // }
-
-    // template <typename T>
-    // inline static void grid_sample_F_vf_nonuniform(const T xs[3][4],
-    //                                                const T sv[3],
-    //                                                const T s1[3],
-    //                                                const T s2[3],
-    //                                                const T s3[3],
-    //                                                const T ev[3],
-    //                                                const T e1[3],
-    //                                                const T e2[3],
-    //                                                const T e3[3],
-    //                                                T F[3][64]) {
-    //     for (int a = 0; a < 4; ++a) {
-    //         const T t = xs[0][a];
-    //         const T omt = T(1) - t;
-    //         for (int b = 0; b < 4; ++b) {
-    //             const T u = xs[1][b];
-    //             for (int c = 0; c < 4; ++c) {
-    //                 const int idx = a * 16 + b * 4 + c;
-    //                 const T v = xs[2][c];
-    //                 const T o = T(1) - u - v;
-    //                 for (int d = 0; d < 3; ++d) {
-    //                     const T vertex = omt * sv[d] + t * ev[d];
-    //                     const T face =
-    //                         omt * (o * s1[d] + u * s2[d] + v * s3[d]) + t * (o * e1[d] + u * e2[d] + v * e3[d]);
-    //                     F[d][idx] = vertex - face;
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
-
     template <int SplitDim, int N, typename T>
     inline static void newton_axis_splitters_vf(const Box<T> &domain,
                                                 const T sv[3],
@@ -1176,14 +1083,108 @@ namespace sccd {
         const T lo = domain.tuv[SplitDim].lower;
         const T hi = domain.tuv[SplitDim].upper;
         const T h = (hi - lo) / T(N + 1);
-        const T radius = h * T(0.5);
+        const T radius = h * T(0.45);
+        const T mid_t = (domain.tuv[0].lower + domain.tuv[0].upper) * T(0.5);
+        const T mid_u = (domain.tuv[1].lower + domain.tuv[1].upper) * T(0.5);
+        const T mid_v = (domain.tuv[2].lower + domain.tuv[2].upper) * T(0.5);
+        const T rt = SplitDim == 0 ? radius : (domain.tuv[0].upper - domain.tuv[0].lower) * T(0.25);
+        const T ru = SplitDim == 1 ? radius : (domain.tuv[1].upper - domain.tuv[1].lower) * T(0.25);
+        const T rv = SplitDim == 2 ? radius : (domain.tuv[2].upper - domain.tuv[2].lower) * T(0.25);
+
+        alignas(64) T ts[N];
+        alignas(64) T us[N];
+        alignas(64) T vs[N];
+        const T s4[3] = {0, 0, 0};
+        const T e4[3] = {0, 0, 0};
+
+        alignas(64) T xmin[N];
+        alignas(64) T xmax[N];
+
+#pragma omp simd aligned(ts, us, vs, xmin, xmax : 64)
+        for (int i = 0; i < N; ++i) {
+            const T x0 = lo + h * T(i + 1);
+            ts[i] = SplitDim == 0 ? x0 : mid_t;
+            us[i] = SplitDim == 1 ? x0 : mid_u;
+            vs[i] = SplitDim == 2 ? x0 : mid_v;
+            xmin[i] = sccd::max<T>(lo, x0 - radius);
+            xmax[i] = sccd::min<T>(hi, x0 + radius);
+        }
+
+        for (int iter = 0; iter < 1; ++iter) {
+#pragma omp simd aligned(ts, us, vs : 64)
+            for (int i = 0; i < N; ++i) {
+                T f = 0;
+                T p[3] = {0, 0, 0};
+                // FIXME: semismooth newton should be better than this
+                vf_objective_dir<T>(sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, ts[i], us[i], vs[i], &f, p);
+
+                if constexpr (SplitDim == 0) {
+                    ts[i] -= sccd::min<T>(xmax[i], sccd::max<T>(xmin[i], p[0]));
+                    us[i] -= p[1];
+                    vs[i] -= p[2];
+                } else if constexpr (SplitDim == 1) {
+                    us[i] -= sccd::min<T>(xmax[i], sccd::max<T>(xmin[i], p[1]));
+                    ts[i] -= p[0];
+                    vs[i] -= p[2];
+                } else {
+                    vs[i] -= sccd::min<T>(xmax[i], sccd::max<T>(xmin[i], p[2]));
+                    ts[i] -= p[0];
+                    us[i] -= p[1];
+                }
+
+                // // Keep inside the domain
+                // vs[i] = sccd::min<T>(domain.tuv[0].upper, sccd::max<T>(domain.tuv[0].lower, vs[i]));
+                // us[i] = sccd::min<T>(domain.tuv[1].upper, sccd::max<T>(domain.tuv[1].lower, us[i]));
+                // ts[i] = sccd::min<T>(domain.tuv[2].upper, sccd::max<T>(domain.tuv[2].lower, ts[i]));
+            }
+        }
+
+#pragma omp simd aligned(splitters, ts, us, vs : 64)
+        for (int i = 0; i < N; ++i) {
+            const T x0 = lo + h * T(i + 1);
+            const T xmin = sccd::max<T>(lo, x0 - radius);
+            const T xmax = sccd::min<T>(hi, x0 + radius);
+            const T x = SplitDim == 0 ? ts[i] : (SplitDim == 1 ? us[i] : vs[i]);
+
+            splitters[i] = sccd::min<T>(xmax, sccd::max<T>(xmin, x));
+        }
+    }
+
+    template <int SplitDim, int N, typename T>
+    inline static void normal_equation_axis_splitters_vf(const Box<T> &domain,
+                                                         const T sv[3],
+                                                         const T s1[3],
+                                                         const T s2[3],
+                                                         const T s3[3],
+                                                         const T ev[3],
+                                                         const T e1[3],
+                                                         const T e2[3],
+                                                         const T e3[3],
+                                                         T *const SCCD_RESTRICT splitters) {
+#if 0
+        // Baseline: uniform sampling
+        const T lo = domain.tuv[SplitDim].lower;
+        const T hi = domain.tuv[SplitDim].upper;
+        const T h = (hi - lo) / T(N + 1);
+#pragma omp simd aligned(splitters : 64)
+        for (int i = 0; i < N; ++i) {
+            const T x0 = lo + h * T(i + 1);
+            splitters[i] = x0;
+        }
+
+#else
+        static_assert(SplitDim >= 0 && SplitDim < 3);
+        static_assert(N > 0);
+
+        const T lo = domain.tuv[SplitDim].lower;
+        const T hi = domain.tuv[SplitDim].upper;
+        const T h = (hi - lo) / T(N + 1);
+        const T radius = h * T(0.45);
         const T mid_t = (domain.tuv[0].lower + domain.tuv[0].upper) * T(0.5);
         const T mid_u = (domain.tuv[1].lower + domain.tuv[1].upper) * T(0.5);
         const T mid_v = (domain.tuv[2].lower + domain.tuv[2].upper) * T(0.5);
         const T eps = std::numeric_limits<T>::epsilon();
 
-        alignas(64) T xmin[N];
-        alignas(64) T xmax[N];
         T F_base[3];
         T J_axis[3];
         T H_axis = T(0);
@@ -1212,7 +1213,7 @@ namespace sccd {
         }
         const T step_scale = H_axis > eps ? T(1) / H_axis : T(0.00001);
 
-#pragma omp simd aligned(splitters, xmin, xmax : 64)
+#pragma omp simd aligned(splitters : 64)
         for (int i = 0; i < N; ++i) {
             const T x0 = lo + h * T(i + 1);
             auto xmin = sccd::max<T>(lo, x0 - radius);
@@ -1226,28 +1227,28 @@ namespace sccd {
 
             const T step = g * step_scale;
             splitters[i] = sccd::min<T>(xmax, sccd::max<T>(xmin, x0 - step));
-            // splitters[i] = x0;
         }
+#endif
     }
 
     template <int SplitDim, int N, typename T>
-    inline bool grid_search_newton_split_vf_axis(const sccd::Box<T> &domain,
-                                                 const int max_iter,
-                                                 const T tol,
-                                                 const T tols[3],
-                                                 const T sv[3],
-                                                 const T s1[3],
-                                                 const T s2[3],
-                                                 const T s3[3],
-                                                 const T ev[3],
-                                                 const T e1[3],
-                                                 const T e2[3],
-                                                 const T e3[3],
-                                                 T &toi,
-                                                 T &u,
-                                                 T &v,
-                                                 std::vector<sccd::Box<T>> &stack,
-                                                 const bool refine) {
+    inline bool grid_search_adaptive_split_vf_axis(const sccd::Box<T> &domain,
+                                                   const int max_iter,
+                                                   const T tol,
+                                                   const T tols[3],
+                                                   const T sv[3],
+                                                   const T s1[3],
+                                                   const T s2[3],
+                                                   const T s3[3],
+                                                   const T ev[3],
+                                                   const T e1[3],
+                                                   const T e2[3],
+                                                   const T e3[3],
+                                                   T &toi,
+                                                   T &u,
+                                                   T &v,
+                                                   std::vector<sccd::Box<T>> &stack,
+                                                   const bool refine) {
         const T lo = domain.tuv[SplitDim].lower;
         const T hi = domain.tuv[SplitDim].upper;
 
@@ -1293,13 +1294,21 @@ namespace sccd {
                 }
             }
 
-            bool contains_zero = true;
-            bool small_adaptive = true;
-            bool small_absolute = true;
+            uint32_t contains_zero = 1;
+            uint32_t accept_mask = 0xf;
             for (int d = 0; d < 3; ++d) {
-                contains_zero &= (fmin[d] <= tol) & (fmax[d] >= -tol);
-                small_adaptive &= (fmax[d] - fmin[d] <= tols[d]);
-                small_absolute &= (fmax[d] - fmin[d] < tol);
+                const uint32_t zero = (fmin[d] <= tol) & (fmax[d] >= -tol);
+                const bool cond1 = (fmax[d] - fmin[d] <= tols[d]);
+                const bool cond2 = !((fmin[d] < tol) | (fmax[d] > -tol));
+                const bool cond3 = (fmax[d] - fmin[d] < tol);
+                const bool cond4 = (fmin[d] >= fmax[d]);
+
+                uint32_t cond_mask = (cond1 ? (1 & accept_mask) : 0);
+                cond_mask |= (cond2 ? (2 & accept_mask) : 0);
+                cond_mask |= (cond3 ? 4 : 0);
+                cond_mask |= (cond4 ? (8 & accept_mask) : 0);
+                accept_mask = cond_mask & (zero ? 0xf : 0);
+                contains_zero &= zero;
             }
 
             if (!contains_zero) {
@@ -1307,7 +1316,7 @@ namespace sccd {
             }
 
             Box<T> box({tt_min, tt_max}, {uu_min, uu_max}, {vv_min, vv_max}, domain.depth + 1);
-            if (small_adaptive || small_absolute || box.depth > max_iter) {
+            if (accept_mask || box.depth > max_iter) {
                 T t_approx = box.tuv[0].lower;
                 if (t_approx < toi && box.tuv[1].lower + box.tuv[2].lower < T(1) + tols[1] + tols[2]) {
                     T u_approx = box.tuv[1].lower;
@@ -1328,6 +1337,8 @@ namespace sccd {
                         u = u_approx;
                         v = v_approx;
                         found = true;
+
+                        // printf("Adaptive: %d\n", box.depth);
                     }
                 }
                 continue;
@@ -1340,52 +1351,52 @@ namespace sccd {
     }
 
     template <int N, typename T>
-    inline bool grid_search_newton_split_vf(const sccd::Box<T> &domain,
-                                            const int max_iter,
-                                            const T tol,
-                                            const T tols[3],
-                                            const T sv[3],
-                                            const T s1[3],
-                                            const T s2[3],
-                                            const T s3[3],
-                                            const T ev[3],
-                                            const T e1[3],
-                                            const T e2[3],
-                                            const T e3[3],
-                                            T &toi,
-                                            T &u,
-                                            T &v,
-                                            std::vector<sccd::Box<T>> &stack,
-                                            const bool refine) {
+    inline bool grid_search_adaptive_split_vf(const sccd::Box<T> &domain,
+                                              const int max_iter,
+                                              const T tol,
+                                              const T tols[3],
+                                              const T sv[3],
+                                              const T s1[3],
+                                              const T s2[3],
+                                              const T s3[3],
+                                              const T ev[3],
+                                              const T e1[3],
+                                              const T e2[3],
+                                              const T e3[3],
+                                              T &toi,
+                                              T &u,
+                                              T &v,
+                                              std::vector<sccd::Box<T>> &stack,
+                                              const bool refine) {
         const int split_dim = domain.widest_dimension();
         if (split_dim == 0) {
-            return grid_search_newton_split_vf_axis<0, N, T>(
+            return grid_search_adaptive_split_vf_axis<0, N, T>(
                 domain, max_iter, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, toi, u, v, stack, refine);
         }
         if (split_dim == 1) {
-            return grid_search_newton_split_vf_axis<1, N, T>(
+            return grid_search_adaptive_split_vf_axis<1, N, T>(
                 domain, max_iter, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, toi, u, v, stack, refine);
         }
-        return grid_search_newton_split_vf_axis<2, N, T>(
+        return grid_search_adaptive_split_vf_axis<2, N, T>(
             domain, max_iter, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, toi, u, v, stack, refine);
     }
 
     template <typename T>
-    bool find_root_grid_newton_split_vf(const int max_iter,
-                                        const T tol,
-                                        const T sv[3],
-                                        const T s1[3],
-                                        const T s2[3],
-                                        const T s3[3],
-                                        const T ev[3],
-                                        const T e1[3],
-                                        const T e2[3],
-                                        const T e3[3],
-                                        T &t,
-                                        T &u,
-                                        T &v,
-                                        std::vector<Box<T>> &stack,
-                                        const bool refine = false) {
+    bool find_root_grid_adaptive_split_vf(const int max_iter,
+                                          const T tol,
+                                          const T sv[3],
+                                          const T s1[3],
+                                          const T s2[3],
+                                          const T s3[3],
+                                          const T ev[3],
+                                          const T e1[3],
+                                          const T e2[3],
+                                          const T e3[3],
+                                          T &t,
+                                          T &u,
+                                          T &v,
+                                          std::vector<Box<T>> &stack,
+                                          const bool refine = false) {
         using Box = sccd::Box<T>;
         using Interval = sccd::Interval<T>;
 
@@ -1430,7 +1441,7 @@ namespace sccd {
                 continue;
             }
 
-            found |= grid_search_newton_split_vf<4, T>(
+            found |= grid_search_adaptive_split_vf<4, T>(
                 box, max_iter, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack, refine);
         }
 
@@ -1796,7 +1807,7 @@ namespace sccd {
         return found;
     }
 
-    // TODO: Rewrite from scratch find_root_grid_newton_split_vf
+    // TODO: Rewrite from scratch find_root_grid_adaptive_split_vf (DONE)
     // Exploit Newton steps with trust-region radius to determine better split points
     // sample the interval with N splitters then use fixed number of newton steps to move the splitter less than half
     // the distance to the next splitter in total (the radius is not on the correction but in total)
@@ -1808,6 +1819,246 @@ namespace sccd {
     // 1) do more compute and less control flow and filling of the stack
     // 2) converge faster to the roots
     // 3) better exploit hardware, hence reduce time to solution
+
+    template <int SplitDim, int N, typename T>
+    inline bool grid_search_uniform_split_vf_axis(const sccd::Box<T> &domain,
+                                                  const int max_iter,
+                                                  const T tol,
+                                                  const T tols[3],
+                                                  const T sv[3],
+                                                  const T s1[3],
+                                                  const T s2[3],
+                                                  const T s3[3],
+                                                  const T ev[3],
+                                                  const T e1[3],
+                                                  const T e2[3],
+                                                  const T e3[3],
+                                                  T &toi,
+                                                  T &u,
+                                                  T &v,
+                                                  std::vector<sccd::Box<T>> &stack,
+                                                  const bool refine) {
+        static_assert(SplitDim >= 0 && SplitDim < 3);
+        static_assert(N > 0);
+
+        const T lo = domain.tuv[SplitDim].lower;
+        const T h = (domain.tuv[SplitDim].upper - lo) / T(N);
+
+        alignas(64) T sample_min[N];
+        alignas(64) T sample_max[N];
+        alignas(64) T fmin[3][N];
+        alignas(64) T fmax[3][N];
+        alignas(64) uint32_t contains_zero[N];
+        alignas(64) uint32_t accept[N];
+
+#pragma omp simd aligned(sample_min, sample_max : 64)
+        for (int i = 0; i < N; ++i) {
+            sample_min[i] = lo + h * T(i);
+            sample_max[i] = lo + h * T(i + 1);
+        }
+
+        for (int d = 0; d < 3; ++d) {
+#pragma omp simd aligned(fmin, fmax : 64)
+            for (int i = 0; i < N; ++i) {
+                fmin[d][i] = std::numeric_limits<T>::max();
+                fmax[d][i] = std::numeric_limits<T>::lowest();
+            }
+        }
+
+        for (int mask = 0; mask < 8; ++mask) {
+            const bool mt = mask & 1;
+            const bool mu = mask & 2;
+            const bool mv = mask & 4;
+#pragma omp simd aligned(sample_min, sample_max, fmin, fmax : 64)
+            for (int i = 0; i < N; ++i) {
+                const T tt = SplitDim == 0 ? (mt ? sample_max[i] : sample_min[i])
+                                           : (mt ? domain.tuv[0].upper : domain.tuv[0].lower);
+                const T uu = SplitDim == 1 ? (mu ? sample_max[i] : sample_min[i])
+                                           : (mu ? domain.tuv[1].upper : domain.tuv[1].lower);
+                const T vv = SplitDim == 2 ? (mv ? sample_max[i] : sample_min[i])
+                                           : (mv ? domain.tuv[2].upper : domain.tuv[2].lower);
+                T F[3];
+                diff_vf<T>(sv, s1, s2, s3, ev, e1, e2, e3, tt, uu, vv, F);
+                for (int d = 0; d < 3; ++d) {
+                    fmin[d][i] = sccd::min<T>(fmin[d][i], F[d]);
+                    fmax[d][i] = sccd::max<T>(fmax[d][i], F[d]);
+                }
+            }
+        }
+
+#pragma omp simd aligned(fmin, fmax, contains_zero, accept : 64)
+        for (int i = 0; i < N; ++i) {
+            uint32_t contains_origin = 1;
+            uint32_t accept_mask = 0xf;
+            for (int d = 0; d < 3; ++d) {
+                const uint32_t zero = (fmin[d][i] <= tol) & (fmax[d][i] >= -tol);
+                const bool cond1 = (fmax[d][i] - fmin[d][i] <= tols[d]);
+                const bool cond2 = !((fmin[d][i] < tol) | (fmax[d][i] > -tol));
+                const bool cond3 = (fmax[d][i] - fmin[d][i] < tol);
+                const bool cond4 = (fmin[d][i] >= fmax[d][i]);
+
+                uint32_t cond_mask = (cond1 ? (1 & accept_mask) : 0);
+                cond_mask |= (cond2 ? (2 & accept_mask) : 0);
+                cond_mask |= (cond3 ? 4 : 0);
+                cond_mask |= (cond4 ? (8 & accept_mask) : 0);
+                accept_mask = cond_mask & (zero ? 0xf : 0);
+                contains_origin &= zero;
+            }
+            contains_zero[i] = contains_origin;
+            accept[i] = accept_mask;
+        }
+
+        bool found = false;
+        for (int i = 0; i < N; ++i) {
+            if (!contains_zero[i]) {
+                continue;
+            }
+
+            const T sample_lo = sample_min[i];
+            const T sample_hi = sample_max[i];
+            const T tt_min = SplitDim == 0 ? sample_lo : domain.tuv[0].lower;
+            const T tt_max = SplitDim == 0 ? sample_hi : domain.tuv[0].upper;
+            const T uu_min = SplitDim == 1 ? sample_lo : domain.tuv[1].lower;
+            const T uu_max = SplitDim == 1 ? sample_hi : domain.tuv[1].upper;
+            const T vv_min = SplitDim == 2 ? sample_lo : domain.tuv[2].lower;
+            const T vv_max = SplitDim == 2 ? sample_hi : domain.tuv[2].upper;
+
+            if (tt_min >= toi || uu_min + vv_min >= T(1) + tol) {
+                continue;
+            }
+
+            Box<T> box({tt_min, tt_max}, {uu_min, uu_max}, {vv_min, vv_max}, domain.depth + 1);
+            if (accept[i] || box.depth > max_iter) {
+                T t_approx = box.tuv[0].lower;
+                if (t_approx < toi && box.tuv[1].lower + box.tuv[2].lower < T(1) + tols[1] + tols[2]) {
+                    T u_approx = box.tuv[1].lower;
+                    T v_approx = box.tuv[2].lower;
+
+                    if (refine) {
+                        const bool refined =
+                            find_root_newton<T>(40, tol, sv, s1, s2, s3, ev, e1, e2, e3, t_approx, u_approx, v_approx);
+
+                        if (refined && t_approx < toi) {
+                            toi = sccd::min<T>(box.tuv[0].upper, sccd::max<T>(box.tuv[0].lower, T(0.99) * t_approx));
+                            u = u_approx;
+                            v = v_approx;
+                            found = true;
+                        }
+                    } else {
+                        toi = t_approx;
+                        u = u_approx;
+                        v = v_approx;
+                        found = true;
+
+                        // printf("Uniform: %d\n", box.depth);
+                    }
+                }
+                continue;
+            }
+
+            stack.push_back(box);
+        }
+
+        return found;
+    }
+
+    template <int N, typename T>
+    inline bool grid_search_uniform_split_vf(const sccd::Box<T> &domain,
+                                             const int max_iter,
+                                             const T tol,
+                                             const T tols[3],
+                                             const T sv[3],
+                                             const T s1[3],
+                                             const T s2[3],
+                                             const T s3[3],
+                                             const T ev[3],
+                                             const T e1[3],
+                                             const T e2[3],
+                                             const T e3[3],
+                                             T &toi,
+                                             T &u,
+                                             T &v,
+                                             std::vector<sccd::Box<T>> &stack,
+                                             const bool refine) {
+        const int split_dim = domain.widest_dimension();
+        if (split_dim == 0) {
+            return grid_search_uniform_split_vf_axis<0, N, T>(
+                domain, max_iter, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, toi, u, v, stack, refine);
+        }
+        if (split_dim == 1) {
+            return grid_search_uniform_split_vf_axis<1, N, T>(
+                domain, max_iter, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, toi, u, v, stack, refine);
+        }
+        return grid_search_uniform_split_vf_axis<2, N, T>(
+            domain, max_iter, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, toi, u, v, stack, refine);
+    }
+
+    template <typename T>
+    bool find_root_grid_uniform_split_vf(const int max_iter,
+                                         const T tol,
+                                         const T sv[3],
+                                         const T s1[3],
+                                         const T s2[3],
+                                         const T s3[3],
+                                         const T ev[3],
+                                         const T e1[3],
+                                         const T e2[3],
+                                         const T e3[3],
+                                         T &t,
+                                         T &u,
+                                         T &v,
+                                         std::vector<Box<T>> &stack,
+                                         const bool refine = false) {
+        using Box = sccd::Box<T>;
+        using Interval = sccd::Interval<T>;
+
+        T tols[3];
+        compute_face_vertex_tolerance_soa<T>(tol,
+                                             sv[0],
+                                             sv[1],
+                                             sv[2],
+                                             s1[0],
+                                             s1[1],
+                                             s1[2],
+                                             s2[0],
+                                             s2[1],
+                                             s2[2],
+                                             s3[0],
+                                             s3[1],
+                                             s3[2],
+                                             ev[0],
+                                             ev[1],
+                                             ev[2],
+                                             e1[0],
+                                             e1[1],
+                                             e1[2],
+                                             e2[0],
+                                             e2[1],
+                                             e2[2],
+                                             e3[0],
+                                             e3[1],
+                                             e3[2],
+                                             &tols[0],
+                                             &tols[1],
+                                             &tols[2]);
+
+        bool found = false;
+        stack.clear();
+        stack.push_back(Box(Interval{T(0), T(1)}, Interval{T(0), T(1)}, Interval{T(0), T(1)}, 0));
+        while (!stack.empty()) {
+            Box box = stack.back();
+            stack.pop_back();
+
+            if (box.tuv[0].lower >= t) {
+                continue;
+            }
+
+            found |= grid_search_uniform_split_vf<4, T>(
+                box, max_iter, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack, refine);
+        }
+
+        return found;
+    }
 
 }  // namespace sccd
 

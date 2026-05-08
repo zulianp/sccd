@@ -53,17 +53,20 @@ namespace sccd {
         int SCCD_USE_TI = 0;
         SCCD_READ_ENV(SCCD_USE_TI, atoi);
 
-        int SCCD_MAX_ITER = 12;
+        int SCCD_MAX_ITER = 32;
         SCCD_READ_ENV(SCCD_MAX_ITER, atoi);
 
-        T_HP SCCD_TOL = std::is_same_v<T, float> ? T(1e-8) : T(1e-12);
+        T_HP SCCD_TOL = std::is_same_v<T, float> ? T(1e-8) : T(1e-16);
         SCCD_READ_ENV(SCCD_TOL, atof);
 
         int SCCD_REFINE = 0;
         SCCD_READ_ENV(SCCD_REFINE, atoi);
 
-        int SCCD_NEWTON_SPLIT_VF = 0;
-        SCCD_READ_ENV(SCCD_NEWTON_SPLIT_VF, atoi);
+        int SCCD_ADAPTIVE_SPLIT_VF = 0;
+        SCCD_READ_ENV(SCCD_ADAPTIVE_SPLIT_VF, atoi);
+
+        int SCCD_UNIFORM_SPLIT_VF = 1;
+        SCCD_READ_ENV(SCCD_UNIFORM_SPLIT_VF, atoi);
 
         std::atomic<T> min_t = max_toi;
         if (toi_stride == 0) toi[0] = max_toi;
@@ -109,38 +112,18 @@ namespace sccd {
                     continue;
                 }
 #endif
-                // if (find_root_grid_rotate_vf<T_HP>(
-                const bool found = SCCD_NEWTON_SPLIT_VF
-                                       ? find_root_grid_newton_split_vf<T_HP>(SCCD_MAX_ITER,
-                                                                              SCCD_TOL,
-                                                                              sv,
-                                                                              s1,
-                                                                              s2,
-                                                                              s3,
-                                                                              ev,
-                                                                              e1,
-                                                                              e2,
-                                                                              e3,
-                                                                              t,
-                                                                              u,
-                                                                              v,
-                                                                              stack,
-                                                                              SCCD_REFINE)
-                                       : find_root_grid_vf<T_HP>(SCCD_MAX_ITER,
-                                                                 SCCD_TOL,
-                                                                 sv,
-                                                                 s1,
-                                                                 s2,
-                                                                 s3,
-                                                                 ev,
-                                                                 e1,
-                                                                 e2,
-                                                                 e3,
-                                                                 t,
-                                                                 u,
-                                                                 v,
-                                                                 stack,
-                                                                 SCCD_REFINE);
+                bool found = false;
+                if (SCCD_ADAPTIVE_SPLIT_VF) {
+                    found = find_root_grid_adaptive_split_vf<T_HP>(
+                        SCCD_MAX_ITER, SCCD_TOL, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack, SCCD_REFINE);
+                } else if (SCCD_UNIFORM_SPLIT_VF) {
+                    found = find_root_grid_uniform_split_vf<T_HP>(
+                        SCCD_MAX_ITER, SCCD_TOL, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack, SCCD_REFINE);
+                } else {
+                    // if (find_root_grid_rotate_vf<T_HP>(
+                    found = find_root_grid_vf<T_HP>(
+                        SCCD_MAX_ITER, SCCD_TOL, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack, SCCD_REFINE);
+                }
                 if (found) {
                     if (toi_stride == 0) {
                         atomic_min<T>(min_t, t);
@@ -181,10 +164,10 @@ namespace sccd {
         int SCCD_USE_TI = 0;
         SCCD_READ_ENV(SCCD_USE_TI, atoi);
 
-        int SCCD_MAX_ITER = 12;
+        int SCCD_MAX_ITER = 32;
         SCCD_READ_ENV(SCCD_MAX_ITER, atoi);
 
-        T_HP SCCD_TOL = std::is_same_v<T, float> ? T(1e-8) : T(1e-12);
+        T_HP SCCD_TOL = std::is_same_v<T, float> ? T(1e-8) : T(1e-16);
         SCCD_READ_ENV(SCCD_TOL, atof);
 
         std::atomic<T> min_t = max_toi;
