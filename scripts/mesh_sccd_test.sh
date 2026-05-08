@@ -7,17 +7,17 @@ export PATH=$INSTALL_DIR/smesh/bin:$PATH
 DATA_PATH=/Users/patrickzulian/Desktop/code/installations/sources/Scalable-CCD/tests/data
 
 
-case=../data/n-body-simulation/frames/
-mesh_t0=balls16_1
-mesh_t1=balls16_2
+# case=../data/n-body-simulation/frames/
+# mesh_t0=balls16_1
+# mesh_t1=balls16_2
 
 # case=../data/armadillo-rollers/frames 
 # mesh_t0="296"
 # mesh_t1="297"
 
-# case=$DATA_PATH/armadillo-rollers/frames
-# mesh_t0=326
-# mesh_t1=327
+case=$DATA_PATH/armadillo-rollers/frames
+mesh_t0=326
+mesh_t1=327
 
 # case=$DATA_PATH/cloth-ball/frames
 # mesh_t0=cloth_ball92
@@ -27,9 +27,9 @@ mesh_t1=balls16_2
 # mesh_t0=227
 # mesh_t1=228
 
-case=$DATA_PATH/n-body-simulation/frames/
-mesh_t0=balls16_18
-mesh_t1=balls16_19
+# case=$DATA_PATH/n-body-simulation/frames/
+# mesh_t0=balls16_18
+# mesh_t1=balls16_19
 
 # case=$DATA_PATH/rod-twist/frames/
 # mesh_t0=3036

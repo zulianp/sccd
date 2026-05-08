@@ -13,6 +13,8 @@ make -j8
 db_dir="$PROJECT_DIR/data"
 datasets=(armadillo-rollers n-body-simulation puffer-ball)
 
+export SCCD_TOL=1e-16 
+
 cd -
 export SCCD_LIB_PATH=$PROJECT_DIR/build/libsccd.dylib
 for ds in ${datasets[@]}
