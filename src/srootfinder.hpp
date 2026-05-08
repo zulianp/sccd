@@ -1169,34 +1169,31 @@ namespace sccd {
                                                 const T e1[3],
                                                 const T e2[3],
                                                 const T e3[3],
-                                                T splitters[N + 1]) {
+                                                T *const SCCD_RESTRICT splitters) {
         static_assert(SplitDim >= 0 && SplitDim < 3);
+        static_assert(N > 0);
 
         const T lo = domain.tuv[SplitDim].lower;
         const T hi = domain.tuv[SplitDim].upper;
-        const T h = (hi - lo) / T(N);
+        const T h = (hi - lo) / T(N + 1);
         const T radius = h * T(0.5);
         const T mid_t = (domain.tuv[0].lower + domain.tuv[0].upper) * T(0.5);
         const T mid_u = (domain.tuv[1].lower + domain.tuv[1].upper) * T(0.5);
         const T mid_v = (domain.tuv[2].lower + domain.tuv[2].upper) * T(0.5);
         const T eps = std::numeric_limits<T>::epsilon();
 
-        splitters[0] = lo;
-        splitters[N] = hi;
+        // TODO precompute quantites that are constant within the Newton iteration
 
-        // TODO create temp solution array with correct alignment for vectorization and use that within the Newton
-        // iteration
-
-#pragma omp simd
-        for (int i = 1; i < N; ++i) {
-            const T x0 = lo + h * T(i);
+#pragma omp simd aligned(splitters : 64)
+        for (int i = 0; i < N; ++i) {
+            const T x0 = lo + h * T(i + 1);
             splitters[i] = x0;
         }
 
-        for (int it = 0; it < 8; ++it) {
-#pragma omp simd
-            for (int i = 1; i < N; ++i) {
-                const T x0 = lo + h * T(i);
+        for (int it = 0; it < 4; ++it) {
+#pragma omp simd aligned(splitters : 64)
+            for (int i = 0; i < N; ++i) {
+                const T x0 = lo + h * T(i + 1);
                 const T xmin = sccd::max<T>(lo, x0 - radius);
                 const T xmax = sccd::min<T>(hi, x0 + radius);
                 const T x = splitters[i];
@@ -1226,7 +1223,7 @@ namespace sccd {
                     H += J * J;
                 }
 
-                const T step = H > eps ? g / H : T(0);
+                const T step = H > eps ? g / H : 0.00001 * g;
                 splitters[i] = sccd::min<T>(xmax, sccd::max<T>(xmin, x - step));
             }
         }
@@ -1250,17 +1247,30 @@ namespace sccd {
                                                  T &v,
                                                  std::vector<sccd::Box<T>> &stack,
                                                  const bool refine) {
-        T splitters[N + 1];
+        const T lo = domain.tuv[SplitDim].lower;
+        const T hi = domain.tuv[SplitDim].upper;
+
+        alignas(64) T splitters[N];
         newton_axis_splitters_vf<SplitDim, N, T>(domain, sv, s1, s2, s3, ev, e1, e2, e3, splitters);
 
-        bool found = false;
+        alignas(64) T samples[N + 2];
+        samples[0] = lo;
+        samples[N + 1] = hi;
+#pragma omp simd aligned(splitters, samples : 64)
         for (int i = 0; i < N; ++i) {
-            const T tt_min = SplitDim == 0 ? splitters[i] : domain.tuv[0].lower;
-            const T tt_max = SplitDim == 0 ? splitters[i + 1] : domain.tuv[0].upper;
-            const T uu_min = SplitDim == 1 ? splitters[i] : domain.tuv[1].lower;
-            const T uu_max = SplitDim == 1 ? splitters[i + 1] : domain.tuv[1].upper;
-            const T vv_min = SplitDim == 2 ? splitters[i] : domain.tuv[2].lower;
-            const T vv_max = SplitDim == 2 ? splitters[i + 1] : domain.tuv[2].upper;
+            samples[i + 1] = splitters[i];
+        }
+
+        bool found = false;
+        for (int i = 0; i < N + 1; ++i) {
+            const T sample_min = samples[i];
+            const T sample_max = samples[i + 1];
+            const T tt_min = SplitDim == 0 ? sample_min : domain.tuv[0].lower;
+            const T tt_max = SplitDim == 0 ? sample_max : domain.tuv[0].upper;
+            const T uu_min = SplitDim == 1 ? sample_min : domain.tuv[1].lower;
+            const T uu_max = SplitDim == 1 ? sample_max : domain.tuv[1].upper;
+            const T vv_min = SplitDim == 2 ? sample_min : domain.tuv[2].lower;
+            const T vv_max = SplitDim == 2 ? sample_max : domain.tuv[2].upper;
 
             if (tt_min >= toi || uu_min + vv_min >= T(1) + tol) {
                 continue;
@@ -1419,7 +1429,7 @@ namespace sccd {
                 continue;
             }
 
-            found |= grid_search_newton_split_vf<8, T>(
+            found |= grid_search_newton_split_vf<4, T>(
                 box, max_iter, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack, refine);
         }
 
