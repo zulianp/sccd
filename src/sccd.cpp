@@ -52,7 +52,8 @@ int sccd_find_root_vf_f(int max_iter,
                         float* v) {
     std::vector<sccd::Box<float>> stack;
     stack.reserve(1024);
-    return sccd::find_root_grid_vf<float>(max_iter, tol, sv, s1, s2, s3, ev, e1, e2, e3, *t, *u, *v, stack);
+    return sccd::find_root_grid_uniform_split_vf<float>(
+        max_iter, tol, sv, s1, s2, s3, ev, e1, e2, e3, *t, *u, *v, stack);
 }
 
 int sccd_find_root_vf_d(int max_iter,
@@ -70,7 +71,7 @@ int sccd_find_root_vf_d(int max_iter,
                         double* v) {
     std::vector<sccd::Box<double>> stack;
     stack.reserve(1024);
-    return sccd::find_root_grid_vf<double>(max_iter, tol, sv, s1, s2, s3, ev, e1, e2, e3, *t, *u, *v, stack);
+    return sccd::find_root_grid_uniform_split_vf<double>(max_iter, tol, sv, s1, s2, s3, ev, e1, e2, e3, *t, *u, *v, stack);
 }
 
 int sccd_find_root_rotate_vf_d(int max_iter,
@@ -88,7 +89,8 @@ int sccd_find_root_rotate_vf_d(int max_iter,
                                double* v) {
     std::vector<sccd::Box<double>> stack;
     stack.reserve(1024);
-    return sccd::find_root_grid_rotate_vf<double>(max_iter, tol, sv, s1, s2, s3, ev, e1, e2, e3, *t, *u, *v, stack, true);
+    return sccd::find_root_grid_rotate_vf<double>(
+        max_iter, tol, sv, s1, s2, s3, ev, e1, e2, e3, *t, *u, *v, stack, true);
 }
 
 int sccd_find_root_rotate_vf_f(int max_iter,
@@ -106,7 +108,8 @@ int sccd_find_root_rotate_vf_f(int max_iter,
                                float* v) {
     std::vector<sccd::Box<float>> stack;
     stack.reserve(1024);
-    return sccd::find_root_grid_rotate_vf<float>(max_iter, tol, sv, s1, s2, s3, ev, e1, e2, e3, *t, *u, *v, stack, true);
+    return sccd::find_root_grid_rotate_vf<float>(
+        max_iter, tol, sv, s1, s2, s3, ev, e1, e2, e3, *t, *u, *v, stack, true);
 }
 
 #ifdef SCCD_ENABLE_TIGHT_INCLUSION

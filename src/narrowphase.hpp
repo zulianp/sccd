@@ -56,7 +56,7 @@ namespace sccd {
         int SCCD_MAX_ITER = 32;
         SCCD_READ_ENV(SCCD_MAX_ITER, atoi);
 
-        T_HP SCCD_TOL = std::is_same_v<T, float> ? T(1e-8) : T(1e-16);
+        T_HP SCCD_TOL = std::is_same_v<T, float> ? T(1e-8) : T(1e-14);
         SCCD_READ_ENV(SCCD_TOL, atof);
 
         int SCCD_REFINE = 0;
@@ -167,7 +167,7 @@ namespace sccd {
         int SCCD_MAX_ITER = 32;
         SCCD_READ_ENV(SCCD_MAX_ITER, atoi);
 
-        T_HP SCCD_TOL = std::is_same_v<T, float> ? T(1e-8) : T(1e-16);
+        T_HP SCCD_TOL = std::is_same_v<T, float> ? T(1e-8) : T(1e-14);
         SCCD_READ_ENV(SCCD_TOL, atof);
 
         std::atomic<T> min_t = max_toi;
