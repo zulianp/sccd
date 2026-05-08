@@ -60,6 +60,9 @@ db_to_raw $case/"$mesh_t1".ply "$mesh_t1"
 
 set +x
 
+export OMP_NUM_THREADS=72
+export OMP_PROC_BIND=true
+
 ITERATIONS=4
 
 echo "CUDA: "
@@ -76,7 +79,7 @@ rm -rf cpu_traces
 mkdir -p cpu_traces
 for ((i=1; i<=ITERATIONS; i++)); do
     echo "Iteration $i"
-    SCCD_TOL=1e-12 SCCD_MAX_ITER=35 ./mesh_sccd      $mesh_t0 $mesh_t1
+    SCCD_NEWTON_SPLIT_VF=1 SCCD_TOL=1e-12 SCCD_MAX_ITER=35 ./mesh_sccd      $mesh_t0 $mesh_t1
     mv smesh.trace.csv cpu_traces/ccd_CPU_$i.csv
 done
 

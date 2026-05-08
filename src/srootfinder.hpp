@@ -1128,36 +1128,36 @@ namespace sccd {
     //     clamp_newton_axis_splitters<T>(xs[2], v_min, v_max);
     // }
 
-    template <typename T>
-    inline static void grid_sample_F_vf_nonuniform(const T xs[3][4],
-                                                   const T sv[3],
-                                                   const T s1[3],
-                                                   const T s2[3],
-                                                   const T s3[3],
-                                                   const T ev[3],
-                                                   const T e1[3],
-                                                   const T e2[3],
-                                                   const T e3[3],
-                                                   T F[3][64]) {
-        for (int a = 0; a < 4; ++a) {
-            const T t = xs[0][a];
-            const T omt = T(1) - t;
-            for (int b = 0; b < 4; ++b) {
-                const T u = xs[1][b];
-                for (int c = 0; c < 4; ++c) {
-                    const int idx = a * 16 + b * 4 + c;
-                    const T v = xs[2][c];
-                    const T o = T(1) - u - v;
-                    for (int d = 0; d < 3; ++d) {
-                        const T vertex = omt * sv[d] + t * ev[d];
-                        const T face =
-                            omt * (o * s1[d] + u * s2[d] + v * s3[d]) + t * (o * e1[d] + u * e2[d] + v * e3[d]);
-                        F[d][idx] = vertex - face;
-                    }
-                }
-            }
-        }
-    }
+    // template <typename T>
+    // inline static void grid_sample_F_vf_nonuniform(const T xs[3][4],
+    //                                                const T sv[3],
+    //                                                const T s1[3],
+    //                                                const T s2[3],
+    //                                                const T s3[3],
+    //                                                const T ev[3],
+    //                                                const T e1[3],
+    //                                                const T e2[3],
+    //                                                const T e3[3],
+    //                                                T F[3][64]) {
+    //     for (int a = 0; a < 4; ++a) {
+    //         const T t = xs[0][a];
+    //         const T omt = T(1) - t;
+    //         for (int b = 0; b < 4; ++b) {
+    //             const T u = xs[1][b];
+    //             for (int c = 0; c < 4; ++c) {
+    //                 const int idx = a * 16 + b * 4 + c;
+    //                 const T v = xs[2][c];
+    //                 const T o = T(1) - u - v;
+    //                 for (int d = 0; d < 3; ++d) {
+    //                     const T vertex = omt * sv[d] + t * ev[d];
+    //                     const T face =
+    //                         omt * (o * s1[d] + u * s2[d] + v * s3[d]) + t * (o * e1[d] + u * e2[d] + v * e3[d]);
+    //                     F[d][idx] = vertex - face;
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }
 
     template <int SplitDim, int N, typename T>
     inline static void newton_axis_splitters_vf(const Box<T> &domain,
@@ -1215,25 +1215,18 @@ namespace sccd {
 #pragma omp simd aligned(splitters, xmin, xmax : 64)
         for (int i = 0; i < N; ++i) {
             const T x0 = lo + h * T(i + 1);
-            splitters[i] = x0;
-            xmin[i] = sccd::max<T>(lo, x0 - radius);
-            xmax[i] = sccd::min<T>(hi, x0 + radius);
-        }
+            auto xmin = sccd::max<T>(lo, x0 - radius);
+            auto xmax = sccd::min<T>(hi, x0 + radius);
 
-        for (int it = 0; it < 4; ++it) {
-#pragma omp simd aligned(splitters, xmin, xmax : 64)
-            for (int i = 0; i < N; ++i) {
-                const T x = splitters[i];
-
-                T g = T(0);
-                for (int d = 0; d < 3; ++d) {
-                    const T J = J_axis[d];
-                    g += (F_base[d] + x * J) * J;
-                }
-
-                const T step = g * step_scale;
-                splitters[i] = sccd::min<T>(xmax[i], sccd::max<T>(xmin[i], x - step));
+            T g = T(0);
+            for (int d = 0; d < 3; ++d) {
+                const T J = J_axis[d];
+                g += (F_base[d] + x0 * J) * J;
             }
+
+            const T step = g * step_scale;
+            splitters[i] = sccd::min<T>(xmax, sccd::max<T>(xmin, x0 - step));
+            // splitters[i] = x0;
         }
     }
 
