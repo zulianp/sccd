@@ -302,6 +302,10 @@ namespace sccd {
 
         int find_impact_times_impl_broadphase_device(const ptrdiff_t toi_stride) {
 #if defined(SCCD_ENABLE_CUDA)
+            if (!vaabb_) {
+                init();
+            }
+
             const int dim = mesh_->spatial_dimension();
             const ptrdiff_t n_nodes = mesh_->n_nodes();
             const ptrdiff_t n_faces = mesh_->block(0)->n_elements();
