@@ -445,6 +445,119 @@ namespace sccd {
         }
     };
 
+    template <int SplitDim, typename T>
+    inline Box<T> split_axis_box(const Box<T> &domain, const T sample_min, const T sample_max) {
+        static_assert(SplitDim >= 0 && SplitDim < 3);
+        return Box<T>(Interval<T>{SplitDim == 0 ? sample_min : domain.tuv[0].lower,
+                                  SplitDim == 0 ? sample_max : domain.tuv[0].upper},
+                      Interval<T>{SplitDim == 1 ? sample_min : domain.tuv[1].lower,
+                                  SplitDim == 1 ? sample_max : domain.tuv[1].upper},
+                      Interval<T>{SplitDim == 2 ? sample_min : domain.tuv[2].lower,
+                                  SplitDim == 2 ? sample_max : domain.tuv[2].upper},
+                      domain.depth + 1);
+    }
+
+    template <typename T>
+    inline void init_codomain_bounds(T fmin[3], T fmax[3]) {
+        for (int d = 0; d < 3; ++d) {
+            fmin[d] = std::numeric_limits<T>::max();
+            fmax[d] = std::numeric_limits<T>::lowest();
+        }
+    }
+
+    template <typename T>
+    inline void update_codomain_bounds(const T F[3], T fmin[3], T fmax[3]) {
+        for (int d = 0; d < 3; ++d) {
+            fmin[d] = sccd::min<T>(fmin[d], F[d]);
+            fmax[d] = sccd::max<T>(fmax[d], F[d]);
+        }
+    }
+
+    template <typename T>
+    inline void update_acceptance_axis(const T fmin,
+                                       const T fmax,
+                                       const T tol,
+                                       const T tol_axis,
+                                       uint32_t &contains_zero,
+                                       uint32_t &accept_mask) {
+        const uint32_t zero = (fmin <= tol) & (fmax >= -tol);
+        const bool cond1 = (fmax - fmin <= tol_axis);
+        const bool cond2 = !((fmin < tol) | (fmax > -tol));
+        const bool cond3 = (fmax - fmin < tol);
+        const bool cond4 = (fmin >= fmax);
+
+        uint32_t cond_mask = (cond1 ? (1 & accept_mask) : 0);
+        cond_mask |= (cond2 ? (2 & accept_mask) : 0);
+        cond_mask |= (cond3 ? 4 : 0);
+        cond_mask |= (cond4 ? (8 & accept_mask) : 0);
+        accept_mask = cond_mask & (zero ? 0xf : 0);
+        contains_zero &= zero;
+    }
+
+    template <typename T>
+    inline bool codomain_acceptance(const T fmin[3], const T fmax[3], const T tol, const T tols[3], uint32_t &accept) {
+        uint32_t contains_zero = 1;
+        uint32_t accept_mask = 0xf;
+        for (int d = 0; d < 3; ++d) {
+            update_acceptance_axis<T>(fmin[d], fmax[d], tol, tols[d], contains_zero, accept_mask);
+        }
+        accept = accept_mask;
+        return contains_zero;
+    }
+
+    template <typename T>
+    inline bool accept_grid_root_vf(const Box<T> &box,
+                                    const T tol,
+                                    const T tols[3],
+                                    const T sv[3],
+                                    const T s1[3],
+                                    const T s2[3],
+                                    const T s3[3],
+                                    const T ev[3],
+                                    const T e1[3],
+                                    const T e2[3],
+                                    const T e3[3],
+                                    T &toi,
+                                    T &u,
+                                    T &v,
+                                    const bool refine) {
+        T t_approx = box.tuv[0].lower;
+        if (t_approx < toi && box.tuv[1].lower + box.tuv[2].lower < T(1) + tols[1] + tols[2]) {
+            T u_approx = box.tuv[1].lower;
+            T v_approx = box.tuv[2].lower;
+
+            if (refine) {
+                const bool refined =
+                    find_root_newton<T>(40, tol, sv, s1, s2, s3, ev, e1, e2, e3, t_approx, u_approx, v_approx);
+
+                if (refined && t_approx < toi) {
+                    toi = sccd::min<T>(box.tuv[0].upper, sccd::max<T>(box.tuv[0].lower, T(0.99) * t_approx));
+                    u = u_approx;
+                    v = v_approx;
+                    return true;
+                }
+            } else {
+                toi = t_approx;
+                u = u_approx;
+                v = v_approx;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    template <typename T>
+    inline bool accept_grid_root_ee(const Box<T> &box, T &toi, T &u, T &v) {
+        const T t_approx = box.tuv[0].lower;
+        if (t_approx < toi) {
+            toi = t_approx;
+            u = box.tuv[1].lower;
+            v = box.tuv[2].lower;
+            return true;
+        }
+        return false;
+    }
+
     template <typename T>
     bool find_root_bisection(const int max_iter,
                              const T tol,
@@ -734,9 +847,9 @@ namespace sccd {
                 continue;
             }
 
-            T fmin[3] = {std::numeric_limits<T>::max(), std::numeric_limits<T>::max(), std::numeric_limits<T>::max()};
-            T fmax[3] = {
-                std::numeric_limits<T>::lowest(), std::numeric_limits<T>::lowest(), std::numeric_limits<T>::lowest()};
+            T fmin[3];
+            T fmax[3];
+            init_codomain_bounds<T>(fmin, fmax);
 
             for (int mask = 0; mask < 8; ++mask) {
                 const T ct = (mask & 1) ? tt_max : tt_min;
@@ -744,59 +857,17 @@ namespace sccd {
                 const T cv = (mask & 4) ? vv_max : vv_min;
                 T F[3];
                 diff_vf<T>(sv, s1, s2, s3, ev, e1, e2, e3, ct, cu, cv, F);
-                for (int d = 0; d < 3; ++d) {
-                    fmin[d] = sccd::min<T>(fmin[d], F[d]);
-                    fmax[d] = sccd::max<T>(fmax[d], F[d]);
-                }
+                update_codomain_bounds<T>(F, fmin, fmax);
             }
 
-            uint32_t contains_zero = 1;
-            uint32_t accept_mask = 0xf;
-            for (int d = 0; d < 3; ++d) {
-                const uint32_t zero = (fmin[d] <= tol) & (fmax[d] >= -tol);
-                const bool cond1 = (fmax[d] - fmin[d] <= tols[d]);
-                const bool cond2 = !((fmin[d] < tol) | (fmax[d] > -tol));
-                const bool cond3 = (fmax[d] - fmin[d] < tol);
-                const bool cond4 = (fmin[d] >= fmax[d]);
-
-                uint32_t cond_mask = (cond1 ? (1 & accept_mask) : 0);
-                cond_mask |= (cond2 ? (2 & accept_mask) : 0);
-                cond_mask |= (cond3 ? 4 : 0);
-                cond_mask |= (cond4 ? (8 & accept_mask) : 0);
-                accept_mask = cond_mask & (zero ? 0xf : 0);
-                contains_zero &= zero;
-            }
-
-            if (!contains_zero) {
+            uint32_t accept_mask = 0;
+            if (!codomain_acceptance<T>(fmin, fmax, tol, tols, accept_mask)) {
                 continue;
             }
 
-            Box<T> box({tt_min, tt_max}, {uu_min, uu_max}, {vv_min, vv_max}, domain.depth + 1);
+            Box<T> box = split_axis_box<SplitDim, T>(domain, sample_min, sample_max);
             if (accept_mask || box.depth > max_iter) {
-                T t_approx = box.tuv[0].lower;
-                if (t_approx < toi && box.tuv[1].lower + box.tuv[2].lower < T(1) + tols[1] + tols[2]) {
-                    T u_approx = box.tuv[1].lower;
-                    T v_approx = box.tuv[2].lower;
-
-                    if (refine) {
-                        const bool refined =
-                            find_root_newton<T>(40, tol, sv, s1, s2, s3, ev, e1, e2, e3, t_approx, u_approx, v_approx);
-
-                        if (refined && t_approx < toi) {
-                            toi = sccd::min<T>(box.tuv[0].upper, sccd::max<T>(box.tuv[0].lower, T(0.99) * t_approx));
-                            u = u_approx;
-                            v = v_approx;
-                            found = true;
-                        }
-                    } else {
-                        toi = t_approx;
-                        u = u_approx;
-                        v = v_approx;
-                        found = true;
-
-                        // printf("Adaptive: %d\n", box.depth);
-                    }
-                }
+                found |= accept_grid_root_vf<T>(box, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, toi, u, v, refine);
                 continue;
             }
 
@@ -975,18 +1046,7 @@ namespace sccd {
             uint32_t contains_origin = 1;
             uint32_t accept_mask = 0xf;
             for (int d = 0; d < 3; ++d) {
-                const uint32_t zero = (fmin[d][i] <= tol) & (fmax[d][i] >= -tol);
-                const bool cond1 = (fmax[d][i] - fmin[d][i] <= tols[d]);
-                const bool cond2 = !((fmin[d][i] < tol) | (fmax[d][i] > -tol));
-                const bool cond3 = (fmax[d][i] - fmin[d][i] < tol);
-                const bool cond4 = (fmin[d][i] >= fmax[d][i]);
-
-                uint32_t cond_mask = (cond1 ? (1 & accept_mask) : 0);
-                cond_mask |= (cond2 ? (2 & accept_mask) : 0);
-                cond_mask |= (cond3 ? 4 : 0);
-                cond_mask |= (cond4 ? (8 & accept_mask) : 0);
-                accept_mask = cond_mask & (zero ? 0xf : 0);
-                contains_origin &= zero;
+                update_acceptance_axis<T>(fmin[d][i], fmax[d][i], tol, tols[d], contains_origin, accept_mask);
             }
             contains_zero[i] = contains_origin;
             accept[i] = accept_mask;
@@ -1011,32 +1071,9 @@ namespace sccd {
                 continue;
             }
 
-            Box<T> box({tt_min, tt_max}, {uu_min, uu_max}, {vv_min, vv_max}, domain.depth + 1);
+            Box<T> box = split_axis_box<SplitDim, T>(domain, sample_lo, sample_hi);
             if (accept[i] || box.depth > max_iter) {
-                T t_approx = box.tuv[0].lower;
-                if (t_approx < toi && box.tuv[1].lower + box.tuv[2].lower < T(1) + tols[1] + tols[2]) {
-                    T u_approx = box.tuv[1].lower;
-                    T v_approx = box.tuv[2].lower;
-
-                    if (refine) {
-                        const bool refined =
-                            find_root_newton<T>(40, tol, sv, s1, s2, s3, ev, e1, e2, e3, t_approx, u_approx, v_approx);
-
-                        if (refined && t_approx < toi) {
-                            toi = sccd::min<T>(box.tuv[0].upper, sccd::max<T>(box.tuv[0].lower, T(0.99) * t_approx));
-                            u = u_approx;
-                            v = v_approx;
-                            found = true;
-                        }
-                    } else {
-                        toi = t_approx;
-                        u = u_approx;
-                        v = v_approx;
-                        found = true;
-
-                        // printf("Uniform: %d\n", box.depth);
-                    }
-                }
+                found |= accept_grid_root_vf<T>(box, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, toi, u, v, refine);
                 continue;
             }
 
@@ -1277,9 +1314,9 @@ namespace sccd {
                 continue;
             }
 
-            T fmin[3] = {std::numeric_limits<T>::max(), std::numeric_limits<T>::max(), std::numeric_limits<T>::max()};
-            T fmax[3] = {
-                std::numeric_limits<T>::lowest(), std::numeric_limits<T>::lowest(), std::numeric_limits<T>::lowest()};
+            T fmin[3];
+            T fmax[3];
+            init_codomain_bounds<T>(fmin, fmax);
 
             for (int mask = 0; mask < 8; ++mask) {
                 const T ct = (mask & 1) ? tt_max : tt_min;
@@ -1287,42 +1324,17 @@ namespace sccd {
                 const T cv = (mask & 4) ? vv_max : vv_min;
                 T F[3];
                 diff_ee<T>(s1, s2, s3, s4, e1, e2, e3, e4, ct, cu, cv, F);
-                for (int d = 0; d < 3; ++d) {
-                    fmin[d] = sccd::min<T>(fmin[d], F[d]);
-                    fmax[d] = sccd::max<T>(fmax[d], F[d]);
-                }
+                update_codomain_bounds<T>(F, fmin, fmax);
             }
 
-            uint32_t contains_zero = 1;
-            uint32_t accept_mask = 0xf;
-            for (int d = 0; d < 3; ++d) {
-                const uint32_t zero = (fmin[d] <= tol) & (fmax[d] >= -tol);
-                const bool cond1 = (fmax[d] - fmin[d] <= tols[d]);
-                const bool cond2 = !((fmin[d] < tol) | (fmax[d] > -tol));
-                const bool cond3 = (fmax[d] - fmin[d] < tol);
-                const bool cond4 = (fmin[d] >= fmax[d]);
-
-                uint32_t cond_mask = (cond1 ? (1 & accept_mask) : 0);
-                cond_mask |= (cond2 ? (2 & accept_mask) : 0);
-                cond_mask |= (cond3 ? 4 : 0);
-                cond_mask |= (cond4 ? (8 & accept_mask) : 0);
-                accept_mask = cond_mask & (zero ? 0xf : 0);
-                contains_zero &= zero;
-            }
-
-            if (!contains_zero) {
+            uint32_t accept_mask = 0;
+            if (!codomain_acceptance<T>(fmin, fmax, tol, tols, accept_mask)) {
                 continue;
             }
 
-            Box<T> box({tt_min, tt_max}, {uu_min, uu_max}, {vv_min, vv_max}, domain.depth + 1);
+            Box<T> box = split_axis_box<SplitDim, T>(domain, sample_min, sample_max);
             if (accept_mask || box.depth > max_iter) {
-                const T t_approx = box.tuv[0].lower;
-                if (t_approx < toi) {
-                    toi = t_approx;
-                    u = box.tuv[1].lower;
-                    v = box.tuv[2].lower;
-                    found = true;
-                }
+                found |= accept_grid_root_ee<T>(box, toi, u, v);
                 continue;
             }
 
@@ -1502,18 +1514,7 @@ namespace sccd {
             uint32_t contains_origin = 1;
             uint32_t accept_mask = 0xf;
             for (int d = 0; d < 3; ++d) {
-                const uint32_t zero = (fmin[d][i] <= tol) & (fmax[d][i] >= -tol);
-                const bool cond1 = (fmax[d][i] - fmin[d][i] <= tols[d]);
-                const bool cond2 = !((fmin[d][i] < tol) | (fmax[d][i] > -tol));
-                const bool cond3 = (fmax[d][i] - fmin[d][i] < tol);
-                const bool cond4 = (fmin[d][i] >= fmax[d][i]);
-
-                uint32_t cond_mask = (cond1 ? (1 & accept_mask) : 0);
-                cond_mask |= (cond2 ? (2 & accept_mask) : 0);
-                cond_mask |= (cond3 ? 4 : 0);
-                cond_mask |= (cond4 ? (8 & accept_mask) : 0);
-                accept_mask = cond_mask & (zero ? 0xf : 0);
-                contains_origin &= zero;
+                update_acceptance_axis<T>(fmin[d][i], fmax[d][i], tol, tols[d], contains_origin, accept_mask);
             }
             contains_zero[i] = contains_origin;
             accept[i] = accept_mask;
@@ -1538,15 +1539,9 @@ namespace sccd {
                 continue;
             }
 
-            Box<T> box({tt_min, tt_max}, {uu_min, uu_max}, {vv_min, vv_max}, domain.depth + 1);
+            Box<T> box = split_axis_box<SplitDim, T>(domain, sample_lo, sample_hi);
             if (accept[i] || box.depth > max_iter) {
-                const T t_approx = box.tuv[0].lower;
-                if (t_approx < toi) {
-                    toi = t_approx;
-                    u = box.tuv[1].lower;
-                    v = box.tuv[2].lower;
-                    found = true;
-                }
+                found |= accept_grid_root_ee<T>(box, toi, u, v);
                 continue;
             }
 

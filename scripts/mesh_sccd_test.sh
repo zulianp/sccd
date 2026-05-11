@@ -11,13 +11,13 @@ DATA_PATH=/Users/patrickzulian/Desktop/code/installations/sources/Scalable-CCD/t
 # mesh_t0=balls16_1
 # mesh_t1=balls16_2
 
-# case=../data/armadillo-rollers/frames 
-# mesh_t0="296"
-# mesh_t1="297"
+case=../data/armadillo-rollers/frames 
+mesh_t0="296"
+mesh_t1="297"
 
-case=$DATA_PATH/armadillo-rollers/frames
-mesh_t0=326
-mesh_t1=327
+# case=$DATA_PATH/armadillo-rollers/frames
+# mesh_t0=326
+# mesh_t1=327
 
 # case=$DATA_PATH/cloth-ball/frames
 # mesh_t0=cloth_ball92
@@ -52,8 +52,8 @@ db_to_raw $case/"$mesh_t1".ply "$mesh_t1"
 export OMP_PROC_BIND=true
 export OMP_NUM_THREADS=10
 # export SCCD_TOL=1e-16
-export SCCD_TOL=1e-12
+# export SCCD_TOL=1e-12
 # export SCCD_MAX_ITER=10
-export  SCCD_USE_TI=1
+# export  SCCD_USE_TI=1
 
 ./mesh_sccd $mesh_t0 $mesh_t1
