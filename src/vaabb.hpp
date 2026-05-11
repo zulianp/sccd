@@ -104,7 +104,11 @@ namespace sccd {
 
                 __m512i k_as_epi64 = _mm512_movm_epi64(k);
                 __m512i k_01 = _mm512_srli_epi64(k_as_epi64, 63);
-                _mm512_storeu_si512((__m512i*)(mask + i), k_01);
+                alignas(64) uint64_t tmp[8];
+                _mm512_storeu_si512((__m512i*)tmp, k_01);
+                for (int lane = 0; lane < 8; ++lane) {
+                    mask[i + lane] = static_cast<uint32_t>(tmp[lane]);
+                }
             }
             return;
 #elif defined(__AVX2__)
@@ -133,7 +137,11 @@ namespace sccd {
 
                 const __m256i m_i = _mm256_castpd_si256(m);
                 const __m256i m_01 = _mm256_srli_epi64(m_i, 63);
-                _mm256_storeu_si256((__m256i*)(mask + i), m_01);
+                alignas(32) uint64_t tmp[4];
+                _mm256_storeu_si256((__m256i*)tmp, m_01);
+                for (int lane = 0; lane < 4; ++lane) {
+                    mask[i + lane] = static_cast<uint32_t>(tmp[lane]);
+                }
             }
             return;
 #elif defined(__ARM_NEON) || defined(__ARM_NEON__)
@@ -158,7 +166,10 @@ namespace sccd {
                 m = vorrq_u64(m, vcgtq_f64(b_minz, a_maxz));
 
                 const uint64x2_t m_01 = vshrq_n_u64(m, 63);
-                vst1q_u64((uint64_t*)(mask + i), m_01);
+                uint64_t tmp[2];
+                vst1q_u64(tmp, m_01);
+                mask[i] = static_cast<uint32_t>(tmp[0]);
+                mask[i + 1] = static_cast<uint32_t>(tmp[1]);
             }
             return;
 #endif
@@ -250,7 +261,11 @@ namespace sccd {
 
                 const __m512i k_as_epi64 = _mm512_movm_epi64(k);
                 const __m512i k_01 = _mm512_srli_epi64(k_as_epi64, 63);
-                _mm512_storeu_si512((__m512i*)(mask + i), k_01);
+                alignas(64) uint64_t tmp[8];
+                _mm512_storeu_si512((__m512i*)tmp, k_01);
+                for (int lane = 0; lane < 8; ++lane) {
+                    mask[i + lane] = static_cast<uint32_t>(tmp[lane]);
+                }
             }
             return;
 #elif defined(__AVX2__)
@@ -279,7 +294,11 @@ namespace sccd {
 
                 const __m256i m_i = _mm256_castpd_si256(m);
                 const __m256i m_01 = _mm256_srli_epi64(m_i, 63);
-                _mm256_storeu_si256((__m256i*)(mask + i), m_01);
+                alignas(32) uint64_t tmp[4];
+                _mm256_storeu_si256((__m256i*)tmp, m_01);
+                for (int lane = 0; lane < 4; ++lane) {
+                    mask[i + lane] = static_cast<uint32_t>(tmp[lane]);
+                }
             }
             return;
 #elif defined(__ARM_NEON) || defined(__ARM_NEON__)
@@ -304,7 +323,10 @@ namespace sccd {
                 m = vorrq_u64(m, vcgtq_f64(b_minz, a_maxz));
 
                 const uint64x2_t m_01 = vshrq_n_u64(m, 63);
-                vst1q_u64((uint64_t*)(mask + i), m_01);
+                uint64_t tmp[2];
+                vst1q_u64(tmp, m_01);
+                mask[i] = static_cast<uint32_t>(tmp[0]);
+                mask[i + 1] = static_cast<uint32_t>(tmp[1]);
             }
             return;
 #endif

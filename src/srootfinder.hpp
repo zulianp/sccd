@@ -474,34 +474,24 @@ namespace sccd {
     }
 
     template <typename T>
-    inline void update_acceptance_axis(const T fmin,
-                                       const T fmax,
-                                       const T tol,
-                                       const T tol_axis,
-                                       uint32_t &contains_zero,
-                                       uint32_t &accept_mask) {
-        const uint32_t zero = (fmin <= tol) & (fmax >= -tol);
-        const bool cond1 = (fmax - fmin <= tol_axis);
-        const bool cond2 = !((fmin < tol) | (fmax > -tol));
-        const bool cond3 = (fmax - fmin < tol);
-        const bool cond4 = (fmin >= fmax);
+    inline bool codomain_acceptance(const T fmin[3], const T fmax[3], const T tol, const T tols[3], bool &accept) {
+        bool contains_zero = true;
+        bool smaller_than_axis_tol = true;
+        bool inside_epsilon_box = true;
+        bool last_axis_smaller_than_scalar_tol = false;
+        bool degenerate_interval = true;
 
-        uint32_t cond_mask = (cond1 ? (1 & accept_mask) : 0);
-        cond_mask |= (cond2 ? (2 & accept_mask) : 0);
-        cond_mask |= (cond3 ? 4 : 0);
-        cond_mask |= (cond4 ? (8 & accept_mask) : 0);
-        accept_mask = cond_mask & (zero ? 0xf : 0);
-        contains_zero &= zero;
-    }
-
-    template <typename T>
-    inline bool codomain_acceptance(const T fmin[3], const T fmax[3], const T tol, const T tols[3], uint32_t &accept) {
-        uint32_t contains_zero = 1;
-        uint32_t accept_mask = 0xf;
         for (int d = 0; d < 3; ++d) {
-            update_acceptance_axis<T>(fmin[d], fmax[d], tol, tols[d], contains_zero, accept_mask);
+            const T interval_width = fmax[d] - fmin[d];
+            contains_zero = contains_zero && (fmin[d] <= tol) && (fmax[d] >= -tol);
+            smaller_than_axis_tol = smaller_than_axis_tol && (interval_width <= tols[d]);
+            inside_epsilon_box = inside_epsilon_box && !((fmin[d] < tol) || (fmax[d] > -tol));
+            last_axis_smaller_than_scalar_tol = interval_width < tol;
+            degenerate_interval = degenerate_interval && (fmin[d] >= fmax[d]);
         }
-        accept = accept_mask;
+
+        accept = contains_zero && (smaller_than_axis_tol || inside_epsilon_box || last_axis_smaller_than_scalar_tol ||
+                                   degenerate_interval);
         return contains_zero;
     }
 
@@ -860,13 +850,16 @@ namespace sccd {
                 update_codomain_bounds<T>(F, fmin, fmax);
             }
 
-            uint32_t accept_mask = 0;
-            if (!codomain_acceptance<T>(fmin, fmax, tol, tols, accept_mask)) {
+            bool accepted = false;
+            if (!codomain_acceptance<T>(fmin, fmax, tol, tols, accepted)) {
+                // Does not contain origin
                 continue;
             }
 
+            accepted = accepted && (domain.tuv[0].lower > 0);
+
             Box<T> box = split_axis_box<SplitDim, T>(domain, sample_min, sample_max);
-            if (accept_mask || box.depth > max_iter) {
+            if (accepted || box.depth > max_iter) {
                 found |= accept_grid_root_vf<T>(box, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, toi, u, v, refine);
                 continue;
             }
@@ -1003,8 +996,8 @@ namespace sccd {
         alignas(64) T sample_max[N];
         alignas(64) T fmin[3][N];
         alignas(64) T fmax[3][N];
-        alignas(64) uint32_t contains_zero[N];
-        alignas(64) uint32_t accept[N];
+        alignas(64) bool contains_zero[N];
+        alignas(64) bool accept[N];
 
 #pragma omp simd aligned(sample_min, sample_max : 64)
         for (int i = 0; i < N; ++i) {
@@ -1043,13 +1036,9 @@ namespace sccd {
 
 #pragma omp simd aligned(fmin, fmax, contains_zero, accept : 64)
         for (int i = 0; i < N; ++i) {
-            uint32_t contains_origin = 1;
-            uint32_t accept_mask = 0xf;
-            for (int d = 0; d < 3; ++d) {
-                update_acceptance_axis<T>(fmin[d][i], fmax[d][i], tol, tols[d], contains_origin, accept_mask);
-            }
-            contains_zero[i] = contains_origin;
-            accept[i] = accept_mask;
+            const T fmin_i[3] = {fmin[0][i], fmin[1][i], fmin[2][i]};
+            const T fmax_i[3] = {fmax[0][i], fmax[1][i], fmax[2][i]};
+            contains_zero[i] = codomain_acceptance<T>(fmin_i, fmax_i, tol, tols, accept[i]);
         }
 
         bool found = false;
@@ -1070,6 +1059,8 @@ namespace sccd {
             if (tt_min >= toi || uu_min + vv_min >= T(1) + tol) {
                 continue;
             }
+
+            accept[i] = accept[i] && (tt_min > 0);
 
             Box<T> box = split_axis_box<SplitDim, T>(domain, sample_lo, sample_hi);
             if (accept[i] || box.depth > max_iter) {
@@ -1327,13 +1318,15 @@ namespace sccd {
                 update_codomain_bounds<T>(F, fmin, fmax);
             }
 
-            uint32_t accept_mask = 0;
-            if (!codomain_acceptance<T>(fmin, fmax, tol, tols, accept_mask)) {
+            bool accepted = false;
+            if (!codomain_acceptance<T>(fmin, fmax, tol, tols, accepted)) {
                 continue;
             }
 
+            accepted = accepted && (domain.tuv[0].lower > 0);
+
             Box<T> box = split_axis_box<SplitDim, T>(domain, sample_min, sample_max);
-            if (accept_mask || box.depth > max_iter) {
+            if (accepted || box.depth > max_iter) {
                 found |= accept_grid_root_ee<T>(box, toi, u, v);
                 continue;
             }
@@ -1471,8 +1464,8 @@ namespace sccd {
         alignas(64) T sample_max[N];
         alignas(64) T fmin[3][N];
         alignas(64) T fmax[3][N];
-        alignas(64) uint32_t contains_zero[N];
-        alignas(64) uint32_t accept[N];
+        alignas(64) bool contains_zero[N];
+        alignas(64) bool accept[N];
 
 #pragma omp simd aligned(sample_min, sample_max : 64)
         for (int i = 0; i < N; ++i) {
@@ -1511,13 +1504,9 @@ namespace sccd {
 
 #pragma omp simd aligned(fmin, fmax, contains_zero, accept : 64)
         for (int i = 0; i < N; ++i) {
-            uint32_t contains_origin = 1;
-            uint32_t accept_mask = 0xf;
-            for (int d = 0; d < 3; ++d) {
-                update_acceptance_axis<T>(fmin[d][i], fmax[d][i], tol, tols[d], contains_origin, accept_mask);
-            }
-            contains_zero[i] = contains_origin;
-            accept[i] = accept_mask;
+            const T fmin_i[3] = {fmin[0][i], fmin[1][i], fmin[2][i]};
+            const T fmax_i[3] = {fmax[0][i], fmax[1][i], fmax[2][i]};
+            contains_zero[i] = codomain_acceptance<T>(fmin_i, fmax_i, tol, tols, accept[i]);
         }
 
         bool found = false;
@@ -1538,6 +1527,8 @@ namespace sccd {
             if (tt_min >= toi) {
                 continue;
             }
+
+            accept[i] = accept[i] && (tt_min > 0);
 
             Box<T> box = split_axis_box<SplitDim, T>(domain, sample_lo, sample_hi);
             if (accept[i] || box.depth > max_iter) {
