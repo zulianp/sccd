@@ -2,10 +2,19 @@
 #define SCCD_SMESH_CCD_HPP
 
 #include "broadphase.hpp"
+#include "narrowphase.hpp"
 #include "smesh_device_buffer.hpp"
 #include "smesh_graph.hpp"
 #include "smesh_mesh.hpp"
 #include "smesh_tracer.hpp"
+
+#if defined(SCCD_ENABLE_CUDA)
+#include "sccd_broadphase.cuh"
+#include "sccd_narrowphase.cuh"
+#include "sccd_vaabb.cuh"
+
+#include <cuda_runtime_api.h>
+#endif
 
 namespace sccd {
     template <typename scalar_t>
@@ -237,7 +246,51 @@ namespace sccd {
         }
 
         int find_impact_times_impl_narrowphase_host(const ptrdiff_t toi_stride) {
-            // TODO: Complete the code for the narrowphase on the host
+            const auto toi_storage_size = [toi_stride](const size_t noverlaps) {
+                return toi_stride == 0 ? size_t(1) : noverlaps;
+            };
+
+            {
+                SMESH_TRACE_SCOPE("Narrow phase");
+
+                scalar_t toi = 1;
+                {
+                    SMESH_TRACE_SCOPE("Narrow phase: F2V");
+
+                    vf_tois_ = smesh::create_buffer<scalar_t>(toi_storage_size(v_overlap_->size()), execution_space_);
+                    sccd::narrow_phase_vf<3, scalar_t, smesh::idx_t>(v_overlap_->size(),
+                                                                     v_overlap_->data(),
+                                                                     f_overlap_->data(),
+                                                                     points_t0_->data(),
+                                                                     points_t1_->data(),
+                                                                     1,
+                                                                     faces_->data(),
+                                                                     toi,
+                                                                     vf_tois_->data(),
+                                                                     toi_stride);
+
+                    if (toi_stride == 0 && v_overlap_->size() != 0) {
+                        toi = vf_tois_->data()[0];
+                    }
+                }
+
+                {
+                    SMESH_TRACE_SCOPE("Narrow phase: E2E");
+
+                    ee_tois_ = smesh::create_buffer<scalar_t>(toi_storage_size(e0_overlap_->size()), execution_space_);
+                    sccd::narrow_phase_ee<scalar_t, smesh::idx_t>(e0_overlap_->size(),
+                                                                  e0_overlap_->data(),
+                                                                  e1_overlap_->data(),
+                                                                  points_t0_->data(),
+                                                                  points_t1_->data(),
+                                                                  1,
+                                                                  edges_->data(),
+                                                                  toi,
+                                                                  ee_tois_->data(),
+                                                                  toi_stride);
+                }
+            }
+
             return SCCD_SUCCESS;
         }
 
