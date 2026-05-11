@@ -95,8 +95,7 @@ namespace sccd {
         ticcd::Vector3 f1_t1(e2[0], e2[1], e2[2]);
         ticcd::Vector3 f2_t1(e3[0], e3[1], e3[2]);
 
-        ticcd::Array3 tol(atol, atol, atol);
-        ticcd::Array3 err(1e-10, 1e-10, 1e-10);
+        ticcd::Array3 err(-1, -1, -1);
 
         ticcd::Scalar ms = 0;
         ticcd::Scalar max_time = 1;
@@ -169,8 +168,7 @@ namespace sccd {
         ticcd::Vector3 e2_t1(e2[0], e2[1], e2[2]);
         ticcd::Vector3 e3_t1(e3[0], e3[1], e3[2]);
         ticcd::Vector3 e4_t1(e4[0], e4[1], e4[2]);
-        ticcd::Array3 tol(atol, atol, atol);
-        ticcd::Array3 err(1e-10, 1e-10, 1e-10);
+        ticcd::Array3 err(-1, -1, -1);
 
         ticcd::Scalar ms = 0;
         ticcd::Scalar max_time = 1;
