@@ -56,7 +56,7 @@ namespace sccd {
         int SCCD_MAX_ITER = 32;
         SCCD_READ_ENV(SCCD_MAX_ITER, atoi);
 
-        T_HP SCCD_TOL = std::is_same_v<T, float> ? T(1e-8) : T(1e-14);
+        T_HP SCCD_TOL = std::is_same_v<T, T_HP> ? T(1e-8) : T(1e-14);
         SCCD_READ_ENV(SCCD_TOL, atof);
 
         int SCCD_REFINE = 0;
@@ -161,14 +161,11 @@ namespace sccd {
         int SCCD_MAX_ITER = 32;
         SCCD_READ_ENV(SCCD_MAX_ITER, atoi);
 
-        T_HP SCCD_TOL = std::is_same_v<T, float> ? T(1e-8) : T(1e-14);
+        T_HP SCCD_TOL = std::is_same_v<T, T_HP> ? T(1e-8) : T(1e-14);
         SCCD_READ_ENV(SCCD_TOL, atof);
 
         int SCCD_REFINE = 0;
         SCCD_READ_ENV(SCCD_REFINE, atoi);
-
-        int SCCD_UNIFORM_SPLIT_EE = 1;
-        SCCD_READ_ENV(SCCD_UNIFORM_SPLIT_EE, atoi);
 
         int SCCD_ADAPTIVE_SPLIT_EE = 0;
         SCCD_READ_ENV(SCCD_ADAPTIVE_SPLIT_EE, atoi);
@@ -220,16 +217,12 @@ namespace sccd {
                 }
 #endif
                 bool found = false;
-                if (SCCD_UNIFORM_SPLIT_EE) {
-                    found = find_root_grid_uniform_split_ee<T_HP>(
-                        SCCD_MAX_ITER, SCCD_TOL, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v, stack, SCCD_REFINE);
-
-                } else if (SCCD_ADAPTIVE_SPLIT_EE) {
+                if (SCCD_ADAPTIVE_SPLIT_EE) {
                     found = find_root_grid_adaptive_split_ee<T_HP>(
                         SCCD_MAX_ITER, SCCD_TOL, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v, stack, SCCD_REFINE);
                 } else {
-                    found = find_root_grid_ee<T_HP>(
-                        SCCD_MAX_ITER, SCCD_TOL, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v, stack);
+                    found = find_root_grid_uniform_split_ee<T_HP>(
+                        SCCD_MAX_ITER, SCCD_TOL, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v, stack, SCCD_REFINE);
                 }
 
                 if (found) {
