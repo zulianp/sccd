@@ -73,6 +73,10 @@ if(TARGET TBB::tbb)
   target_link_libraries(sccd PUBLIC TBB::tbb)
 endif()
 
+if(SCCD_ENABLE_CUDA)
+  target_compile_definitions(sccd PUBLIC SCCD_ENABLE_CUDA)
+endif()
+
 if(SCCD_ENABLE_HACKS)
   add_subdirectory(hacks)
   # file(GLOB_RECURSE SCCD_HACKS_HEADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/hacks/*.hpp")

@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cfloat>
+#include <cstring>
 
 #include "sparallel.hpp"
 #include "vaabb.hpp"

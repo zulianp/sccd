@@ -4,5 +4,7 @@
 #cmakedefine SCCD_ENABLE_OPENMP
 #cmakedefine SCCD_ENABLE_TBB
 #cmakedefine SCCD_ENABLE_TIGHT_INCLUSION
+#cmakedefine SCCD_ENABLE_SMESH
+#cmakedefine SCCD_ENABLE_CUDA
 
 #endif
