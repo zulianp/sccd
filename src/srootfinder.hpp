@@ -119,7 +119,8 @@ namespace sccd {
                                     max_iter,
                                     output_tolerance,
                                     no_zero_toi,
-                                    ticcd::CCDRootFindingMethod::BREADTH_FIRST_SEARCH);
+                                    // ticcd::CCDRootFindingMethod::BREADTH_FIRST_SEARCH);
+                                    ticcd::CCDRootFindingMethod::DEPTH_FIRST_SEARCH);
 
         // double u0 = -1, v0 = -1;
         // double discrepancy = -1;
@@ -190,7 +191,8 @@ namespace sccd {
                                   max_iter,
                                   output_tolerance,
                                   no_zero_toi,
-                                  ticcd::CCDRootFindingMethod::BREADTH_FIRST_SEARCH);
+                                  //   ticcd::CCDRootFindingMethod::BREADTH_FIRST_SEARCH);
+                                  ticcd::CCDRootFindingMethod::DEPTH_FIRST_SEARCH);
     }
 
 #endif

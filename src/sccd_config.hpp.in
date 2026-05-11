@@ -3,5 +3,6 @@
 
 #cmakedefine SCCD_ENABLE_OPENMP
 #cmakedefine SCCD_ENABLE_TBB
+#cmakedefine SCCD_ENABLE_TIGHT_INCLUSION
 
 #endif

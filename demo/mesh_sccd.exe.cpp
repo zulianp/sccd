@@ -1,3 +1,4 @@
+#include "smesh_buffer.hpp"
 #include "smesh_context.hpp"
 #include "smesh_graph.hpp"
 #include "smesh_mesh.hpp"
@@ -7,6 +8,9 @@
 #include "broadphase.hpp"
 #include "narrowphase.hpp"
 #include "sccd_config.hpp"
+
+// using scalar_t = float;
+using scalar_t = double;
 
 int main(int argc, char** argv) {
     auto ctx = smesh::initialize(argc, argv);
@@ -36,20 +40,23 @@ int main(int argc, char** argv) {
             return 1;
         }
 
+        auto points0 = smesh::astype<scalar_t>(t0->points());
+        auto points1 = smesh::astype<scalar_t>(t1->points());
         auto elements = t0->elements(0)->data();
-        auto p0 = t0->points()->data();
-        auto p1 = t1->points()->data();
+
+        auto p0 = points0->data();
+        auto p1 = points1->data();
 
         // AABB nodes
         const ptrdiff_t n_nodes = t0->n_nodes();
-        auto aabb_min_nodes = smesh::create_host_buffer<smesh::geom_t>(dim, n_nodes);
-        auto aabb_max_nodes = smesh::create_host_buffer<smesh::geom_t>(dim, n_nodes);
+        auto aabb_min_nodes = smesh::create_host_buffer<scalar_t>(dim, n_nodes);
+        auto aabb_max_nodes = smesh::create_host_buffer<scalar_t>(dim, n_nodes);
         sccd::compute_aabbs(dim, t0->n_nodes(), p0, p1, aabb_min_nodes->data(), aabb_max_nodes->data());
 
         // AABB faces
         const ptrdiff_t n_faces = t0->n_elements();
-        auto aabb_min_faces = smesh::create_host_buffer<smesh::geom_t>(dim, n_faces);
-        auto aabb_max_faces = smesh::create_host_buffer<smesh::geom_t>(dim, n_faces);
+        auto aabb_min_faces = smesh::create_host_buffer<scalar_t>(dim, n_faces);
+        auto aabb_max_faces = smesh::create_host_buffer<scalar_t>(dim, n_faces);
 
         ptrdiff_t element_offset = 0;
         for (auto b : t0->blocks()) {
@@ -69,35 +76,35 @@ int main(int argc, char** argv) {
         smesh::crs_to_coo(t0->n_nodes(), n2n_crs->rowptr()->data(), row_idx->data());
 
         const ptrdiff_t n_edges = n2n_crs->nnz();
-        auto aabb_min_edges = smesh::create_host_buffer<smesh::geom_t>(dim, n_edges);
-        auto aabb_max_edges = smesh::create_host_buffer<smesh::geom_t>(dim, n_edges);
+        auto aabb_min_edges = smesh::create_host_buffer<scalar_t>(dim, n_edges);
+        auto aabb_max_edges = smesh::create_host_buffer<scalar_t>(dim, n_edges);
 
         smesh::idx_t* edges[2] = {row_idx->data(), n2n_crs->colidx()->data()};
         sccd::compute_aabbs(2, row_idx->size(), edges, dim, p0, p1, aabb_min_edges->data(), aabb_max_edges->data());
 
         // CCD: Broadphase
-        auto scratch = smesh::create_host_buffer<smesh::geom_t>(std::max(n_nodes, std::max(n_faces, n_edges)));
+        auto scratch = smesh::create_host_buffer<scalar_t>(std::max(n_nodes, std::max(n_faces, n_edges)));
 
-        smesh::geom_t* vaabb[6] = {aabb_min_nodes->data()[0],
-                                   aabb_min_nodes->data()[1],
-                                   aabb_min_nodes->data()[2],
-                                   aabb_max_nodes->data()[0],
-                                   aabb_max_nodes->data()[1],
-                                   aabb_max_nodes->data()[2]};
+        scalar_t* vaabb[6] = {aabb_min_nodes->data()[0],
+                              aabb_min_nodes->data()[1],
+                              aabb_min_nodes->data()[2],
+                              aabb_max_nodes->data()[0],
+                              aabb_max_nodes->data()[1],
+                              aabb_max_nodes->data()[2]};
 
-        smesh::geom_t* faabb[6] = {aabb_min_faces->data()[0],
-                                   aabb_min_faces->data()[1],
-                                   aabb_min_faces->data()[2],
-                                   aabb_max_faces->data()[0],
-                                   aabb_max_faces->data()[1],
-                                   aabb_max_faces->data()[2]};
+        scalar_t* faabb[6] = {aabb_min_faces->data()[0],
+                              aabb_min_faces->data()[1],
+                              aabb_min_faces->data()[2],
+                              aabb_max_faces->data()[0],
+                              aabb_max_faces->data()[1],
+                              aabb_max_faces->data()[2]};
 
-        smesh::geom_t* eaabb[6] = {aabb_min_edges->data()[0],
-                                   aabb_min_edges->data()[1],
-                                   aabb_min_edges->data()[2],
-                                   aabb_max_edges->data()[0],
-                                   aabb_max_edges->data()[1],
-                                   aabb_max_edges->data()[2]};
+        scalar_t* eaabb[6] = {aabb_min_edges->data()[0],
+                              aabb_min_edges->data()[1],
+                              aabb_min_edges->data()[2],
+                              aabb_max_edges->data()[0],
+                              aabb_max_edges->data()[1],
+                              aabb_max_edges->data()[2]};
 
         int sort_axis = sccd::choose_axis(n_nodes, vaabb);
 
@@ -127,100 +134,101 @@ int main(int argc, char** argv) {
         std::shared_ptr<smesh::Buffer<smesh::idx_t>> e0_overlap, e1_overlap, f_overlap, v_overlap;
 
         {
-            SMESH_TRACE_SCOPE("Broadphase: E2E");
+            SMESH_TRACE_SCOPE("Broadphase");
 
-            sccd::count_self_overlaps<2>(sort_axis, n_edges, eaabb, eidx->data(), 1, edges, ccdptr->data());
+            {
+                SMESH_TRACE_SCOPE("Broadphase: E2E");
 
-            e0_overlap = smesh::create_host_buffer<smesh::idx_t>(ccdptr->data()[n_edges]);
-            e1_overlap = smesh::create_host_buffer<smesh::idx_t>(ccdptr->data()[n_edges]);
+                sccd::count_self_overlaps<2>(sort_axis, n_edges, eaabb, eidx->data(), 1, edges, ccdptr->data());
 
-            sccd::collect_self_overlaps<2>(sort_axis,
-                                           n_edges,
-                                           eaabb,
-                                           eidx->data(),
-                                           1,
-                                           edges,
-                                           ccdptr->data(),
-                                           e0_overlap->data(),
-                                           e1_overlap->data());
-        }
+                e0_overlap = smesh::create_host_buffer<smesh::idx_t>(ccdptr->data()[n_edges]);
+                e1_overlap = smesh::create_host_buffer<smesh::idx_t>(ccdptr->data()[n_edges]);
 
-        {
-            SMESH_TRACE_SCOPE("Broadphase: F2V");
+                sccd::collect_self_overlaps<2>(sort_axis,
+                                               n_edges,
+                                               eaabb,
+                                               eidx->data(),
+                                               1,
+                                               edges,
+                                               ccdptr->data(),
+                                               e0_overlap->data(),
+                                               e1_overlap->data());
+            }
 
-            auto cm = smesh::create_host_buffer<smesh::geom_t>(n_nodes);
-            sccd::cummax(n_nodes, vaabb[dim + sort_axis], cm->data());
+            {
+                SMESH_TRACE_SCOPE("Broadphase: F2V");
 
-            sccd::count_overlaps<3, 1, smesh::geom_t, smesh::idx_t>(sort_axis,
-                                                                    n_faces,
-                                                                    faabb,
-                                                                    fidx->data(),
-                                                                    1,
-                                                                    t0->elements(0)->data(),
-                                                                    n_nodes,
-                                                                    vaabb,
-                                                                    vidx->data(),
-                                                                    0,
-                                                                    nullptr,
-                                                                    ccdptr->data(),
-                                                                    cm->data());
+                auto cm = smesh::create_host_buffer<scalar_t>(n_nodes);
+                sccd::cummax(n_nodes, vaabb[dim + sort_axis], cm->data());
 
-            f_overlap = smesh::create_host_buffer<smesh::idx_t>(ccdptr->data()[n_faces]);
-            v_overlap = smesh::create_host_buffer<smesh::idx_t>(ccdptr->data()[n_faces]);
+                sccd::count_overlaps<3, 1, scalar_t, smesh::idx_t>(sort_axis,
+                                                                   n_faces,
+                                                                   faabb,
+                                                                   fidx->data(),
+                                                                   1,
+                                                                   elements,
+                                                                   n_nodes,
+                                                                   vaabb,
+                                                                   vidx->data(),
+                                                                   0,
+                                                                   nullptr,
+                                                                   ccdptr->data(),
+                                                                   cm->data());
 
-            sccd::collect_overlaps<3, 1, smesh::geom_t, smesh::idx_t>(sort_axis,
-                                                                      n_faces,
-                                                                      faabb,
-                                                                      fidx->data(),
-                                                                      1,
-                                                                      t0->elements(0)->data(),
-                                                                      n_nodes,
-                                                                      vaabb,
-                                                                      vidx->data(),
-                                                                      0,
-                                                                      nullptr,
-                                                                      ccdptr->data(),
-                                                                      cm->data(),
-                                                                      f_overlap->data(),
-                                                                      v_overlap->data());
+                f_overlap = smesh::create_host_buffer<smesh::idx_t>(ccdptr->data()[n_faces]);
+                v_overlap = smesh::create_host_buffer<smesh::idx_t>(ccdptr->data()[n_faces]);
+
+                sccd::collect_overlaps<3, 1, scalar_t, smesh::idx_t>(sort_axis,
+                                                                     n_faces,
+                                                                     faabb,
+                                                                     fidx->data(),
+                                                                     1,
+                                                                     elements,
+                                                                     n_nodes,
+                                                                     vaabb,
+                                                                     vidx->data(),
+                                                                     0,
+                                                                     nullptr,
+                                                                     ccdptr->data(),
+                                                                     cm->data(),
+                                                                     f_overlap->data(),
+                                                                     v_overlap->data());
+            }
         }
 
         // Narrow phase
-        smesh::geom_t toi = std::numeric_limits<smesh::geom_t>::max();
-        smesh::geom_t toi_vf, toi_ee;
+        scalar_t toi = 1;
+        scalar_t toi_vf, toi_ee;
 
         {
-            SMESH_TRACE_SCOPE("Narrow phase: F2V");
-            sccd::narrow_phase_vf<3, smesh::geom_t>(v_overlap->size(),
-                                                    v_overlap->data(),
-                                                    f_overlap->data(),
-                                                    p0,
-                                                    p1,
-                                                    1,
-                                                    t0->elements(0)->data(),
-                                                    toi,
-                                                    &toi_vf);
-            toi = toi_vf;
-        }
+            SMESH_TRACE_SCOPE("Narrow phase");
+            {
+                SMESH_TRACE_SCOPE("Narrow phase: F2V");
+                sccd::narrow_phase_vf<3, scalar_t>(
+                    v_overlap->size(), v_overlap->data(), f_overlap->data(), p0, p1, 1, elements, toi, &toi_vf);
+                toi = toi_vf;
+            }
 
-        {
-            SMESH_TRACE_SCOPE("Narrow phase: E2E");
-            sccd::narrow_phase_ee<smesh::geom_t>(
-                e0_overlap->size(), e0_overlap->data(), e1_overlap->data(), p0, p1, 1, edges, toi, &toi_ee);
-            toi = toi_ee;
+            {
+                SMESH_TRACE_SCOPE("Narrow phase: E2E");
+                sccd::narrow_phase_ee<scalar_t>(
+                    e0_overlap->size(), e0_overlap->data(), e1_overlap->data(), p0, p1, 1, edges, toi, &toi_ee);
+                toi = toi_ee;
+            }
         }
 
         // toi = sccd::min(toi_vf, toi_ee);
 
         double tock = smesh::time_seconds();
-        printf("#faces %ld #edges %ld $nodes %ld, #e2e %ld #f2v %ld, %g [s], toi %g\n",
+        printf("#faces %ld #edges %ld $nodes %ld, #e2e %ld #f2v %ld, %g [s], toi %g, toi_vf %g\n",
                n_faces,
                n_edges,
                n_nodes,
                e0_overlap->size(),
                f_overlap->size(),
                tock - tick,
-               (double)toi);
+               (double)toi,
+               (double)toi_vf);
     }
 
     return 0;
