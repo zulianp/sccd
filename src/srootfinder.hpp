@@ -771,7 +771,7 @@ namespace sccd {
         }
         const T step_scale = H_axis > eps ? T(1) / H_axis : T(0.00001);
 
-#pragma omp simd aligned(splitters : 64)
+#pragma omp simd aligned(splitters)
         for (int i = 0; i < N; ++i) {
             const T x0 = lo + h * T(i + 1);
             auto xmin = sccd::max<T>(lo, x0 - radius);
@@ -815,7 +815,7 @@ namespace sccd {
         alignas(64) T samples[N + 2];
         samples[0] = lo;
         samples[N + 1] = hi;
-#pragma omp simd aligned(splitters, samples : 64)
+#pragma omp simd aligned(splitters, samples)
         for (int i = 0; i < N; ++i) {
             samples[i + 1] = splitters[i];
         }
@@ -997,14 +997,14 @@ namespace sccd {
         alignas(64) bool contains_zero[N];
         alignas(64) bool accept[N];
 
-#pragma omp simd aligned(sample_min, sample_max : 64)
+#pragma omp simd aligned(sample_min, sample_max)
         for (int i = 0; i < N; ++i) {
             sample_min[i] = lo + h * T(i);
             sample_max[i] = lo + h * T(i + 1);
         }
 
         for (int d = 0; d < 3; ++d) {
-#pragma omp simd aligned(fmin, fmax : 64)
+#pragma omp simd aligned(fmin, fmax)
             for (int i = 0; i < N; ++i) {
                 fmin[d][i] = std::numeric_limits<T>::max();
                 fmax[d][i] = std::numeric_limits<T>::lowest();
@@ -1015,7 +1015,7 @@ namespace sccd {
             const bool mt = mask & 1;
             const bool mu = mask & 2;
             const bool mv = mask & 4;
-#pragma omp simd aligned(sample_min, sample_max, fmin, fmax : 64)
+#pragma omp simd aligned(sample_min, sample_max, fmin, fmax)
             for (int i = 0; i < N; ++i) {
                 const T tt = SplitDim == 0 ? (mt ? sample_max[i] : sample_min[i])
                                            : (mt ? domain.tuv[0].upper : domain.tuv[0].lower);
@@ -1032,7 +1032,7 @@ namespace sccd {
             }
         }
 
-#pragma omp simd aligned(fmin, fmax, contains_zero, accept : 64)
+#pragma omp simd aligned(fmin, fmax, contains_zero, accept)
         for (int i = 0; i < N; ++i) {
             const T fmin_i[3] = {fmin[0][i], fmin[1][i], fmin[2][i]};
             const T fmax_i[3] = {fmax[0][i], fmax[1][i], fmax[2][i]};
@@ -1237,7 +1237,7 @@ namespace sccd {
         }
         const T step_scale = H_axis > eps ? T(1) / H_axis : T(0.00001);
 
-#pragma omp simd aligned(splitters : 64)
+#pragma omp simd aligned(splitters)
         for (int i = 0; i < N; ++i) {
             const T x0 = lo + h * T(i + 1);
             auto xmin = sccd::max<T>(lo, x0 - radius);
@@ -1283,7 +1283,7 @@ namespace sccd {
         alignas(64) T samples[N + 2];
         samples[0] = lo;
         samples[N + 1] = hi;
-#pragma omp simd aligned(splitters, samples : 64)
+#pragma omp simd aligned(splitters, samples)
         for (int i = 0; i < N; ++i) {
             samples[i + 1] = splitters[i];
         }
@@ -1465,14 +1465,14 @@ namespace sccd {
         alignas(64) bool contains_zero[N];
         alignas(64) bool accept[N];
 
-#pragma omp simd aligned(sample_min, sample_max : 64)
+#pragma omp simd aligned(sample_min, sample_max)
         for (int i = 0; i < N; ++i) {
             sample_min[i] = lo + h * T(i);
             sample_max[i] = lo + h * T(i + 1);
         }
 
         for (int d = 0; d < 3; ++d) {
-#pragma omp simd aligned(fmin, fmax : 64)
+#pragma omp simd aligned(fmin, fmax)
             for (int i = 0; i < N; ++i) {
                 fmin[d][i] = std::numeric_limits<T>::max();
                 fmax[d][i] = std::numeric_limits<T>::lowest();
@@ -1483,7 +1483,7 @@ namespace sccd {
             const bool mt = mask & 1;
             const bool mu = mask & 2;
             const bool mv = mask & 4;
-#pragma omp simd aligned(sample_min, sample_max, fmin, fmax : 64)
+#pragma omp simd aligned(sample_min, sample_max, fmin, fmax)
             for (int i = 0; i < N; ++i) {
                 const T tt = SplitDim == 0 ? (mt ? sample_max[i] : sample_min[i])
                                            : (mt ? domain.tuv[0].upper : domain.tuv[0].lower);
@@ -1500,7 +1500,7 @@ namespace sccd {
             }
         }
 
-#pragma omp simd aligned(fmin, fmax, contains_zero, accept : 64)
+#pragma omp simd aligned(fmin, fmax, contains_zero, accept)
         for (int i = 0; i < N; ++i) {
             const T fmin_i[3] = {fmin[0][i], fmin[1][i], fmin[2][i]};
             const T fmax_i[3] = {fmax[0][i], fmax[1][i], fmax[2][i]};
