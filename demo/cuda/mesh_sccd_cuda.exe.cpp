@@ -75,26 +75,43 @@ int main(int argc, char** argv) {
     scalar_t toi = 1;
     scalar_t toi_vf = 1;
     scalar_t toi_ee = 1;
+    ptrdiff_t n_e2e = -1;
+    ptrdiff_t n_f2v = -1;
 
     auto ccd = sccd::CCD<scalar_t>::create(t0, smesh::EXECUTION_SPACE_DEVICE);
 
     int SCCD_REPEAT = 1;
     SCCD_READ_ENV(SCCD_REPEAT, atoi);
+    int SCCD_USE_FIND_EARLIEST_IMPACT_TIME = 1;
+    SCCD_READ_ENV(SCCD_USE_FIND_EARLIEST_IMPACT_TIME, atoi);
+
     for (int i = 0; i < SCCD_REPEAT; i++) {
-        const int err =
-            ccd->find_impact_times(points0, points1, v_overlap, f_overlap, vf_toi, e0_overlap, e1_overlap, ee_toi);
+        int err = SCCD_SUCCESS;
+        if (SCCD_USE_FIND_EARLIEST_IMPACT_TIME) {
+            err = ccd->find_earliest_impact_time(points0, points1, toi);
+            toi_vf = toi;
+            toi_ee = toi;
+        } else {
+            err =
+                ccd->find_impact_times(points0, points1, v_overlap, f_overlap, vf_toi, e0_overlap, e1_overlap, ee_toi);
+        }
+
         if (err != SCCD_SUCCESS) {
             return err;
         }
 
-        toi_vf = buffer_min_or(vf_toi, scalar_t(1));
-        toi_ee = buffer_min_or(ee_toi, scalar_t(1));
-        toi = std::min(toi_vf, toi_ee);
+        if (!SCCD_USE_FIND_EARLIEST_IMPACT_TIME) {
+            toi_vf = buffer_min_or(vf_toi, scalar_t(1));
+            toi_ee = buffer_min_or(ee_toi, scalar_t(1));
+            toi = std::min(toi_vf, toi_ee);
+            n_e2e = e0_overlap->size();
+            n_f2v = f_overlap->size();
+        }
     }
 
     int SCCD_EXPORT_COLLISIONS = 0;
     SCCD_READ_ENV(SCCD_EXPORT_COLLISIONS, atoi);
-    if (SCCD_EXPORT_COLLISIONS) {
+    if (SCCD_EXPORT_COLLISIONS && !SCCD_USE_FIND_EARLIEST_IMPACT_TIME) {
         auto folder = smesh::Path("collisions");
         std::filesystem::create_directories("collisions");
         smesh::to_host(v_overlap)->to_file(folder / "v_overlap.int32");
@@ -107,14 +124,23 @@ int main(int argc, char** argv) {
 
     const ptrdiff_t n_edges = t0->edge_graph()->nnz();
     double tock = smesh::time_seconds();
-    printf("#faces %ld #edges %ld #nodes %ld, #e2e %ld #f2v %ld, %g [s], toi %g\n",
-           t0->block(0)->n_elements(),
-           n_edges,
-           t0->n_nodes(),
-           e0_overlap->size(),
-           f_overlap->size(),
-           (tock - tick) / SCCD_REPEAT,
-           (double)toi);
+    if (SCCD_USE_FIND_EARLIEST_IMPACT_TIME) {
+        printf("#faces %ld #edges %ld #nodes %ld, %g [s], toi %g\n",
+               t0->block(0)->n_elements(),
+               n_edges,
+               t0->n_nodes(),
+               (tock - tick) / SCCD_REPEAT,
+               (double)toi);
+    } else {
+        printf("#faces %ld #edges %ld #nodes %ld, #e2e %ld #f2v %ld, %g [s], toi %g\n",
+               t0->block(0)->n_elements(),
+               n_edges,
+               t0->n_nodes(),
+               n_e2e,
+               n_f2v,
+               (tock - tick) / SCCD_REPEAT,
+               (double)toi);
+    }
 
     return 0;
 }
