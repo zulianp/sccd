@@ -1,6 +1,8 @@
 #ifndef SCCD_SMESH_CCD_HPP
 #define SCCD_SMESH_CCD_HPP
 
+#include "sccd_config.hpp"
+
 #include "broadphase.hpp"
 #include "narrowphase.hpp"
 #include "smesh_device_buffer.hpp"
