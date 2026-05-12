@@ -25,9 +25,9 @@ export PATH=$INSTALL_DIR/smesh/bin:$PATH
 # mesh_t0=326
 # mesh_t1=327
 
-# case=/capstor/scratch/cscs/zulianp/Scalable-CCD/tests/data/cloth-ball/frames
-# mesh_t0=cloth_ball92
-# mesh_t1=cloth_ball93
+case=/capstor/scratch/cscs/zulianp/Scalable-CCD/tests/data/cloth-ball/frames
+mesh_t0=cloth_ball92
+mesh_t1=cloth_ball93
 
 # case=/capstor/scratch/cscs/zulianp/Scalable-CCD/tests/data/cloth-funnel/frames/
 # mesh_t0=227
@@ -37,9 +37,9 @@ export PATH=$INSTALL_DIR/smesh/bin:$PATH
 # mesh_t0=balls16_18
 # mesh_t1=balls16_19
 
-case=/capstor/scratch/cscs/zulianp/Scalable-CCD/tests/data/rod-twist/frames/
-mesh_t0=3036
-mesh_t1=3037
+# case=/capstor/scratch/cscs/zulianp/Scalable-CCD/tests/data/rod-twist/frames/
+# mesh_t0=3036
+# mesh_t1=3037
 
 set -x
 
