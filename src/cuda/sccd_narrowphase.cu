@@ -29,6 +29,10 @@
 #define SCCD_NP_MAX_BISECTIONS 69
 #endif
 
+#ifndef SCCD_CUDA_ADAPTIVE_SPLIT
+#define SCCD_CUDA_ADAPTIVE_SPLIT 0
+#endif
+
 namespace sccd {
     namespace device {
 
@@ -746,6 +750,116 @@ namespace sccd {
             }
         }
 
+        template <typename T>
+        static inline __device__ int widest_dimension(const Domain<T>& in) {
+            const T dt = in.tupper - in.tlower;
+            const T du = in.uupper - in.ulower;
+            const T dv = in.vupper - in.vlower;
+            if (du > dt && du >= dv) return 1;
+            if (dv > dt && dv > du) return 2;
+            return 0;
+        }
+
+        template <bool is_vf, typename T, typename Vec4>
+        static inline __device__ void adaptive_axis_terms_component(const int split_dim,
+                                                                    const Vec4 s,
+                                                                    const Vec4 e,
+                                                                    const T mid_t,
+                                                                    const T mid_u,
+                                                                    const T mid_v,
+                                                                    T& F_base,
+                                                                    T& J_axis) {
+            const T base_t = split_dim == 0 ? T(0) : mid_t;
+            const T base_u = split_dim == 1 ? T(0) : mid_u;
+            const T base_v = split_dim == 2 ? T(0) : mid_v;
+
+            if constexpr (is_vf) {
+                const T base_omt = T(1) - base_t;
+                const T base_o = T(1) - base_u - base_v;
+                const T vertex = base_omt * s.x + base_t * e.x;
+                const T face = base_omt * (base_o * s.y + base_u * s.z + base_v * s.w) +
+                               base_t * (base_o * e.y + base_u * e.z + base_v * e.w);
+                F_base = vertex - face;
+
+                if (split_dim == 0) {
+                    const T o = T(1) - mid_u - mid_v;
+                    J_axis = (e.x - s.x) - (o * (e.y - s.y) + mid_u * (e.z - s.z) + mid_v * (e.w - s.w));
+                } else if (split_dim == 1) {
+                    J_axis = -((T(1) - mid_t) * (s.z - s.y) + mid_t * (e.z - e.y));
+                } else {
+                    J_axis = -((T(1) - mid_t) * (s.w - s.y) + mid_t * (e.w - e.y));
+                }
+            } else {
+                const T ea0 = (e.x - s.x) * base_t + s.x;
+                const T ea1 = (e.y - s.y) * base_t + s.y;
+                const T eb0 = (e.z - s.z) * base_t + s.z;
+                const T eb1 = (e.w - s.w) * base_t + s.w;
+                F_base = ((ea1 - ea0) * base_u + ea0) - ((eb1 - eb0) * base_v + eb0);
+
+                if (split_dim == 0) {
+                    J_axis = (T(1) - mid_u) * (e.x - s.x) + mid_u * (e.y - s.y) - (T(1) - mid_v) * (e.z - s.z) -
+                             mid_v * (e.w - s.w);
+                } else if (split_dim == 1) {
+                    J_axis = (T(1) - mid_t) * (s.y - s.x) + mid_t * (e.y - e.x);
+                } else {
+                    J_axis = -((T(1) - mid_t) * (s.w - s.z) + mid_t * (e.w - e.z));
+                }
+            }
+        }
+
+        template <bool is_vf, typename T, typename Vec4>
+        static inline __device__ void adaptive_split_longest_axis(const Domain<T>& in,
+                                                                  const Vec4 sx,
+                                                                  const Vec4 sy,
+                                                                  const Vec4 sz,
+                                                                  const Vec4 ex,
+                                                                  const Vec4 ey,
+                                                                  const Vec4 ez,
+                                                                  Domain<T>& left,
+                                                                  Domain<T>& right) {
+            left = in;
+            right = in;
+
+            const int split_dim = widest_dimension<T>(in);
+            const T lo = split_dim == 0 ? in.tlower : (split_dim == 1 ? in.ulower : in.vlower);
+            const T hi = split_dim == 0 ? in.tupper : (split_dim == 1 ? in.uupper : in.vupper);
+            const T h = (hi - lo) * T(0.5);
+            const T radius = h * T(0.45);
+            const T x0 = lo + h;
+            const T mid_t = (in.tlower + in.tupper) * T(0.5);
+            const T mid_u = (in.ulower + in.uupper) * T(0.5);
+            const T mid_v = (in.vlower + in.vupper) * T(0.5);
+
+            T Fx;
+            T Fy;
+            T Fz;
+            T Jx;
+            T Jy;
+            T Jz;
+            adaptive_axis_terms_component<is_vf, T, Vec4>(split_dim, sx, ex, mid_t, mid_u, mid_v, Fx, Jx);
+            adaptive_axis_terms_component<is_vf, T, Vec4>(split_dim, sy, ey, mid_t, mid_u, mid_v, Fy, Jy);
+            adaptive_axis_terms_component<is_vf, T, Vec4>(split_dim, sz, ez, mid_t, mid_u, mid_v, Fz, Jz);
+
+            const T H_axis = Jx * Jx + Jy * Jy + Jz * Jz;
+            const T eps = sizeof(T) == sizeof(float) ? T(1.1920928955078125e-7) : T(2.2204460492503131e-16);
+            const T step_scale = H_axis > eps ? T(1) / H_axis : T(0.00001);
+            const T g = (Fx + x0 * Jx) * Jx + (Fy + x0 * Jy) * Jy + (Fz + x0 * Jz) * Jz;
+            const T xmin = device::max<T>(lo, x0 - radius);
+            const T xmax = device::min<T>(hi, x0 + radius);
+            const T m = device::min<T>(xmax, device::max<T>(xmin, x0 - g * step_scale));
+
+            if (split_dim == 0) {
+                left.tupper = m;
+                right.tlower = m;
+            } else if (split_dim == 1) {
+                left.uupper = m;
+                right.ulower = m;
+            } else {
+                left.vupper = m;
+                right.vlower = m;
+            }
+        }
+
         template <bool is_vf, int N, typename T, typename I>
         static __device__ void narrow_phase_dfs_zero_stride_body(const I* const SCCD_RESTRICT overlap0,
                                                                  const I* const SCCD_RESTRICT overlap1,
@@ -829,7 +943,12 @@ namespace sccd {
 
                 if (active) {
                     Domain<T> left, right;
-                    bisect_longest_axis<T>(cur, atol, left, right);
+
+                    if (SCCD_CUDA_ADAPTIVE_SPLIT) {
+                        adaptive_split_longest_axis<is_vf, T, Vec4>(cur, sx, sy, sz, ex, ey, ez, left, right);
+                    } else {
+                        bisect_longest_axis<T>(cur, atol, left, right);
+                    }
                     int cl = 0, cr = 0, al = 0, ar = 0;
                     evaluate_cell_3d<is_vf, T, Vec4>(left, sx, sy, sz, ex, ey, ez, tol, atol, cl, al);
                     evaluate_cell_3d<is_vf, T, Vec4>(right, sx, sy, sz, ex, ey, ez, tol, atol, cr, ar);
@@ -1182,7 +1301,13 @@ namespace sccd {
 
                 if (active) {
                     Domain<T> left, right;
-                    bisect_longest_axis<T>(cur, atol, left, right);
+
+                    if (SCCD_CUDA_ADAPTIVE_SPLIT) {
+                        adaptive_split_longest_axis<is_vf, T, Vec4>(cur, sx, sy, sz, ex, ey, ez, left, right);
+                    } else {
+                        bisect_longest_axis<T>(cur, atol, left, right);
+                    }
+
                     int cl = 0, cr = 0, al = 0, ar = 0;
                     evaluate_cell_3d<is_vf, T, Vec4>(left, sx, sy, sz, ex, ey, ez, tol, atol, cl, al);
                     evaluate_cell_3d<is_vf, T, Vec4>(right, sx, sy, sz, ex, ey, ez, tol, atol, cr, ar);

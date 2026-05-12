@@ -52,8 +52,17 @@ int sccd_find_root_vf_f(int max_iter,
                         float* v) {
     std::vector<sccd::Box<float>> stack;
     stack.reserve(1024);
-    return sccd::find_root_grid_uniform_split_vf<float>(
-        max_iter, tol, sv, s1, s2, s3, ev, e1, e2, e3, *t, *u, *v, stack);
+
+    int SCCD_ADAPTIVE_SPLIT = 0;
+    SCCD_READ_ENV(SCCD_ADAPTIVE_SPLIT, atoi);
+
+    if (SCCD_ADAPTIVE_SPLIT) {
+        return sccd::find_root_grid_adaptive_split_vf<float>(
+            max_iter, tol, sv, s1, s2, s3, ev, e1, e2, e3, *t, *u, *v, stack);
+    } else {
+        return sccd::find_root_grid_uniform_split_vf<float>(
+            max_iter, tol, sv, s1, s2, s3, ev, e1, e2, e3, *t, *u, *v, stack);
+    }
 }
 
 int sccd_find_root_vf_d(int max_iter,
@@ -69,10 +78,19 @@ int sccd_find_root_vf_d(int max_iter,
                         double* t,
                         double* u,
                         double* v) {
+    int SCCD_ADAPTIVE_SPLIT = 0;
+    SCCD_READ_ENV(SCCD_ADAPTIVE_SPLIT, atoi);
+
     std::vector<sccd::Box<double>> stack;
     stack.reserve(1024);
-    return sccd::find_root_grid_uniform_split_vf<double>(
-        max_iter, tol, sv, s1, s2, s3, ev, e1, e2, e3, *t, *u, *v, stack);
+
+    if (SCCD_ADAPTIVE_SPLIT) {
+        return sccd::find_root_grid_adaptive_split_vf<double>(
+            max_iter, tol, sv, s1, s2, s3, ev, e1, e2, e3, *t, *u, *v, stack);
+    } else {
+        return sccd::find_root_grid_uniform_split_vf<double>(
+            max_iter, tol, sv, s1, s2, s3, ev, e1, e2, e3, *t, *u, *v, stack);
+    }
 }
 
 #ifdef SCCD_ENABLE_TIGHT_INCLUSION
@@ -124,8 +142,17 @@ int sccd_find_root_ee_d(int max_iter,
                         double* v) {
     std::vector<sccd::Box<double>> stack;
     stack.reserve(1024);
-    return sccd::find_root_grid_uniform_split_ee<double>(
-        max_iter, tol, s0, s1, s2, s3, e0, e1, e2, e3, *t, *u, *v, stack);
+
+    int SCCD_ADAPTIVE_SPLIT = 0;
+    SCCD_READ_ENV(SCCD_ADAPTIVE_SPLIT, atoi);
+
+    if (SCCD_ADAPTIVE_SPLIT) {
+        return sccd::find_root_grid_adaptive_split_ee<double>(
+            max_iter, tol, s0, s1, s2, s3, e0, e1, e2, e3, *t, *u, *v, stack);
+    } else {
+        return sccd::find_root_grid_uniform_split_ee<double>(
+            max_iter, tol, s0, s1, s2, s3, e0, e1, e2, e3, *t, *u, *v, stack);
+    }
 }
 
 }  // extern "C"
