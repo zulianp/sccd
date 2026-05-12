@@ -106,44 +106,15 @@ FV: 8.0297     [ms]
 EE+FV: 25.6937 [ms], TOI:  7.49206e-06
 ```
 
-# Single vs Double (Rod-Twist)
+# SCCD
 
 Timings are in seconds
 
-Single 
 
-```csv
-name,calls,total,avg
-Broadphase,1,0.00670576,0.00670576
-Broadphase: E2E,1,0.00222325,0.00222325
-Broadphase: F2V,1,0.000902653,0.000902653
-Mesh::node_to_node_graph_upper_triangular,1,0.01232,0.01232
-Mesh::read,2,0.00465608,0.00232804
-Narrow phase,1,0.0392153,0.0392153
-Narrow phase: E2E,1,0.0392082,0.0392082
-Narrow phase: F2V,1,1.43051e-06,1.43051e-06
-Sorting AABBs,1,0.00126553,0.00126553
-create_crs_graph_upper_triangular_from_element,1,0.0122893,0.0122893
-create_n2e,1,0.00225544,0.00225544
-mesh_sccd_cuda.exe,1,2.50109,2.50109
-```
-
-Double
-
-```csv
-name,calls,total,avg
-Broadphase,1,0.203465,0.203465
-Broadphase: E2E,1,0.00271726,0.00271726
-Broadphase: F2V,1,0.00123119,0.00123119
-Mesh::node_to_node_graph_upper_triangular,1,0.0125632,0.0125632
-Mesh::read,2,0.00413275,0.00206637
-Narrow phase,1,0.0265396,0.0265396
-Narrow phase: E2E,1,0.0265284,0.0265284
-Narrow phase: F2V,1,4.29153e-06,4.29153e-06
-Sorting AABBs,1,0.00160575,0.00160575
-create_crs_graph_upper_triangular_from_element,1,0.0125022,0.0125022
-create_n2e,1,0.00219655,0.00219655
-mesh_sccd_cuda.exe,1,2.54673,2.54673
+```c
+NP: 31.2078 [ms]
+EE: 21.3292 [ms]
+FV: 9.87339 [ms]
 ```
 
 Double precision seems to be faster in the narrow phase

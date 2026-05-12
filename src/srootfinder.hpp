@@ -612,35 +612,11 @@ namespace sccd {
         };
 
         // Compute per-axis tolerances (matching snumtol.hpp signature)
-        T tol0 = tol, tol1 = tol, tol2 = tol;
-        compute_face_vertex_tolerance_soa<T>(tol,
-                                             sv[0],
-                                             sv[1],
-                                             sv[2],
-                                             s1[0],
-                                             s1[1],
-                                             s1[2],
-                                             s2[0],
-                                             s2[1],
-                                             s2[2],
-                                             s3[0],
-                                             s3[1],
-                                             s3[2],
-                                             ev[0],
-                                             ev[1],
-                                             ev[2],
-                                             e1[0],
-                                             e1[1],
-                                             e1[2],
-                                             e2[0],
-                                             e2[1],
-                                             e2[2],
-                                             e3[0],
-                                             e3[1],
-                                             e3[2],
-                                             &tol0,
-                                             &tol1,
-                                             &tol2);
+        T axis_tol[3];
+        compute_face_vertex_tolerance<T>(tol, sv, s1, s2, s3, ev, e1, e2, e3, axis_tol);
+        const T tol0 = axis_tol[0];
+        const T tol1 = axis_tol[1];
+        const T tol2 = axis_tol[2];
 
         // printf("tol %f -> tol0: %f, tol1: %f, tol2: %f\n", tol, tol0, tol1, tol2);
 
@@ -854,7 +830,7 @@ namespace sccd {
                 continue;
             }
 
-            accepted = accepted && (domain.tuv[0].lower > 0);
+            accepted = accepted && (tt_min > 0);
 
             Box<T> box = split_axis_box<SplitDim, T>(domain, sample_min, sample_max);
             if (accepted || box.depth > max_iter) {
@@ -919,34 +895,7 @@ namespace sccd {
         using Interval = sccd::Interval<T>;
 
         T tols[3];
-        compute_face_vertex_tolerance_soa<T>(tol,
-                                             sv[0],
-                                             sv[1],
-                                             sv[2],
-                                             s1[0],
-                                             s1[1],
-                                             s1[2],
-                                             s2[0],
-                                             s2[1],
-                                             s2[2],
-                                             s3[0],
-                                             s3[1],
-                                             s3[2],
-                                             ev[0],
-                                             ev[1],
-                                             ev[2],
-                                             e1[0],
-                                             e1[1],
-                                             e1[2],
-                                             e2[0],
-                                             e2[1],
-                                             e2[2],
-                                             e3[0],
-                                             e3[1],
-                                             e3[2],
-                                             &tols[0],
-                                             &tols[1],
-                                             &tols[2]);
+        compute_face_vertex_tolerance<T>(tol, sv, s1, s2, s3, ev, e1, e2, e3, tols);
 
         bool found = false;
         stack.clear();
@@ -1123,34 +1072,7 @@ namespace sccd {
         using Interval = sccd::Interval<T>;
 
         T tols[3];
-        compute_face_vertex_tolerance_soa<T>(tol,
-                                             sv[0],
-                                             sv[1],
-                                             sv[2],
-                                             s1[0],
-                                             s1[1],
-                                             s1[2],
-                                             s2[0],
-                                             s2[1],
-                                             s2[2],
-                                             s3[0],
-                                             s3[1],
-                                             s3[2],
-                                             ev[0],
-                                             ev[1],
-                                             ev[2],
-                                             e1[0],
-                                             e1[1],
-                                             e1[2],
-                                             e2[0],
-                                             e2[1],
-                                             e2[2],
-                                             e3[0],
-                                             e3[1],
-                                             e3[2],
-                                             &tols[0],
-                                             &tols[1],
-                                             &tols[2]);
+        compute_face_vertex_tolerance<T>(tol, sv, s1, s2, s3, ev, e1, e2, e3, tols);
 
         bool found = false;
         stack.clear();
@@ -1237,7 +1159,7 @@ namespace sccd {
         }
         const T step_scale = H_axis > eps ? T(1) / H_axis : T(0.00001);
 
-#pragma omp simd aligned(splitters)
+#pragma omp simd
         for (int i = 0; i < N; ++i) {
             const T x0 = lo + h * T(i + 1);
             auto xmin = sccd::max<T>(lo, x0 - radius);
@@ -1283,7 +1205,7 @@ namespace sccd {
         alignas(64) T samples[N + 2];
         samples[0] = lo;
         samples[N + 1] = hi;
-#pragma omp simd aligned(splitters, samples)
+#pragma omp simd
         for (int i = 0; i < N; ++i) {
             samples[i + 1] = splitters[i];
         }
@@ -1321,7 +1243,7 @@ namespace sccd {
                 continue;
             }
 
-            accepted = accepted && (domain.tuv[0].lower > 0);
+            accepted = accepted && (tt_min > 0);
 
             Box<T> box = split_axis_box<SplitDim, T>(domain, sample_min, sample_max);
             if (accepted || box.depth > max_iter) {
@@ -1386,34 +1308,7 @@ namespace sccd {
         using Interval = sccd::Interval<T>;
 
         T tols[3];
-        compute_edge_edge_tolerance_soa<T>(tol,
-                                           s1[0],
-                                           s1[1],
-                                           s1[2],
-                                           s2[0],
-                                           s2[1],
-                                           s2[2],
-                                           s3[0],
-                                           s3[1],
-                                           s3[2],
-                                           s4[0],
-                                           s4[1],
-                                           s4[2],
-                                           e1[0],
-                                           e1[1],
-                                           e1[2],
-                                           e2[0],
-                                           e2[1],
-                                           e2[2],
-                                           e3[0],
-                                           e3[1],
-                                           e3[2],
-                                           e4[0],
-                                           e4[1],
-                                           e4[2],
-                                           &tols[0],
-                                           &tols[1],
-                                           &tols[2]);
+        compute_edge_edge_tolerance<T>(tol, s1, s2, s3, s4, e1, e2, e3, e4, tols);
 
         bool found = false;
         stack.clear();
@@ -1465,14 +1360,14 @@ namespace sccd {
         alignas(64) bool contains_zero[N];
         alignas(64) bool accept[N];
 
-#pragma omp simd aligned(sample_min, sample_max)
+#pragma omp simd
         for (int i = 0; i < N; ++i) {
             sample_min[i] = lo + h * T(i);
             sample_max[i] = lo + h * T(i + 1);
         }
 
         for (int d = 0; d < 3; ++d) {
-#pragma omp simd aligned(fmin, fmax)
+#pragma omp simd
             for (int i = 0; i < N; ++i) {
                 fmin[d][i] = std::numeric_limits<T>::max();
                 fmax[d][i] = std::numeric_limits<T>::lowest();
@@ -1483,7 +1378,7 @@ namespace sccd {
             const bool mt = mask & 1;
             const bool mu = mask & 2;
             const bool mv = mask & 4;
-#pragma omp simd aligned(sample_min, sample_max, fmin, fmax)
+#pragma omp simd
             for (int i = 0; i < N; ++i) {
                 const T tt = SplitDim == 0 ? (mt ? sample_max[i] : sample_min[i])
                                            : (mt ? domain.tuv[0].upper : domain.tuv[0].lower);
@@ -1500,7 +1395,7 @@ namespace sccd {
             }
         }
 
-#pragma omp simd aligned(fmin, fmax, contains_zero, accept)
+#pragma omp simd
         for (int i = 0; i < N; ++i) {
             const T fmin_i[3] = {fmin[0][i], fmin[1][i], fmin[2][i]};
             const T fmax_i[3] = {fmax[0][i], fmax[1][i], fmax[2][i]};
@@ -1591,34 +1486,7 @@ namespace sccd {
         using Interval = sccd::Interval<T>;
 
         T tols[3];
-        compute_edge_edge_tolerance_soa<T>(tol,
-                                           s1[0],
-                                           s1[1],
-                                           s1[2],
-                                           s2[0],
-                                           s2[1],
-                                           s2[2],
-                                           s3[0],
-                                           s3[1],
-                                           s3[2],
-                                           s4[0],
-                                           s4[1],
-                                           s4[2],
-                                           e1[0],
-                                           e1[1],
-                                           e1[2],
-                                           e2[0],
-                                           e2[1],
-                                           e2[2],
-                                           e3[0],
-                                           e3[1],
-                                           e3[2],
-                                           e4[0],
-                                           e4[1],
-                                           e4[2],
-                                           &tols[0],
-                                           &tols[1],
-                                           &tols[2]);
+        compute_edge_edge_tolerance<T>(tol, s1, s2, s3, s4, e1, e2, e3, e4, tols);
 
         bool found = false;
         stack.clear();

@@ -297,6 +297,7 @@ namespace sccd {
         }
 
         int find_impact_times_impl_host(const ptrdiff_t toi_stride) {
+            SMESH_TRACE_SCOPE("CCD CPU");
             int err = find_impact_times_impl_broadphase_host(toi_stride);
             err |= find_impact_times_impl_narrowphase_host(toi_stride);
             return err;
@@ -518,6 +519,7 @@ namespace sccd {
         }
 
         int find_impact_times_impl_device(const ptrdiff_t toi_stride) {
+            SMESH_TRACE_SCOPE("CCD GPU");
             int err = find_impact_times_impl_broadphase_device(toi_stride);
             err |= find_impact_times_impl_narrowphase_device(toi_stride);
             return err;
