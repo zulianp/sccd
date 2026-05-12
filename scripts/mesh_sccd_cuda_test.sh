@@ -70,7 +70,9 @@ rm -rf cuda_traces
 mkdir -p cuda_traces
 for ((i=1; i<=ITERATIONS; i++)); do
     echo "Iteration $i"
+    set -x
     $LAUNCH ./mesh_sccd_cuda $mesh_t0 $mesh_t1
+    set +x
     mv smesh.trace.csv cuda_traces/ccd_GPU_$i.csv
 done
 
@@ -79,7 +81,9 @@ rm -rf cpu_traces
 mkdir -p cpu_traces
 for ((i=1; i<=ITERATIONS; i++)); do
     echo "Iteration $i"
-    SCCD_NEWTON_SPLIT_VF=1 SCCD_TOL=1e-12 SCCD_MAX_ITER=35 ./mesh_sccd      $mesh_t0 $mesh_t1
+    set -x
+     SCCD_ADAPTIVE_SPLIT_EE=1 SCCD_ADAPTIVE_SPLIT_VF=1 ./mesh_sccd      $mesh_t0 $mesh_t1
+    set +x
     mv smesh.trace.csv cpu_traces/ccd_CPU_$i.csv
 done
 
