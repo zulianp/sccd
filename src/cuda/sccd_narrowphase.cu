@@ -17,23 +17,16 @@
 #include "sccd_reduce.cuh"
 
 #ifndef SCCD_NP_SHARED_STACK_CAP
-// #define SCCD_NP_SHARED_STACK_CAP 2048
 #define SCCD_NP_SHARED_STACK_CAP 1024
-// #define SCCD_NP_SHARED_STACK_CAP 512
-// #define SCCD_NP_SHARED_STACK_CAP 256
 #endif
 
 #ifndef SCCD_NP_THREADS_PER_BLOCK
 #define SCCD_NP_THREADS_PER_BLOCK 128
 #endif
 
-// Maximum number of bisections (per-thread DFS depth) before a candidate
-// subdomain is "accepted" with cur.tlower as a conservative TOI for that
-// cell.  This bounds the depth of the depth-first traversal in
-// narrow_phase_dfs_kernel and prevents pathologically deep recursion.
+// Maximum number of bisections (per-thread DFS depth)
 #ifndef SCCD_NP_MAX_BISECTIONS
 #define SCCD_NP_MAX_BISECTIONS 69
-// #define SCCD_NP_MAX_BISECTIONS 128
 #endif
 
 namespace sccd {
@@ -50,12 +43,6 @@ namespace sccd {
             T vupper;
         };
 
-        // A LIFO of subdomains.  `top` is a POINTER to the counter so the
-        // same struct can represent either a shared-memory stack (top
-        // lives in shared) or a device-global stack (top lives in
-        // global), and atomics on *top hit the appropriate memory
-        // scope.  All array fields use an SoA layout for coalesced
-        // access during push/pop by peer warps.
         template <typename T>
         struct Stack {
             T* tlower;
@@ -67,7 +54,7 @@ namespace sccd {
             int* level;
             int* qid;
             int* top;
-            int* request;  // device counter for slot deficit (grow-on-demand)
+            int* request;
             int capacity;
         };
 
@@ -286,9 +273,6 @@ namespace sccd {
             // Compute spatial displacements range
             Vec4 dx = ex - sx;
 
-            // f(t,u,v) = position_on_edge_a(t,u) - position_on_edge_b(t,v)
-            // Vec4 layout: (.x,.y) = edge a vertices (P0_a, P1_a)
-            //              (.z,.w) = edge b vertices (P0_b, P1_b).
             {
                 Vec4 xt = tl * dx + sx;
                 const T pa_l = (xt.y - xt.x) * ul + xt.x;
@@ -401,19 +385,10 @@ namespace sccd {
             cond_mask |= (cond2 ? MASK_BOX_INSIDE_EPSILON_BOX : 0);
             cond_mask |= (cond3 ? MASK_REAL_TOLERANCE_SMALLER_THAN_INT_TOLERANCE : 0);
             cond_mask |= (cond4 ? MASK_INTERVAL_TERMINAL : 0);
-            // Gate the flags on the origin-containment test in this axis.
-            // Without MASK_FULL the bitwise-AND would clip bits 1..3 (see
-            // operator precedence: the ternary binds tighter than &).
             cond_mask &= ((fmin <= tol) && (fmax >= -tol)) ? MASK_FULL : 0;
             return cond_mask;
         }
 
-        // ----------------------------------------------------------------
-        // Pure cell evaluation: tests an already-built (t, u, v) domain
-        // for origin containment and the four accept conditions.  Use
-        // this when the caller already has the cell box in hand (e.g.
-        // after a bisection) and no subdivision is needed.
-        // ----------------------------------------------------------------
         template <bool is_vf, typename T, typename Vec4>
         static inline __device__ void evaluate_cell_3d(const Domain<T>& cell,
                                                        const Vec4 sx,
@@ -466,13 +441,6 @@ namespace sccd {
             accept = co && (cond1 || cond2 || cond3 || cond4);
         }
 
-        // ----------------------------------------------------------------
-        // Per-cell evaluation with subdivision: each lane processes one
-        // (ti, ui, vi) cell of a 2 x 4 x 4 decomposition (or any other
-        // nt x nu x nv) of the parent (t, u, v) subdomain.  The built
-        // sub-cell is returned via `cell`; the rest delegates to
-        // evaluate_cell_3d.
-        // ----------------------------------------------------------------
         template <bool is_vf, typename T, typename Vec4>
         static inline __device__ void sample_cell_3d(const int ti,
                                                      const int ui,
@@ -506,8 +474,6 @@ namespace sccd {
             evaluate_cell_3d<is_vf, T, Vec4>(cell, sx, sy, sz, ex, ey, ez, tol, adaptive_tol, contains_origin, accept);
         }
 
-        // Load the 4 endpoint coordinates (sx,sy,sz,ex,ey,ez) for a
-        // given query (overlap candidate) into registers.
         template <typename T, typename Vec4, typename I>
         static inline __device__ void load_query_ee(const int qid,
                                                     const I* const SCCD_RESTRICT overlap0,
@@ -645,54 +611,21 @@ namespace sccd {
         // Per-slot validity tag stored in the qid array.  Three states:
         //   SCCD_QID_EMPTY   (-1): free, available to be claimed by a writer
         //   SCCD_QID_WRITING (-2): claimed by a writer, fields being filled
-        //   qid >= 0              : committed, fields are safe to read
-        //
-        // Writer:
-        //   1. reserve_slots bumps `top` (exclusive ownership of the slot index)
-        //   2. CAS qid[slot] EMPTY -> WRITING (spin-wait until the previous
-        //      popper, if any, clears the slot)
-        //   3. write fields, fence, atomicExch qid[slot] -> real qid
-        //
-        // Popper:
-        //   1. release_slot decrements `top`
-        //   2. spin until qid[slot] >= 0 (committed)
-        //   3. fence, read fields, atomicExch qid[slot] -> EMPTY
-        //
-        // The WRITING state is essential: without it, a pusher that reserves
-        // a slot just after a popper decremented `top` would clobber the
-        // still-in-use fields the popper is about to read.
+        //   qid >= 0             : committed, fields are safe to read
         static constexpr int SCCD_QID_EMPTY = -1;
         static constexpr int SCCD_QID_WRITING = -2;
 
-        // ----------------------------------------------------------------
-        // One-time toi init: toi[i] = max_toi for i in [0, toi_n).
-        //
-        // g_qid initialisation happens on the host side via
-        // cudaMemsetAsync(g_qid, 0xFF, ...) since SCCD_QID_EMPTY == -1.
-        // The stack arrays themselves are sized on demand (see
-        // grow_stack in narrow_phase_generic), so an init kernel covering
-        // the stack would not have a fixed size to target.
-        // ----------------------------------------------------------------
         template <typename T>
         __global__ void init_narrow_phase_kernel(const size_t toi_n, const T max_toi, T* SCCD_RESTRICT toi) {
             const size_t i = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
             if (i < toi_n) toi[i] = max_toi;
         }
 
-        // Per-attempt reset.  Launched as <<<1,1>>> before each attempt;
-        // much cheaper than a memset+memcpy dance.  Stream-ordered against
-        // the preceding worker launch, so no explicit sync is needed.
-        // Resets both the stack top and the deficit-request counter; toi
-        // is intentionally preserved so retries benefit from the tighter
-        // bounds produced by the previous attempt.
         __global__ void reset_batch_narrow_phase_kernel(int* SCCD_RESTRICT g_top, int* SCCD_RESTRICT g_request) {
             *g_top = 0;
             *g_request = 0;
         }
 
-        // Reserve k contiguous slots in a stack via bounded CAS.
-        // Returns the base index, or -1 when there is not enough room.
-        // Bounded so the counter never exceeds 'capacity'.
         static inline __device__ int reserve_slots(int* SCCD_RESTRICT counter, int k, int capacity) {
             int old = atomicAdd(counter, 0);
             while (true) {
@@ -703,9 +636,6 @@ namespace sccd {
             }
         }
 
-        // Pop one slot from a stack via bounded CAS.
-        // Returns the slot index to read (= old_top - 1), or -1 if empty.
-        // Bounded so the counter never goes below 0.
         static inline __device__ int release_slot(int* SCCD_RESTRICT counter) {
             int old = atomicAdd(counter, 0);
             while (true) {
@@ -716,20 +646,11 @@ namespace sccd {
             }
         }
 
-        // Pop one entry from a stack into Domain + level + qid.
-        // `Shared` selects the memory scope of the fence that orders
-        // the validity-tag read against the field reads.  Both variants
-        // share identical logic otherwise; template dispatch lets the
-        // compiler pick the cheaper `__threadfence_block` for the
-        // intra-block case.
         template <bool Shared, typename T>
         static inline __device__ int try_pop(const Stack<T>& stk, Domain<T>& d, int& level, int& qid) {
             const int slot = release_slot(stk.top);
             if (slot < 0) return 0;
-            // Spin until the writer publishes a committed (non-negative)
-            // qid.  EMPTY (-1) and WRITING (-2) both mean "not yet
-            // published"; any q >= 0 means the writer's field writes
-            // retired before the qid publish (they fenced first).
+
             int q;
             do {
                 q = atomicAdd(&stk.qid[slot], 0);
@@ -739,6 +660,7 @@ namespace sccd {
             } else {
                 __threadfence();
             }
+
             d.tlower = stk.tlower[slot];
             d.tupper = stk.tupper[slot];
             d.ulower = stk.ulower[slot];
@@ -747,7 +669,7 @@ namespace sccd {
             d.vupper = stk.vupper[slot];
             level = stk.level[slot];
             qid = q;
-            // Reset valid tag so the slot is reusable.
+
             atomicExch(&stk.qid[slot], SCCD_QID_EMPTY);
             return 1;
         }
@@ -824,21 +746,6 @@ namespace sccd {
             }
         }
 
-        // -----------------------------------------------------------------
-        // Per-thread DFS body for the toi_stride==0 case (one global toi
-        // shared across all candidates).  Each thread enters with at most
-        // one initial cell of work (active_in==1 implies qid_in/cur_in/
-        // level_in are valid).  The body:
-        //   - sets up block-local shared state (stack, s_toi);
-        //   - loads geometry for the initial seed;
-        //   - runs the bisect/push/pop loop;
-        //   - folds the block's best s_toi back into the global toi.
-        //
-        // Push discipline: shared stack first, plain-write spill into the
-        // global stack on overflow.  The body never pops from the global
-        // stack, so cross-block coordination on g_stack is producer-only
-        // and a CAS-tag protocol is unnecessary.
-        // -----------------------------------------------------------------
         template <bool is_vf, int N, typename T, typename I>
         static __device__ void narrow_phase_dfs_zero_stride_body(const I* const SCCD_RESTRICT overlap0,
                                                                  const I* const SCCD_RESTRICT overlap1,
@@ -878,8 +785,6 @@ namespace sccd {
             }
             __syncthreads();
 
-            // Shared stack never tracks a deficit (overflow falls through
-            // to g_stack), so the request counter is intentionally null.
             Stack<T> s_stack = {s_tlower,
                                 s_tupper,
                                 s_ulower,
@@ -905,8 +810,6 @@ namespace sccd {
             }
 
             while (true) {
-                // Cross-block prune: fold s_toi into the global toi and
-                // refresh s_toi with whichever side is tighter.
                 if (tid == 0) {
                     const T g = device::atomic_min(&toi[0], s_toi);
                     if (g < s_toi) s_toi = g;
@@ -915,15 +818,11 @@ namespace sccd {
 
                 if (active && cur.tlower >= s_toi) active = 0;
 
-                // Depth cap: cur is origin-containing by construction; at
-                // max depth take its tlower as a conservative TOI for this
-                // cell instead of bisecting further.
                 if (active && level >= max_bisections) {
                     device::atomic_min(&s_toi, cur.tlower);
                     active = 0;
                 }
 
-                // ----------- Phase A: bisect & decide what to push -----------
                 Domain<T> push_box;
                 int push_level = 0;
                 int will_push = 0;
@@ -971,12 +870,6 @@ namespace sccd {
                     }
                 }
 
-                // Push: shared first; overflow spills into g_stack via the
-                // CAS EMPTY->WRITING protocol so a concurrent from-stack
-                // popper sees the field writes before the qid publish.
-                // When the global stack is full the work is dropped and the
-                // deficit is added to g_stack.request; the host grows the
-                // stack and re-runs the kernel.
                 if (will_push) {
                     const int slot = reserve_slots(&s_top, 1, S_CAP);
                     if (slot >= 0 && slot < S_CAP) {
@@ -1012,7 +905,6 @@ namespace sccd {
 
                 __syncthreads();
 
-                // ----------- Phase B: idle threads pull more shared work ----
                 if (!active) {
                     int t = atomicAdd(&s_top, 0);
                     while (t > 0) {
@@ -1056,9 +948,6 @@ namespace sccd {
 
                 __syncthreads();
 
-                // Termination: shared stack empty and no active thread in
-                // the block.  Overflow in g_stack is recorded as request
-                // and re-derived from seeds on the next attempt.
                 const int n_active = block_popc<N>(active, warp_sums);
                 if (n_active == 0) {
                     const int s_now = atomicAdd(&s_top, 0);
@@ -1069,15 +958,6 @@ namespace sccd {
             if (tid == 0) device::atomic_min(&toi[0], s_toi);
         }
 
-        // -----------------------------------------------------------------
-        // Kernel A: each thread takes a unique candidate from the input
-        // range [seed_begin, seed_end).  Seeds whose root domain does not
-        // contain the origin (or is already dominated by toi[0]) are
-        // dropped before entering the loop body.  This preserves the
-        // original `narrow_phase_dfs_zero_stride_kernel` behaviour.
-        //
-        // Layout: blockDim.x == N, qid = seed_begin + blockIdx.x * N + tid.
-        // -----------------------------------------------------------------
         template <bool is_vf, int N, typename T, typename I>
         __global__ void narrow_phase_dfs_zero_stride_kernel(const I* const SCCD_RESTRICT overlap0,
                                                             const I* const SCCD_RESTRICT overlap1,
@@ -1101,10 +981,6 @@ namespace sccd {
             int level = 0;
             int active = 0;
 
-            // Initial seed: load geometry, evaluate the root domain, and
-            // accept it only if it contains the origin and is not already
-            // dominated by the current global toi.  Geometry/atol are
-            // discarded here -- the body re-loads them for active threads.
             if (has_seed) {
                 qid = my_seed;
                 Vec4 sx, sy, sz, ex, ey, ez;
@@ -1128,18 +1004,6 @@ namespace sccd {
                 overlap0, overlap1, sp, ep, element_stride, elements, tol, toi, g_stack, qid, cur, level, active);
         }
 
-        // -----------------------------------------------------------------
-        // Kernel B: each thread seeds itself by popping one entry off the
-        // global stack (typically produced by Kernel A's overflow path or
-        // by an earlier drain pass).  Threads that find the stack empty
-        // start inactive and only contribute to s_toi reduction; they may
-        // still steal work from the shared stack once the body's loop
-        // starts publishing into it.
-        //
-        // Launch shape is flexible: blockDim.x == N, grid sized to whatever
-        // budget the host wants to dedicate to draining g_stack.  Each
-        // launch consumes up to grid_blocks * N entries from g_stack.
-        // -----------------------------------------------------------------
         template <bool is_vf, int N, typename T, typename I>
         __global__ void narrow_phase_dfs_zero_stride_from_stack_kernel(const I* const SCCD_RESTRICT overlap0,
                                                                        const I* const SCCD_RESTRICT overlap1,
@@ -1155,11 +1019,6 @@ namespace sccd {
             int level = 0;
             int active = 0;
 
-            // try_pop drains one slot per thread.  It uses the EMPTY/
-            // WRITING/committed tag protocol on the producer side: entries
-            // written by the body (or an earlier kernel) via plain stores
-            // are observed once the qid field becomes non-negative.  An
-            // empty stack just leaves the thread inactive.
             if (try_pop<false, T>(g_stack, cur, level, qid)) {
                 active = 1;
             }
@@ -1168,41 +1027,6 @@ namespace sccd {
                 overlap0, overlap1, sp, ep, element_stride, elements, tol, toi, g_stack, qid, cur, level, active);
         }
 
-        // -----------------------------------------------------------------
-        // Per-block (one query per block) DFS body.  Each block is
-        // dedicated to a single query `qid`; all N threads cooperate by
-        // sampling `sampling_root` into an NT x NU x NV grid via
-        // sample_cell_3d, folding accepting cells into s_toi, then running
-        // the bisect/push/pop loop on the surviving cells.
-        //
-        // Parameters that differ between callers:
-        //   - qid              : which query to process.
-        //   - sampling_root    : the domain to subdivide into sample cells.
-        //                        Kernel A passes [0,1]^3.  Kernel B passes
-        //                        a sub-domain popped from g_stack.
-        //   - initial_level    : depth of `sampling_root` along the DFS
-        //                        bisection chain.  The main loop starts at
-        //                        level = initial_level + 1.
-        //   - do_hard_defer    : if true and the active-seed count exceeds
-        //                        alpha*N, dump the active seeds back to
-        //                        g_stack with `g_stack.level[slot] =
-        //                        initial_level` and exit.  Kernel A enables
-        //                        this; Kernel B disables it (work was just
-        //                        pulled from g_stack, dumping back would
-        //                        loop).
-        //
-        // The main loop's global-stack spill uses the CAS EMPTY->WRITING
-        // protocol so producers in this kernel cannot race with a one-shot
-        // initial popper in Kernel B running concurrently.  This kernel
-        // never pops g_stack inside the loop, so the CAS spin has bounded
-        // wait time and no deadlock cycle can form.
-        //
-        // When g_stack is full a push records its deficit in
-        // g_stack.request and drops the work.  The host detects the
-        // request after the launch, grows the stack accordingly, and
-        // re-runs the kernel from the original seeds; tighter TOIs from
-        // the failed attempt cut the work tree on the retry.
-        // -----------------------------------------------------------------
         template <bool is_vf, int N, typename T, typename I>
         static __device__ void narrow_phase_dfs_body(const I* const SCCD_RESTRICT overlap0,
                                                      const I* const SCCD_RESTRICT overlap1,
@@ -1256,8 +1080,6 @@ namespace sccd {
             }
             __syncthreads();
 
-            // Shared stack never tracks a deficit (overflow falls through
-            // to g_stack), so the request counter is intentionally null.
             Stack<T> s_stack = {s_tlower,
                                 s_tupper,
                                 s_ulower,
@@ -1287,16 +1109,11 @@ namespace sccd {
             sample_cell_3d<is_vf, T, Vec4>(
                 ti, ui, vi, NT, NU, NV, sampling_root, sx, sy, sz, ex, ey, ez, tol, atol, contains, accept, cur);
 
-            // Fold accepted cells into s_toi first, so the prune below can
-            // use the tightest bound available within this block.
             if (accept && is_domain_valid<is_vf>(cur, s_toi, atol)) {
                 device::atomic_min(&s_toi, cur.tlower);
             }
             __syncthreads();
 
-            // Drop any seed cell whose time interval is already dominated
-            // by s_toi: the smallest TOI it could ever produce is tlower,
-            // which is >= the current best, so further bisection is wasted.
             const int active_seed = contains && !accept && (cur.tlower < s_toi);
 
             const int co_count = block_popc<N>(active_seed, warp_sums);
@@ -1324,13 +1141,6 @@ namespace sccd {
                     const int rank = atomicAdd(&s_defer_cursor, 1);
                     const int slot = s_defer_base + rank;
                     if (slot >= 0 && slot < g_stack.capacity) {
-                        // Producer-side fence: ensure the field writes are
-                        // visible before the consumer (from-stack kernel)
-                        // observes a committed qid.  Hard-defer pushes are
-                        // consumed in a separate kernel launch, so a kernel
-                        // boundary already provides visibility, but we keep
-                        // the per-slot fence for symmetry with the loop
-                        // push and to allow potential same-launch consumers.
                         g_stack.tlower[slot] = cur.tlower;
                         g_stack.tupper[slot] = cur.tupper;
                         g_stack.ulower[slot] = cur.ulower;
@@ -1349,10 +1159,6 @@ namespace sccd {
             int active = active_seed;
             int level = initial_level + 1;
             while (true) {
-                // Cross-block pruning: when the toi is shared across all
-                // candidates (toi_stride == 0), fold s_toi into the
-                // global toi and refresh s_toi with whichever side was
-                // tighter.
                 if (toi_stride == 0) {
                     if (tid == 0) {
                         const T g = device::atomic_min(&toi[toi_idx], s_toi);
@@ -1363,10 +1169,6 @@ namespace sccd {
 
                 if (active && cur.tlower >= s_toi) active = 0;
 
-                // Depth cap: cur is origin-containing by construction (we
-                // only keep origin-containing halves during DFS).  At max
-                // depth, accept its tlower as a conservative TOI for this
-                // cell instead of bisecting further.
                 if (active && level >= max_bisections) {
                     if (is_domain_valid<is_vf>(cur, s_toi, atol)) {
                         device::atomic_min(&s_toi, cur.tlower);
@@ -1421,11 +1223,6 @@ namespace sccd {
                     }
                 }
 
-                // Phase A: pushes. Shared first; overflow spills to
-                // g_stack via the CAS EMPTY->WRITING protocol so the
-                // from-stack variant can pop these entries safely.  When
-                // the global stack is full the deficit is recorded in
-                // g_stack.request and the host grows the stack on retry.
                 if (will_push) {
                     const int slot = reserve_slots(&s_top, 1, S_CAP);
                     if (slot >= 0 && slot < S_CAP) {
@@ -1461,9 +1258,6 @@ namespace sccd {
 
                 __syncthreads();
 
-                // Phase B: pops from shared only (this kernel never pops
-                // g_stack inside the loop).  Each popper gets a unique
-                // slot in [0, s_top); pushes from Phase A are visible.
                 if (!active) {
                     int t = atomicAdd(&s_top, 0);
                     while (t > 0) {
@@ -1495,11 +1289,6 @@ namespace sccd {
             if (tid == 0) device::atomic_min(&toi[toi_idx], s_toi);
         }
 
-        // -----------------------------------------------------------------
-        // Kernel A: one block per query in [seed_begin, seed_end).
-        // Samples [0,1]^3 root, hard-defer enabled.  Preserves the
-        // original `narrow_phase_dfs_kernel` behaviour.
-        // -----------------------------------------------------------------
         template <bool is_vf, int N, typename T, typename I>
         __global__ void narrow_phase_dfs_kernel(const I* const SCCD_RESTRICT overlap0,
                                                 const I* const SCCD_RESTRICT overlap1,
@@ -1535,19 +1324,6 @@ namespace sccd {
                                                   /*do_hard_defer=*/true);
         }
 
-        // -----------------------------------------------------------------
-        // Kernel B: each block pops one (cur, level, qid) entry from
-        // g_stack and runs the per-block DFS body against that domain.
-        // Lane 0 performs the pop and publishes the popped entry through
-        // shared memory; the rest of the block enters the body with the
-        // broadcast values.  Hard-defer is disabled to prevent the body
-        // from immediately dumping work back into g_stack (which would
-        // create a no-progress loop across host relaunches).
-        //
-        // A block that finds g_stack empty exits without touching toi.
-        // The host launches this kernel grid-blocks at a time and
-        // relaunches while h_g_top > 0.
-        // -----------------------------------------------------------------
         template <bool is_vf, int N, typename T, typename I>
         __global__ void narrow_phase_dfs_from_stack_kernel(const I* const SCCD_RESTRICT overlap0,
                                                            const I* const SCCD_RESTRICT overlap1,
@@ -1581,8 +1357,6 @@ namespace sccd {
 
             if (!b_have_work) return;
 
-            // alpha is unused because do_hard_defer=false short-circuits
-            // its only consumer in the body.
             narrow_phase_dfs_body<is_vf, N, T, I>(overlap0,
                                                   overlap1,
                                                   sp,
@@ -1656,9 +1430,6 @@ namespace sccd {
 
             constexpr int N = SCCD_NP_THREADS_PER_BLOCK;
 
-            // Occupancy-derived blocks-per-SM (0 dynamic shared mem).
-            // Sized for the from-stack DFS kernel since that is the
-            // dominant Pass 2 worker.
             int SCCD_BLOCKS_PER_SM = 4;
             {
                 int occ = 0;
@@ -1669,6 +1440,7 @@ namespace sccd {
                     SCCD_BLOCKS_PER_SM = occ;
                 }
             }
+
             SCCD_READ_ENV(SCCD_BLOCKS_PER_SM, atoi);
             printf("SCCD_BLOCKS_PER_SM: %d, SCCD_NP_THREADS_PER_BLOCK: %d\n",
                    SCCD_BLOCKS_PER_SM,
@@ -1678,31 +1450,15 @@ namespace sccd {
             if (base_grid_blocks <= 0) base_grid_blocks = 1;
 
             // Batch size: candidates processed per outer iteration.
-            // Default is the whole input -- the grow-on-demand stack
-            // adapts capacity to the actual deficit, so there is no
-            // need to artificially fragment work.  Override via
-            // SCCD_BATCH_SIZE for tighter peak-memory control.
             int SCCD_BATCH_SIZE = 0;
             SCCD_READ_ENV(SCCD_BATCH_SIZE, atoi);
             const size_t batch_size = (SCCD_BATCH_SIZE > 0) ? (size_t)SCCD_BATCH_SIZE : noverlaps;
 
-            // Initial global-stack capacity.  Defaults to 0 -- we let
-            // the first pass discover the deficit and grow on demand.
-            // Override via SCCD_GSTACK_CAP_INIT to skip the initial
-            // empty-stack attempt when a good estimate is available.
-            int SCCD_GSTACK_CAP_INIT = 0;
-            SCCD_READ_ENV(SCCD_GSTACK_CAP_INIT, atoi);
-            int gstack_cap = (SCCD_GSTACK_CAP_INIT >= 0) ? SCCD_GSTACK_CAP_INIT : 0;
+            int gstack_cap = 0;
 
-            // Soft upper bound on a single grow request, to amortise
-            // realloc cost when the deficit is small and to cap peak
-            // memory on a single attempt.  Override via SCCD_GSTACK_CAP_MAX.
             int SCCD_GSTACK_CAP_MAX = INT_MAX;
             SCCD_READ_ENV(SCCD_GSTACK_CAP_MAX, atoi);
 
-            // Global LIFO stack arrays.  Sized on demand: start at
-            // `gstack_cap` (0 by default) and grow whenever a worker
-            // reports a deficit via g_request.
             T* g_tlower = nullptr;
             T* g_tupper = nullptr;
             T* g_ulower = nullptr;
