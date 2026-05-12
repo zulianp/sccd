@@ -22,8 +22,8 @@
 #endif
 
 #ifndef SCCD_NP_SHARED_STACK_CAP
-#define SCCD_NP_SHARED_STACK_CAP 2048
-// #define SCCD_NP_SHARED_STACK_CAP 1024
+// #define SCCD_NP_SHARED_STACK_CAP 2048
+#define SCCD_NP_SHARED_STACK_CAP 1024
 #endif
 
 #ifndef SCCD_NP_THREADS_PER_BLOCK
@@ -940,36 +940,38 @@ namespace sccd {
             }
         }
 
-        // Per-thread DFS variant for the toi_stride==0 case (one global toi
-        // shared across all candidates).  Each thread owns one initial seed
-        // and its own DFS register state; the block shares a stack used as
-        // a load-balancing reservoir, with overflow spilling to the global
-        // stack so other blocks can pick it up.
+        // -----------------------------------------------------------------
+        // Per-thread DFS body for the toi_stride==0 case (one global toi
+        // shared across all candidates).  Each thread enters with at most
+        // one initial cell of work (active_in==1 implies qid_in/cur_in/
+        // level_in are valid).  The body:
+        //   - sets up block-local shared state (stack, s_toi);
+        //   - loads geometry for the initial seed;
+        //   - runs the bisect/push/pop loop;
+        //   - folds the block's best s_toi back into the global toi.
         //
-        // Layout: blockDim.x == N, qid = seed_begin + blockIdx.x * N + tid
-        // (static assignment).  Termination is best-effort: a block exits
-        // when it observes its own threads idle, the shared stack empty,
-        // and the global stack empty for several consecutive iterations.
-        // Any work still in g_stack at exit is drained by the existing
-        // warp-cooperative kernel from the host driver.
+        // Push discipline: shared stack first, plain-write spill into the
+        // global stack on overflow.  The body never pops from the global
+        // stack, so cross-block coordination on g_stack is producer-only
+        // and a CAS-tag protocol is unnecessary.
+        // -----------------------------------------------------------------
         template <bool is_vf, int N, typename T, typename I>
-        __global__ void narrow_phase_dfs_zero_stride_kernel(const I* const SCCD_RESTRICT overlap0,
-                                                            const I* const SCCD_RESTRICT overlap1,
-                                                            T** const SCCD_RESTRICT sp,
-                                                            T** const SCCD_RESTRICT ep,
-                                                            const size_t element_stride,
-                                                            I** const SCCD_RESTRICT elements,
-                                                            const T tol,
-                                                            //    One global toi for all candidates
-                                                            T* SCCD_RESTRICT toi,
-                                                            Stack<T> g_stack,
-                                                            const int g_normal_cap,
-                                                            int* SCCD_RESTRICT halt,
-                                                            const T alpha,
-                                                            const int seed_begin,
-                                                            const int seed_end) {
+        static __device__ void narrow_phase_dfs_zero_stride_body(const I* const SCCD_RESTRICT overlap0,
+                                                                 const I* const SCCD_RESTRICT overlap1,
+                                                                 T** const SCCD_RESTRICT sp,
+                                                                 T** const SCCD_RESTRICT ep,
+                                                                 const size_t element_stride,
+                                                                 I** const SCCD_RESTRICT elements,
+                                                                 const T tol,
+                                                                 T* SCCD_RESTRICT toi,
+                                                                 Stack<T> g_stack,
+                                                                 const int g_normal_cap,
+                                                                 int* SCCD_RESTRICT halt,
+                                                                 int qid_in,
+                                                                 Domain<T> cur_in,
+                                                                 int level_in,
+                                                                 int active_in) {
             static_assert(N == 64 || N == 128 || N == 256, "SCCD_NP_THREADS_PER_BLOCK must be one of 64/128/256");
-            (void)alpha;  // unused: this kernel does not hard-defer.
             using Vec4 = typename device::Vec4Type<T>::type;
             constexpr int S_CAP = SCCD_NP_SHARED_STACK_CAP;
             constexpr int max_bisections = SCCD_NP_MAX_BISECTIONS;
@@ -987,14 +989,7 @@ namespace sccd {
             __shared__ int warp_sums[N >> 5];
 
             const int tid = threadIdx.x;
-            const int my_seed = seed_begin + (int)blockIdx.x * N + tid;
-            const bool has_seed = my_seed < seed_end;
 
-            // Initialize s_top and s_toi.  The shared-stack qid tags are
-            // unused on this kernel's hot path (Phase A/B __syncthreads
-            // already orders writers vs readers), but `s_qid[slot]` is
-            // still used as the qid value the popper reloads on, so it
-            // must hold whatever the matching writer stored.
             if (tid == 0) {
                 s_top = 0;
                 s_toi = toi[0];
@@ -1004,40 +999,21 @@ namespace sccd {
             Stack<T> s_stack = {
                 s_tlower, s_tupper, s_ulower, s_uupper, s_vlower, s_vupper, s_level, s_qid, &s_top, S_CAP};
 
-            // Per-thread DFS state.  qid identifies the candidate currently
-            // owning `cur`; it changes when the thread pops a slot tagged
-            // with a different candidate, in which case geometry/atol must
-            // be reloaded.
-            int qid = -1;
-            Domain<T> cur = {T(0), T(0), T(0), T(0), T(0), T(0)};
-            int level = 0;
-            int active = 0;
+            int qid = qid_in;
+            Domain<T> cur = cur_in;
+            int level = level_in;
+            int active = active_in;
             Vec4 sx, sy, sz, ex, ey, ez;
             T atol[3] = {T(0), T(0), T(0)};
 
-            // Initial seed: load geometry and use the root only as a
-            // refinement seed.  Do not accept the full [0,1]^3 root domain:
-            // its tlower is exactly 0 and creates a false zero TOI.
-            if (has_seed) {
-                qid = my_seed;
+            if (active) {
                 load_query_and_tol<is_vf, T, Vec4, I>(
                     qid, overlap0, overlap1, sp, ep, element_stride, elements, tol, sx, sy, sz, ex, ey, ez, atol);
-
-                Domain<T> root = {T(0), T(1), T(0), T(1), T(0), T(1)};
-                int contains = 0;
-                int accept = 0;
-                evaluate_cell_3d<is_vf, T, Vec4>(root, sx, sy, sz, ex, ey, ez, tol, atol, contains, accept);
-                if (contains && is_domain_valid<is_vf>(root, s_toi, atol)) {
-                    cur = root;
-                    level = 0;
-                    active = 1;
-                }
             }
 
             while (true) {
                 // Cross-block prune: fold s_toi into the global toi and
-                // refresh s_toi with whichever side is tighter.  The block
-                // can then prune dominated cells before any further work.
+                // refresh s_toi with whichever side is tighter.
                 if (tid == 0) {
                     const T g = device::atomic_min(&toi[0], s_toi);
                     if (g < s_toi) s_toi = g;
@@ -1070,7 +1046,6 @@ namespace sccd {
                         cl = 0;
                         al = 0;
                     }
-
                     if (!is_domain_valid<is_vf>(right, s_toi, atol)) {
                         cr = 0;
                         ar = 0;
@@ -1103,13 +1078,9 @@ namespace sccd {
                     }
                 }
 
-                // Push: try shared first (single-writer slot, no tag needed
-                // because the __syncthreads below separates writers from
-                // readers).  Overflow spills into the global stack with
-                // plain writes -- this kernel never pops from global,
-                // Pass 2 (warp-per-query) picks up the spillover.  Plain
-                // writes are race-free because each reserved slot has a
-                // unique writer and no in-kernel popper races on it.
+                // Push: shared first; overflow spills into g_stack with
+                // plain writes.  The body never pops from g_stack, so no
+                // tag protocol is required here.
                 if (will_push) {
                     const int slot = reserve_slots(&s_top, 1, S_CAP);
                     if (slot >= 0 && slot < S_CAP) {
@@ -1128,6 +1099,16 @@ namespace sccd {
                             g_slot = reserve_slots(g_stack.top, 1, g_stack.capacity);
                         }
                         if (g_slot >= 0 && g_slot < g_stack.capacity) {
+                            // Claim the slot EMPTY -> WRITING.  This kernel
+                            // never pops g_stack inside the loop, so the only
+                            // concurrent reader on a contended slot is a
+                            // one-shot initial popper from another launch
+                            // mode (e.g. the from-stack variant) -- bounded
+                            // wait, no deadlock cycle.
+                            while (atomicCAS(&g_stack.qid[g_slot], SCCD_QID_EMPTY, SCCD_QID_WRITING) !=
+                                   SCCD_QID_EMPTY) {
+                                // busy-wait
+                            }
                             g_stack.tlower[g_slot] = push_box.tlower;
                             g_stack.tupper[g_slot] = push_box.tupper;
                             g_stack.ulower[g_slot] = push_box.ulower;
@@ -1135,7 +1116,8 @@ namespace sccd {
                             g_stack.vlower[g_slot] = push_box.vlower;
                             g_stack.vupper[g_slot] = push_box.vupper;
                             g_stack.level[g_slot] = push_level;
-                            g_stack.qid[g_slot] = qid;
+                            __threadfence();
+                            atomicExch(&g_stack.qid[g_slot], qid);
                         }
                     }
                 }
@@ -1143,10 +1125,6 @@ namespace sccd {
                 __syncthreads();
 
                 // ----------- Phase B: idle threads pull more shared work ----
-                // Only the shared stack is drained here.  Any overflow
-                // pushed into the global stack above is left for Pass 2
-                // to consume; this removes the cross-block CAS protocol
-                // that could deadlock under heavy contention.
                 if (!active) {
                     int t = atomicAdd(&s_top, 0);
                     while (t > 0) {
@@ -1190,9 +1168,9 @@ namespace sccd {
 
                 __syncthreads();
 
-                // Termination: exit once the block has no active thread
-                // and the shared stack is empty, or halt was raised.
-                // Overflow in g_stack is intentionally left for Pass 2.
+                // Termination: shared stack empty (or halt) and no active
+                // thread in the block.  Overflow in g_stack is left for a
+                // subsequent draining pass.
                 const int n_active = block_popc<N>(active, warp_sums);
                 if (n_active == 0) {
                     const int s_now = atomicAdd(&s_top, 0);
@@ -1201,9 +1179,141 @@ namespace sccd {
                 }
             }
 
-            // Final flush: ensure this block's tightest s_toi is folded
-            // into the global toi before exit.
             if (tid == 0) device::atomic_min(&toi[0], s_toi);
+        }
+
+        // -----------------------------------------------------------------
+        // Kernel A: each thread takes a unique candidate from the input
+        // range [seed_begin, seed_end).  Seeds whose root domain does not
+        // contain the origin (or is already dominated by toi[0]) are
+        // dropped before entering the loop body.  This preserves the
+        // original `narrow_phase_dfs_zero_stride_kernel` behaviour.
+        //
+        // Layout: blockDim.x == N, qid = seed_begin + blockIdx.x * N + tid.
+        // -----------------------------------------------------------------
+        template <bool is_vf, int N, typename T, typename I>
+        __global__ void narrow_phase_dfs_zero_stride_kernel(const I* const SCCD_RESTRICT overlap0,
+                                                            const I* const SCCD_RESTRICT overlap1,
+                                                            T** const SCCD_RESTRICT sp,
+                                                            T** const SCCD_RESTRICT ep,
+                                                            const size_t element_stride,
+                                                            I** const SCCD_RESTRICT elements,
+                                                            const T tol,
+                                                            T* SCCD_RESTRICT toi,
+                                                            Stack<T> g_stack,
+                                                            const int g_normal_cap,
+                                                            int* SCCD_RESTRICT halt,
+                                                            const T alpha,
+                                                            const int seed_begin,
+                                                            const int seed_end) {
+            (void)alpha;  // unused: this kernel does not hard-defer.
+            using Vec4 = typename device::Vec4Type<T>::type;
+
+            const int tid = threadIdx.x;
+            const int my_seed = seed_begin + (int)blockIdx.x * N + tid;
+            const bool has_seed = my_seed < seed_end;
+
+            int qid = -1;
+            Domain<T> cur = {T(0), T(0), T(0), T(0), T(0), T(0)};
+            int level = 0;
+            int active = 0;
+
+            // Initial seed: load geometry, evaluate the root domain, and
+            // accept it only if it contains the origin and is not already
+            // dominated by the current global toi.  Geometry/atol are
+            // discarded here -- the body re-loads them for active threads.
+            if (has_seed) {
+                qid = my_seed;
+                Vec4 sx, sy, sz, ex, ey, ez;
+                T atol[3];
+                load_query_and_tol<is_vf, T, Vec4, I>(
+                    qid, overlap0, overlap1, sp, ep, element_stride, elements, tol, sx, sy, sz, ex, ey, ez, atol);
+
+                Domain<T> root = {T(0), T(1), T(0), T(1), T(0), T(1)};
+                int contains = 0;
+                int accept = 0;
+                evaluate_cell_3d<is_vf, T, Vec4>(root, sx, sy, sz, ex, ey, ez, tol, atol, contains, accept);
+
+                if (contains && is_domain_valid<is_vf>(root, toi[0], atol)) {
+                    cur = root;
+                    level = 0;
+                    active = 1;
+                }
+            }
+
+            narrow_phase_dfs_zero_stride_body<is_vf, N, T, I>(overlap0,
+                                                              overlap1,
+                                                              sp,
+                                                              ep,
+                                                              element_stride,
+                                                              elements,
+                                                              tol,
+                                                              toi,
+                                                              g_stack,
+                                                              g_normal_cap,
+                                                              halt,
+                                                              qid,
+                                                              cur,
+                                                              level,
+                                                              active);
+        }
+
+        // -----------------------------------------------------------------
+        // Kernel B: each thread seeds itself by popping one entry off the
+        // global stack (typically produced by Kernel A's overflow path or
+        // by an earlier drain pass).  Threads that find the stack empty
+        // start inactive and only contribute to s_toi reduction; they may
+        // still steal work from the shared stack once the body's loop
+        // starts publishing into it.
+        //
+        // Launch shape is flexible: blockDim.x == N, grid sized to whatever
+        // budget the host wants to dedicate to draining g_stack.  Each
+        // launch consumes up to grid_blocks * N entries from g_stack.
+        // -----------------------------------------------------------------
+        template <bool is_vf, int N, typename T, typename I>
+        __global__ void narrow_phase_dfs_zero_stride_from_stack_kernel(const I* const SCCD_RESTRICT overlap0,
+                                                                       const I* const SCCD_RESTRICT overlap1,
+                                                                       T** const SCCD_RESTRICT sp,
+                                                                       T** const SCCD_RESTRICT ep,
+                                                                       const size_t element_stride,
+                                                                       I** const SCCD_RESTRICT elements,
+                                                                       const T tol,
+                                                                       T* SCCD_RESTRICT toi,
+                                                                       Stack<T> g_stack,
+                                                                       const int g_normal_cap,
+                                                                       int* SCCD_RESTRICT halt,
+                                                                       const T alpha) {
+            (void)alpha;
+
+            int qid = -1;
+            Domain<T> cur = {T(0), T(0), T(0), T(0), T(0), T(0)};
+            int level = 0;
+            int active = 0;
+
+            // try_pop drains one slot per thread.  It uses the EMPTY/
+            // WRITING/committed tag protocol on the producer side: entries
+            // written by the body (or an earlier kernel) via plain stores
+            // are observed once the qid field becomes non-negative.  An
+            // empty stack just leaves the thread inactive.
+            if (try_pop<false, T>(g_stack, cur, level, qid)) {
+                active = 1;
+            }
+
+            narrow_phase_dfs_zero_stride_body<is_vf, N, T, I>(overlap0,
+                                                              overlap1,
+                                                              sp,
+                                                              ep,
+                                                              element_stride,
+                                                              elements,
+                                                              tol,
+                                                              toi,
+                                                              g_stack,
+                                                              g_normal_cap,
+                                                              halt,
+                                                              qid,
+                                                              cur,
+                                                              level,
+                                                              active);
         }
 
         template <bool is_vf, int N, typename T, typename I>
@@ -1997,47 +2107,87 @@ namespace sccd {
                 SCCD_CHECK_CUDA(cudaMemcpy(&h_g_top, g_top, sizeof(int), cudaMemcpyDeviceToHost));
                 if (h_g_top <= 0) continue;
 
-                printf("gtop = %d\n", h_g_top);
-
-                const int pass2_seed = (int)end;
-                cudaMemcpy(seed_cursor, &pass2_seed, sizeof(int), cudaMemcpyHostToDevice);
-                cudaMemsetAsync(inflight, 0, sizeof(int));
-                cudaMemsetAsync(halt, 0, sizeof(int));
-
-                while (true) {
-                    int grid_blocks = base_grid_blocks;
-                    if (grid_blocks > this_batch) grid_blocks = this_batch;
-                    dim3 grid_pass2(grid_blocks, 1, 1);
-
-                    narrow_phase_kernel<is_vf, T, I><<<grid_pass2, block_pass2>>>(overlap0,
-                                                                                  overlap1,
-                                                                                  v0,
-                                                                                  v1,
-                                                                                  element_stride,
-                                                                                  elements,
-                                                                                  tol,
-                                                                                  d_toi,
-                                                                                  toi_stride,
-                                                                                  g_stack,
-                                                                                  g_normal_cap,
-                                                                                  inflight,
-                                                                                  seed_cursor,
-                                                                                  (int)end,
-                                                                                  halt);
-                    SCCD_CUDA_LAST_ERROR();
-
-                    // Check whether the batch is fully drained.  A D2H
-                    // copy per relaunch is cheap compared to the kernel
-                    // runtime and is only paid once per overflow event.
-                    int h_seed_cursor = 0;
-                    cudaMemcpy(&h_g_top, g_top, sizeof(int), cudaMemcpyDeviceToHost);
-                    cudaMemcpy(&h_seed_cursor, seed_cursor, sizeof(int), cudaMemcpyDeviceToHost);
-                    if (h_g_top <= 0 && h_seed_cursor >= (int)end) break;
-
-                    // Work remains; reset transient counters and relaunch.
-                    // g_top, g_qid[], seed_cursor, d_toi are preserved.
+                if (toi_stride == 0) {
+                    // Pass 2 (zero-stride): drain g_stack with the
+                    // per-thread DFS body.  Each block consumes up to N
+                    // entries via initial pops; relaunch while h_g_top
+                    // > 0 (the body may push back on overflow).  There
+                    // is no seed_cursor logic here -- all remaining
+                    // work lives in g_stack.
+                    constexpr int N = SCCD_NP_THREADS_PER_BLOCK;
                     cudaMemsetAsync(halt, 0, sizeof(int));
+
+                    printf("Draining g_stack with from-stack kernel (%d)\n", h_g_top);
+
+                    while (true) {
+                        int grid_blocks = (h_g_top + N - 1) / N;
+                        if (grid_blocks > base_grid_blocks) grid_blocks = base_grid_blocks;
+                        if (grid_blocks < 1) grid_blocks = 1;
+                        dim3 grid_pass2_zs(grid_blocks, 1, 1);
+
+                        narrow_phase_dfs_zero_stride_from_stack_kernel<is_vf, N, T, I>
+                            <<<grid_pass2_zs, block_pass1>>>(overlap0,
+                                                             overlap1,
+                                                             v0,
+                                                             v1,
+                                                             element_stride,
+                                                             elements,
+                                                             tol,
+                                                             d_toi,
+                                                             g_stack,
+                                                             g_normal_cap,
+                                                             halt,
+                                                             SCCD_NP_ALPHA);
+                        SCCD_CUDA_LAST_ERROR();
+
+                        cudaMemcpy(&h_g_top, g_top, sizeof(int), cudaMemcpyDeviceToHost);
+                        if (h_g_top <= 0) break;
+
+                        cudaMemsetAsync(halt, 0, sizeof(int));
+                    }
+                } else {
+                    // Pass 2 (per-block stride): warp-per-query worker
+                    // pulls seeds via seed_cursor and drains g_stack.
+                    const int pass2_seed = (int)end;
+                    cudaMemcpy(seed_cursor, &pass2_seed, sizeof(int), cudaMemcpyHostToDevice);
                     cudaMemsetAsync(inflight, 0, sizeof(int));
+                    cudaMemsetAsync(halt, 0, sizeof(int));
+
+                    while (true) {
+                        int grid_blocks = base_grid_blocks;
+                        if (grid_blocks > this_batch) grid_blocks = this_batch;
+                        dim3 grid_pass2(grid_blocks, 1, 1);
+
+                        narrow_phase_kernel<is_vf, T, I><<<grid_pass2, block_pass2>>>(overlap0,
+                                                                                      overlap1,
+                                                                                      v0,
+                                                                                      v1,
+                                                                                      element_stride,
+                                                                                      elements,
+                                                                                      tol,
+                                                                                      d_toi,
+                                                                                      toi_stride,
+                                                                                      g_stack,
+                                                                                      g_normal_cap,
+                                                                                      inflight,
+                                                                                      seed_cursor,
+                                                                                      (int)end,
+                                                                                      halt);
+                        SCCD_CUDA_LAST_ERROR();
+
+                        // Check whether the batch is fully drained.  A D2H
+                        // copy per relaunch is cheap compared to the kernel
+                        // runtime and is only paid once per overflow event.
+                        int h_seed_cursor = 0;
+                        cudaMemcpy(&h_g_top, g_top, sizeof(int), cudaMemcpyDeviceToHost);
+                        cudaMemcpy(&h_seed_cursor, seed_cursor, sizeof(int), cudaMemcpyDeviceToHost);
+                        if (h_g_top <= 0 && h_seed_cursor >= (int)end) break;
+
+                        // Work remains; reset transient counters and relaunch.
+                        // g_top, g_qid[], seed_cursor, d_toi are preserved.
+                        cudaMemsetAsync(halt, 0, sizeof(int));
+                        cudaMemsetAsync(inflight, 0, sizeof(int));
+                    }
                 }
             }
 
