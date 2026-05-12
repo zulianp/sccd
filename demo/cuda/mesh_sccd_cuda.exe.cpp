@@ -68,8 +68,6 @@ int main(int argc, char** argv) {
 
     auto ccd = sccd::CCD<scalar_t>::create(t0, smesh::EXECUTION_SPACE_DEVICE);
 
-    int SCCD_REPEAT = 1;
-    SCCD_READ_ENV(SCCD_REPEAT, atoi);
     int SCCD_USE_FIND_EARLIEST_IMPACT_TIME = 1;
     SCCD_READ_ENV(SCCD_USE_FIND_EARLIEST_IMPACT_TIME, atoi);
 
@@ -84,7 +82,7 @@ int main(int argc, char** argv) {
                t0->block(0)->n_elements(),
                t0->edge_graph()->nnz(),
                t0->n_nodes(),
-               (tock - tick) / SCCD_REPEAT,
+               (tock - tick),
                (double)toi);
 
     } else {
@@ -116,7 +114,7 @@ int main(int argc, char** argv) {
                t0->n_nodes(),
                n_e2e,
                n_f2v,
-               (tock - tick) / SCCD_REPEAT,
+               (tock - tick),
                (double)toi,
                (double)toi_vf,
                (double)toi_ee);
