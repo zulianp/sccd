@@ -1087,10 +1087,8 @@ namespace sccd {
                                                             Stack<T> g_stack,
                                                             const int g_normal_cap,
                                                             int* SCCD_RESTRICT halt,
-                                                            const T alpha,
                                                             const int seed_begin,
                                                             const int seed_end) {
-            (void)alpha;  // unused: this kernel does not hard-defer.
             using Vec4 = typename device::Vec4Type<T>::type;
 
             const int tid = threadIdx.x;
@@ -1165,10 +1163,7 @@ namespace sccd {
                                                                        T* SCCD_RESTRICT toi,
                                                                        Stack<T> g_stack,
                                                                        const int g_normal_cap,
-                                                                       int* SCCD_RESTRICT halt,
-                                                                       const T alpha) {
-            (void)alpha;
-
+                                                                       int* SCCD_RESTRICT halt) {
             int qid = -1;
             Domain<T> cur = {T(0), T(0), T(0), T(0), T(0), T(0)};
             int level = 0;
@@ -1573,8 +1568,7 @@ namespace sccd {
                                                            const int toi_stride,
                                                            Stack<T> g_stack,
                                                            const int g_normal_cap,
-                                                           int* SCCD_RESTRICT halt,
-                                                           const T alpha) {
+                                                           int* SCCD_RESTRICT halt) {
             __shared__ int b_qid;
             __shared__ int b_level;
             __shared__ int b_have_work;
@@ -1609,13 +1603,12 @@ namespace sccd {
                                                   g_stack,
                                                   g_normal_cap,
                                                   halt,
-                                                  alpha,
+                                                  T(0),
                                                   b_qid,
                                                   b_cur,
                                                   b_level,
                                                   /*do_hard_defer=*/false);
         }
-
 
         template <bool is_vf, typename T, typename I>
         int narrow_phase_generic(const size_t noverlaps,
@@ -1680,10 +1673,8 @@ namespace sccd {
             {
                 int occ = 0;
                 if (cudaOccupancyMaxActiveBlocksPerMultiprocessor(
-                        &occ,
-                        (const void*)narrow_phase_dfs_zero_stride_from_stack_kernel<is_vf, N, T, I>,
-                        N,
-                        0) == cudaSuccess &&
+                        &occ, (const void*)narrow_phase_dfs_zero_stride_from_stack_kernel<is_vf, N, T, I>, N, 0) ==
+                        cudaSuccess &&
                     occ > 0) {
                     SCCD_BLOCKS_PER_SM = occ;
                 }
@@ -1708,6 +1699,7 @@ namespace sccd {
             // noverlaps so we don't reserve gigabytes for tiny inputs.
             size_t free_bytes = 0, total_bytes = 0;
             cudaMemGetInfo(&free_bytes, &total_bytes);
+            (void)total_bytes;
 
             double SCCD_MEM_FRACTION = 0.25;
             SCCD_READ_ENV(SCCD_MEM_FRACTION, atof);
@@ -1822,7 +1814,6 @@ namespace sccd {
                                                                                                         g_stack,
                                                                                                         g_normal_cap,
                                                                                                         halt,
-                                                                                                        SCCD_NP_ALPHA,
                                                                                                         (int)begin,
                                                                                                         (int)end);
                 } else {
@@ -1888,23 +1879,20 @@ namespace sccd {
                                                           d_toi,
                                                           g_stack,
                                                           g_normal_cap,
-                                                          halt,
-                                                          SCCD_NP_ALPHA);
+                                                          halt);
                     } else {
-                        narrow_phase_dfs_from_stack_kernel<is_vf, N, T, I>
-                            <<<grid_pass2, block_pass1>>>(overlap0,
-                                                          overlap1,
-                                                          v0,
-                                                          v1,
-                                                          element_stride,
-                                                          elements,
-                                                          tol,
-                                                          d_toi,
-                                                          toi_stride,
-                                                          g_stack,
-                                                          g_normal_cap,
-                                                          halt,
-                                                          SCCD_NP_ALPHA);
+                        narrow_phase_dfs_from_stack_kernel<is_vf, N, T, I><<<grid_pass2, block_pass1>>>(overlap0,
+                                                                                                        overlap1,
+                                                                                                        v0,
+                                                                                                        v1,
+                                                                                                        element_stride,
+                                                                                                        elements,
+                                                                                                        tol,
+                                                                                                        d_toi,
+                                                                                                        toi_stride,
+                                                                                                        g_stack,
+                                                                                                        g_normal_cap,
+                                                                                                        halt);
                     }
                     SCCD_CUDA_LAST_ERROR();
 
