@@ -23,6 +23,7 @@
 
 #ifndef SCCD_NP_SHARED_STACK_CAP
 #define SCCD_NP_SHARED_STACK_CAP 2048
+// #define SCCD_NP_SHARED_STACK_CAP 1024
 #endif
 
 #ifndef SCCD_NP_THREADS_PER_BLOCK
@@ -84,16 +85,16 @@ namespace sccd {
         }
 
         template <typename T, typename Vec4>
-        static inline __device__ void compute_edge_edge_tolerance_soa(const T codomain_tol,
-                                                                      const Vec4 sx,
-                                                                      const Vec4 sy,
-                                                                      const Vec4 sz,
-                                                                      const Vec4 ex,
-                                                                      const Vec4 ey,
-                                                                      const Vec4 ez,
-                                                                      T* const SCCD_RESTRICT tol0,
-                                                                      T* const SCCD_RESTRICT tol1,
-                                                                      T* const SCCD_RESTRICT tol2) {
+        static inline __device__ void compute_edge_edge_tolerance(const T codomain_tol,
+                                                                  const Vec4 sx,
+                                                                  const Vec4 sy,
+                                                                  const Vec4 sz,
+                                                                  const Vec4 ex,
+                                                                  const Vec4 ey,
+                                                                  const Vec4 ez,
+                                                                  T* const SCCD_RESTRICT tol0,
+                                                                  T* const SCCD_RESTRICT tol1,
+                                                                  T* const SCCD_RESTRICT tol2) {
             const T v0sx = sx.x;
             const T v0sy = sy.x;
             const T v0sz = sz.x;
@@ -171,16 +172,16 @@ namespace sccd {
         }
 
         template <typename T, typename Vec4>
-        static inline __device__ void compute_face_vertex_tolerance_soa(const T codomain_tol,
-                                                                        const Vec4 sx,
-                                                                        const Vec4 sy,
-                                                                        const Vec4 sz,
-                                                                        const Vec4 ex,
-                                                                        const Vec4 ey,
-                                                                        const Vec4 ez,
-                                                                        T* const SCCD_RESTRICT tol0,
-                                                                        T* const SCCD_RESTRICT tol1,
-                                                                        T* const SCCD_RESTRICT tol2) {
+        static inline __device__ void compute_face_vertex_tolerance(const T codomain_tol,
+                                                                    const Vec4 sx,
+                                                                    const Vec4 sy,
+                                                                    const Vec4 sz,
+                                                                    const Vec4 ex,
+                                                                    const Vec4 ey,
+                                                                    const Vec4 ez,
+                                                                    T* const SCCD_RESTRICT tol0,
+                                                                    T* const SCCD_RESTRICT tol1,
+                                                                    T* const SCCD_RESTRICT tol2) {
             const T v0sx = sx.x;
             const T v0sy = sy.x;
             const T v0sz = sz.x;
@@ -572,7 +573,6 @@ namespace sccd {
                                                     Vec4& ex,
                                                     Vec4& ey,
                                                     Vec4& ez) {
-            // TODO: Implement this
             const I va = voverlap[qid];
             const I vb = foverlap[qid];
 
@@ -636,11 +636,11 @@ namespace sccd {
             if constexpr (is_vf) {
                 load_query_vf<T, Vec4, I>(
                     qid, overlap0, overlap1, sp, ep, element_stride, elements, sx, sy, sz, ex, ey, ez);
-                compute_face_vertex_tolerance_soa<T, Vec4>(tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
+                compute_face_vertex_tolerance<T, Vec4>(tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
             } else {
                 load_query_ee<T, Vec4, I>(
                     qid, overlap0, overlap1, sp, ep, element_stride, elements, sx, sy, sz, ex, ey, ez);
-                compute_edge_edge_tolerance_soa<T, Vec4>(tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
+                compute_edge_edge_tolerance<T, Vec4>(tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
             }
         }
 
@@ -973,11 +973,6 @@ namespace sccd {
             using Vec4 = typename device::Vec4Type<T>::type;
             constexpr int S_CAP = SCCD_NP_SHARED_STACK_CAP;
             constexpr int max_bisections = SCCD_NP_MAX_BISECTIONS;
-            // Number of consecutive iterations the block must observe an
-            // empty workload before declaring termination.  Higher values
-            // reduce the chance of exiting just before another block
-            // pushes new work into g_stack.
-            constexpr int MAX_IDLE_ITERS = 8;
 
             __shared__ T s_tlower[S_CAP];
             __shared__ T s_tupper[S_CAP];
@@ -995,9 +990,11 @@ namespace sccd {
             const int my_seed = seed_begin + (int)blockIdx.x * N + tid;
             const bool has_seed = my_seed < seed_end;
 
-            // Init shared validity tags (only needed for global stack -- the
-            // shared stack uses Phase A/B sync separation), s_top, s_toi.
-            for (int i = tid; i < S_CAP; i += N) s_qid[i] = SCCD_QID_EMPTY;
+            // Initialize s_top and s_toi.  The shared-stack qid tags are
+            // unused on this kernel's hot path (Phase A/B __syncthreads
+            // already orders writers vs readers), but `s_qid[slot]` is
+            // still used as the qid value the popper reloads on, so it
+            // must hold whatever the matching writer stored.
             if (tid == 0) {
                 s_top = 0;
                 s_toi = toi[0];
@@ -1036,8 +1033,6 @@ namespace sccd {
                     active = 1;
                 }
             }
-
-            int idle_iters = 0;
 
             while (true) {
                 // Cross-block prune: fold s_toi into the global toi and
@@ -1110,8 +1105,11 @@ namespace sccd {
 
                 // Push: try shared first (single-writer slot, no tag needed
                 // because the __syncthreads below separates writers from
-                // readers).  Overflow into global uses the EMPTY/WRITING
-                // tag protocol because cross-block pop/push interleave.
+                // readers).  Overflow spills into the global stack with
+                // plain writes -- this kernel never pops from global,
+                // Pass 2 (warp-per-query) picks up the spillover.  Plain
+                // writes are race-free because each reserved slot has a
+                // unique writer and no in-kernel popper races on it.
                 if (will_push) {
                     const int slot = reserve_slots(&s_top, 1, S_CAP);
                     if (slot >= 0 && slot < S_CAP) {
@@ -1130,12 +1128,6 @@ namespace sccd {
                             g_slot = reserve_slots(g_stack.top, 1, g_stack.capacity);
                         }
                         if (g_slot >= 0 && g_slot < g_stack.capacity) {
-                            while (atomicCAS(&g_stack.qid[g_slot], SCCD_QID_EMPTY, SCCD_QID_WRITING) !=
-                                   SCCD_QID_EMPTY) {
-                                // Slot still being read by a popper that
-                                // released the index but has not yet
-                                // exchanged the qid back to EMPTY.
-                            }
                             g_stack.tlower[g_slot] = push_box.tlower;
                             g_stack.tupper[g_slot] = push_box.tupper;
                             g_stack.ulower[g_slot] = push_box.ulower;
@@ -1143,22 +1135,21 @@ namespace sccd {
                             g_stack.vlower[g_slot] = push_box.vlower;
                             g_stack.vupper[g_slot] = push_box.vupper;
                             g_stack.level[g_slot] = push_level;
-                            __threadfence();
-                            atomicExch(&g_stack.qid[g_slot], qid);
+                            g_stack.qid[g_slot] = qid;
                         }
                     }
                 }
 
                 __syncthreads();
 
-                // ----------- Phase B: idle threads pull more work -----------
+                // ----------- Phase B: idle threads pull more shared work ----
+                // Only the shared stack is drained here.  Any overflow
+                // pushed into the global stack above is left for Pass 2
+                // to consume; this removes the cross-block CAS protocol
+                // that could deadlock under heavy contention.
                 if (!active) {
-                    // Shared pop: bounded CAS decrement, then plain reads.
-                    // Pushes from Phase A are already visible across the
-                    // barrier above.
                     int t = atomicAdd(&s_top, 0);
-                    int got = 0;
-                    while (t > 0 && !got) {
+                    while (t > 0) {
                         const int prev = atomicCAS(&s_top, t, t - 1);
                         if (prev == t) {
                             const int slot = t - 1;
@@ -1190,74 +1181,23 @@ namespace sccd {
                                                                           atol);
                                 }
                                 active = 1;
-                                got = 1;
                             }
                             break;
                         }
                         t = prev;
                     }
-
-                    // Global pop: tag protocol.  Spin until the writer
-                    // commits a non-negative qid, then drain fields and
-                    // recycle the slot back to EMPTY.
-                    if (!got) {
-                        const int g_slot = release_slot(g_stack.top);
-                        if (g_slot >= 0 && g_slot < g_stack.capacity) {
-                            int q;
-                            do {
-                                q = atomicAdd(&g_stack.qid[g_slot], 0);
-                            } while (q < 0);
-                            __threadfence();
-                            cur.tlower = g_stack.tlower[g_slot];
-                            cur.tupper = g_stack.tupper[g_slot];
-                            cur.ulower = g_stack.ulower[g_slot];
-                            cur.uupper = g_stack.uupper[g_slot];
-                            cur.vlower = g_stack.vlower[g_slot];
-                            cur.vupper = g_stack.vupper[g_slot];
-                            level = g_stack.level[g_slot];
-                            atomicExch(&g_stack.qid[g_slot], SCCD_QID_EMPTY);
-                            if (q != qid) {
-                                qid = q;
-                                load_query_and_tol<is_vf, T, Vec4, I>(qid,
-                                                                      overlap0,
-                                                                      overlap1,
-                                                                      sp,
-                                                                      ep,
-                                                                      element_stride,
-                                                                      elements,
-                                                                      tol,
-                                                                      sx,
-                                                                      sy,
-                                                                      sz,
-                                                                      ex,
-                                                                      ey,
-                                                                      ez,
-                                                                      atol);
-                            }
-                            active = 1;
-                        }
-                    }
                 }
 
                 __syncthreads();
 
-                // Termination (best-effort): block exits once it has seen
-                // no active thread and both stacks empty for MAX_IDLE_ITERS
-                // consecutive iterations.  A halt flag also forces exit so
-                // the host can react to a full g_stack.
+                // Termination: exit once the block has no active thread
+                // and the shared stack is empty, or halt was raised.
+                // Overflow in g_stack is intentionally left for Pass 2.
                 const int n_active = block_popc<N>(active, warp_sums);
                 if (n_active == 0) {
                     const int s_now = atomicAdd(&s_top, 0);
-                    const int g_now = atomicAdd(g_stack.top, 0);
                     const int h_now = atomicAdd(halt, 0);
-                    if ((s_now <= 0 && g_now <= 0) || h_now != 0) {
-                        idle_iters += 1;
-                        if (idle_iters >= MAX_IDLE_ITERS) break;
-                    } else {
-                        idle_iters = 0;
-                    }
-                } else {
-                    idle_iters = 0;
+                    if (s_now <= 0 || h_now != 0) break;
                 }
             }
 
@@ -2015,7 +1955,6 @@ namespace sccd {
                 //   stride == 1 : per-block DFS, one toi per candidate.
                 //                 Grid is one block per candidate.
                 if (toi_stride == 0) {
-                    printf("Using narrow_phase_dfs_zero_stride_kernel (%d)\n", this_batch);
                     constexpr int N = SCCD_NP_THREADS_PER_BLOCK;
                     const int grid_blocks_zs = (this_batch + N - 1) / N;
                     dim3 grid_pass1_zs(grid_blocks_zs, 1, 1);
@@ -2034,7 +1973,6 @@ namespace sccd {
                                                                                                         (int)begin,
                                                                                                         (int)end);
                 } else {
-                    printf("Using narrow_phase_dfs_kernel (%d)\n", this_batch);
                     dim3 grid_pass1(this_batch, 1, 1);
                     narrow_phase_dfs_kernel<is_vf, SCCD_NP_THREADS_PER_BLOCK, T, I>
                         <<<grid_pass1, block_pass1>>>(overlap0,
