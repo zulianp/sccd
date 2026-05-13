@@ -58,3 +58,31 @@ endif()
 if(SCCD_ENABLE_SMESH)
   find_package(smesh REQUIRED)
 endif()
+
+
+if(SCCD_ENABLE_TIGHT_INCLUSION)
+  include(FetchContent)
+
+  set(TIGHT_INCLUSION_WITH_RATIONAL OFF CACHE BOOL "" FORCE)
+  set(TIGHT_INCLUSION_WITH_TIMER OFF CACHE BOOL "" FORCE)
+  set(TIGHT_INCLUSION_LIMIT_QUEUE_SIZE OFF CACHE BOOL "" FORCE)
+
+  FetchContent_Declare(
+    tight_inclusion
+    GIT_REPOSITORY https://github.com/Continuous-Collision-Detection/Tight-Inclusion.git
+    GIT_TAG v1.0.6
+    GIT_SHALLOW TRUE
+  )
+  FetchContent_MakeAvailable(tight_inclusion)
+
+  separate_arguments(SCCD_TIGHT_INCLUSION_CXX_FLAGS NATIVE_COMMAND "${CMAKE_CXX_FLAGS}")
+  separate_arguments(SCCD_TIGHT_INCLUSION_CXX_RELEASE_FLAGS NATIVE_COMMAND "${CMAKE_CXX_FLAGS_RELEASE}")
+  target_compile_options(tight_inclusion PRIVATE
+    ${SCCD_TIGHT_INCLUSION_CXX_FLAGS}
+    "$<$<CONFIG:Release>:${SCCD_TIGHT_INCLUSION_CXX_RELEASE_FLAGS}>"
+  )
+
+  add_compile_definitions(SCCD_ENABLE_TIGHT_INCLUSION=1)
+  list(APPEND SCCD_DEP_LIBRARIES "$<BUILD_INTERFACE:tight_inclusion::tight_inclusion>")
+
+endif()

@@ -1,17 +1,20 @@
 #include "sccd_vaabb.cuh"
 
-#ifndef MIN
-#define MIN(a, b) ((a) < (b) ? (a) : (b))
-#endif
-#ifndef MAX
-#define MAX(a, b) ((a) > (b) ? (a) : (b))
-#endif
-
 #include <stdio.h>
 #include <stdlib.h>
 
 namespace sccd {
     namespace device {
+        template <typename T>
+        static __device__ __forceinline__ T dmin(const T a, const T b) {
+            return b < a ? b : a;
+        }
+
+        template <typename T>
+        static __device__ __forceinline__ T dmax(const T a, const T b) {
+            return a < b ? b : a;
+        }
+
         template <typename idx_t, typename geom_t, typename aabb_t>
         __global__ void compute_aabbs_face_kernel(const int nxe,
                                                   const ptrdiff_t n_elements,
@@ -28,17 +31,17 @@ namespace sccd {
                 const geom_t p0 = points0[d][ii];
                 const geom_t p1 = points1[d][ii];
 
-                aabbs[d][e] = MIN(p0, p1);
-                aabbs[dim + d][e] = MAX(p0, p1);
+                aabbs[d][e] = dmin<geom_t>(p0, p1);
+                aabbs[dim + d][e] = dmax<geom_t>(p0, p1);
 
                 for (int v = 1; v < nxe; v++) {
                     const idx_t ii = elements[v][e];
                     const geom_t p0 = points0[d][ii];
                     const geom_t p1 = points1[d][ii];
-                    const aabb_t p_min = MIN(p0, p1);
-                    const aabb_t p_max = MAX(p0, p1);
-                    aabbs[d][e] = MIN(aabbs[d][e], p_min);
-                    aabbs[dim + d][e] = MAX(aabbs[dim + d][e], p_max);
+                    const aabb_t p_min = dmin<geom_t>(p0, p1);
+                    const aabb_t p_max = dmax<geom_t>(p0, p1);
+                    aabbs[d][e] = dmin<aabb_t>(aabbs[d][e], p_min);
+                    aabbs[dim + d][e] = dmax<aabb_t>(aabbs[dim + d][e], p_max);
                 }
             }
         }
@@ -78,8 +81,8 @@ namespace sccd {
             for (int d = 0; d < dim; d++) {
                 const geom_t p0 = points0[d][n];
                 const geom_t p1 = points1[d][n];
-                aabbs[d][n] = MIN(p0, p1);
-                aabbs[dim + d][n] = MAX(p0, p1);
+                aabbs[d][n] = dmin<geom_t>(p0, p1);
+                aabbs[dim + d][n] = dmax<geom_t>(p0, p1);
             }
         }
 
