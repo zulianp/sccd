@@ -13,3 +13,7 @@ FetchContent_MakeAvailable(simdjson)
 add_executable(boxes_json_to_raw boxes_json_to_raw.cpp)
 target_compile_features(boxes_json_to_raw PRIVATE cxx_std_17)
 target_link_libraries(boxes_json_to_raw PRIVATE simdjson::simdjson)
+
+add_executable(mma_bool_json_to_raw mma_bool_json_to_raw.cpp)
+target_compile_features(mma_bool_json_to_raw PRIVATE cxx_std_17)
+target_link_libraries(mma_bool_json_to_raw PRIVATE simdjson::simdjson)

@@ -41,11 +41,15 @@ parallel_jobs() {
 }
 
 cmake -S "${JSON_PROJECT_DIR}" -B "${JSON_BUILD_DIR}" -DCMAKE_BUILD_TYPE=Release
-cmake --build "${JSON_BUILD_DIR}" --config Release --target boxes_json_to_raw --parallel "$(parallel_jobs)"
+cmake --build "${JSON_BUILD_DIR}" --config Release --target boxes_json_to_raw mma_bool_json_to_raw --parallel "$(parallel_jobs)"
 
 BOXES_JSON_TO_RAW="${JSON_BUILD_DIR}/boxes_json_to_raw"
 if [[ ! -x "${BOXES_JSON_TO_RAW}" && -x "${JSON_BUILD_DIR}/Release/boxes_json_to_raw" ]]; then
     BOXES_JSON_TO_RAW="${JSON_BUILD_DIR}/Release/boxes_json_to_raw"
+fi
+MMA_BOOL_JSON_TO_RAW="${JSON_BUILD_DIR}/mma_bool_json_to_raw"
+if [[ ! -x "${MMA_BOOL_JSON_TO_RAW}" && -x "${JSON_BUILD_DIR}/Release/mma_bool_json_to_raw" ]]; then
+    MMA_BOOL_JSON_TO_RAW="${JSON_BUILD_DIR}/Release/mma_bool_json_to_raw"
 fi
 
 datasets=()
@@ -68,9 +72,18 @@ done
 
 "${PYTHON}" "${BENCHMARK_DIR}/roots_to_raw.py" "${DATA_DIR}" "${PYTHON_DIR}" "${datasets[@]}"
 
-# 3) Extract  the mma_bool files and put them in the dedicated folder (e.g., mma_bool/0ee) as mma_bool.uint8
+for dataset in "${datasets[@]}"; do
+    mma_bool_dir="${DATA_DIR}/${dataset}/mma_bool"
+    [[ -d "${mma_bool_dir}" ]] || continue
+    find "${mma_bool_dir}" -maxdepth 1 -name '*_mma_bool.json' -print0 | xargs -0 sh -c '
+        if [ "$#" -gt 0 ]; then
+            "$0" "$@"
+        fi
+    ' "${MMA_BOOL_JSON_TO_RAW}"
+done
 
 # TODO:
 # 4) Create a bench.exe.cpp that reads the meshes and scans the folder boxes and reads the raw files, times the CCD for each file collision files pair (names the trace file after the case and folder e.g., SMESH_TRACE_FILE=armadillo-rollers/0ee)
 # the timings are collected as milliseconds and stored in a unique raw binary file for the whole case and collision type e.g., armadillo-rollers-fv.float64 and armadillo-rollers-ee.float64 
 # The benchmark also collects the accuracy metrics: number of false positives and negatives for the narrow-phase, and number of false positives and negatives for the broad-phase. writes sccd_toi.float64, sccd_fp.uint8, sccd_fn.uint8, sccd_fp_broad.uint8, sccd_fn_broad.uint8, it also makes sure that the data is aligned/ordeded with the query file and the roots file.
+
