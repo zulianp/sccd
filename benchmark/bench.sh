@@ -88,7 +88,7 @@ for dataset in "${datasets[@]}"; do
     ' "${MMA_BOOL_JSON_TO_RAW}"
 done
 
-cmake_bench_args=(-DCMAKE_BUILD_TYPE=Release -DSCCD_ENABLE_SMESH=ON)
+cmake_bench_args=(-DCMAKE_BUILD_TYPE=Release -DSCCD_ENABLE_SMESH=ON -DSCCD_ENABLE_OPENMP=ON -DSCCD_ENABLE_TIGHT_INCLUSION=ON)
 if [[ -n "${SCCD_SMESH_DIR:-}" ]]; then
     cmake_bench_args+=("-Dsmesh_DIR=${SCCD_SMESH_DIR}")
 elif [[ -n "${smesh_DIR:-}" ]]; then
@@ -120,6 +120,13 @@ if [[ ! -x "${SCCD_BENCH}" && -x "${SCCD_BUILD_DIR}/Release/sccd_bench" ]]; then
     SCCD_BENCH="${SCCD_BUILD_DIR}/Release/sccd_bench"
 fi
 
+if [[ -z "${OMP_NUM_THREADS:-}" ]]; then
+    export OMP_NUM_THREADS="$(parallel_jobs)"
+fi
+if [[ -z "${OMP_PROC_BIND:-}" ]]; then
+    export OMP_PROC_BIND=true
+fi
+
 exec 1>&3
 
 BENCH_CSV="${SCCD_BENCH_CSV:-"${BENCHMARK_DIR}/bench.csv"}"
@@ -137,4 +144,4 @@ fi
 exec 1>&2
 
 "${PYTHON}" "${BENCHMARK_DIR}/bench_postprocess.py" \
-    "${BENCH_CSV}" "${BENCH_AGG_CSV}" "${BENCH_FIGURE_DIR}" "${BENCH_REPORT_TEX}"
+    "${BENCH_CSV}" "${BENCH_AGG_CSV}" "${BENCH_FIGURE_DIR}" "${BENCH_REPORT_TEX}" "${DATA_DIR}"
