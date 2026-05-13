@@ -55,6 +55,7 @@ def main():
     fig.suptitle("Classification errors (full result tables)", y=1.02)
     fig.tight_layout()
     fig.savefig(f"{out_stem}.pdf", bbox_inches="tight")
+    fig.savefig(f"{out_stem}.png", dpi=150, bbox_inches="tight")
     plt.close()
 
 
