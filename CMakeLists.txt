@@ -21,6 +21,11 @@ option(SCCD_ENABLE_CUDA "Enable CUDA" OFF)
 # SCCD library
 file(GLOB_RECURSE SCCD_HEADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp")
 file(GLOB_RECURSE SCCD_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
+list(FILTER SCCD_SOURCES EXCLUDE REGEX "/tests/")
+if(NOT SCCD_ENABLE_SMESH)
+  list(FILTER SCCD_SOURCES EXCLUDE REGEX "/integrations/smesh/")
+  list(FILTER SCCD_HEADERS EXCLUDE REGEX "/integrations/smesh/")
+endif()
 
 if(SCCD_ENABLE_CUDA)
   file(GLOB_RECURSE SCCD_CUDA_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cu")
@@ -68,6 +73,10 @@ if(TARGET TBB::tbb)
   target_link_libraries(sccd PUBLIC TBB::tbb)
 endif()
 
+if(SCCD_ENABLE_CUDA)
+  target_compile_definitions(sccd PUBLIC SCCD_ENABLE_CUDA)
+endif()
+
 if(SCCD_ENABLE_HACKS)
   add_subdirectory(hacks)
   # file(GLOB_RECURSE SCCD_HACKS_HEADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/hacks/*.hpp")
@@ -77,6 +86,7 @@ if(SCCD_ENABLE_HACKS)
 endif()
 
 if(SCCD_ENABLE_SMESH)
+  target_include_directories(sccd PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/integrations/smesh>)
   target_link_libraries(sccd PUBLIC smesh::smesh)
 endif()
 
@@ -156,3 +166,5 @@ if(SCCD_ENABLE_SMESH)
     endforeach()
   endif()
 endif()
+
+include(SCCDTests)

@@ -1,18 +1,42 @@
+#include "smesh_buffer.hpp"
 #include "smesh_context.hpp"
+#include "smesh_device_buffer.hpp"
 #include "smesh_graph.hpp"
 #include "smesh_mesh.hpp"
 #include "smesh_path.hpp"
 #include "smesh_tracer.hpp"
 
-#include "broadphase.hpp"
-#include "narrowphase.hpp"
+#include "sccd_base.hpp"
 #include "sccd_config.hpp"
+#include "sccd_smesh_CCD.hpp"
 
-#include "sccd_broadphase.cuh"
-#include "sccd_narrowphase.cuh"
-#include "sccd_vaabb.cuh"
+#include <algorithm>
+#include <filesystem>
+#include <limits>
+#include <type_traits>
 
-#include <cuda_runtime_api.h>
+// using scalar_t = smesh::geom_t;
+using scalar_t = double;
+
+template <typename T, typename MeshT>
+smesh::SharedBuffer<T*> device_points_as(const MeshT& mesh) {
+    if constexpr (std::is_same<T, smesh::geom_t>::value) {
+        return mesh->device_points_SoA();
+    } else {
+        auto points = smesh::astype<T>(mesh->points());
+        return smesh::to_device(points);
+    }
+}
+
+static scalar_t buffer_min_or(const smesh::SharedBuffer<scalar_t>& values, const scalar_t fallback) {
+    if (!values || values->size() == 0) {
+        return fallback;
+    }
+
+    auto host_values = smesh::to_host(values);
+    const auto begin = host_values->data();
+    return *std::min_element(begin, begin + host_values->size());
+}
 
 int main(int argc, char** argv) {
     auto ctx = smesh::initialize(argc, argv);
@@ -21,190 +45,92 @@ int main(int argc, char** argv) {
     if (argc != 3) {
         fprintf(stderr, "Usage: %s <mesh_t0> <mesh_t1>\n", argv[0]);
         return 1;
-    } else {
-        double tick = smesh::time_seconds();
+    }
 
-        auto comm = ctx->communicator();
+    double tick = smesh::time_seconds();
+    auto comm = ctx->communicator();
 
-        // Read surface meshes
-        auto t0 = smesh::Mesh::create_from_file(comm, smesh::Path(argv[1]));
-        auto t1 = smesh::Mesh::create_from_file(comm, smesh::Path(argv[2]));
+    auto t0 = smesh::Mesh::create_from_file(comm, smesh::Path(argv[1]));
+    auto t1 = smesh::Mesh::create_from_file(comm, smesh::Path(argv[2]));
 
-        const int dim = t0->spatial_dimension();
+    if (t0->spatial_dimension() != t1->spatial_dimension()) {
+        SMESH_ERROR("Mesh t0 and t1 must have the same spatial dimension\n");
+        return 1;
+    }
 
-        if (dim != t1->spatial_dimension()) {
-            SMESH_ERROR("Mesh t0 and t1 must have the same spatial dimension\n");
-            return 1;
-        }
+    if (t0->n_elements() != t1->n_elements()) {
+        SMESH_ERROR("Mesh t0 and t1 must have the same number of elements\n");
+        return 1;
+    }
 
-        if (t0->n_elements() != t1->n_elements()) {
-            SMESH_ERROR("Mesh t0 and t1 must have the same number of elements\n");
-            return 1;
-        }
+    auto points0 = device_points_as<scalar_t>(t0);
+    auto points1 = device_points_as<scalar_t>(t1);
 
-        auto faces = t0->block(0)->device_elements_SoA();
-        auto points0 = t0->device_points_SoA();
-        auto points1 = t1->device_points_SoA();
+    auto ccd = sccd::CCD<scalar_t>::create(t0, smesh::EXECUTION_SPACE_DEVICE);
 
-        auto faabb = smesh::create_device_buffer<smesh::geom_t>(2 * dim, t0->block(0)->n_elements());
+    int SCCD_USE_FIND_EARLIEST_IMPACT_TIME = 1;
+    SCCD_READ_ENV(SCCD_USE_FIND_EARLIEST_IMPACT_TIME, atoi);
 
-        // AABB faces
-        const ptrdiff_t n_faces = t0->block(0)->n_elements();
-        sccd::device::compute_aabbs<smesh::idx_t, smesh::geom_t, smesh::geom_t>(t0->block(0)->n_nodes_per_element(),
-                                                                                n_faces,
-                                                                                faces->data(),
-                                                                                dim,
-                                                                                points0->data(),
-                                                                                points1->data(),
-                                                                                faabb->data());
+    int err = SCCD_SUCCESS;
+    if (SCCD_USE_FIND_EARLIEST_IMPACT_TIME) {
+        scalar_t toi = 1;
 
-        // AABB nodes
-        const ptrdiff_t n_nodes = t0->n_nodes();
-        auto vaabb = smesh::create_device_buffer<smesh::geom_t>(2 * dim, n_nodes);
-        sccd::device::compute_aabbs<smesh::geom_t, smesh::geom_t>(
-            dim, t0->n_nodes(), points0->data(), points1->data(), vaabb->data());
-
-        // AABB edges
-        auto n2n_crs = t0->edge_graph();
-        auto row_idx_temp = smesh::create_host_buffer<smesh::idx_t>(n2n_crs->nnz());
-        smesh::crs_to_coo(t0->n_nodes(), n2n_crs->rowptr()->data(), row_idx_temp->data());
-
-        const ptrdiff_t n_edges = n2n_crs->nnz();
-
-        auto row_idx = smesh::to_device(row_idx_temp);
-        auto col_idx = smesh::to_device(n2n_crs->colidx());
-        auto edges = smesh::create_2d(std::vector{row_idx, col_idx});
-
-        auto eaabb = smesh::create_device_buffer<smesh::geom_t>(2 * dim, n_edges);
-        sccd::device::compute_aabbs<smesh::idx_t, smesh::geom_t, smesh::geom_t>(
-            2, n_edges, edges->data(), dim, points0->data(), points1->data(), eaabb->data());
-
-        // CCD: Broadphase
-        int sort_axis = sccd::device::choose_axis(dim, n_nodes, vaabb->data());
-
-        auto vidx = smesh::create_device_buffer<smesh::idx_t>(n_nodes);
-        auto fidx = smesh::create_device_buffer<smesh::idx_t>(n_faces);
-        auto eidx = smesh::create_device_buffer<smesh::idx_t>(n_edges);
-
-        auto scratch = smesh::create_device_buffer<smesh::geom_t>(std::max(n_nodes, std::max(n_faces, n_edges)));
-
-        sccd::device::sort_along_axis(dim, n_nodes, sort_axis, vaabb->data(), vidx->data(), scratch->data());
-        sccd::device::sort_along_axis(dim, n_faces, sort_axis, faabb->data(), fidx->data(), scratch->data());
-        sccd::device::sort_along_axis(dim, n_edges, sort_axis, eaabb->data(), eidx->data(), scratch->data());
-
-        ptrdiff_t max_ccdptr_size = std::max(n_faces, n_edges) + 1;
-        auto ccdptr = smesh::create_device_buffer<ptrdiff_t>(max_ccdptr_size);
-
-        // Results of the broadphase
-        smesh::SharedBuffer<smesh::idx_t> e0_overlap, e1_overlap, f_overlap, v_overlap;
-
-        {
-            SMESH_TRACE_SCOPE("Broadphase: E2E");
-            sccd::device::count_self_overlaps<2>(
-                sort_axis, n_edges, eaabb->data(), eidx->data(), 1, edges->data(), ccdptr->data());
-
-            ptrdiff_t n_edge_overlaps = 0;
-            cudaMemcpy(&n_edge_overlaps, ccdptr->data() + n_edges, sizeof(n_edge_overlaps), cudaMemcpyDeviceToHost);
-
-            e0_overlap = smesh::create_device_buffer<smesh::idx_t>(n_edge_overlaps);
-            e1_overlap = smesh::create_device_buffer<smesh::idx_t>(n_edge_overlaps);
-
-            sccd::device::collect_self_overlaps<2>(sort_axis,
-                                                   n_edges,
-                                                   eaabb->data(),
-                                                   eidx->data(),
-                                                   1,
-                                                   edges->data(),
-                                                   ccdptr->data(),
-                                                   e0_overlap->data(),
-                                                   e1_overlap->data());
-        }
-
-        {
-            SMESH_TRACE_SCOPE("Broadphase: F2V");
-            auto cm = smesh::create_device_buffer<smesh::geom_t>(n_nodes);
-            smesh::geom_t* vaabb_max_axis = nullptr;
-            cudaMemcpy(
-                &vaabb_max_axis, vaabb->data() + dim + sort_axis, sizeof(vaabb_max_axis), cudaMemcpyDeviceToHost);
-
-            sccd::device::cummax(n_nodes, vaabb_max_axis, cm->data());
-
-            sccd::device::count_overlaps<3, 1, smesh::geom_t, smesh::idx_t>(sort_axis,
-                                                                            n_faces,
-                                                                            faabb->data(),
-                                                                            fidx->data(),
-                                                                            1,
-                                                                            faces->data(),
-                                                                            n_nodes,
-                                                                            vaabb->data(),
-                                                                            vidx->data(),
-                                                                            0,
-                                                                            nullptr,
-                                                                            ccdptr->data(),
-                                                                            cm->data());
-
-            ptrdiff_t n_face_overlaps = 0;
-            cudaMemcpy(&n_face_overlaps, ccdptr->data() + n_faces, sizeof(n_face_overlaps), cudaMemcpyDeviceToHost);
-
-            f_overlap = smesh::create_device_buffer<smesh::idx_t>(n_face_overlaps);
-            v_overlap = smesh::create_device_buffer<smesh::idx_t>(n_face_overlaps);
-
-            sccd::device::collect_overlaps<3, 1, smesh::geom_t, smesh::idx_t>(sort_axis,
-                                                                              n_faces,
-                                                                              faabb->data(),
-                                                                              fidx->data(),
-                                                                              1,
-                                                                              faces->data(),
-                                                                              n_nodes,
-                                                                              vaabb->data(),
-                                                                              vidx->data(),
-                                                                              0,
-                                                                              nullptr,
-                                                                              ccdptr->data(),
-                                                                              cm->data(),
-                                                                              f_overlap->data(),
-                                                                              v_overlap->data());
-        }
-
-        // Narrow phase
-        smesh::geom_t toi = std::numeric_limits<smesh::geom_t>::max();
-        smesh::geom_t toi_vf, toi_ee;
-
-        {
-            SMESH_TRACE_SCOPE("Narrow phase: F2V");
-            toi_vf = sccd::device::narrow_phase_vf<3, smesh::geom_t, smesh::idx_t>(v_overlap->size(),
-                                                                                   v_overlap->data(),
-                                                                                   f_overlap->data(),
-                                                                                   points0->data(),
-                                                                                   points1->data(),
-                                                                                   1,
-                                                                                   faces->data(),
-                                                                                   toi);
-            toi = toi_vf;
-        }
-
-        {
-            SMESH_TRACE_SCOPE("Narrow phase: E2E");
-            toi_ee = sccd::device::narrow_phase_ee<smesh::geom_t, smesh::idx_t>(e0_overlap->size(),
-                                                                                e0_overlap->data(),
-                                                                                e1_overlap->data(),
-                                                                                points0->data(),
-                                                                                points1->data(),
-                                                                                1,
-                                                                                edges->data(),
-                                                                                toi);
-            toi = toi_ee;
-        }
+        err = ccd->find_earliest_impact_time(points0, points1, toi);
 
         double tock = smesh::time_seconds();
-        printf("#faces %ld #edges %ld #nodes %ld, #e2e %ld #f2v %ld, %g [s], toi %g\n",
-               n_faces,
-               n_edges,
-               n_nodes,
-               e0_overlap->size(),
-               f_overlap->size(),
-               tock - tick,
+        printf("#faces %ld #edges %ld #nodes %ld, %g [s], toi %g\n",
+               t0->block(0)->n_elements(),
+               t0->edge_graph()->nnz(),
+               t0->n_nodes(),
+               (tock - tick),
                (double)toi);
+
+    } else {
+        smesh::SharedBuffer<smesh::idx_t> v_overlap;
+        smesh::SharedBuffer<smesh::idx_t> f_overlap;
+        smesh::SharedBuffer<smesh::idx_t> e0_overlap;
+        smesh::SharedBuffer<smesh::idx_t> e1_overlap;
+        smesh::SharedBuffer<scalar_t> vf_toi;
+        smesh::SharedBuffer<scalar_t> ee_toi;
+        scalar_t toi = 1;
+        scalar_t toi_vf = 1;
+        scalar_t toi_ee = 1;
+        ptrdiff_t n_e2e = -1;
+        ptrdiff_t n_f2v = -1;
+
+        err = ccd->find_impact_times(points0, points1, v_overlap, f_overlap, vf_toi, e0_overlap, e1_overlap, ee_toi);
+
+        double tock = smesh::time_seconds();
+
+        toi_vf = buffer_min_or(vf_toi, scalar_t(1));
+        toi_ee = buffer_min_or(ee_toi, scalar_t(1));
+        toi = std::min(toi_vf, toi_ee);
+        n_e2e = e0_overlap->size();
+        n_f2v = f_overlap->size();
+
+        printf("#faces %ld #edges %ld #nodes %ld, #e2e %ld #f2v %ld, %g [s], toi %g, toi_vf %g, toi_ee %g\n",
+               t0->block(0)->n_elements(),
+               t0->edge_graph()->nnz(),
+               t0->n_nodes(),
+               n_e2e,
+               n_f2v,
+               (tock - tick),
+               (double)toi,
+               (double)toi_vf,
+               (double)toi_ee);
+
+        int SCCD_EXPORT_COLLISIONS = 0;
+        SCCD_READ_ENV(SCCD_EXPORT_COLLISIONS, atoi);
+        if (SCCD_EXPORT_COLLISIONS && !SCCD_USE_FIND_EARLIEST_IMPACT_TIME) {
+            auto folder = smesh::Path("collisions");
+            std::filesystem::create_directories("collisions");
+            smesh::to_host(v_overlap)->to_file(folder / "v_overlap.int32");
+            smesh::to_host(f_overlap)->to_file(folder / "f_overlap.int32");
+            smesh::to_host(vf_toi)->to_file(folder / "vf_toi.float64");
+            smesh::to_host(e0_overlap)->to_file(folder / "e0_overlap.int32");
+            smesh::to_host(e1_overlap)->to_file(folder / "e1_overlap.int32");
+            smesh::to_host(ee_toi)->to_file(folder / "ee_toi.float64");
+        }
     }
 
     return 0;
