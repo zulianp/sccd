@@ -371,7 +371,7 @@ def collect_toi_points(data_dir, rows):
             if not math.isfinite(reference_toi) or not math.isfinite(sccd_toi):
                 continue
             denominator = reference_toi + 1.0e-12
-            points.append((reference_toi, sccd_toi / denominator))
+            points.append((reference_toi, sccd_toi / denominator, abs(sccd_toi - reference_toi) / denominator))
 
     if missing:
         print(
@@ -385,6 +385,32 @@ def collect_toi_points(data_dir, rows):
     return points_by_dataset
 
 
+def write_toi_error_csv(toi_error_csv, points_by_dataset):
+    fields = [
+        "dataset",
+        "toi_count",
+        "toi_rel_error_avg",
+        "toi_rel_error_min",
+        "toi_rel_error_max",
+    ]
+    with toi_error_csv.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fields)
+        writer.writeheader()
+        for dataset in sorted(points_by_dataset):
+            errors = [point[2] for point in points_by_dataset[dataset]]
+            if not errors:
+                continue
+            writer.writerow(
+                {
+                    "dataset": dataset,
+                    "toi_count": len(errors),
+                    "toi_rel_error_avg": f"{mean(errors):.9g}",
+                    "toi_rel_error_min": f"{min(errors):.9g}",
+                    "toi_rel_error_max": f"{max(errors):.9g}",
+                }
+            )
+
+
 def write_toi_pgf_plot(figure_dir, dataset, points):
     if not points:
         return None
@@ -394,7 +420,7 @@ def write_toi_pgf_plot(figure_dir, dataset, points):
         writer.writerow(("reference_toi", "toi_over_reference"))
         writer.writerows(
             (f"{reference_toi:.12g}", f"{ratio:.12g}")
-            for reference_toi, ratio in points
+            for reference_toi, ratio, _ in points
         )
 
     tex_path_out = figure_dir / f"{dataset}_toi_ratio.tex"
@@ -423,8 +449,7 @@ def write_toi_pgf_plot(figure_dir, dataset, points):
     return tex_path_out
 
 
-def write_toi_figures(data_dir, figure_dir, rows):
-    points_by_dataset = collect_toi_points(data_dir, rows)
+def write_toi_figures(figure_dir, points_by_dataset):
     figures = []
     try:
         import matplotlib
@@ -471,9 +496,10 @@ def write_toi_figures(data_dir, figure_dir, rows):
     return figures
 
 
-def write_report(report_tex, agg_csv, paired_csv, figures):
+def write_report(report_tex, agg_csv, paired_csv, toi_error_csv, figures):
     rel_agg = relative_to_or_self(agg_csv, report_tex.parent)
     rel_paired = relative_to_or_self(paired_csv, report_tex.parent)
+    rel_toi_error = relative_to_or_self(toi_error_csv, report_tex.parent)
     with report_tex.open("w") as f:
         f.write(
             r"""\documentclass{article}
@@ -533,6 +559,24 @@ def write_report(report_tex, agg_csv, paired_csv, figures):
             r"""}
 }
 
+{\footnotesize
+\pgfplotstabletypeset[
+    col sep=comma,
+    columns={dataset,toi_count,toi_rel_error_avg,toi_rel_error_min,toi_rel_error_max},
+    columns/dataset/.style={string type,column name=Dataset},
+    columns/toi_count/.style={fixed,precision=0,column name={TOI count}},
+    columns/toi_rel_error_avg/.style={sci,precision=3,column name={Avg rel error}},
+    columns/toi_rel_error_min/.style={sci,precision=3,column name={Min rel error}},
+    columns/toi_rel_error_max/.style={sci,precision=3,column name={Max rel error}},
+    every head row/.style={before row=\toprule,after row=\midrule},
+    every last row/.style={after row=\bottomrule}
+]{"""
+        )
+        f.write(tex_path(rel_toi_error))
+        f.write(
+            r"""}
+}
+
 """
         )
         for figure in figures:
@@ -560,11 +604,15 @@ def main(argv):
     paired_csv = agg_csv.with_name(agg_csv.name.replace("_aggregate", "_paired"))
     if paired_csv == agg_csv:
         paired_csv = agg_csv.with_name(f"{agg_csv.stem}_paired{agg_csv.suffix}")
+    toi_error_csv = agg_csv.with_name(agg_csv.name.replace("_aggregate", "_toi_error"))
+    if toi_error_csv == agg_csv:
+        toi_error_csv = agg_csv.with_name(f"{agg_csv.stem}_toi_error{agg_csv.suffix}")
     figure_dir = Path(argv[3])
     report_tex = Path(argv[4])
     data_dir = Path(argv[5]) if len(argv) == 6 else bench_csv.parent.parent / "data"
     agg_csv.parent.mkdir(parents=True, exist_ok=True)
     paired_csv.parent.mkdir(parents=True, exist_ok=True)
+    toi_error_csv.parent.mkdir(parents=True, exist_ok=True)
     figure_dir.mkdir(parents=True, exist_ok=True)
     report_tex.parent.mkdir(parents=True, exist_ok=True)
 
@@ -574,13 +622,16 @@ def main(argv):
     write_aggregate_csv(agg_csv, by_dataset)
     figures = write_figures(figure_dir, by_dataset)
     if data_dir.exists():
-        figures.extend(write_toi_figures(data_dir, figure_dir, rows))
+        points_by_dataset = collect_toi_points(data_dir, rows)
+        write_toi_error_csv(toi_error_csv, points_by_dataset)
+        figures.extend(write_toi_figures(figure_dir, points_by_dataset))
     else:
         print(
             f"warning: skipped TOI plots because data directory does not exist: {data_dir}",
             file=sys.stderr,
         )
-    write_report(report_tex, agg_csv, paired_csv, figures)
+        write_toi_error_csv(toi_error_csv, {})
+    write_report(report_tex, agg_csv, paired_csv, toi_error_csv, figures)
     return 0
 
 
