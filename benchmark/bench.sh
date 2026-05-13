@@ -20,6 +20,8 @@ BENCHMARK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DATA_DIR="${SCCD_DATA_DIR:-"${BENCHMARK_DIR}/../data"}"
 JSON_PROJECT_DIR="${BENCHMARK_DIR}/../external/json"
 JSON_BUILD_DIR="${SCCD_JSON_BUILD_DIR:-"${BENCHMARK_DIR}/../build_json"}"
+PYTHON_DIR="${BENCHMARK_DIR}/../python"
+PYTHON="${PYTHON:-python3}"
 
 is_enabled() {
     case "${1:-0}" in
@@ -64,11 +66,9 @@ for dataset in "${datasets[@]}"; do
     ' "${BOXES_JSON_TO_RAW}"
 done
 
-# TODO:
-# 2) Use read_wxf to generate the impact exact times for each query (e.g., data/armadillo-rollers/roots/0ee_roots.tar) and put them in the dedicated folder (e.g., roots/0ee) as toi.float64
+"${PYTHON}" "${BENCHMARK_DIR}/roots_to_raw.py" "${DATA_DIR}" "${PYTHON_DIR}" "${datasets[@]}"
 
-
-# 3) Do the same for the mma_bool files and put them in the dedicated folder (e.g., mma_bool/0ee) as mma_bool.uint8
+# 3) Extract  the mma_bool files and put them in the dedicated folder (e.g., mma_bool/0ee) as mma_bool.uint8
 
 # TODO:
 # 4) Create a bench.exe.cpp that reads the meshes and scans the folder boxes and reads the raw files, times the CCD for each file collision files pair (names the trace file after the case and folder e.g., SMESH_TRACE_FILE=armadillo-rollers/0ee)
