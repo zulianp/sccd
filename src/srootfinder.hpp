@@ -798,6 +798,7 @@ namespace sccd {
 
         bool found = false;
         for (int i = 0; i < N + 1; ++i) {
+            // for (int i = N; i >= 0; --i) {
             const T sample_min = samples[i];
             const T sample_max = samples[i + 1];
             const T tt_min = SplitDim == 0 ? sample_min : domain.tuv[0].lower;

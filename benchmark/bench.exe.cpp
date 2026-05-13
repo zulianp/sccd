@@ -48,6 +48,28 @@ namespace {
         std::array<std::vector<idx_t>, 2> edges;
     };
 
+    struct BroadphaseResult {
+        std::unordered_set<std::uint64_t> pairs;
+        std::uint64_t false_positives = 0;
+        std::vector<idx_t> v_overlap;
+        std::vector<idx_t> f_overlap;
+        std::vector<idx_t> e0_overlap;
+        std::vector<idx_t> e1_overlap;
+    };
+
+    struct BroadphaseWorkspace {
+        std::array<std::vector<idx_t>, 2> ordered_edges;
+        smesh::SharedBuffer<scalar_t*> vaabb;
+        smesh::SharedBuffer<scalar_t*> faabb;
+        smesh::SharedBuffer<scalar_t*> eaabb;
+        smesh::SharedBuffer<idx_t> vidx;
+        smesh::SharedBuffer<idx_t> fidx;
+        smesh::SharedBuffer<idx_t> eidx;
+        smesh::SharedBuffer<scalar_t> scratch;
+        smesh::SharedBuffer<ptrdiff_t> ccdptr;
+        smesh::SharedBuffer<scalar_t> cumulative_max;
+    };
+
     std::uint64_t pair_key(const std::int64_t a, const std::int64_t b) {
         return (static_cast<std::uint64_t>(static_cast<std::uint32_t>(a)) << 32) | static_cast<std::uint32_t>(b);
     }
@@ -407,10 +429,33 @@ namespace {
         return edges;
     }
 
-    std::unordered_set<std::uint64_t> broad_pairs_for(const MeshPair& meshes,
-                                                      const bool is_vf,
-                                                      const std::unordered_set<std::uint64_t>& expected,
-                                                      std::uint64_t& false_positives) {
+    BroadphaseWorkspace make_broadphase_workspace(const MeshPair& meshes) {
+        BroadphaseWorkspace workspace;
+        workspace.ordered_edges = dataset_ordered_edges(meshes.t0);
+
+        const int dim = meshes.t0->spatial_dimension();
+        const ptrdiff_t n_nodes = meshes.t0->n_nodes();
+        const ptrdiff_t n_faces = meshes.t0->block(0)->n_elements();
+        const ptrdiff_t n_edges = static_cast<ptrdiff_t>(workspace.ordered_edges[0].size());
+
+        workspace.vaabb = smesh::create_buffer<scalar_t>(2 * dim, n_nodes, smesh::EXECUTION_SPACE_HOST);
+        workspace.faabb = smesh::create_buffer<scalar_t>(2 * dim, n_faces, smesh::EXECUTION_SPACE_HOST);
+        workspace.eaabb = smesh::create_buffer<scalar_t>(2 * dim, n_edges, smesh::EXECUTION_SPACE_HOST);
+        workspace.vidx = smesh::create_buffer<idx_t>(n_nodes, smesh::EXECUTION_SPACE_HOST);
+        workspace.fidx = smesh::create_buffer<idx_t>(n_faces, smesh::EXECUTION_SPACE_HOST);
+        workspace.eidx = smesh::create_buffer<idx_t>(n_edges, smesh::EXECUTION_SPACE_HOST);
+        workspace.scratch =
+            smesh::create_buffer<scalar_t>(std::max(n_nodes, std::max(n_faces, n_edges)), smesh::EXECUTION_SPACE_HOST);
+        workspace.ccdptr =
+            smesh::create_buffer<ptrdiff_t>(std::max(n_faces, n_edges) + 1, smesh::EXECUTION_SPACE_HOST);
+        workspace.cumulative_max = smesh::create_buffer<scalar_t>(n_nodes, smesh::EXECUTION_SPACE_HOST);
+
+        return workspace;
+    }
+
+    BroadphaseResult run_broadphase(const MeshPair& meshes,
+                                    const bool is_vf,
+                                    BroadphaseWorkspace& workspace) {
         SMESH_TRACE_SCOPE("benchmark broadphase");
 
         auto points0 = smesh::astype<scalar_t>(meshes.t0->points());
@@ -418,107 +463,165 @@ namespace {
         const int dim = meshes.t0->spatial_dimension();
         const ptrdiff_t n_nodes = meshes.t0->n_nodes();
         const ptrdiff_t n_faces = meshes.t0->block(0)->n_elements();
-        auto ordered_edges = dataset_ordered_edges(meshes.t0);
-        const ptrdiff_t n_edges = static_cast<ptrdiff_t>(ordered_edges[0].size());
-        const ptrdiff_t face_offset = n_nodes + n_edges;
-        const ptrdiff_t edge_offset = n_nodes;
+        const ptrdiff_t n_edges = static_cast<ptrdiff_t>(workspace.ordered_edges[0].size());
         auto faces = meshes.t0->block(0)->elements();
-        idx_t* edges[2] = {ordered_edges[0].data(), ordered_edges[1].data()};
+        idx_t* edges[2] = {workspace.ordered_edges[0].data(), workspace.ordered_edges[1].data()};
 
-        auto vaabb = smesh::create_buffer<scalar_t>(2 * dim, n_nodes, smesh::EXECUTION_SPACE_HOST);
-        auto faabb = smesh::create_buffer<scalar_t>(2 * dim, n_faces, smesh::EXECUTION_SPACE_HOST);
-        auto eaabb = smesh::create_buffer<scalar_t>(2 * dim, n_edges, smesh::EXECUTION_SPACE_HOST);
-        auto vidx = smesh::create_buffer<idx_t>(n_nodes, smesh::EXECUTION_SPACE_HOST);
-        auto fidx = smesh::create_buffer<idx_t>(n_faces, smesh::EXECUTION_SPACE_HOST);
-        auto eidx = smesh::create_buffer<idx_t>(n_edges, smesh::EXECUTION_SPACE_HOST);
-        auto scratch =
-            smesh::create_buffer<scalar_t>(std::max(n_nodes, std::max(n_faces, n_edges)), smesh::EXECUTION_SPACE_HOST);
-        auto ccdptr = smesh::create_buffer<ptrdiff_t>(std::max(n_faces, n_edges) + 1, smesh::EXECUTION_SPACE_HOST);
-        auto cumulative_max = smesh::create_buffer<scalar_t>(n_nodes, smesh::EXECUTION_SPACE_HOST);
-
-        sccd::compute_aabbs(dim, n_nodes, points0->data(), points1->data(), vaabb->data(), vaabb->data() + dim);
+        sccd::compute_aabbs(
+            dim, n_nodes, points0->data(), points1->data(), workspace.vaabb->data(), workspace.vaabb->data() + dim);
         sccd::compute_aabbs(meshes.t0->block(0)->n_nodes_per_element(),
                             n_faces,
                             faces->data(),
                             dim,
                             points0->data(),
                             points1->data(),
-                            faabb->data(),
-                            faabb->data() + dim);
-        sccd::compute_aabbs(
-            2, n_edges, edges, dim, points0->data(), points1->data(), eaabb->data(), eaabb->data() + dim);
+                            workspace.faabb->data(),
+                            workspace.faabb->data() + dim);
+        sccd::compute_aabbs(2,
+                            n_edges,
+                            edges,
+                            dim,
+                            points0->data(),
+                            points1->data(),
+                            workspace.eaabb->data(),
+                            workspace.eaabb->data() + dim);
 
-        const int sort_axis = sccd::choose_axis(n_nodes, vaabb->data());
-        sccd::sort_along_axis(n_nodes, sort_axis, vaabb->data(), vidx->data(), scratch->data());
+        const int sort_axis = sccd::choose_axis(n_nodes, workspace.vaabb->data());
+        sccd::sort_along_axis(
+            n_nodes, sort_axis, workspace.vaabb->data(), workspace.vidx->data(), workspace.scratch->data());
 
-        std::unordered_set<std::uint64_t> actual;
+        BroadphaseResult result;
         if (is_vf) {
-            sccd::sort_along_axis(n_faces, sort_axis, faabb->data(), fidx->data(), scratch->data());
-            sccd::cummax(n_nodes, vaabb->data()[dim + sort_axis], cumulative_max->data());
+            sccd::sort_along_axis(
+                n_faces, sort_axis, workspace.faabb->data(), workspace.fidx->data(), workspace.scratch->data());
+            sccd::cummax(n_nodes, workspace.vaabb->data()[dim + sort_axis], workspace.cumulative_max->data());
             sccd::count_overlaps<3, 1, scalar_t, idx_t>(sort_axis,
                                                         n_faces,
-                                                        faabb->data(),
-                                                        fidx->data(),
+                                                        workspace.faabb->data(),
+                                                        workspace.fidx->data(),
                                                         1,
                                                         faces->data(),
                                                         n_nodes,
-                                                        vaabb->data(),
-                                                        vidx->data(),
+                                                        workspace.vaabb->data(),
+                                                        workspace.vidx->data(),
                                                         0,
                                                         nullptr,
-                                                        ccdptr->data(),
-                                                        cumulative_max->data());
-            const ptrdiff_t n_overlaps = ccdptr->data()[n_faces];
-            auto f_overlap = smesh::create_buffer<idx_t>(n_overlaps, smesh::EXECUTION_SPACE_HOST);
-            auto v_overlap = smesh::create_buffer<idx_t>(n_overlaps, smesh::EXECUTION_SPACE_HOST);
+                                                        workspace.ccdptr->data(),
+                                                        workspace.cumulative_max->data());
+            const ptrdiff_t n_overlaps = workspace.ccdptr->data()[n_faces];
+            result.f_overlap.resize(static_cast<std::size_t>(n_overlaps));
+            result.v_overlap.resize(static_cast<std::size_t>(n_overlaps));
             sccd::collect_overlaps<3, 1, scalar_t, idx_t>(sort_axis,
                                                           n_faces,
-                                                          faabb->data(),
-                                                          fidx->data(),
+                                                          workspace.faabb->data(),
+                                                          workspace.fidx->data(),
                                                           1,
                                                           faces->data(),
                                                           n_nodes,
-                                                          vaabb->data(),
-                                                          vidx->data(),
+                                                          workspace.vaabb->data(),
+                                                          workspace.vidx->data(),
                                                           0,
                                                           nullptr,
-                                                          ccdptr->data(),
-                                                          cumulative_max->data(),
-                                                          f_overlap->data(),
-                                                          v_overlap->data());
-            actual.reserve(static_cast<std::size_t>(n_overlaps) * 2 + 1);
-            for (ptrdiff_t i = 0; i < n_overlaps; ++i) {
-                actual.insert(pair_key(v_overlap->data()[i], f_overlap->data()[i] + face_offset));
-            }
+                                                          workspace.ccdptr->data(),
+                                                          workspace.cumulative_max->data(),
+                                                          result.f_overlap.data(),
+                                                          result.v_overlap.data());
         } else {
-            sccd::sort_along_axis(n_edges, sort_axis, eaabb->data(), eidx->data(), scratch->data());
-            sccd::count_self_overlaps<2>(
-                sort_axis, n_edges, eaabb->data(), eidx->data(), 1, edges, ccdptr->data());
-            const ptrdiff_t n_overlaps = ccdptr->data()[n_edges];
-            auto e0_overlap = smesh::create_buffer<idx_t>(n_overlaps, smesh::EXECUTION_SPACE_HOST);
-            auto e1_overlap = smesh::create_buffer<idx_t>(n_overlaps, smesh::EXECUTION_SPACE_HOST);
+            sccd::sort_along_axis(
+                n_edges, sort_axis, workspace.eaabb->data(), workspace.eidx->data(), workspace.scratch->data());
+            sccd::count_self_overlaps<2>(sort_axis,
+                                         n_edges,
+                                         workspace.eaabb->data(),
+                                         workspace.eidx->data(),
+                                         1,
+                                         edges,
+                                         workspace.ccdptr->data());
+            const ptrdiff_t n_overlaps = workspace.ccdptr->data()[n_edges];
+            result.e0_overlap.resize(static_cast<std::size_t>(n_overlaps));
+            result.e1_overlap.resize(static_cast<std::size_t>(n_overlaps));
             sccd::collect_self_overlaps<2>(sort_axis,
                                            n_edges,
-                                           eaabb->data(),
-                                           eidx->data(),
+                                           workspace.eaabb->data(),
+                                           workspace.eidx->data(),
                                            1,
                                            edges,
-                                           ccdptr->data(),
-                                           e0_overlap->data(),
-                                           e1_overlap->data());
-            actual.reserve(static_cast<std::size_t>(n_overlaps) * 2 + 1);
-            for (ptrdiff_t i = 0; i < n_overlaps; ++i) {
-                actual.insert(pair_key(e0_overlap->data()[i] + edge_offset, e1_overlap->data()[i] + edge_offset));
+                                           workspace.ccdptr->data(),
+                                           result.e0_overlap.data(),
+                                           result.e1_overlap.data());
+        }
+
+        return result;
+    }
+
+    void populate_broadphase_pairs(const MeshPair& meshes,
+                                   const bool is_vf,
+                                   const BroadphaseWorkspace& workspace,
+                                   const std::unordered_set<std::uint64_t>& expected,
+                                   BroadphaseResult& result) {
+        const ptrdiff_t n_nodes = meshes.t0->n_nodes();
+        const ptrdiff_t n_edges = static_cast<ptrdiff_t>(workspace.ordered_edges[0].size());
+        const ptrdiff_t face_offset = n_nodes + n_edges;
+        const ptrdiff_t edge_offset = n_nodes;
+
+        if (is_vf) {
+            result.pairs.reserve(result.v_overlap.size() * 2 + 1);
+            for (std::size_t i = 0; i < result.v_overlap.size(); ++i) {
+                result.pairs.insert(pair_key(result.v_overlap[i], result.f_overlap[i] + face_offset));
+            }
+        } else {
+            result.pairs.reserve(result.e0_overlap.size() * 2 + 1);
+            for (std::size_t i = 0; i < result.e0_overlap.size(); ++i) {
+                result.pairs.insert(pair_key(result.e0_overlap[i] + edge_offset, result.e1_overlap[i] + edge_offset));
             }
         }
 
-        false_positives = 0;
-        for (const auto pair : actual) {
+        result.false_positives = 0;
+        for (const auto pair : result.pairs) {
             if (!contains_pair(expected, pair)) {
-                ++false_positives;
+                ++result.false_positives;
             }
         }
-        return actual;
+    }
+
+    double time_narrowphase_zero_stride(const MeshPair& meshes,
+                                        const bool is_vf,
+                                        const BroadphaseWorkspace& workspace,
+                                        const BroadphaseResult& broadphase) {
+        auto points0 = smesh::astype<scalar_t>(meshes.t0->points());
+        auto points1 = smesh::astype<scalar_t>(meshes.t1->points());
+        scalar_t toi = scalar_t(1);
+
+        const auto start = std::chrono::steady_clock::now();
+        if (is_vf) {
+            auto faces = meshes.t0->block(0)->elements();
+            sccd::narrow_phase_vf<3, scalar_t, idx_t>(broadphase.v_overlap.size(),
+                                                      broadphase.v_overlap.data(),
+                                                      broadphase.f_overlap.data(),
+                                                      points0->data(),
+                                                      points1->data(),
+                                                      1,
+                                                      faces->data(),
+                                                      1.0,
+                                                      &toi,
+                                                      0);
+        } else {
+            idx_t* edges[2] = {const_cast<idx_t*>(workspace.ordered_edges[0].data()),
+                               const_cast<idx_t*>(workspace.ordered_edges[1].data())};
+            sccd::narrow_phase_ee<scalar_t, idx_t>(broadphase.e0_overlap.size(),
+                                                   broadphase.e0_overlap.data(),
+                                                   broadphase.e1_overlap.data(),
+                                                   points0->data(),
+                                                   points1->data(),
+                                                   1,
+                                                   edges,
+                                                   1.0,
+                                                   &toi,
+                                                   0);
+        }
+        const auto stop = std::chrono::steady_clock::now();
+        static volatile scalar_t toi_sink;
+        toi_sink = toi;
+        return std::chrono::duration<double, std::milli>(stop - start).count();
     }
 
     bool run_case(const std::shared_ptr<smesh::Communicator>& comm,
@@ -564,12 +667,18 @@ namespace {
             return false;
         }
 
+        BroadphaseWorkspace broadphase_workspace = make_broadphase_workspace(meshes);
         const auto broad_expected = expected_pairs(c0, c1);
-        std::uint64_t broad_fp_count = 0;
         const auto broad_start = std::chrono::steady_clock::now();
-        const auto broad_actual = broad_pairs_for(meshes, case_file.is_vf, broad_expected, broad_fp_count);
+        BroadphaseResult broadphase = run_broadphase(meshes, case_file.is_vf, broadphase_workspace);
         const auto broad_stop = std::chrono::steady_clock::now();
         const double broad_ms = std::chrono::duration<double, std::milli>(broad_stop - broad_start).count();
+        const double narrow_ms =
+            time_narrowphase_zero_stride(meshes, case_file.is_vf, broadphase_workspace, broadphase);
+        const std::size_t narrow_queries =
+            case_file.is_vf ? broadphase.v_overlap.size() : broadphase.e0_overlap.size();
+        timings_ms.push_back(narrow_ms);
+        populate_broadphase_pairs(meshes, case_file.is_vf, broadphase_workspace, broad_expected, broadphase);
 
         std::vector<std::uint8_t> mma;
         const fs::path mma_path = dataset_dir / "mma_bool" / case_file.key / "mma_bool.uint8";
@@ -586,7 +695,6 @@ namespace {
 
         std::vector<scalar_t> sccd_toi(q0.size(), scalar_t(1));
 
-        const auto start = std::chrono::steady_clock::now();
         scalar_t* points0[3] = {
             query_geometry.points0[0].data(), query_geometry.points0[1].data(), query_geometry.points0[2].data()};
         scalar_t* points1[3] = {
@@ -617,9 +725,6 @@ namespace {
                                                    sccd_toi.data(),
                                                    1);
         }
-        const auto stop = std::chrono::steady_clock::now();
-        const double narrow_ms = std::chrono::duration<double, std::milli>(stop - start).count();
-        timings_ms.push_back(narrow_ms);
 
         std::vector<std::uint8_t> fp(q0.size(), 0);
         std::vector<std::uint8_t> fn(q0.size(), 0);
@@ -629,9 +734,9 @@ namespace {
         std::vector<std::int32_t> fp_broad_c1;
         std::vector<std::int32_t> fn_broad_c0;
         std::vector<std::int32_t> fn_broad_c1;
-        fp_broad.reserve(static_cast<std::size_t>(broad_fp_count));
-        fp_broad_c0.reserve(static_cast<std::size_t>(broad_fp_count));
-        fp_broad_c1.reserve(static_cast<std::size_t>(broad_fp_count));
+        fp_broad.reserve(static_cast<std::size_t>(broadphase.false_positives));
+        fp_broad_c0.reserve(static_cast<std::size_t>(broadphase.false_positives));
+        fp_broad_c1.reserve(static_cast<std::size_t>(broadphase.false_positives));
 
         std::uint64_t fp_count = 0;
         std::uint64_t fn_count = 0;
@@ -649,7 +754,7 @@ namespace {
             fp_count += fp[i];
             fn_count += fn[i];
 
-            const bool broad_found = contains_pair(broad_actual, pair_key(c0[i], c1[i]));
+            const bool broad_found = contains_pair(broadphase.pairs, pair_key(c0[i], c1[i]));
             if (!broad_found) {
                 fn_broad[i] = 1;
                 fn_broad_c0.push_back(c0[i]);
@@ -657,8 +762,8 @@ namespace {
             }
         }
 
-        if (broad_fp_count != 0) {
-            for (const auto pair : broad_actual) {
+        if (broadphase.false_positives != 0) {
+            for (const auto pair : broadphase.pairs) {
                 if (!contains_pair(broad_expected, pair)) {
                     fp_broad.push_back(1);
                     fp_broad_c0.push_back(static_cast<std::int32_t>(pair >> 32));
@@ -668,18 +773,18 @@ namespace {
         }
 
         const std::uint64_t broad_fn_count = static_cast<std::uint64_t>(fn_broad_c0.size());
-        std::cout << dataset << ',' << case_file.key << ',' << (case_file.is_vf ? "vf" : "ee") << ',' << q0.size()
-                  << ',' << broad_ms << ',' << narrow_ms << ',' << fp_count << ',' << fn_count << ','
-                  << broad_fp_count << ',' << broad_fn_count << '\n';
+        std::cout << dataset << ',' << case_file.key << ',' << (case_file.is_vf ? "vf" : "ee") << ','
+                  << narrow_queries << ',' << broad_ms << ',' << narrow_ms << ',' << fp_count << ',' << fn_count << ','
+                  << broadphase.false_positives << ',' << broad_fn_count << '\n';
 
-        const bool wrote =
-            write_raw(roots_dir / "sccd_toi.float64", sccd_toi) && write_raw(roots_dir / "sccd_fp.uint8", fp) &&
-            write_raw(roots_dir / "sccd_fn.uint8", fn) && write_raw(roots_dir / "sccd_fp_broad.uint8", fp_broad) &&
-            write_raw(roots_dir / "sccd_fn_broad.uint8", fn_broad) &&
-            write_raw(roots_dir / "sccd_fp_broad_c0.int32", fp_broad_c0) &&
-            write_raw(roots_dir / "sccd_fp_broad_c1.int32", fp_broad_c1) &&
-            write_raw(roots_dir / "sccd_fn_broad_c0.int32", fn_broad_c0) &&
-            write_raw(roots_dir / "sccd_fn_broad_c1.int32", fn_broad_c1);
+        const bool wrote = write_raw(roots_dir / "sccd_toi.float64", sccd_toi) &&
+                           write_raw(roots_dir / "sccd_fp.uint8", fp) && write_raw(roots_dir / "sccd_fn.uint8", fn) &&
+                           write_raw(roots_dir / "sccd_fp_broad.uint8", fp_broad) &&
+                           write_raw(roots_dir / "sccd_fn_broad.uint8", fn_broad) &&
+                           write_raw(roots_dir / "sccd_fp_broad_c0.int32", fp_broad_c0) &&
+                           write_raw(roots_dir / "sccd_fp_broad_c1.int32", fp_broad_c1) &&
+                           write_raw(roots_dir / "sccd_fn_broad_c0.int32", fn_broad_c0) &&
+                           write_raw(roots_dir / "sccd_fn_broad_c1.int32", fn_broad_c1);
         if (fn_count != 0 || broad_fn_count != 0) {
             std::cerr << "error: false negatives in " << dataset << "/" << case_file.key << ": fn=" << fn_count
                       << " broad_fn=" << broad_fn_count << "\n";
