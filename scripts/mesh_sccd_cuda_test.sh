@@ -82,7 +82,7 @@ mkdir -p cpu_traces
 for ((i=1; i<=ITERATIONS; i++)); do
     echo "Iteration $i"
     set -x
-     SCCD_ADAPTIVE_SPLIT_EE=1 SCCD_ADAPTIVE_SPLIT_VF=1 ./mesh_sccd      $mesh_t0 $mesh_t1
+     SCCD_ADAPTIVE_SPLIT=1 ./mesh_sccd      $mesh_t0 $mesh_t1
     set +x
     mv smesh.trace.csv cpu_traces/ccd_CPU_$i.csv
 done

@@ -62,8 +62,8 @@ namespace sccd {
         int SCCD_REFINE = 0;
         SCCD_READ_ENV(SCCD_REFINE, atoi);
 
-        int SCCD_ADAPTIVE_SPLIT_VF = 0;
-        SCCD_READ_ENV(SCCD_ADAPTIVE_SPLIT_VF, atoi);
+        int SCCD_ADAPTIVE_SPLIT = 0;
+        SCCD_READ_ENV(SCCD_ADAPTIVE_SPLIT, atoi);
 
         std::atomic<T> min_t = max_toi;
         if (toi_stride == 0) toi[0] = max_toi;
@@ -109,7 +109,7 @@ namespace sccd {
                 }
 #endif
                 bool found = false;
-                if (SCCD_ADAPTIVE_SPLIT_VF) {
+                if (SCCD_ADAPTIVE_SPLIT) {
                     found = find_root_grid_adaptive_split_vf<T_HP>(
                         SCCD_MAX_DEPTH, SCCD_TOL, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack, SCCD_REFINE);
                 } else {
@@ -166,8 +166,8 @@ namespace sccd {
         int SCCD_REFINE = 0;
         SCCD_READ_ENV(SCCD_REFINE, atoi);
 
-        int SCCD_ADAPTIVE_SPLIT_EE = 0;
-        SCCD_READ_ENV(SCCD_ADAPTIVE_SPLIT_EE, atoi);
+        int SCCD_ADAPTIVE_SPLIT = 0;
+        SCCD_READ_ENV(SCCD_ADAPTIVE_SPLIT, atoi);
 
         std::atomic<T> min_t = max_toi;
         if (toi_stride == 0) toi[0] = max_toi;
@@ -215,7 +215,7 @@ namespace sccd {
                 }
 #endif
                 bool found = false;
-                if (SCCD_ADAPTIVE_SPLIT_EE) {
+                if (SCCD_ADAPTIVE_SPLIT) {
                     found = find_root_grid_adaptive_split_ee<T_HP>(
                         SCCD_MAX_DEPTH, SCCD_TOL, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v, stack, SCCD_REFINE);
                 } else {
