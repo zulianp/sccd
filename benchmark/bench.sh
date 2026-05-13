@@ -20,8 +20,10 @@ BENCHMARK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DATA_DIR="${SCCD_DATA_DIR:-"${BENCHMARK_DIR}/../data"}"
 JSON_PROJECT_DIR="${BENCHMARK_DIR}/../external/json"
 JSON_BUILD_DIR="${SCCD_JSON_BUILD_DIR:-"${BENCHMARK_DIR}/../build_json"}"
+SCCD_BUILD_DIR="${SCCD_BUILD_DIR:-"${BENCHMARK_DIR}/../build_benchmark"}"
 PYTHON_DIR="${BENCHMARK_DIR}/../python"
 PYTHON="${PYTHON:-python3}"
+ROOT_DIR="${BENCHMARK_DIR}/.."
 
 is_enabled() {
     case "${1:-0}" in
@@ -82,8 +84,26 @@ for dataset in "${datasets[@]}"; do
     ' "${MMA_BOOL_JSON_TO_RAW}"
 done
 
-# TODO:
-# 4) Create a bench.exe.cpp that reads the meshes and scans the folder boxes and reads the raw files, times the CCD for each file collision files pair (names the trace file after the case and folder e.g., SMESH_TRACE_FILE=armadillo-rollers/0ee)
-# the timings are collected as milliseconds and stored in a unique raw binary file for the whole case and collision type e.g., armadillo-rollers-fv.float64 and armadillo-rollers-ee.float64 
-# The benchmark also collects the accuracy metrics: number of false positives and negatives for the narrow-phase, and number of false positives and negatives for the broad-phase. writes sccd_toi.float64, sccd_fp.uint8, sccd_fn.uint8, sccd_fp_broad.uint8, sccd_fn_broad.uint8, it also makes sure that the data is aligned/ordeded with the query file and the roots file.
+cmake_bench_args=(-DCMAKE_BUILD_TYPE=Release -DSCCD_ENABLE_SMESH=ON)
+if [[ -n "${SCCD_SMESH_DIR:-}" ]]; then
+    cmake_bench_args+=("-Dsmesh_DIR=${SCCD_SMESH_DIR}")
+elif [[ -n "${smesh_DIR:-}" ]]; then
+    cmake_bench_args+=("-Dsmesh_DIR=${smesh_DIR}")
+elif [[ -f "${ROOT_DIR}/build_release/CMakeCache.txt" ]]; then
+    cached_smesh_dir="$(sed -n 's/^smesh_DIR[^=]*=//p' "${ROOT_DIR}/build_release/CMakeCache.txt" | tail -n 1)"
+    if [[ -n "${cached_smesh_dir}" && -d "${cached_smesh_dir}" ]]; then
+        cmake_bench_args+=("-Dsmesh_DIR=${cached_smesh_dir}")
+    fi
+fi
 
+cmake -S "${ROOT_DIR}" -B "${SCCD_BUILD_DIR}" "${cmake_bench_args[@]}"
+cmake --build "${SCCD_BUILD_DIR}" --config Release --target sccd_bench --parallel "$(parallel_jobs)"
+
+SCCD_BENCH="${SCCD_BUILD_DIR}/sccd_bench"
+if [[ ! -x "${SCCD_BENCH}" && -x "${SCCD_BUILD_DIR}/Release/sccd_bench" ]]; then
+    SCCD_BENCH="${SCCD_BUILD_DIR}/Release/sccd_bench"
+fi
+
+if [[ "${#datasets[@]}" -gt 0 ]]; then
+    "${SCCD_BENCH}" "${DATA_DIR}" "${datasets[@]}"
+fi

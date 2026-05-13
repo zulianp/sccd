@@ -165,6 +165,9 @@ if(SCCD_ENABLE_SMESH)
       target_link_libraries(${SCCD_CUDA_DEMO_TARGET} PRIVATE sccd)
     endforeach()
   endif()
+
+  add_executable(sccd_bench "${CMAKE_CURRENT_SOURCE_DIR}/benchmark/bench.exe.cpp")
+  target_link_libraries(sccd_bench PRIVATE sccd)
 endif()
 
 include(SCCDTests)
