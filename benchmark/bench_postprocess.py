@@ -289,6 +289,38 @@ def write_pgf_plot(figure_dir, dataset, values):
     return path
 
 
+def write_np_qps_pgf_plot(figure_dir, dataset, values):
+    values = sorted(values, key=lambda row: row["step"])
+    qps_values = [
+        (row["step"], row["queries"] / (row["narrow_ms"] * 1.0e-3))
+        for row in values
+        if row["narrow_ms"] > 0.0
+    ]
+    if not qps_values:
+        return None
+    qps = "\n".join(f"        ({step},{value:.12g})" for step, value in qps_values)
+    path = figure_dir / f"{dataset}_np_queries_per_second.tex"
+    with path.open("w") as f:
+        f.write(r"\begin{tikzpicture}" "\n")
+        f.write(r"\begin{axis}[" "\n")
+        f.write(r"    width=\linewidth,height=6cm," "\n")
+        f.write(f"    title={{{tex_escape(dataset)}}},\n")
+        f.write(r"    xlabel={Case}," "\n")
+        f.write(r"    ylabel={Narrow-phase queries / s}," "\n")
+        f.write(r"    ymode=log," "\n")
+        f.write(r"    grid=both" "\n")
+        f.write(r"]" "\n")
+        f.write(
+            r"\addplot+[mark=none,thick] coordinates {"
+            "\n" + qps + "\n"
+            r"    };"
+            "\n"
+        )
+        f.write(r"\end{axis}" "\n")
+        f.write(r"\end{tikzpicture}" "\n")
+    return path
+
+
 def write_figures(figure_dir, by_dataset):
     figures = []
     try:
@@ -336,6 +368,27 @@ def write_figures(figure_dir, by_dataset):
             fig.savefig(png, dpi=180)
             plt.close(fig)
             figures.append(pdf)
+
+            qps = [
+                row["queries"] / (row["narrow_ms"] * 1.0e-3)
+                for row in values
+                if row["narrow_ms"] > 0.0
+            ]
+            qps_steps = [row["step"] for row in values if row["narrow_ms"] > 0.0]
+            if qps:
+                fig, ax = plt.subplots(figsize=(7.0, 3.8), constrained_layout=True)
+                ax.plot(qps_steps, qps, linewidth=1.5)
+                ax.set_title(dataset)
+                ax.set_xlabel("Case")
+                ax.set_ylabel("Narrow-phase queries / s")
+                ax.set_yscale("log")
+                ax.grid(True, alpha=0.25)
+                pdf = figure_dir / f"{dataset}_np_queries_per_second.pdf"
+                png = figure_dir / f"{dataset}_np_queries_per_second.png"
+                fig.savefig(pdf)
+                fig.savefig(png, dpi=180)
+                plt.close(fig)
+                figures.append(pdf)
     except Exception as exc:
         print(
             f"warning: matplotlib timing plots were not generated; using PGFPlots fallback: {exc}",
@@ -345,6 +398,9 @@ def write_figures(figure_dir, by_dataset):
             figure = write_pgf_plot(figure_dir, dataset, by_dataset[dataset])
             if figure is not None:
                 figures.append(figure)
+            qps_figure = write_np_qps_pgf_plot(figure_dir, dataset, by_dataset[dataset])
+            if qps_figure is not None:
+                figures.append(qps_figure)
     return figures
 
 
