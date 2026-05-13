@@ -15,6 +15,10 @@ export  SCCD_ENABLE_PUFFER_BALL=0
 export  SCCD_ENABLE_ROD_TWIST=0
 
 BENCHMARK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+exec 3>&1
+exec 1>&2
+
 "${BENCHMARK_DIR}/download_datasets.sh"
 
 DATA_DIR="${SCCD_DATA_DIR:-"${BENCHMARK_DIR}/../data"}"
@@ -99,11 +103,38 @@ fi
 cmake -S "${ROOT_DIR}" -B "${SCCD_BUILD_DIR}" "${cmake_bench_args[@]}"
 cmake --build "${SCCD_BUILD_DIR}" --config Release --target sccd_bench --parallel "$(parallel_jobs)"
 
+if [[ -z "${SCCD_DB_TO_RAW:-}" ]]; then
+    if command -v db_to_raw >/dev/null 2>&1; then
+        export SCCD_DB_TO_RAW="$(command -v db_to_raw)"
+    elif [[ -n "${SCCD_SMESH_DIR:-}" && -x "${SCCD_SMESH_DIR%/}/../../../bin/db_to_raw" ]]; then
+        export SCCD_DB_TO_RAW="$(cd "${SCCD_SMESH_DIR%/}/../../../bin" && pwd)/db_to_raw"
+    elif [[ -n "${smesh_DIR:-}" && -x "${smesh_DIR%/}/../../../bin/db_to_raw" ]]; then
+        export SCCD_DB_TO_RAW="$(cd "${smesh_DIR%/}/../../../bin" && pwd)/db_to_raw"
+    elif [[ -n "${cached_smesh_dir:-}" && -x "${cached_smesh_dir%/}/../../../bin/db_to_raw" ]]; then
+        export SCCD_DB_TO_RAW="$(cd "${cached_smesh_dir%/}/../../../bin" && pwd)/db_to_raw"
+    fi
+fi
+
 SCCD_BENCH="${SCCD_BUILD_DIR}/sccd_bench"
 if [[ ! -x "${SCCD_BENCH}" && -x "${SCCD_BUILD_DIR}/Release/sccd_bench" ]]; then
     SCCD_BENCH="${SCCD_BUILD_DIR}/Release/sccd_bench"
 fi
 
+exec 1>&3
+
+BENCH_CSV="${SCCD_BENCH_CSV:-"${BENCHMARK_DIR}/bench.csv"}"
+BENCH_AGG_CSV="${SCCD_BENCH_AGG_CSV:-"${BENCHMARK_DIR}/bench_aggregate.csv"}"
+BENCH_FIGURE_DIR="${SCCD_BENCH_FIGURE_DIR:-"${BENCHMARK_DIR}/figures"}"
+BENCH_REPORT_TEX="${SCCD_BENCH_REPORT_TEX:-"${BENCHMARK_DIR}/bench_report.tex"}"
+mkdir -p "$(dirname "${BENCH_CSV}")" "$(dirname "${BENCH_AGG_CSV}")" "${BENCH_FIGURE_DIR}" "$(dirname "${BENCH_REPORT_TEX}")"
+
 if [[ "${#datasets[@]}" -gt 0 ]]; then
-    "${SCCD_BENCH}" "${DATA_DIR}" "${datasets[@]}"
+    "${SCCD_BENCH}" "${DATA_DIR}" "${datasets[@]}" | tee "${BENCH_CSV}"
+else
+    printf 'dataset,case,type,queries,broad_ms,narrow_ms,fp,fn,broad_fp,broad_fn\n' | tee "${BENCH_CSV}"
 fi
+
+exec 1>&2
+
+"${PYTHON}" "${BENCHMARK_DIR}/bench_postprocess.py" \
+    "${BENCH_CSV}" "${BENCH_AGG_CSV}" "${BENCH_FIGURE_DIR}" "${BENCH_REPORT_TEX}"
