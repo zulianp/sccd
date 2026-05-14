@@ -8,7 +8,7 @@ set -euo pipefail
 # 3) Number of false positives (should be as low as possible for the narrow-phase) and negatives (should be 0)
 
 export  SCCD_ENABLE_ARMADILLO_ROLLERS=1
-export  SCCD_ENABLE_CLOTH_BALL=0
+export  SCCD_ENABLE_CLOTH_BALL=1
 export  SCCD_ENABLE_CLOTH_FUNNEL=0
 export  SCCD_ENABLE_N_BODY_SIMULATION=0
 export  SCCD_ENABLE_PUFFER_BALL=0
