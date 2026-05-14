@@ -132,16 +132,16 @@ namespace sccd {
     }
 
     template <typename T, typename I>
-    int narrow_phase_newton_pass(const size_t noverlaps,
-                                 const I* const SCCD_RESTRICT e0overalp,
-                                 const I* const SCCD_RESTRICT e1overalp,
-                                 T** const SCCD_RESTRICT v0,
-                                 T** const SCCD_RESTRICT v1,
-                                 const size_t edge_stride,
-                                 I** const SCCD_RESTRICT edges,
-                                 const T max_toi,
-                                 T* const SCCD_RESTRICT toi,
-                                 const int toi_stride = 0);
+    int narrow_phase_newton_pass_ee(const size_t noverlaps,
+                                    const I* const SCCD_RESTRICT e0overalp,
+                                    const I* const SCCD_RESTRICT e1overalp,
+                                    T** const SCCD_RESTRICT v0,
+                                    T** const SCCD_RESTRICT v1,
+                                    const size_t edge_stride,
+                                    I** const SCCD_RESTRICT edges,
+                                    const T max_toi,
+                                    T* const SCCD_RESTRICT toi,
+                                    const int toi_stride = 0);
 
     template <typename T, typename I>
     int narrow_phase_ee(const size_t noverlaps,
@@ -192,7 +192,7 @@ namespace sccd {
         int SCCD_USE_NEWTON_PASS = 0;
         SCCD_READ_ENV(SCCD_USE_NEWTON_PASS, atoi);
         if (SCCD_USE_NEWTON_PASS) {
-            narrow_phase_newton_pass<T, I>(
+            narrow_phase_newton_pass_ee<T, I>(
                 noverlaps, e0overalp, e1overalp, v0, v1, edge_stride, edges, max_toi, toi, toi_stride);
 
             if (toi_stride == 0) {
@@ -394,16 +394,16 @@ namespace sccd {
     }
 
     template <typename T, typename I>
-    int narrow_phase_newton_pass(const size_t noverlaps,
-                                 const I* const SCCD_RESTRICT e0overalp,
-                                 const I* const SCCD_RESTRICT e1overalp,
-                                 T** const SCCD_RESTRICT v0,
-                                 T** const SCCD_RESTRICT v1,
-                                 const size_t edge_stride,
-                                 I** const SCCD_RESTRICT edges,
-                                 const T max_toi,
-                                 T* const SCCD_RESTRICT toi,
-                                 const int toi_stride) {
+    int narrow_phase_newton_pass_ee(const size_t noverlaps,
+                                    const I* const SCCD_RESTRICT e0overalp,
+                                    const I* const SCCD_RESTRICT e1overalp,
+                                    T** const SCCD_RESTRICT v0,
+                                    T** const SCCD_RESTRICT v1,
+                                    const size_t edge_stride,
+                                    I** const SCCD_RESTRICT edges,
+                                    const T max_toi,
+                                    T* const SCCD_RESTRICT toi,
+                                    const int toi_stride) {
         using T_HP = double;
 
         assert(toi_stride == 0 || toi_stride == 1);
