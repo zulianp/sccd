@@ -79,6 +79,13 @@ namespace sccd {
 
         std::atomic<T> min_t = max_toi;
 
+        if (toi_stride == 1) {
+#pragma omp parallel for
+            for (ptrdiff_t i = 0; i < noverlaps; i++) {
+                toi[i] = max_toi;
+            }
+        }
+
         int SCCD_USE_NEWTON_PASS = 0;
         SCCD_READ_ENV(SCCD_USE_NEWTON_PASS, atoi);
         if (SCCD_USE_NEWTON_PASS) {
@@ -120,7 +127,7 @@ namespace sccd {
                 const T_HP e3[3] = {v1[0][nodes[2]], v1[1][nodes[2]], v1[2][nodes[2]]};
 
                 // Iteration variables
-                T_HP t = min_t;
+                T_HP t = toi_stride == 0 ? T_HP(min_t.load()) : T_HP(toi[i]);
                 T_HP u = 0;
                 T_HP v = 0;
 
@@ -138,13 +145,48 @@ namespace sccd {
                     continue;
                 }
 #endif
+
+                const T_HP t_upper = sccd::min<T_HP>(t, T_HP(1));
+                const Box<T_HP> initial_domain(Interval<T_HP>{T_HP(0), t_upper},
+                                               Interval<T_HP>{T_HP(0), T_HP(1)},
+                                               Interval<T_HP>{T_HP(0), T_HP(1)},
+                                               0);
+
                 bool found = false;
                 if (SCCD_ADAPTIVE_SPLIT) {
-                    found = find_root_grid_adaptive_split_vf<T_HP>(
-                        SCCD_MAX_DEPTH, SCCD_TOL, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack, SCCD_REFINE);
+                    found = find_root_grid_adaptive_split_vf<T_HP>(SCCD_MAX_DEPTH,
+                                                                   SCCD_TOL,
+                                                                   sv,
+                                                                   s1,
+                                                                   s2,
+                                                                   s3,
+                                                                   ev,
+                                                                   e1,
+                                                                   e2,
+                                                                   e3,
+                                                                   initial_domain,
+                                                                   t,
+                                                                   u,
+                                                                   v,
+                                                                   stack,
+                                                                   SCCD_REFINE);
                 } else {
-                    found = find_root_grid_uniform_split_vf<T_HP>(
-                        SCCD_MAX_DEPTH, SCCD_TOL, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack, SCCD_REFINE);
+                    found = find_root_grid_uniform_split_vf<T_HP>(SCCD_MAX_DEPTH,
+                                                                  SCCD_TOL,
+                                                                  sv,
+                                                                  s1,
+                                                                  s2,
+                                                                  s3,
+                                                                  ev,
+                                                                  e1,
+                                                                  e2,
+                                                                  e3,
+                                                                  initial_domain,
+                                                                  t,
+                                                                  u,
+                                                                  v,
+                                                                  stack,
+                                                                  SCCD_REFINE);
                 }
 
                 if (found) {
@@ -193,6 +235,13 @@ namespace sccd {
             toi[0] = 0;
             printf("max_toi is 0 returning\n");
             return 0;
+        }
+
+        if (toi_stride == 1) {
+#pragma omp parallel for
+            for (ptrdiff_t i = 0; i < noverlaps; i++) {
+                toi[i] = max_toi;
+            }
         }
 
         assert(toi_stride == 0 || toi_stride == 1);
@@ -262,9 +311,14 @@ namespace sccd {
                 const T_HP e4[3] = {v1[0][nodes1[1]], v1[1][nodes1[1]], v1[2][nodes1[1]]};
 
                 // Iteration variables
-                T_HP t = min_t;
+                T_HP t = toi_stride == 0 ? T_HP(min_t.load()) : T_HP(toi[i]);
                 T_HP u = 0;
                 T_HP v = 0;
+                const T_HP t_upper = sccd::min<T_HP>(t, T_HP(1));
+                const Box<T_HP> initial_domain(Interval<T_HP>{T_HP(0), t_upper},
+                                               Interval<T_HP>{T_HP(0), T_HP(1)},
+                                               Interval<T_HP>{T_HP(0), T_HP(1)},
+                                               0);
 
 #ifdef SCCD_ENABLE_TIGHT_INCLUSION
 #warning "SCCD_ENABLE_TIGHT_INCLUSION"
@@ -282,11 +336,39 @@ namespace sccd {
 #endif
                 bool found = false;
                 if (SCCD_ADAPTIVE_SPLIT) {
-                    found = find_root_grid_adaptive_split_ee<T_HP>(
-                        SCCD_MAX_DEPTH, SCCD_TOL, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v, stack, SCCD_REFINE);
+                    found = find_root_grid_adaptive_split_ee<T_HP>(SCCD_MAX_DEPTH,
+                                                                   SCCD_TOL,
+                                                                   s1,
+                                                                   s2,
+                                                                   s3,
+                                                                   s4,
+                                                                   e1,
+                                                                   e2,
+                                                                   e3,
+                                                                   e4,
+                                                                   initial_domain,
+                                                                   t,
+                                                                   u,
+                                                                   v,
+                                                                   stack,
+                                                                   SCCD_REFINE);
                 } else {
-                    found = find_root_grid_uniform_split_ee<T_HP>(
-                        SCCD_MAX_DEPTH, SCCD_TOL, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v, stack, SCCD_REFINE);
+                    found = find_root_grid_uniform_split_ee<T_HP>(SCCD_MAX_DEPTH,
+                                                                  SCCD_TOL,
+                                                                  s1,
+                                                                  s2,
+                                                                  s3,
+                                                                  s4,
+                                                                  e1,
+                                                                  e2,
+                                                                  e3,
+                                                                  e4,
+                                                                  initial_domain,
+                                                                  t,
+                                                                  u,
+                                                                  v,
+                                                                  stack,
+                                                                  SCCD_REFINE);
                 }
 
                 if (found) {
