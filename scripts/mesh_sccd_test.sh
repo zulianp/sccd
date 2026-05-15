@@ -19,9 +19,9 @@ DATA_PATH=/Users/patrickzulian/Desktop/code/installations/sources/Scalable-CCD/t
 # mesh_t0=326
 # mesh_t1=327
 
-case=$DATA_PATH/cloth-ball/frames
-mesh_t0=cloth_ball92
-mesh_t1=cloth_ball93
+# case=$DATA_PATH/cloth-ball/frames
+# mesh_t0=cloth_ball92
+# mesh_t1=cloth_ball93
 
 # case=$DATA_PATH/cloth-funnel/frames/
 # mesh_t0=227
@@ -31,9 +31,9 @@ mesh_t1=cloth_ball93
 # mesh_t0=balls16_18
 # mesh_t1=balls16_19
 
-# case=$DATA_PATH/rod-twist/frames/
-# mesh_t0=3036
-# mesh_t1=3037
+case=$DATA_PATH/rod-twist/frames/
+mesh_t0=3036
+mesh_t1=3037
 
 set -x
 
