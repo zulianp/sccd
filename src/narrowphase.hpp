@@ -649,8 +649,8 @@ namespace sccd {
         }
         assert(toi != nullptr);
 
-        int SCCD_MAX_DEPTH = 32;
-        SCCD_READ_ENV(SCCD_MAX_DEPTH, atoi);
+        int SCCD_NEWTON_ITERATIONS = 10;
+        SCCD_READ_ENV(SCCD_NEWTON_ITERATIONS, atoi);
 
         T_HP SCCD_TOL = std::is_same_v<float, T_HP> ? T(1e-8) : T(1e-14);
         SCCD_READ_ENV(SCCD_TOL, atof);
@@ -685,7 +685,8 @@ namespace sccd {
                 T_HP u = T_HP(1.0 / 3.0);
                 T_HP v = T_HP(1.0 / 3.0);
 
-                if (!find_root_newton_vf<T_HP>(SCCD_MAX_DEPTH, SCCD_TOL, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v)) {
+                if (!find_root_newton_vf<T_HP>(
+                        SCCD_NEWTON_ITERATIONS, SCCD_TOL, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v)) {
                     continue;
                 }
 

@@ -381,6 +381,12 @@ namespace sccd {
                 Interval{tuv[split_dim].lower, (tuv[split_dim].lower + tuv[split_dim].upper) * T(0.5)},
                 Interval{(tuv[split_dim].lower + tuv[split_dim].upper) * T(0.5), tuv[split_dim].upper}};
 
+            // // NEW
+            // if (split_dim == 0) {
+            //     split_intervals.first.lower = std::min(split_intervals.first.lower, toi);
+            //     split_intervals.second.lower = std::min(split_intervals.second.lower, toi);
+            // }
+
             if (split_intervals.first.is_terminal() || split_intervals.second.is_terminal()) {
                 return true;
             }
@@ -418,6 +424,12 @@ namespace sccd {
             std::pair<Interval, Interval> split_intervals{
                 Interval{tuv[split_dim].lower, (tuv[split_dim].lower + tuv[split_dim].upper) * T(0.5)},
                 Interval{(tuv[split_dim].lower + tuv[split_dim].upper) * T(0.5), tuv[split_dim].upper}};
+
+            // // NEW
+            // if (split_dim == 0) {
+            //     split_intervals.first.lower = std::min(split_intervals.first.lower, toi);
+            //     split_intervals.second.lower = std::min(split_intervals.second.lower, toi);
+            // }
 
             if (split_intervals.first.is_terminal() || split_intervals.second.is_terminal()) {
                 return true;
@@ -716,8 +728,7 @@ namespace sccd {
                              T &t,
                              T &u,
                              T &v) {
-        return find_root_bisection<T>(
-            max_iter, tol, sv, s1, s2, s3, ev, e1, e2, e3, unit_domain_box<T>(), t, u, v);
+        return find_root_bisection<T>(max_iter, tol, sv, s1, s2, s3, ev, e1, e2, e3, unit_domain_box<T>(), t, u, v);
     }
 
     template <int SplitDim, int N, typename T>
@@ -933,6 +944,8 @@ namespace sccd {
                 continue;
             }
 
+            // box.tuv[0].upper = std::min(box.tuv[0].upper, t);
+
             found |= grid_search_adaptive_split_vf<4, T>(
                 box, max_iter, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack, refine);
         }
@@ -1060,6 +1073,7 @@ namespace sccd {
                 continue;
             }
 
+            // box.tuv[0].lower = std::min(box.tuv[0].lower, toi);
             stack.push_back(box);
         }
 
@@ -1129,6 +1143,8 @@ namespace sccd {
             if (box.tuv[0].lower >= t) {
                 continue;
             }
+
+            // box.tuv[0].upper = std::min(box.tuv[0].upper, t);
 
             found |= grid_search_uniform_split_vf<4, T>(
                 box, max_iter, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack, refine);
@@ -1316,6 +1332,7 @@ namespace sccd {
                 continue;
             }
 
+            // box.tuv[0].lower = std::min(box.tuv[0].lower, toi);
             stack.push_back(box);
         }
 
@@ -1385,6 +1402,8 @@ namespace sccd {
             if (box.tuv[0].lower >= t) {
                 continue;
             }
+
+            // box.tuv[0].upper = std::min(box.tuv[0].upper, t);
 
             found |= grid_search_adaptive_split_ee<4, T>(
                 box, max_iter, tol, tols, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v, stack, refine);
@@ -1514,6 +1533,7 @@ namespace sccd {
                 continue;
             }
 
+            // box.tuv[0].lower = std::min(box.tuv[0].lower, toi);
             stack.push_back(box);
         }
 
@@ -1583,6 +1603,8 @@ namespace sccd {
             if (box.tuv[0].lower >= t) {
                 continue;
             }
+
+            // box.tuv[0].upper = std::min(box.tuv[0].upper, t);
 
             found |= grid_search_uniform_split_ee<4, T>(
                 box, max_iter, tol, tols, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v, stack, refine);
