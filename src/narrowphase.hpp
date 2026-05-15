@@ -7,6 +7,7 @@
 
 #include "roots.hpp"
 #include "sccd_base.hpp"
+#include "sccd_vnarrowphase.hpp"
 #include "srootfinder.hpp"
 #include "vaabb.hpp"
 
@@ -61,6 +62,14 @@ namespace sccd {
             return 0;
         }
         assert(toi != nullptr);
+
+        int SCCD_USE_VNARROW_PHASE = 0;
+        SCCD_READ_ENV(SCCD_USE_VNARROW_PHASE, atoi);
+
+        if (SCCD_USE_VNARROW_PHASE) {
+            return v_narrow_phase_vf<nxe, T, I>(
+                noverlaps, voveralp, foveralp, v0, v1, face_stride, faces, max_toi, toi, toi_stride);
+        }
 
         int SCCD_USE_TI = 0;
         SCCD_READ_ENV(SCCD_USE_TI, atoi);
