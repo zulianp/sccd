@@ -64,8 +64,6 @@ namespace sccd {
         int depth[VSIZE];
         uint8_t active[VSIZE];
         VInterval<T, VSIZE> tuv[3];
-        VQuery<T, VSIZE> query;
-        VTolerances<T, VSIZE> tols;
     };
 
     template <typename T, typename I, int VSIZE>
@@ -76,32 +74,7 @@ namespace sccd {
         for (int d = 0; d < 3; ++d) {
             domain.tuv[d].lower[i] = T(0);
             domain.tuv[d].upper[i] = T(0);
-            domain.tols.axis[d][i] = std::numeric_limits<T>::max();
         }
-        domain.query.s0.x[i] = T(0);
-        domain.query.s0.y[i] = T(0);
-        domain.query.s0.z[i] = T(0);
-        domain.query.s1.x[i] = T(0);
-        domain.query.s1.y[i] = T(0);
-        domain.query.s1.z[i] = T(0);
-        domain.query.s2.x[i] = T(0);
-        domain.query.s2.y[i] = T(0);
-        domain.query.s2.z[i] = T(0);
-        domain.query.s3.x[i] = T(0);
-        domain.query.s3.y[i] = T(0);
-        domain.query.s3.z[i] = T(0);
-        domain.query.e0.x[i] = T(0);
-        domain.query.e0.y[i] = T(0);
-        domain.query.e0.z[i] = T(0);
-        domain.query.e1.x[i] = T(0);
-        domain.query.e1.y[i] = T(0);
-        domain.query.e1.z[i] = T(0);
-        domain.query.e2.x[i] = T(0);
-        domain.query.e2.y[i] = T(0);
-        domain.query.e2.z[i] = T(0);
-        domain.query.e3.x[i] = T(0);
-        domain.query.e3.y[i] = T(0);
-        domain.query.e3.z[i] = T(0);
     }
 
     template <typename Q, typename T, typename I, int VSIZE>
@@ -252,6 +225,58 @@ namespace sccd {
         }
     }
 
+    template <typename T, int VSIZE>
+    static inline void copy_query_lane(const VQuery<T, VSIZE>& src,
+                                       const int src_lane,
+                                       VQuery<T, VSIZE>& dst,
+                                       const int dst_lane) {
+        dst.s0.x[dst_lane] = src.s0.x[src_lane];
+        dst.s0.y[dst_lane] = src.s0.y[src_lane];
+        dst.s0.z[dst_lane] = src.s0.z[src_lane];
+        dst.s1.x[dst_lane] = src.s1.x[src_lane];
+        dst.s1.y[dst_lane] = src.s1.y[src_lane];
+        dst.s1.z[dst_lane] = src.s1.z[src_lane];
+        dst.s2.x[dst_lane] = src.s2.x[src_lane];
+        dst.s2.y[dst_lane] = src.s2.y[src_lane];
+        dst.s2.z[dst_lane] = src.s2.z[src_lane];
+        dst.s3.x[dst_lane] = src.s3.x[src_lane];
+        dst.s3.y[dst_lane] = src.s3.y[src_lane];
+        dst.s3.z[dst_lane] = src.s3.z[src_lane];
+        dst.e0.x[dst_lane] = src.e0.x[src_lane];
+        dst.e0.y[dst_lane] = src.e0.y[src_lane];
+        dst.e0.z[dst_lane] = src.e0.z[src_lane];
+        dst.e1.x[dst_lane] = src.e1.x[src_lane];
+        dst.e1.y[dst_lane] = src.e1.y[src_lane];
+        dst.e1.z[dst_lane] = src.e1.z[src_lane];
+        dst.e2.x[dst_lane] = src.e2.x[src_lane];
+        dst.e2.y[dst_lane] = src.e2.y[src_lane];
+        dst.e2.z[dst_lane] = src.e2.z[src_lane];
+        dst.e3.x[dst_lane] = src.e3.x[src_lane];
+        dst.e3.y[dst_lane] = src.e3.y[src_lane];
+        dst.e3.z[dst_lane] = src.e3.z[src_lane];
+    }
+
+    template <typename T, typename I, int VSIZE>
+    static void gather_query(const VDomain<T, I, VSIZE>& domain,
+                             const VQuery<T, VSIZE>& query,
+                             VQuery<T, VSIZE>& packed_query) {
+        for (int i = 0; i < VSIZE; ++i) {
+            copy_query_lane<T, VSIZE>(query, static_cast<int>(domain.query_index[i]), packed_query, i);
+        }
+    }
+
+    template <typename T, typename I, int VSIZE>
+    static void gather_tolerances(const VDomain<T, I, VSIZE>& domain,
+                                  const VTolerances<T, VSIZE>& tols,
+                                  VTolerances<T, VSIZE>& packed_tols) {
+        for (int i = 0; i < VSIZE; ++i) {
+            const int q = static_cast<int>(domain.query_index[i]);
+            packed_tols.axis[0][i] = tols.axis[0][q];
+            packed_tols.axis[1][i] = tols.axis[1][q];
+            packed_tols.axis[2][i] = tols.axis[2][q];
+        }
+    }
+
     template <typename T>
     static inline void diff_vf_component(const T s0,
                                          const T s1,
@@ -272,6 +297,7 @@ namespace sccd {
 
     template <typename T, typename I, int VSIZE>
     static void compute_codomain_scalar(const VDomain<T, I, VSIZE>& domain,
+                                        const VQuery<T, VSIZE>& query,
                                         VCodomain<T, VSIZE>& codomain) {
         for (int d = 0; d < 3; ++d) {
             for (int i = 0; i < VSIZE; ++i) {
@@ -286,19 +312,20 @@ namespace sccd {
             const bool mv = (mask & 4) != 0;
 #pragma omp simd
             for (int i = 0; i < VSIZE; ++i) {
+                const int q = static_cast<int>(domain.query_index[i]);
                 const T t = mt ? domain.tuv[0].upper[i] : domain.tuv[0].lower[i];
                 const T u = mu ? domain.tuv[1].upper[i] : domain.tuv[1].lower[i];
                 const T v = mv ? domain.tuv[2].upper[i] : domain.tuv[2].lower[i];
                 T f;
 
-                diff_vf_component<T>(domain.query.s0.x[i],
-                                     domain.query.s1.x[i],
-                                     domain.query.s2.x[i],
-                                     domain.query.s3.x[i],
-                                     domain.query.e0.x[i],
-                                     domain.query.e1.x[i],
-                                     domain.query.e2.x[i],
-                                     domain.query.e3.x[i],
+                diff_vf_component<T>(query.s0.x[q],
+                                     query.s1.x[q],
+                                     query.s2.x[q],
+                                     query.s3.x[q],
+                                     query.e0.x[q],
+                                     query.e1.x[q],
+                                     query.e2.x[q],
+                                     query.e3.x[q],
                                      t,
                                      u,
                                      v,
@@ -306,14 +333,14 @@ namespace sccd {
                 codomain.xyz[0].lower[i] = sccd::min<T>(codomain.xyz[0].lower[i], f);
                 codomain.xyz[0].upper[i] = sccd::max<T>(codomain.xyz[0].upper[i], f);
 
-                diff_vf_component<T>(domain.query.s0.y[i],
-                                     domain.query.s1.y[i],
-                                     domain.query.s2.y[i],
-                                     domain.query.s3.y[i],
-                                     domain.query.e0.y[i],
-                                     domain.query.e1.y[i],
-                                     domain.query.e2.y[i],
-                                     domain.query.e3.y[i],
+                diff_vf_component<T>(query.s0.y[q],
+                                     query.s1.y[q],
+                                     query.s2.y[q],
+                                     query.s3.y[q],
+                                     query.e0.y[q],
+                                     query.e1.y[q],
+                                     query.e2.y[q],
+                                     query.e3.y[q],
                                      t,
                                      u,
                                      v,
@@ -321,14 +348,14 @@ namespace sccd {
                 codomain.xyz[1].lower[i] = sccd::min<T>(codomain.xyz[1].lower[i], f);
                 codomain.xyz[1].upper[i] = sccd::max<T>(codomain.xyz[1].upper[i], f);
 
-                diff_vf_component<T>(domain.query.s0.z[i],
-                                     domain.query.s1.z[i],
-                                     domain.query.s2.z[i],
-                                     domain.query.s3.z[i],
-                                     domain.query.e0.z[i],
-                                     domain.query.e1.z[i],
-                                     domain.query.e2.z[i],
-                                     domain.query.e3.z[i],
+                diff_vf_component<T>(query.s0.z[q],
+                                     query.s1.z[q],
+                                     query.s2.z[q],
+                                     query.s3.z[q],
+                                     query.e0.z[q],
+                                     query.e1.z[q],
+                                     query.e2.z[q],
+                                     query.e3.z[q],
                                      t,
                                      u,
                                      v,
@@ -377,8 +404,12 @@ namespace sccd {
 
     template <typename I, int VSIZE>
     static void compute_codomain_neon(const VDomain<double, I, VSIZE>& domain,
+                                      const VQuery<double, VSIZE>& query,
                                       VCodomain<double, VSIZE>& codomain) {
         static_assert((VSIZE % 2) == 0, "double NEON codomain kernel expects an even vector size");
+        VQuery<double, VSIZE> packed_query;
+        gather_query<double, I, VSIZE>(domain, query, packed_query);
+
         for (int d = 0; d < 3; ++d) {
             for (int i = 0; i < VSIZE; i += 2) {
                 vst1q_f64(codomain.xyz[d].lower + i, vdupq_n_f64(std::numeric_limits<double>::max()));
@@ -395,29 +426,29 @@ namespace sccd {
                 const float64x2_t u = vld1q_f64(uptr + i);
                 const float64x2_t v = vld1q_f64(vptr + i);
 
-                float64x2_t f = diff_vf_component_neon(domain.query.s0.x,
-                                                        domain.query.s1.x,
-                                                        domain.query.s2.x,
-                                                        domain.query.s3.x,
-                                                        domain.query.e0.x,
-                                                        domain.query.e1.x,
-                                                        domain.query.e2.x,
-                                                        domain.query.e3.x,
-                                                        t,
-                                                        u,
-                                                        v,
-                                                        i);
+                float64x2_t f = diff_vf_component_neon(packed_query.s0.x,
+                                                       packed_query.s1.x,
+                                                       packed_query.s2.x,
+                                                       packed_query.s3.x,
+                                                       packed_query.e0.x,
+                                                       packed_query.e1.x,
+                                                       packed_query.e2.x,
+                                                       packed_query.e3.x,
+                                                       t,
+                                                       u,
+                                                       v,
+                                                       i);
                 vst1q_f64(codomain.xyz[0].lower + i, vminq_f64(vld1q_f64(codomain.xyz[0].lower + i), f));
                 vst1q_f64(codomain.xyz[0].upper + i, vmaxq_f64(vld1q_f64(codomain.xyz[0].upper + i), f));
 
-                f = diff_vf_component_neon(domain.query.s0.y,
-                                           domain.query.s1.y,
-                                           domain.query.s2.y,
-                                           domain.query.s3.y,
-                                           domain.query.e0.y,
-                                           domain.query.e1.y,
-                                           domain.query.e2.y,
-                                           domain.query.e3.y,
+                f = diff_vf_component_neon(packed_query.s0.y,
+                                           packed_query.s1.y,
+                                           packed_query.s2.y,
+                                           packed_query.s3.y,
+                                           packed_query.e0.y,
+                                           packed_query.e1.y,
+                                           packed_query.e2.y,
+                                           packed_query.e3.y,
                                            t,
                                            u,
                                            v,
@@ -425,14 +456,14 @@ namespace sccd {
                 vst1q_f64(codomain.xyz[1].lower + i, vminq_f64(vld1q_f64(codomain.xyz[1].lower + i), f));
                 vst1q_f64(codomain.xyz[1].upper + i, vmaxq_f64(vld1q_f64(codomain.xyz[1].upper + i), f));
 
-                f = diff_vf_component_neon(domain.query.s0.z,
-                                           domain.query.s1.z,
-                                           domain.query.s2.z,
-                                           domain.query.s3.z,
-                                           domain.query.e0.z,
-                                           domain.query.e1.z,
-                                           domain.query.e2.z,
-                                           domain.query.e3.z,
+                f = diff_vf_component_neon(packed_query.s0.z,
+                                           packed_query.s1.z,
+                                           packed_query.s2.z,
+                                           packed_query.s3.z,
+                                           packed_query.e0.z,
+                                           packed_query.e1.z,
+                                           packed_query.e2.z,
+                                           packed_query.e3.z,
                                            t,
                                            u,
                                            v,
@@ -446,23 +477,26 @@ namespace sccd {
 
     template <typename T, typename I, int VSIZE>
     static void compute_codomain(const VDomain<T, I, VSIZE>& domain,
+                                 const VQuery<T, VSIZE>& query,
                                  VCodomain<T, VSIZE>& codomain) {
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
         if constexpr (std::is_same<T, double>::value) {
-            compute_codomain_neon<I, VSIZE>(domain, codomain);
+            compute_codomain_neon<I, VSIZE>(domain, query, codomain);
             return;
         }
 #endif
-        compute_codomain_scalar<T, I, VSIZE>(domain, codomain);
+        compute_codomain_scalar<T, I, VSIZE>(domain, query, codomain);
     }
 
     template <typename T, typename I, int VSIZE>
     static void compute_masks_scalar(const VDomain<T, I, VSIZE>& domain,
                                      const VCodomain<T, VSIZE>& codomain,
+                                     const VTolerances<T, VSIZE>& tols,
                                      const T tol,
                                      uint8_t* const SCCD_RESTRICT contains_origin,
                                      uint8_t* const SCCD_RESTRICT accepted) {
         for (int i = 0; i < VSIZE; ++i) {
+            const int q = static_cast<int>(domain.query_index[i]);
             bool contains = domain.active[i] != 0;
             bool smaller_than_axis_tol = true;
             bool inside_epsilon_box = true;
@@ -473,7 +507,7 @@ namespace sccd {
                 const T fmax = codomain.xyz[d].upper[i];
                 const T width = fmax - fmin;
                 contains = contains && (fmin <= tol) && (fmax >= -tol);
-                smaller_than_axis_tol = smaller_than_axis_tol && (width <= domain.tols.axis[d][i]);
+                smaller_than_axis_tol = smaller_than_axis_tol && (width <= tols.axis[d][q]);
                 inside_epsilon_box = inside_epsilon_box && (fmin >= -tol) && (fmax <= tol);
                 true_tol = sccd::max<T>(true_tol, width);
             }
@@ -482,9 +516,11 @@ namespace sccd {
             const bool terminal = (domain.tuv[0].lower[i] >= domain.tuv[0].upper[i]) ||
                                   (domain.tuv[1].lower[i] >= domain.tuv[1].upper[i]) ||
                                   (domain.tuv[2].lower[i] >= domain.tuv[2].upper[i]);
+            const bool positive_time = domain.tuv[0].lower[i] > T(0);
 
             contains_origin[i] = contains;
-            accepted[i] = contains && (smaller_than_axis_tol || inside_epsilon_box || real_tol_smaller || terminal);
+            accepted[i] = contains && positive_time &&
+                          (smaller_than_axis_tol || inside_epsilon_box || real_tol_smaller || terminal);
         }
     }
 
@@ -492,10 +528,14 @@ namespace sccd {
     template <typename I, int VSIZE>
     static void compute_masks_neon(const VDomain<double, I, VSIZE>& domain,
                                    const VCodomain<double, VSIZE>& codomain,
+                                   const VTolerances<double, VSIZE>& tols,
                                    const double tol,
                                    uint8_t* const SCCD_RESTRICT contains_origin,
                                    uint8_t* const SCCD_RESTRICT accepted) {
         static_assert((VSIZE % 2) == 0, "double NEON mask kernel expects an even vector size");
+        VTolerances<double, VSIZE> packed_tols;
+        gather_tolerances<double, I, VSIZE>(domain, tols, packed_tols);
+
         const float64x2_t vtol = vdupq_n_f64(tol);
         const float64x2_t vntol = vdupq_n_f64(-tol);
         const float64x2_t vzero = vdupq_n_f64(0.0);
@@ -511,20 +551,23 @@ namespace sccd {
                 const float64x2_t fmax = vld1q_f64(codomain.xyz[d].upper + i);
                 const float64x2_t width = vsubq_f64(fmax, fmin);
                 contains = vandq_u64(contains, vandq_u64(vcleq_f64(fmin, vtol), vcgeq_f64(fmax, vntol)));
-                smaller = vandq_u64(smaller, vcleq_f64(width, vld1q_f64(domain.tols.axis[d] + i)));
+                smaller = vandq_u64(smaller, vcleq_f64(width, vld1q_f64(packed_tols.axis[d] + i)));
                 inside = vandq_u64(inside, vandq_u64(vcgeq_f64(fmin, vntol), vcleq_f64(fmax, vtol)));
                 true_tol = vmaxq_f64(true_tol, width);
             }
 
             const float64x2_t tl = vld1q_f64(domain.tuv[0].lower + i);
+            const uint64x2_t positive_time = vcgtq_f64(tl, vzero);
             const uint64x2_t real_small = vandq_u64(vcgtq_f64(tl, vzero), vcltq_f64(true_tol, vtol));
             uint64x2_t terminal = vcgeq_f64(vld1q_f64(domain.tuv[0].lower + i), vld1q_f64(domain.tuv[0].upper + i));
-            terminal = vorrq_u64(
-                terminal, vcgeq_f64(vld1q_f64(domain.tuv[1].lower + i), vld1q_f64(domain.tuv[1].upper + i)));
-            terminal = vorrq_u64(
-                terminal, vcgeq_f64(vld1q_f64(domain.tuv[2].lower + i), vld1q_f64(domain.tuv[2].upper + i)));
+            terminal =
+                vorrq_u64(terminal, vcgeq_f64(vld1q_f64(domain.tuv[1].lower + i), vld1q_f64(domain.tuv[1].upper + i)));
+            terminal =
+                vorrq_u64(terminal, vcgeq_f64(vld1q_f64(domain.tuv[2].lower + i), vld1q_f64(domain.tuv[2].upper + i)));
 
-            const uint64x2_t accept = vandq_u64(contains, vorrq_u64(vorrq_u64(smaller, inside), vorrq_u64(real_small, terminal)));
+            const uint64x2_t accept =
+                vandq_u64(vandq_u64(contains, positive_time),
+                          vorrq_u64(vorrq_u64(smaller, inside), vorrq_u64(real_small, terminal)));
             uint64_t co_tmp[2];
             uint64_t ac_tmp[2];
             vst1q_u64(co_tmp, contains);
@@ -540,16 +583,17 @@ namespace sccd {
     template <typename T, typename I, int VSIZE>
     static void compute_masks(const VDomain<T, I, VSIZE>& domain,
                               const VCodomain<T, VSIZE>& codomain,
+                              const VTolerances<T, VSIZE>& tols,
                               const T tol,
                               uint8_t* const SCCD_RESTRICT contains_origin,
                               uint8_t* const SCCD_RESTRICT accepted) {
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
         if constexpr (std::is_same<T, double>::value) {
-            compute_masks_neon<I, VSIZE>(domain, codomain, tol, contains_origin, accepted);
+            compute_masks_neon<I, VSIZE>(domain, codomain, tols, tol, contains_origin, accepted);
             return;
         }
 #endif
-        compute_masks_scalar<T, I, VSIZE>(domain, codomain, tol, contains_origin, accepted);
+        compute_masks_scalar<T, I, VSIZE>(domain, codomain, tols, tol, contains_origin, accepted);
     }
 
     template <typename T, typename I, int VSIZE>
@@ -606,40 +650,11 @@ namespace sccd {
     template <typename T, typename I, int VSIZE>
     static inline bool lane_valid(const VDomain<T, I, VSIZE>& domain,
                                   const int i,
-                                  const T toi) {
+                                  const T toi,
+                                  const VTolerances<T, VSIZE>& tols) {
+        const int q = static_cast<int>(domain.query_index[i]);
         return domain.active[i] && domain.tuv[0].lower[i] < toi &&
-               domain.tuv[1].lower[i] + domain.tuv[2].lower[i] < T(1) + domain.tols.axis[1][i] + domain.tols.axis[2][i];
-    }
-
-    template <typename T, typename I, int VSIZE>
-    static inline void copy_query_lane(const VQuery<T, VSIZE>& src,
-                                       const int src_lane,
-                                       VQuery<T, VSIZE>& dst,
-                                       const int dst_lane) {
-        dst.s0.x[dst_lane] = src.s0.x[src_lane];
-        dst.s0.y[dst_lane] = src.s0.y[src_lane];
-        dst.s0.z[dst_lane] = src.s0.z[src_lane];
-        dst.s1.x[dst_lane] = src.s1.x[src_lane];
-        dst.s1.y[dst_lane] = src.s1.y[src_lane];
-        dst.s1.z[dst_lane] = src.s1.z[src_lane];
-        dst.s2.x[dst_lane] = src.s2.x[src_lane];
-        dst.s2.y[dst_lane] = src.s2.y[src_lane];
-        dst.s2.z[dst_lane] = src.s2.z[src_lane];
-        dst.s3.x[dst_lane] = src.s3.x[src_lane];
-        dst.s3.y[dst_lane] = src.s3.y[src_lane];
-        dst.s3.z[dst_lane] = src.s3.z[src_lane];
-        dst.e0.x[dst_lane] = src.e0.x[src_lane];
-        dst.e0.y[dst_lane] = src.e0.y[src_lane];
-        dst.e0.z[dst_lane] = src.e0.z[src_lane];
-        dst.e1.x[dst_lane] = src.e1.x[src_lane];
-        dst.e1.y[dst_lane] = src.e1.y[src_lane];
-        dst.e1.z[dst_lane] = src.e1.z[src_lane];
-        dst.e2.x[dst_lane] = src.e2.x[src_lane];
-        dst.e2.y[dst_lane] = src.e2.y[src_lane];
-        dst.e2.z[dst_lane] = src.e2.z[src_lane];
-        dst.e3.x[dst_lane] = src.e3.x[src_lane];
-        dst.e3.y[dst_lane] = src.e3.y[src_lane];
-        dst.e3.z[dst_lane] = src.e3.z[src_lane];
+               domain.tuv[1].lower[i] + domain.tuv[2].lower[i] < T(1) + tols.axis[1][q] + tols.axis[2][q];
     }
 
     template <typename T, typename I, int VSIZE>
@@ -649,6 +664,7 @@ namespace sccd {
                                        const T lower,
                                        const T upper,
                                        const T toi,
+                                       const VTolerances<T, VSIZE>& tols,
                                        VDomain<T, I, VSIZE>& pack,
                                        int& pack_size,
                                        std::vector<VDomain<T, I, VSIZE>>& stack) {
@@ -663,14 +679,12 @@ namespace sccd {
         for (int d = 0; d < 3; ++d) {
             pack.tuv[d].lower[dst] = src.tuv[d].lower[src_lane];
             pack.tuv[d].upper[dst] = src.tuv[d].upper[src_lane];
-            pack.tols.axis[d][dst] = src.tols.axis[d][src_lane];
         }
-        copy_query_lane<T, I, VSIZE>(src.query, src_lane, pack.query, dst);
         pack.tuv[split_axis].lower[dst] = lower;
         pack.tuv[split_axis].upper[dst] = upper;
         pack.tuv[0].upper[dst] = sccd::min<T>(pack.tuv[0].upper[dst], toi);
 
-        if (!lane_valid<T, I, VSIZE>(pack, dst, toi)) {
+        if (!lane_valid<T, I, VSIZE>(pack, dst, toi, tols)) {
             --pack_size;
             return;
         }
@@ -690,6 +704,7 @@ namespace sccd {
                                                 const uint8_t* const SCCD_RESTRICT accepted,
                                                 const int* const SCCD_RESTRICT longest_axis_to_split,
                                                 T* const SCCD_RESTRICT toi_packed,
+                                                const VTolerances<T, VSIZE>& tols,
                                                 const int max_depth,
                                                 std::vector<VDomain<T, I, VSIZE>>& stack) {
         VDomain<T, I, VSIZE> pack;
@@ -705,7 +720,7 @@ namespace sccd {
 
             const int q = static_cast<int>(domain.query_index[i]);
             const T toi = toi_packed[q];
-            if (!lane_valid<T, I, VSIZE>(domain, i, toi)) {
+            if (!lane_valid<T, I, VSIZE>(domain, i, toi, tols)) {
                 continue;
             }
 
@@ -715,23 +730,25 @@ namespace sccd {
             const T mid = (lo + hi) * T(0.5);
 
             if (!(lo < mid && mid < hi)) {
-                toi_packed[q] = sccd::min<T>(toi_packed[q], domain.tuv[0].lower[i]);
+                if (domain.tuv[0].lower[i] > T(0)) {
+                    toi_packed[q] = sccd::min<T>(toi_packed[q], domain.tuv[0].lower[i]);
+                }
                 continue;
             }
 
-            push_child_lane<T, I, VSIZE>(domain, i, split_axis, lo, mid, toi, pack, pack_size, stack);
+            push_child_lane<T, I, VSIZE>(domain, i, split_axis, lo, mid, toi, tols, pack, pack_size, stack);
 
             bool push_upper = true;
             if (split_axis == 0) {
                 push_upper = mid < toi;
             } else if (split_axis == 1) {
-                push_upper = mid + domain.tuv[2].lower[i] < T(1) + domain.tols.axis[1][i] + domain.tols.axis[2][i];
+                push_upper = mid + domain.tuv[2].lower[i] < T(1) + tols.axis[1][q] + tols.axis[2][q];
             } else {
-                push_upper = domain.tuv[1].lower[i] + mid < T(1) + domain.tols.axis[1][i] + domain.tols.axis[2][i];
+                push_upper = domain.tuv[1].lower[i] + mid < T(1) + tols.axis[1][q] + tols.axis[2][q];
             }
 
             if (push_upper) {
-                push_child_lane<T, I, VSIZE>(domain, i, split_axis, mid, hi, toi, pack, pack_size, stack);
+                push_child_lane<T, I, VSIZE>(domain, i, split_axis, mid, hi, toi, tols, pack, pack_size, stack);
             }
         }
 
@@ -748,6 +765,7 @@ namespace sccd {
                                          const uint8_t* const SCCD_RESTRICT contains_origin,
                                          const uint8_t* const SCCD_RESTRICT accepted,
                                          T* const SCCD_RESTRICT toi_packed,
+                                         const VTolerances<T, VSIZE>& tols,
                                          const int max_depth) {
         for (int i = 0; i < VSIZE; ++i) {
             if (!domain.active[i]) {
@@ -756,23 +774,25 @@ namespace sccd {
 
             const int q = static_cast<int>(domain.query_index[i]);
             const bool depth_limit = contains_origin[i] && domain.depth[i] >= max_depth;
-            if ((accepted[i] || depth_limit) && lane_valid<T, I, VSIZE>(domain, i, toi_packed[q])) {
+            const bool positive_time = domain.tuv[0].lower[i] > T(0);
+            if ((accepted[i] || (depth_limit && positive_time)) &&
+                lane_valid<T, I, VSIZE>(domain, i, toi_packed[q], tols)) {
                 toi_packed[q] = sccd::min<T>(toi_packed[q], domain.tuv[0].lower[i]);
             }
         }
     }
 
     template <int nxe, typename T, typename I>
-    int v_narrow_phase_newton_pass_vf(const size_t noverlaps,
-                                      const I* const SCCD_RESTRICT voveralp,
-                                      const I* const SCCD_RESTRICT foveralp,
-                                      T** const SCCD_RESTRICT v0,
-                                      T** const SCCD_RESTRICT v1,
-                                      const size_t face_stride,
-                                      I** const SCCD_RESTRICT faces,
-                                      const T max_toi,
-                                      T* const SCCD_RESTRICT toi,
-                                      const int toi_stride) {
+    int v_narrow_phase_vf(const size_t noverlaps,
+                          const I* const SCCD_RESTRICT voveralp,
+                          const I* const SCCD_RESTRICT foveralp,
+                          T** const SCCD_RESTRICT v0,
+                          T** const SCCD_RESTRICT v1,
+                          const size_t face_stride,
+                          I** const SCCD_RESTRICT faces,
+                          const T max_toi,
+                          T* const SCCD_RESTRICT toi,
+                          const int toi_stride) {
         using T_HP = double;
 
         assert(toi_stride == 0 || toi_stride == 1);
@@ -790,7 +810,7 @@ namespace sccd {
         T_HP SCCD_TOL = std::is_same<float, T_HP>::value ? T_HP(1e-8) : T_HP(1e-14);
         SCCD_READ_ENV(SCCD_TOL, atof);
 
-        int constexpr VSIZE = 8;
+        int constexpr VSIZE = 16;
         using VQueryT = VQuery<T_HP, VSIZE>;
         using VDomainT = VDomain<T_HP, I, VSIZE>;
         using VCodomainT = VCodomain<T_HP, VSIZE>;
@@ -805,7 +825,8 @@ namespace sccd {
 
             for (ptrdiff_t ib = rbegin; ib < rend; ++ib) {
                 const ptrdiff_t block_begin = ib * VSIZE;
-                const ptrdiff_t block_size = std::min<ptrdiff_t>(VSIZE, static_cast<ptrdiff_t>(noverlaps) - block_begin);
+                const ptrdiff_t block_size =
+                    std::min<ptrdiff_t>(VSIZE, static_cast<ptrdiff_t>(noverlaps) - block_begin);
 
                 VQueryT query;
                 load_query<T_HP, T, I, VSIZE>(ib, block_size, voveralp, foveralp, v0, v1, face_stride, faces, query);
@@ -815,8 +836,6 @@ namespace sccd {
 
                 VDomainT domain;
                 init_domain<T_HP, I, VSIZE>(block_size, T_HP(max_toi), domain);
-                domain.query = query;
-                domain.tols = tols;
 
                 T_HP toi_packed[VSIZE];
                 for (int i = 0; i < VSIZE; ++i) {
@@ -836,27 +855,33 @@ namespace sccd {
                         }
                         const int q = static_cast<int>(domain.query_index[i]);
                         domain.tuv[0].upper[i] = sccd::min<T_HP>(domain.tuv[0].upper[i], toi_packed[q]);
-                        if (!lane_valid<T_HP, I, VSIZE>(domain, i, toi_packed[q])) {
+                        if (!lane_valid<T_HP, I, VSIZE>(domain, i, toi_packed[q], tols)) {
                             domain.active[i] = 0;
                         }
                     }
 
                     VCodomainT codomain;
-                    compute_codomain<T_HP, I, VSIZE>(domain, codomain);
+                    compute_codomain<T_HP, I, VSIZE>(domain, query, codomain);
 
                     uint8_t contains_origin_mask[VSIZE];
                     uint8_t acceptance_mask[VSIZE];
                     compute_masks<T_HP, I, VSIZE>(
-                        domain, codomain, SCCD_TOL, contains_origin_mask, acceptance_mask);
+                        domain, codomain, tols, SCCD_TOL, contains_origin_mask, acceptance_mask);
 
                     process_accepted_domains<T_HP, I, VSIZE>(
-                        domain, contains_origin_mask, acceptance_mask, toi_packed, SCCD_MAX_DEPTH);
+                        domain, contains_origin_mask, acceptance_mask, toi_packed, tols, SCCD_MAX_DEPTH);
 
                     int longest_axis_to_split[VSIZE];
                     detect_longest_axis_to_split<T_HP, I, VSIZE>(domain, longest_axis_to_split);
 
-                    split_domain_along_longest_axis<T_HP, I, VSIZE>(
-                        domain, contains_origin_mask, acceptance_mask, longest_axis_to_split, toi_packed, SCCD_MAX_DEPTH, stack);
+                    split_domain_along_longest_axis<T_HP, I, VSIZE>(domain,
+                                                                    contains_origin_mask,
+                                                                    acceptance_mask,
+                                                                    longest_axis_to_split,
+                                                                    toi_packed,
+                                                                    tols,
+                                                                    SCCD_MAX_DEPTH,
+                                                                    stack);
                 }
 
                 T_HP local_min = T_HP(max_toi);
