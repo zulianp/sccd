@@ -74,7 +74,7 @@ namespace sccd {
         int SCCD_USE_TI = 0;
         SCCD_READ_ENV(SCCD_USE_TI, atoi);
 
-        int SCCD_MAX_DEPTH = 32;
+        int SCCD_MAX_DEPTH = 69;
         SCCD_READ_ENV(SCCD_MAX_DEPTH, atoi);
 
         T_HP SCCD_TOL = std::is_same_v<float, T_HP> ? T(1e-8) : T(1e-14);
@@ -83,7 +83,7 @@ namespace sccd {
         int SCCD_REFINE = 0;
         SCCD_READ_ENV(SCCD_REFINE, atoi);
 
-        int SCCD_ADAPTIVE_SPLIT = 0;
+        int SCCD_ADAPTIVE_SPLIT = 1;
         SCCD_READ_ENV(SCCD_ADAPTIVE_SPLIT, atoi);
 
         std::atomic<T> min_t = max_toi;
@@ -263,7 +263,7 @@ namespace sccd {
         int SCCD_USE_TI = 0;
         SCCD_READ_ENV(SCCD_USE_TI, atoi);
 
-        int SCCD_MAX_DEPTH = 32;
+        int SCCD_MAX_DEPTH = 69;
         SCCD_READ_ENV(SCCD_MAX_DEPTH, atoi);
 
         T_HP SCCD_TOL = std::is_same_v<float, T_HP> ? T(1e-8) : T(1e-14);
@@ -272,7 +272,7 @@ namespace sccd {
         int SCCD_REFINE = 0;
         SCCD_READ_ENV(SCCD_REFINE, atoi);
 
-        int SCCD_ADAPTIVE_SPLIT = 0;
+        int SCCD_ADAPTIVE_SPLIT = 1;
         SCCD_READ_ENV(SCCD_ADAPTIVE_SPLIT, atoi);
 
         std::atomic<T> min_t = max_toi;
@@ -744,7 +744,7 @@ namespace sccd {
         }
         assert(toi != nullptr);
 
-        int SCCD_MAX_DEPTH = 32;
+        int SCCD_MAX_DEPTH = 69;
         SCCD_READ_ENV(SCCD_MAX_DEPTH, atoi);
 
         T_HP SCCD_TOL = std::is_same_v<float, T_HP> ? T(1e-8) : T(1e-14);

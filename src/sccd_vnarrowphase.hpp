@@ -7,6 +7,7 @@
 #include "sparallel.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cassert>
 #include <cfloat>
 #include <cstddef>
@@ -20,7 +21,18 @@
 #include <arm_neon.h>
 #endif
 
+#ifndef SCCD_VNARROWPHASE_ADAPTIVE_SPLIT
+#define SCCD_VNARROWPHASE_ADAPTIVE_SPLIT 1
+#endif
+
 namespace sccd {
+
+    template <typename T>
+    static inline void atomic_min_relaxed(std::atomic<T>& target, const T value) {
+        T current = target.load(std::memory_order_relaxed);
+        while (value < current && !target.compare_exchange_weak(current, value, std::memory_order_relaxed)) {
+        }
+    }
 
     template <typename T, int VSIZE>
     struct VPoint {
@@ -64,6 +76,14 @@ namespace sccd {
         int depth[VSIZE];
         uint8_t active[VSIZE];
         VInterval<T, VSIZE> tuv[3];
+    };
+
+    template <typename T, typename I>
+    struct VActiveBox {
+        I query_index;
+        int depth;
+        T lower[3];
+        T upper[3];
     };
 
     template <typename T, typename I, int VSIZE>
@@ -225,58 +245,6 @@ namespace sccd {
         }
     }
 
-    template <typename T, int VSIZE>
-    static inline void copy_query_lane(const VQuery<T, VSIZE>& src,
-                                       const int src_lane,
-                                       VQuery<T, VSIZE>& dst,
-                                       const int dst_lane) {
-        dst.s0.x[dst_lane] = src.s0.x[src_lane];
-        dst.s0.y[dst_lane] = src.s0.y[src_lane];
-        dst.s0.z[dst_lane] = src.s0.z[src_lane];
-        dst.s1.x[dst_lane] = src.s1.x[src_lane];
-        dst.s1.y[dst_lane] = src.s1.y[src_lane];
-        dst.s1.z[dst_lane] = src.s1.z[src_lane];
-        dst.s2.x[dst_lane] = src.s2.x[src_lane];
-        dst.s2.y[dst_lane] = src.s2.y[src_lane];
-        dst.s2.z[dst_lane] = src.s2.z[src_lane];
-        dst.s3.x[dst_lane] = src.s3.x[src_lane];
-        dst.s3.y[dst_lane] = src.s3.y[src_lane];
-        dst.s3.z[dst_lane] = src.s3.z[src_lane];
-        dst.e0.x[dst_lane] = src.e0.x[src_lane];
-        dst.e0.y[dst_lane] = src.e0.y[src_lane];
-        dst.e0.z[dst_lane] = src.e0.z[src_lane];
-        dst.e1.x[dst_lane] = src.e1.x[src_lane];
-        dst.e1.y[dst_lane] = src.e1.y[src_lane];
-        dst.e1.z[dst_lane] = src.e1.z[src_lane];
-        dst.e2.x[dst_lane] = src.e2.x[src_lane];
-        dst.e2.y[dst_lane] = src.e2.y[src_lane];
-        dst.e2.z[dst_lane] = src.e2.z[src_lane];
-        dst.e3.x[dst_lane] = src.e3.x[src_lane];
-        dst.e3.y[dst_lane] = src.e3.y[src_lane];
-        dst.e3.z[dst_lane] = src.e3.z[src_lane];
-    }
-
-    template <typename T, typename I, int VSIZE>
-    static void gather_query(const VDomain<T, I, VSIZE>& domain,
-                             const VQuery<T, VSIZE>& query,
-                             VQuery<T, VSIZE>& packed_query) {
-        for (int i = 0; i < VSIZE; ++i) {
-            copy_query_lane<T, VSIZE>(query, static_cast<int>(domain.query_index[i]), packed_query, i);
-        }
-    }
-
-    template <typename T, typename I, int VSIZE>
-    static void gather_tolerances(const VDomain<T, I, VSIZE>& domain,
-                                  const VTolerances<T, VSIZE>& tols,
-                                  VTolerances<T, VSIZE>& packed_tols) {
-        for (int i = 0; i < VSIZE; ++i) {
-            const int q = static_cast<int>(domain.query_index[i]);
-            packed_tols.axis[0][i] = tols.axis[0][q];
-            packed_tols.axis[1][i] = tols.axis[1][q];
-            packed_tols.axis[2][i] = tols.axis[2][q];
-        }
-    }
-
     template <typename T>
     static inline void diff_vf_component(const T s0,
                                          const T s1,
@@ -367,30 +335,35 @@ namespace sccd {
     }
 
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
-    static inline float64x2_t diff_vf_component_neon(const double* const SCCD_RESTRICT s0,
-                                                     const double* const SCCD_RESTRICT s1,
-                                                     const double* const SCCD_RESTRICT s2,
-                                                     const double* const SCCD_RESTRICT s3,
-                                                     const double* const SCCD_RESTRICT e0,
-                                                     const double* const SCCD_RESTRICT e1,
-                                                     const double* const SCCD_RESTRICT e2,
-                                                     const double* const SCCD_RESTRICT e3,
-                                                     const float64x2_t t,
-                                                     const float64x2_t u,
-                                                     const float64x2_t v,
-                                                     const int i) {
+    static inline float64x2_t load2_indexed_f64(const double* const SCCD_RESTRICT a, const int q0, const int q1) {
+        return vsetq_lane_f64(a[q1], vdupq_n_f64(a[q0]), 1);
+    }
+
+    static inline float64x2_t diff_vf_component_neon_indexed(const double* const SCCD_RESTRICT s0,
+                                                             const double* const SCCD_RESTRICT s1,
+                                                             const double* const SCCD_RESTRICT s2,
+                                                             const double* const SCCD_RESTRICT s3,
+                                                             const double* const SCCD_RESTRICT e0,
+                                                             const double* const SCCD_RESTRICT e1,
+                                                             const double* const SCCD_RESTRICT e2,
+                                                             const double* const SCCD_RESTRICT e3,
+                                                             const int q0,
+                                                             const int q1,
+                                                             const float64x2_t t,
+                                                             const float64x2_t u,
+                                                             const float64x2_t v) {
         const float64x2_t one = vdupq_n_f64(1.0);
         const float64x2_t omt = vsubq_f64(one, t);
         const float64x2_t o = vsubq_f64(vsubq_f64(one, u), v);
 
-        const float64x2_t vs0 = vld1q_f64(s0 + i);
-        const float64x2_t vs1 = vld1q_f64(s1 + i);
-        const float64x2_t vs2 = vld1q_f64(s2 + i);
-        const float64x2_t vs3 = vld1q_f64(s3 + i);
-        const float64x2_t ve0 = vld1q_f64(e0 + i);
-        const float64x2_t ve1 = vld1q_f64(e1 + i);
-        const float64x2_t ve2 = vld1q_f64(e2 + i);
-        const float64x2_t ve3 = vld1q_f64(e3 + i);
+        const float64x2_t vs0 = load2_indexed_f64(s0, q0, q1);
+        const float64x2_t vs1 = load2_indexed_f64(s1, q0, q1);
+        const float64x2_t vs2 = load2_indexed_f64(s2, q0, q1);
+        const float64x2_t vs3 = load2_indexed_f64(s3, q0, q1);
+        const float64x2_t ve0 = load2_indexed_f64(e0, q0, q1);
+        const float64x2_t ve1 = load2_indexed_f64(e1, q0, q1);
+        const float64x2_t ve2 = load2_indexed_f64(e2, q0, q1);
+        const float64x2_t ve3 = load2_indexed_f64(e3, q0, q1);
 
         const float64x2_t vertex = vfmaq_f64(vmulq_f64(omt, vs0), t, ve0);
         float64x2_t sface = vmulq_f64(o, vs1);
@@ -407,9 +380,6 @@ namespace sccd {
                                       const VQuery<double, VSIZE>& query,
                                       VCodomain<double, VSIZE>& codomain) {
         static_assert((VSIZE % 2) == 0, "double NEON codomain kernel expects an even vector size");
-        VQuery<double, VSIZE> packed_query;
-        gather_query<double, I, VSIZE>(domain, query, packed_query);
-
         for (int d = 0; d < 3; ++d) {
             for (int i = 0; i < VSIZE; i += 2) {
                 vst1q_f64(codomain.xyz[d].lower + i, vdupq_n_f64(std::numeric_limits<double>::max()));
@@ -425,49 +395,54 @@ namespace sccd {
                 const float64x2_t t = vld1q_f64(tptr + i);
                 const float64x2_t u = vld1q_f64(uptr + i);
                 const float64x2_t v = vld1q_f64(vptr + i);
+                const int q0 = static_cast<int>(domain.query_index[i]);
+                const int q1 = static_cast<int>(domain.query_index[i + 1]);
 
-                float64x2_t f = diff_vf_component_neon(packed_query.s0.x,
-                                                       packed_query.s1.x,
-                                                       packed_query.s2.x,
-                                                       packed_query.s3.x,
-                                                       packed_query.e0.x,
-                                                       packed_query.e1.x,
-                                                       packed_query.e2.x,
-                                                       packed_query.e3.x,
-                                                       t,
-                                                       u,
-                                                       v,
-                                                       i);
+                float64x2_t f = diff_vf_component_neon_indexed(query.s0.x,
+                                                               query.s1.x,
+                                                               query.s2.x,
+                                                               query.s3.x,
+                                                               query.e0.x,
+                                                               query.e1.x,
+                                                               query.e2.x,
+                                                               query.e3.x,
+                                                               q0,
+                                                               q1,
+                                                               t,
+                                                               u,
+                                                               v);
                 vst1q_f64(codomain.xyz[0].lower + i, vminq_f64(vld1q_f64(codomain.xyz[0].lower + i), f));
                 vst1q_f64(codomain.xyz[0].upper + i, vmaxq_f64(vld1q_f64(codomain.xyz[0].upper + i), f));
 
-                f = diff_vf_component_neon(packed_query.s0.y,
-                                           packed_query.s1.y,
-                                           packed_query.s2.y,
-                                           packed_query.s3.y,
-                                           packed_query.e0.y,
-                                           packed_query.e1.y,
-                                           packed_query.e2.y,
-                                           packed_query.e3.y,
-                                           t,
-                                           u,
-                                           v,
-                                           i);
+                f = diff_vf_component_neon_indexed(query.s0.y,
+                                                   query.s1.y,
+                                                   query.s2.y,
+                                                   query.s3.y,
+                                                   query.e0.y,
+                                                   query.e1.y,
+                                                   query.e2.y,
+                                                   query.e3.y,
+                                                   q0,
+                                                   q1,
+                                                   t,
+                                                   u,
+                                                   v);
                 vst1q_f64(codomain.xyz[1].lower + i, vminq_f64(vld1q_f64(codomain.xyz[1].lower + i), f));
                 vst1q_f64(codomain.xyz[1].upper + i, vmaxq_f64(vld1q_f64(codomain.xyz[1].upper + i), f));
 
-                f = diff_vf_component_neon(packed_query.s0.z,
-                                           packed_query.s1.z,
-                                           packed_query.s2.z,
-                                           packed_query.s3.z,
-                                           packed_query.e0.z,
-                                           packed_query.e1.z,
-                                           packed_query.e2.z,
-                                           packed_query.e3.z,
-                                           t,
-                                           u,
-                                           v,
-                                           i);
+                f = diff_vf_component_neon_indexed(query.s0.z,
+                                                   query.s1.z,
+                                                   query.s2.z,
+                                                   query.s3.z,
+                                                   query.e0.z,
+                                                   query.e1.z,
+                                                   query.e2.z,
+                                                   query.e3.z,
+                                                   q0,
+                                                   q1,
+                                                   t,
+                                                   u,
+                                                   v);
                 vst1q_f64(codomain.xyz[2].lower + i, vminq_f64(vld1q_f64(codomain.xyz[2].lower + i), f));
                 vst1q_f64(codomain.xyz[2].upper + i, vmaxq_f64(vld1q_f64(codomain.xyz[2].upper + i), f));
             }
@@ -498,29 +473,21 @@ namespace sccd {
         for (int i = 0; i < VSIZE; ++i) {
             const int q = static_cast<int>(domain.query_index[i]);
             bool contains = domain.active[i] != 0;
-            bool smaller_than_axis_tol = true;
-            bool inside_epsilon_box = true;
-            T true_tol = T(0);
+            bool box_in_eps = true;
+            bool widths_within_tol = true;
 
             for (int d = 0; d < 3; ++d) {
                 const T fmin = codomain.xyz[d].lower[i];
                 const T fmax = codomain.xyz[d].upper[i];
-                const T width = fmax - fmin;
                 contains = contains && (fmin <= tol) && (fmax >= -tol);
-                smaller_than_axis_tol = smaller_than_axis_tol && (width <= tols.axis[d][q]);
-                inside_epsilon_box = inside_epsilon_box && (fmin >= -tol) && (fmax <= tol);
-                true_tol = sccd::max<T>(true_tol, width);
+                box_in_eps = box_in_eps && (fmin >= -tol) && (fmax <= tol);
+                widths_within_tol =
+                    widths_within_tol && ((domain.tuv[d].upper[i] - domain.tuv[d].lower[i]) <= tols.axis[d][q]);
             }
 
-            const bool real_tol_smaller = (domain.tuv[0].lower[i] > T(0)) && (true_tol < tol);
-            const bool terminal = (domain.tuv[0].lower[i] >= domain.tuv[0].upper[i]) ||
-                                  (domain.tuv[1].lower[i] >= domain.tuv[1].upper[i]) ||
-                                  (domain.tuv[2].lower[i] >= domain.tuv[2].upper[i]);
             const bool positive_time = domain.tuv[0].lower[i] > T(0);
-
             contains_origin[i] = contains;
-            accepted[i] = contains && positive_time &&
-                          (smaller_than_axis_tol || inside_epsilon_box || real_tol_smaller || terminal);
+            accepted[i] = contains && positive_time && (box_in_eps || widths_within_tol);
         }
     }
 
@@ -533,41 +500,31 @@ namespace sccd {
                                    uint8_t* const SCCD_RESTRICT contains_origin,
                                    uint8_t* const SCCD_RESTRICT accepted) {
         static_assert((VSIZE % 2) == 0, "double NEON mask kernel expects an even vector size");
-        VTolerances<double, VSIZE> packed_tols;
-        gather_tolerances<double, I, VSIZE>(domain, tols, packed_tols);
-
         const float64x2_t vtol = vdupq_n_f64(tol);
         const float64x2_t vntol = vdupq_n_f64(-tol);
         const float64x2_t vzero = vdupq_n_f64(0.0);
 
         for (int i = 0; i < VSIZE; i += 2) {
             uint64x2_t contains = vdupq_n_u64(~uint64_t(0));
-            uint64x2_t smaller = vdupq_n_u64(~uint64_t(0));
-            uint64x2_t inside = vdupq_n_u64(~uint64_t(0));
-            float64x2_t true_tol = vdupq_n_f64(0.0);
+            uint64x2_t box_in_eps = vdupq_n_u64(~uint64_t(0));
+            uint64x2_t widths_within_tol = vdupq_n_u64(~uint64_t(0));
+            const int q0 = static_cast<int>(domain.query_index[i]);
+            const int q1 = static_cast<int>(domain.query_index[i + 1]);
 
             for (int d = 0; d < 3; ++d) {
                 const float64x2_t fmin = vld1q_f64(codomain.xyz[d].lower + i);
                 const float64x2_t fmax = vld1q_f64(codomain.xyz[d].upper + i);
-                const float64x2_t width = vsubq_f64(fmax, fmin);
+                const float64x2_t width =
+                    vsubq_f64(vld1q_f64(domain.tuv[d].upper + i), vld1q_f64(domain.tuv[d].lower + i));
                 contains = vandq_u64(contains, vandq_u64(vcleq_f64(fmin, vtol), vcgeq_f64(fmax, vntol)));
-                smaller = vandq_u64(smaller, vcleq_f64(width, vld1q_f64(packed_tols.axis[d] + i)));
-                inside = vandq_u64(inside, vandq_u64(vcgeq_f64(fmin, vntol), vcleq_f64(fmax, vtol)));
-                true_tol = vmaxq_f64(true_tol, width);
+                box_in_eps = vandq_u64(box_in_eps, vandq_u64(vcgeq_f64(fmin, vntol), vcleq_f64(fmax, vtol)));
+                widths_within_tol =
+                    vandq_u64(widths_within_tol, vcleq_f64(width, load2_indexed_f64(tols.axis[d], q0, q1)));
             }
 
-            const float64x2_t tl = vld1q_f64(domain.tuv[0].lower + i);
-            const uint64x2_t positive_time = vcgtq_f64(tl, vzero);
-            const uint64x2_t real_small = vandq_u64(vcgtq_f64(tl, vzero), vcltq_f64(true_tol, vtol));
-            uint64x2_t terminal = vcgeq_f64(vld1q_f64(domain.tuv[0].lower + i), vld1q_f64(domain.tuv[0].upper + i));
-            terminal =
-                vorrq_u64(terminal, vcgeq_f64(vld1q_f64(domain.tuv[1].lower + i), vld1q_f64(domain.tuv[1].upper + i)));
-            terminal =
-                vorrq_u64(terminal, vcgeq_f64(vld1q_f64(domain.tuv[2].lower + i), vld1q_f64(domain.tuv[2].upper + i)));
-
+            const uint64x2_t positive_time = vcgtq_f64(vld1q_f64(domain.tuv[0].lower + i), vzero);
             const uint64x2_t accept =
-                vandq_u64(vandq_u64(contains, positive_time),
-                          vorrq_u64(vorrq_u64(smaller, inside), vorrq_u64(real_small, terminal)));
+                vandq_u64(vandq_u64(contains, positive_time), vorrq_u64(box_in_eps, widths_within_tol));
             uint64_t co_tmp[2];
             uint64_t ac_tmp[2];
             vst1q_u64(co_tmp, contains);
@@ -651,10 +608,219 @@ namespace sccd {
     static inline bool lane_valid(const VDomain<T, I, VSIZE>& domain,
                                   const int i,
                                   const T toi,
-                                  const VTolerances<T, VSIZE>& tols) {
-        const int q = static_cast<int>(domain.query_index[i]);
+                                  const VTolerances<T, VSIZE>&) {
         return domain.active[i] && domain.tuv[0].lower[i] < toi &&
-               domain.tuv[1].lower[i] + domain.tuv[2].lower[i] < T(1) + tols.axis[1][q] + tols.axis[2][q];
+               domain.tuv[1].lower[i] + domain.tuv[2].lower[i] <= T(1);
+    }
+
+    template <int SplitDim, int N, typename T, int VSIZE>
+    static inline void normal_equation_axis_splitters_vf_lane(const VQuery<T, VSIZE>& query,
+                                                              const int q,
+                                                              const T tlower,
+                                                              const T tupper,
+                                                              const T ulower,
+                                                              const T uupper,
+                                                              const T vlower,
+                                                              const T vupper,
+                                                              T* const SCCD_RESTRICT splitters) {
+        static_assert(SplitDim >= 0 && SplitDim < 3);
+        static_assert(N > 0);
+
+        const T lower[3] = {tlower, ulower, vlower};
+        const T upper[3] = {tupper, uupper, vupper};
+        const T sv[3] = {query.s0.x[q], query.s0.y[q], query.s0.z[q]};
+        const T s1[3] = {query.s1.x[q], query.s1.y[q], query.s1.z[q]};
+        const T s2[3] = {query.s2.x[q], query.s2.y[q], query.s2.z[q]};
+        const T s3[3] = {query.s3.x[q], query.s3.y[q], query.s3.z[q]};
+        const T ev[3] = {query.e0.x[q], query.e0.y[q], query.e0.z[q]};
+        const T e1[3] = {query.e1.x[q], query.e1.y[q], query.e1.z[q]};
+        const T e2[3] = {query.e2.x[q], query.e2.y[q], query.e2.z[q]};
+        const T e3[3] = {query.e3.x[q], query.e3.y[q], query.e3.z[q]};
+
+        const T lo = lower[SplitDim];
+        const T hi = upper[SplitDim];
+        const T h = (hi - lo) / T(N + 1);
+        const T radius = h * T(0.45);
+        const T mid_t = (lower[0] + upper[0]) * T(0.5);
+        const T mid_u = (lower[1] + upper[1]) * T(0.5);
+        const T mid_v = (lower[2] + upper[2]) * T(0.5);
+        const T eps = std::numeric_limits<T>::epsilon();
+
+        T F_base[3];
+        T J_axis[3];
+        T H_axis = T(0);
+
+        const T base_t = SplitDim == 0 ? T(0) : mid_t;
+        const T base_u = SplitDim == 1 ? T(0) : mid_u;
+        const T base_v = SplitDim == 2 ? T(0) : mid_v;
+        const T base_omt = T(1) - base_t;
+        const T base_o = T(1) - base_u - base_v;
+
+        for (int d = 0; d < 3; ++d) {
+            const T vertex = base_omt * sv[d] + base_t * ev[d];
+            const T face = base_omt * (base_o * s1[d] + base_u * s2[d] + base_v * s3[d]) +
+                           base_t * (base_o * e1[d] + base_u * e2[d] + base_v * e3[d]);
+            F_base[d] = vertex - face;
+
+            if constexpr (SplitDim == 0) {
+                const T o = T(1) - mid_u - mid_v;
+                J_axis[d] = (ev[d] - sv[d]) - (o * (e1[d] - s1[d]) + mid_u * (e2[d] - s2[d]) + mid_v * (e3[d] - s3[d]));
+            } else if constexpr (SplitDim == 1) {
+                J_axis[d] = -((T(1) - mid_t) * (s2[d] - s1[d]) + mid_t * (e2[d] - e1[d]));
+            } else {
+                J_axis[d] = -((T(1) - mid_t) * (s3[d] - s1[d]) + mid_t * (e3[d] - e1[d]));
+            }
+            H_axis += J_axis[d] * J_axis[d];
+        }
+
+        const T step_scale = H_axis > eps ? T(1) / H_axis : T(0.00001);
+#pragma omp simd aligned(splitters)
+        for (int i = 0; i < N; ++i) {
+            const T x0 = lo + h * T(i + 1);
+            auto xmin = sccd::max<T>(lo, x0 - radius);
+            auto xmax = sccd::min<T>(hi, x0 + radius);
+
+            T g = T(0);
+            for (int d = 0; d < 3; ++d) {
+                const T J = J_axis[d];
+                g += (F_base[d] + x0 * J) * J;
+            }
+
+            const T step = g * step_scale;
+            splitters[i] = sccd::min<T>(xmax, sccd::max<T>(xmin, x0 - step));
+        }
+    }
+
+    template <int N, typename T, int VSIZE>
+    static inline void adaptive_splitters_vf(const VQuery<T, VSIZE>& query,
+                                             const int q,
+                                             const int split_axis,
+                                             const T tlower,
+                                             const T tupper,
+                                             const T ulower,
+                                             const T uupper,
+                                             const T vlower,
+                                             const T vupper,
+                                             T* const SCCD_RESTRICT splitters) {
+        if (split_axis == 0) {
+            normal_equation_axis_splitters_vf_lane<0, N, T, VSIZE>(
+                query, q, tlower, tupper, ulower, uupper, vlower, vupper, splitters);
+        } else if (split_axis == 1) {
+            normal_equation_axis_splitters_vf_lane<1, N, T, VSIZE>(
+                query, q, tlower, tupper, ulower, uupper, vlower, vupper, splitters);
+        } else {
+            normal_equation_axis_splitters_vf_lane<2, N, T, VSIZE>(
+                query, q, tlower, tupper, ulower, uupper, vlower, vupper, splitters);
+        }
+    }
+
+    template <typename T>
+    static inline bool codomain_acceptance_grid_vf(const T fmin[3],
+                                                   const T fmax[3],
+                                                   const T tol,
+                                                   const T tols[3],
+                                                   bool& accept) {
+        bool contains_zero = true;
+        bool smaller_than_axis_tol = true;
+        bool inside_epsilon_box = true;
+        bool last_axis_smaller_than_scalar_tol = false;
+        bool degenerate_interval = true;
+
+        for (int d = 0; d < 3; ++d) {
+            const T interval_width = fmax[d] - fmin[d];
+            contains_zero = contains_zero && (fmin[d] <= tol) && (fmax[d] >= -tol);
+            smaller_than_axis_tol = smaller_than_axis_tol && (interval_width <= tols[d]);
+            inside_epsilon_box = inside_epsilon_box && !((fmin[d] < tol) || (fmax[d] > -tol));
+            last_axis_smaller_than_scalar_tol = interval_width < tol;
+            degenerate_interval = degenerate_interval && (fmin[d] >= fmax[d]);
+        }
+
+        accept = contains_zero && (smaller_than_axis_tol || inside_epsilon_box || last_axis_smaller_than_scalar_tol ||
+                                   degenerate_interval);
+        return contains_zero;
+    }
+
+    template <typename T, typename I, int VSIZE>
+    static inline bool active_box_codomain_acceptance_vf(const VActiveBox<T, I>& box,
+                                                         const VQuery<T, VSIZE>& query,
+                                                         const int q,
+                                                         const T tol,
+                                                         const VTolerances<T, VSIZE>& tols,
+                                                         bool& accepted) {
+        T fmin[3] = {std::numeric_limits<T>::max(), std::numeric_limits<T>::max(), std::numeric_limits<T>::max()};
+        T fmax[3] = {
+            std::numeric_limits<T>::lowest(), std::numeric_limits<T>::lowest(), std::numeric_limits<T>::lowest()};
+
+        for (int mask = 0; mask < 8; ++mask) {
+            const T t = (mask & 1) ? box.upper[0] : box.lower[0];
+            const T u = (mask & 2) ? box.upper[1] : box.lower[1];
+            const T v = (mask & 4) ? box.upper[2] : box.lower[2];
+            T f;
+
+            diff_vf_component<T>(query.s0.x[q],
+                                 query.s1.x[q],
+                                 query.s2.x[q],
+                                 query.s3.x[q],
+                                 query.e0.x[q],
+                                 query.e1.x[q],
+                                 query.e2.x[q],
+                                 query.e3.x[q],
+                                 t,
+                                 u,
+                                 v,
+                                 f);
+            fmin[0] = sccd::min<T>(fmin[0], f);
+            fmax[0] = sccd::max<T>(fmax[0], f);
+
+            diff_vf_component<T>(query.s0.y[q],
+                                 query.s1.y[q],
+                                 query.s2.y[q],
+                                 query.s3.y[q],
+                                 query.e0.y[q],
+                                 query.e1.y[q],
+                                 query.e2.y[q],
+                                 query.e3.y[q],
+                                 t,
+                                 u,
+                                 v,
+                                 f);
+            fmin[1] = sccd::min<T>(fmin[1], f);
+            fmax[1] = sccd::max<T>(fmax[1], f);
+
+            diff_vf_component<T>(query.s0.z[q],
+                                 query.s1.z[q],
+                                 query.s2.z[q],
+                                 query.s3.z[q],
+                                 query.e0.z[q],
+                                 query.e1.z[q],
+                                 query.e2.z[q],
+                                 query.e3.z[q],
+                                 t,
+                                 u,
+                                 v,
+                                 f);
+            fmin[2] = sccd::min<T>(fmin[2], f);
+            fmax[2] = sccd::max<T>(fmax[2], f);
+        }
+
+        const T query_tols[3] = {tols.axis[0][q], tols.axis[1][q], tols.axis[2][q]};
+        return codomain_acceptance_grid_vf<T>(fmin, fmax, tol, query_tols, accepted);
+    }
+
+    template <typename T, typename I, int VSIZE>
+    static inline void report_contained_domain(const VDomain<T, I, VSIZE>& domain,
+                                               const int i,
+                                               T* const SCCD_RESTRICT toi_packed,
+                                               const VTolerances<T, VSIZE>& tols) {
+        const int q = static_cast<int>(domain.query_index[i]);
+        if (!lane_valid<T, I, VSIZE>(domain, i, toi_packed[q], tols)) {
+            return;
+        }
+
+        const T candidate = domain.tuv[0].lower[i];
+        if (candidate < toi_packed[q]) {
+            toi_packed[q] = candidate;
+        }
     }
 
     template <typename T, typename I, int VSIZE>
@@ -700,6 +866,7 @@ namespace sccd {
 
     template <typename T, typename I, int VSIZE>
     static void split_domain_along_longest_axis(const VDomain<T, I, VSIZE>& domain,
+                                                const VQuery<T, VSIZE>& query,
                                                 const uint8_t* const SCCD_RESTRICT contains_origin,
                                                 const uint8_t* const SCCD_RESTRICT accepted,
                                                 const int* const SCCD_RESTRICT longest_axis_to_split,
@@ -727,12 +894,42 @@ namespace sccd {
             const int split_axis = longest_axis_to_split[i];
             const T lo = domain.tuv[split_axis].lower[i];
             const T hi = domain.tuv[split_axis].upper[i];
+
+            if constexpr (SCCD_VNARROWPHASE_ADAPTIVE_SPLIT) {
+                constexpr int NSPLIT = 4;
+                alignas(64) T splitters[NSPLIT];
+                adaptive_splitters_vf<NSPLIT, T, VSIZE>(query,
+                                                        q,
+                                                        split_axis,
+                                                        domain.tuv[0].lower[i],
+                                                        domain.tuv[0].upper[i],
+                                                        domain.tuv[1].lower[i],
+                                                        domain.tuv[1].upper[i],
+                                                        domain.tuv[2].lower[i],
+                                                        domain.tuv[2].upper[i],
+                                                        splitters);
+
+                T sample_min = lo;
+                bool split = false;
+                for (int s = 0; s <= NSPLIT; ++s) {
+                    const T sample_max = s == NSPLIT ? hi : splitters[s];
+                    if (sample_min < sample_max) {
+                        push_child_lane<T, I, VSIZE>(
+                            domain, i, split_axis, sample_min, sample_max, toi, tols, pack, pack_size, stack);
+                        split = true;
+                    }
+                    sample_min = sample_max;
+                }
+                if (!split) {
+                    report_contained_domain<T, I, VSIZE>(domain, i, toi_packed, tols);
+                }
+                continue;
+            }
+
             const T mid = (lo + hi) * T(0.5);
 
             if (!(lo < mid && mid < hi)) {
-                if (domain.tuv[0].lower[i] > T(0)) {
-                    toi_packed[q] = sccd::min<T>(toi_packed[q], domain.tuv[0].lower[i]);
-                }
+                report_contained_domain<T, I, VSIZE>(domain, i, toi_packed, tols);
                 continue;
             }
 
@@ -742,9 +939,9 @@ namespace sccd {
             if (split_axis == 0) {
                 push_upper = mid < toi;
             } else if (split_axis == 1) {
-                push_upper = mid + domain.tuv[2].lower[i] < T(1) + tols.axis[1][q] + tols.axis[2][q];
+                push_upper = mid + domain.tuv[2].lower[i] <= T(1);
             } else {
-                push_upper = domain.tuv[1].lower[i] + mid < T(1) + tols.axis[1][q] + tols.axis[2][q];
+                push_upper = domain.tuv[1].lower[i] + mid <= T(1);
             }
 
             if (push_upper) {
@@ -772,12 +969,262 @@ namespace sccd {
                 continue;
             }
 
-            const int q = static_cast<int>(domain.query_index[i]);
             const bool depth_limit = contains_origin[i] && domain.depth[i] >= max_depth;
-            const bool positive_time = domain.tuv[0].lower[i] > T(0);
-            if ((accepted[i] || (depth_limit && positive_time)) &&
-                lane_valid<T, I, VSIZE>(domain, i, toi_packed[q], tols)) {
-                toi_packed[q] = sccd::min<T>(toi_packed[q], domain.tuv[0].lower[i]);
+            if (accepted[i] || depth_limit) {
+                report_contained_domain<T, I, VSIZE>(domain, i, toi_packed, tols);
+            }
+        }
+    }
+
+    template <typename T, typename I, int VSIZE>
+    static inline bool has_active_lanes(const VDomain<T, I, VSIZE>& domain) {
+        for (int i = 0; i < VSIZE; ++i) {
+            if (domain.active[i]) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    template <typename T, typename I, int VSIZE>
+    static inline bool has_pending_split_lanes(const VDomain<T, I, VSIZE>& domain,
+                                               const uint8_t* const SCCD_RESTRICT contains_origin,
+                                               const uint8_t* const SCCD_RESTRICT accepted,
+                                               const int max_depth) {
+        for (int i = 0; i < VSIZE; ++i) {
+            if (domain.active[i] && contains_origin[i] && !accepted[i] && domain.depth[i] < max_depth) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    template <typename T, typename I, int VSIZE>
+    static inline bool active_box_valid(const VActiveBox<T, I>& box, const T toi, const VTolerances<T, VSIZE>&) {
+        return box.lower[0] < toi && box.lower[1] + box.lower[2] <= T(1);
+    }
+
+    template <typename T, typename I, int VSIZE>
+    static inline int active_box_next_split_axis(const VActiveBox<T, I>& box, const VTolerances<T, VSIZE>& tols) {
+        const int q = static_cast<int>(box.query_index);
+        int axis = 0;
+        T best = -std::numeric_limits<T>::infinity();
+        for (int d = 0; d < 3; ++d) {
+            const T width = box.upper[d] - box.lower[d];
+            if (width <= tols.axis[d][q]) {
+                continue;
+            }
+            const T score = width / tols.axis[d][q];
+            if (score > best) {
+                best = score;
+                axis = d;
+            }
+        }
+        return axis;
+    }
+
+    template <typename T, typename I>
+    static inline int active_box_widest_axis(const VActiveBox<T, I>& box) {
+        const T dt = box.upper[0] - box.lower[0];
+        const T du = box.upper[1] - box.lower[1];
+        const T dv = box.upper[2] - box.lower[2];
+        if (du > dt && du >= dv) {
+            return 1;
+        }
+        if (dv > dt && dv > du) {
+            return 2;
+        }
+        return 0;
+    }
+
+    template <typename T, typename I, int VSIZE>
+    static inline void set_lane_from_active_box(VDomain<T, I, VSIZE>& domain,
+                                                const int lane,
+                                                const VActiveBox<T, I>& box,
+                                                const T toi,
+                                                const VTolerances<T, VSIZE>& tols) {
+        domain.query_index[lane] = box.query_index;
+        domain.depth[lane] = box.depth;
+        domain.active[lane] = 1;
+        for (int d = 0; d < 3; ++d) {
+            domain.tuv[d].lower[lane] = box.lower[d];
+            domain.tuv[d].upper[lane] = d == 0 ? sccd::min<T>(box.upper[d], toi) : box.upper[d];
+        }
+        if (!lane_valid<T, I, VSIZE>(domain, lane, toi, tols)) {
+            deactivate_lane<T, I, VSIZE>(domain, lane);
+        }
+    }
+
+    template <typename T, typename I, int VSIZE>
+    static inline VActiveBox<T, I> active_box_from_lane(const VDomain<T, I, VSIZE>& domain, const int lane) {
+        VActiveBox<T, I> box;
+        box.query_index = domain.query_index[lane];
+        box.depth = domain.depth[lane];
+        for (int d = 0; d < 3; ++d) {
+            box.lower[d] = domain.tuv[d].lower[lane];
+            box.upper[d] = domain.tuv[d].upper[lane];
+        }
+        return box;
+    }
+
+    template <typename T, typename I, int VSIZE>
+    static inline void refill_inactive_lanes(VDomain<T, I, VSIZE>& domain,
+                                             std::vector<VActiveBox<T, I>>& stack,
+                                             const T* const SCCD_RESTRICT toi_packed,
+                                             const VTolerances<T, VSIZE>& tols) {
+        for (int i = 0; i < VSIZE && !stack.empty(); ++i) {
+            if (domain.active[i]) {
+                continue;
+            }
+
+            VActiveBox<T, I> box = stack.back();
+            stack.pop_back();
+            set_lane_from_active_box<T, I, VSIZE>(domain, i, box, toi_packed[static_cast<int>(box.query_index)], tols);
+        }
+    }
+
+    template <typename T, typename I, int VSIZE>
+    static inline void split_or_deactivate_lane(VDomain<T, I, VSIZE>& domain,
+                                                const int lane,
+                                                const VQuery<T, VSIZE>& query,
+                                                T* const SCCD_RESTRICT toi_packed,
+                                                const VTolerances<T, VSIZE>& tols,
+                                                const T tol,
+                                                const int max_depth,
+                                                std::vector<VActiveBox<T, I>>& stack) {
+        VActiveBox<T, I> parent = active_box_from_lane<T, I, VSIZE>(domain, lane);
+        const int q = static_cast<int>(parent.query_index);
+        T toi = toi_packed[q];
+        const int split_axis = [](const VActiveBox<T, I>& box, const VTolerances<T, VSIZE>& tolerances) {
+            if constexpr (SCCD_VNARROWPHASE_ADAPTIVE_SPLIT) {
+                return active_box_widest_axis<T, I>(box);
+            }
+            return active_box_next_split_axis<T, I, VSIZE>(box, tolerances);
+        }(parent, tols);
+
+        if constexpr (SCCD_VNARROWPHASE_ADAPTIVE_SPLIT) {
+            constexpr int NSPLIT = 4;
+            alignas(64) T splitters[NSPLIT];
+            adaptive_splitters_vf<NSPLIT, T, VSIZE>(query,
+                                                    q,
+                                                    split_axis,
+                                                    parent.lower[0],
+                                                    parent.upper[0],
+                                                    parent.lower[1],
+                                                    parent.upper[1],
+                                                    parent.lower[2],
+                                                    parent.upper[2],
+                                                    splitters);
+
+            VActiveBox<T, I> keep;
+            bool has_keep = false;
+            T sample_min = parent.lower[split_axis];
+            for (int s = 0; s <= NSPLIT; ++s) {
+                const T sample_max = s == NSPLIT ? parent.upper[split_axis] : splitters[s];
+                if (!(sample_min < sample_max)) {
+                    sample_min = sample_max;
+                    continue;
+                }
+
+                VActiveBox<T, I> child = parent;
+                child.depth = parent.depth + 1;
+                child.lower[split_axis] = sample_min;
+                child.upper[split_axis] = sample_max;
+                child.upper[0] = sccd::min<T>(child.upper[0], toi);
+
+                if (child.lower[0] >= toi || child.lower[1] + child.lower[2] >= T(1) + tol) {
+                    sample_min = sample_max;
+                    continue;
+                }
+
+                bool accepted = false;
+                if (active_box_codomain_acceptance_vf<T, I, VSIZE>(child, query, q, tol, tols, accepted)) {
+                    accepted = accepted && (child.lower[0] > T(0));
+                    if (accepted || child.depth > max_depth) {
+                        if (child.lower[0] < toi &&
+                            child.lower[1] + child.lower[2] < T(1) + tols.axis[1][q] + tols.axis[2][q]) {
+                            toi = sccd::min<T>(toi, child.lower[0]);
+                            toi_packed[q] = toi;
+                        }
+                    } else {
+                        if (!has_keep || child.lower[0] < keep.lower[0]) {
+                            if (has_keep) {
+                                stack.push_back(keep);
+                            }
+                            keep = child;
+                            has_keep = true;
+                        } else {
+                            stack.push_back(child);
+                        }
+                    }
+                }
+                sample_min = sample_max;
+            }
+
+            if (has_keep) {
+                set_lane_from_active_box<T, I, VSIZE>(domain, lane, keep, toi, tols);
+            } else {
+                deactivate_lane<T, I, VSIZE>(domain, lane);
+            }
+            return;
+        }
+
+        const T mid = (parent.lower[split_axis] + parent.upper[split_axis]) * T(0.5);
+
+        if (!(parent.lower[split_axis] < mid && mid < parent.upper[split_axis])) {
+            report_contained_domain<T, I, VSIZE>(domain, lane, toi_packed, tols);
+            deactivate_lane<T, I, VSIZE>(domain, lane);
+            return;
+        }
+
+        VActiveBox<T, I> left = parent;
+        VActiveBox<T, I> right = parent;
+        left.depth = parent.depth + 1;
+        right.depth = parent.depth + 1;
+        left.upper[split_axis] = mid;
+        right.lower[split_axis] = mid;
+        left.upper[0] = sccd::min<T>(left.upper[0], toi);
+        right.upper[0] = sccd::min<T>(right.upper[0], toi);
+
+        const bool left_valid = active_box_valid<T, I, VSIZE>(left, toi, tols);
+        const bool right_valid = active_box_valid<T, I, VSIZE>(right, toi, tols);
+
+        if (left_valid && right_valid) {
+            const bool keep_left = left.lower[0] <= right.lower[0];
+            const VActiveBox<T, I>& keep = keep_left ? left : right;
+            const VActiveBox<T, I>& push = keep_left ? right : left;
+            set_lane_from_active_box<T, I, VSIZE>(domain, lane, keep, toi, tols);
+            stack.push_back(push);
+        } else if (left_valid) {
+            set_lane_from_active_box<T, I, VSIZE>(domain, lane, left, toi, tols);
+        } else if (right_valid) {
+            set_lane_from_active_box<T, I, VSIZE>(domain, lane, right, toi, tols);
+        } else {
+            deactivate_lane<T, I, VSIZE>(domain, lane);
+        }
+    }
+
+    template <typename T, typename I, int VSIZE>
+    static inline void advance_lanes_after_evaluation(VDomain<T, I, VSIZE>& domain,
+                                                      const uint8_t* const SCCD_RESTRICT contains_origin,
+                                                      const uint8_t* const SCCD_RESTRICT accepted,
+                                                      const VQuery<T, VSIZE>& query,
+                                                      T* const SCCD_RESTRICT toi_packed,
+                                                      const VTolerances<T, VSIZE>& tols,
+                                                      const T tol,
+                                                      const int max_depth,
+                                                      std::vector<VActiveBox<T, I>>& stack) {
+        for (int i = 0; i < VSIZE; ++i) {
+            if (!domain.active[i]) {
+                continue;
+            }
+
+            const int q = static_cast<int>(domain.query_index[i]);
+            if (!contains_origin[i] || accepted[i] || domain.depth[i] >= max_depth ||
+                !lane_valid<T, I, VSIZE>(domain, i, toi_packed[q], tols)) {
+                deactivate_lane<T, I, VSIZE>(domain, i);
+            } else {
+                split_or_deactivate_lane<T, I, VSIZE>(domain, i, query, toi_packed, tols, tol, max_depth, stack);
             }
         }
     }
@@ -798,29 +1245,32 @@ namespace sccd {
         assert(toi_stride == 0 || toi_stride == 1);
         if (noverlaps == 0) {
             if (toi != nullptr && toi_stride == 0) {
-                toi[0] = max_toi;
+                toi[0] = sccd::min<T>(T(1), max_toi);
             }
             return 0;
         }
         assert(toi != nullptr);
 
-        int SCCD_MAX_DEPTH = 32;
+        const T_HP max_domain_toi = sccd::min<T_HP>(T_HP(1), T_HP(max_toi));
+
+        int SCCD_MAX_DEPTH = 69;
         SCCD_READ_ENV(SCCD_MAX_DEPTH, atoi);
 
         T_HP SCCD_TOL = std::is_same<float, T_HP>::value ? T_HP(1e-8) : T_HP(1e-14);
         SCCD_READ_ENV(SCCD_TOL, atof);
 
-        int constexpr VSIZE = 16;
+        int constexpr VSIZE = 8;
         using VQueryT = VQuery<T_HP, VSIZE>;
         using VDomainT = VDomain<T_HP, I, VSIZE>;
         using VCodomainT = VCodomain<T_HP, VSIZE>;
         using VTolerancesT = VTolerances<T_HP, VSIZE>;
+        using VActiveBoxT = VActiveBox<T_HP, I>;
 
         const ptrdiff_t nblocks = static_cast<ptrdiff_t>((noverlaps + VSIZE - 1) / VSIZE);
-        std::vector<T> block_min(toi_stride == 0 ? nblocks : 0, max_toi);
+        std::atomic<T_HP> global_min{max_domain_toi};
 
         sccd::parallel_for_br(0, nblocks, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
-            std::vector<VDomainT> stack;
+            std::vector<VActiveBoxT> stack;
             stack.reserve(1024);
 
             for (ptrdiff_t ib = rbegin; ib < rend; ++ib) {
@@ -834,30 +1284,55 @@ namespace sccd {
                 VTolerancesT tols;
                 compute_tolerances<T_HP, VSIZE>(SCCD_TOL, query, tols);
 
-                VDomainT domain;
-                init_domain<T_HP, I, VSIZE>(block_size, T_HP(max_toi), domain);
-
                 T_HP toi_packed[VSIZE];
+                const T_HP initial_toi = toi_stride == 0 ? global_min.load(std::memory_order_relaxed) : max_domain_toi;
                 for (int i = 0; i < VSIZE; ++i) {
-                    toi_packed[i] = T_HP(max_toi);
+                    toi_packed[i] = initial_toi;
                 }
 
                 stack.clear();
-                stack.push_back(domain);
 
-                while (!stack.empty()) {
-                    domain = stack.back();
-                    stack.pop_back();
+                for (ptrdiff_t i = block_size - 1; i >= 0; --i) {
+                    VActiveBoxT root;
+                    root.query_index = static_cast<I>(i);
+                    root.depth = 0;
+                    root.lower[0] = T_HP(0);
+                    root.upper[0] = toi_packed[i];
+                    root.lower[1] = T_HP(0);
+                    root.upper[1] = T_HP(1);
+                    root.lower[2] = T_HP(0);
+                    root.upper[2] = T_HP(1);
+                    stack.push_back(root);
+                }
+
+                VDomainT domain;
+                for (int i = 0; i < VSIZE; ++i) {
+                    deactivate_lane<T_HP, I, VSIZE>(domain, i);
+                }
+                refill_inactive_lanes<T_HP, I, VSIZE>(domain, stack, toi_packed, tols);
+
+                while (has_active_lanes<T_HP, I, VSIZE>(domain) || !stack.empty()) {
+                    refill_inactive_lanes<T_HP, I, VSIZE>(domain, stack, toi_packed, tols);
+
+                    const T_HP current_min_toi =
+                        toi_stride == 0 ? global_min.load(std::memory_order_relaxed) : max_domain_toi;
 
                     for (int i = 0; i < VSIZE; ++i) {
                         if (!domain.active[i]) {
                             continue;
                         }
                         const int q = static_cast<int>(domain.query_index[i]);
+                        if (toi_stride == 0) {
+                            toi_packed[q] = sccd::min<T_HP>(toi_packed[q], current_min_toi);
+                        }
                         domain.tuv[0].upper[i] = sccd::min<T_HP>(domain.tuv[0].upper[i], toi_packed[q]);
                         if (!lane_valid<T_HP, I, VSIZE>(domain, i, toi_packed[q], tols)) {
                             domain.active[i] = 0;
                         }
+                    }
+
+                    if (!has_active_lanes<T_HP, I, VSIZE>(domain)) {
+                        continue;
                     }
 
                     VCodomainT codomain;
@@ -871,39 +1346,47 @@ namespace sccd {
                     process_accepted_domains<T_HP, I, VSIZE>(
                         domain, contains_origin_mask, acceptance_mask, toi_packed, tols, SCCD_MAX_DEPTH);
 
-                    int longest_axis_to_split[VSIZE];
-                    detect_longest_axis_to_split<T_HP, I, VSIZE>(domain, longest_axis_to_split);
+                    if (toi_stride == 0) {
+                        T_HP local_min = max_domain_toi;
+                        for (int i = 0; i < VSIZE; ++i) {
+                            local_min = sccd::min<T_HP>(local_min, toi_packed[i]);
+                        }
+                        if (local_min < max_domain_toi) {
+                            atomic_min_relaxed<T_HP>(global_min, local_min);
+                        }
+                    }
 
-                    split_domain_along_longest_axis<T_HP, I, VSIZE>(domain,
-                                                                    contains_origin_mask,
-                                                                    acceptance_mask,
-                                                                    longest_axis_to_split,
-                                                                    toi_packed,
-                                                                    tols,
-                                                                    SCCD_MAX_DEPTH,
-                                                                    stack);
+                    if (!has_pending_split_lanes<T_HP, I, VSIZE>(
+                            domain, contains_origin_mask, acceptance_mask, SCCD_MAX_DEPTH)) {
+                        for (int i = 0; i < VSIZE; ++i) {
+                            if (domain.active[i]) {
+                                deactivate_lane<T_HP, I, VSIZE>(domain, i);
+                            }
+                        }
+                        continue;
+                    }
+
+                    advance_lanes_after_evaluation<T_HP, I, VSIZE>(domain,
+                                                                   contains_origin_mask,
+                                                                   acceptance_mask,
+                                                                   query,
+                                                                   toi_packed,
+                                                                   tols,
+                                                                   SCCD_TOL,
+                                                                   SCCD_MAX_DEPTH,
+                                                                   stack);
                 }
 
-                T_HP local_min = T_HP(max_toi);
                 for (ptrdiff_t i = 0; i < block_size; ++i) {
-                    local_min = sccd::min<T_HP>(local_min, toi_packed[i]);
                     if (toi_stride == 1) {
                         toi[block_begin + i] = T(toi_packed[i]);
                     }
-                }
-
-                if (toi_stride == 0) {
-                    block_min[ib] = T(local_min);
                 }
             }
         });
 
         if (toi_stride == 0) {
-            T min_t = max_toi;
-            for (ptrdiff_t ib = 0; ib < nblocks; ++ib) {
-                min_t = sccd::min<T>(min_t, block_min[ib]);
-            }
-            toi[0] = min_t;
+            toi[0] = T(global_min.load(std::memory_order_relaxed));
         }
 
         return 0;
