@@ -823,7 +823,8 @@ namespace {
         const smesh::ExecutionSpace execution_space = benchmark_execution_space();
         CCDRun ccd_run = make_ccd_run(meshes, execution_space);
         const auto broad_expected = expected_pairs(c0, c1);
-        if (timings_ms.empty()) {
+        const bool warmup_first_case = timings_ms.empty();
+        if (warmup_first_case) {
             BroadphaseResult warmup = run_broadphase(case_file.is_vf, ccd_run);
             if (warmup.err != SCCD_SUCCESS) {
                 std::cerr << "error: CCD broadphase warmup failed for " << dataset << "/" << case_file.key << "\n";
@@ -837,6 +838,14 @@ namespace {
         }
         const double broad_ms = broadphase.elapsed_ms;
         int narrow_err = SCCD_SUCCESS;
+        if (warmup_first_case) {
+            time_narrowphase_zero_stride(case_file.is_vf, ccd_run, narrow_err);
+            if (narrow_err != SCCD_SUCCESS) {
+                std::cerr << "error: CCD narrowphase warmup failed for " << dataset << "/" << case_file.key << "\n";
+                return false;
+            }
+        }
+        narrow_err = SCCD_SUCCESS;
         const double narrow_ms = time_narrowphase_zero_stride(case_file.is_vf, ccd_run, narrow_err);
         if (narrow_err != SCCD_SUCCESS) {
             std::cerr << "error: CCD narrowphase failed for " << dataset << "/" << case_file.key << "\n";
