@@ -17,7 +17,22 @@ fetch() {
     local output="$2"
 
     if command -v curl >/dev/null 2>&1; then
-        curl -L --fail --retry 3 --continue-at - --output "${output}" "${url}"
+        if [[ -s "${output}" ]]; then
+            set +e
+            curl -L --fail --retry 3 --continue-at - --output "${output}" "${url}"
+            local status=$?
+            set -e
+
+            if [[ "${status}" -eq 33 ]]; then
+                echo "server does not support resumed downloads; restarting ${output}" >&2
+                rm -f "${output}"
+                curl -L --fail --retry 3 --output "${output}" "${url}"
+            else
+                return "${status}"
+            fi
+        else
+            curl -L --fail --retry 3 --output "${output}" "${url}"
+        fi
     elif command -v wget >/dev/null 2>&1; then
         wget -c -O "${output}" "${url}"
     else
@@ -38,7 +53,11 @@ download_archive() {
     fi
 
     mkdir -p "${CACHE_DIR}" "${DATA_DIR}"
-    fetch "${url}" "${archive}"
+    if [[ -f "${archive}" ]] && tar -tzf "${archive}" >/dev/null 2>&1; then
+        echo "using cached dataset archive: ${archive}"
+    else
+        fetch "${url}" "${archive}"
+    fi
     tar -xzf "${archive}" -C "${DATA_DIR}"
 }
 
