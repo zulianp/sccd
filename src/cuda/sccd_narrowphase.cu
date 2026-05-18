@@ -1567,9 +1567,9 @@ namespace sccd {
             }
 
             SCCD_READ_ENV(SCCD_BLOCKS_PER_SM, atoi);
-            printf("SCCD_BLOCKS_PER_SM: %d, SCCD_NP_THREADS_PER_BLOCK: %d\n",
-                   SCCD_BLOCKS_PER_SM,
-                   SCCD_NP_THREADS_PER_BLOCK);
+            // printf("SCCD_BLOCKS_PER_SM: %d, SCCD_NP_THREADS_PER_BLOCK: %d\n",
+            //        SCCD_BLOCKS_PER_SM,
+            //        SCCD_NP_THREADS_PER_BLOCK);
 
             int base_grid_blocks = prop.multiProcessorCount * SCCD_BLOCKS_PER_SM;
             if (base_grid_blocks <= 0) base_grid_blocks = 1;
@@ -1712,7 +1712,7 @@ namespace sccd {
                     // drain is recorded in g_request and handled by the
                     // outer retry below.
                     while (h_g_top > 0) {
-                        printf("Draining g_stack with from-stack kernel (%d)\n", h_g_top);
+                        // printf("Draining g_stack with from-stack kernel (%d)\n", h_g_top);
                         int grid_blocks = (toi_stride == 0) ? (h_g_top + N - 1) / N : h_g_top;
                         if (grid_blocks > base_grid_blocks) grid_blocks = base_grid_blocks;
                         if (grid_blocks < 1) grid_blocks = 1;
@@ -1738,7 +1738,7 @@ namespace sccd {
                     cudaMemcpy(&h_g_request, g_request, sizeof(int), cudaMemcpyDeviceToHost);
                     if (h_g_request <= 0) break;
 
-                    printf("Overflowed: %d\n", h_g_request);
+                    // printf("Overflowed: %d\n", h_g_request);
 
                     int grow_by = h_g_request;
                     if (grow_by > SCCD_GSTACK_CAP_MAX) grow_by = SCCD_GSTACK_CAP_MAX;

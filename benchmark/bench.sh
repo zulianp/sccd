@@ -136,7 +136,6 @@ BENCH_REPORT_TEX="${SCCD_BENCH_REPORT_TEX:-"${BENCHMARK_DIR}/bench_report.tex"}"
 mkdir -p "$(dirname "${BENCH_CSV}")" "$(dirname "${BENCH_AGG_CSV}")" "${BENCH_FIGURE_DIR}" "$(dirname "${BENCH_REPORT_TEX}")"
 
 if [[ "${#datasets[@]}" -gt 0 ]]; then
-    set -x
     "${SCCD_BENCH}" "${DATA_DIR}" "${datasets[@]}" | tee "${BENCH_CSV}"
 else
     printf 'dataset,case,type,queries,broad_ms,narrow_ms,fp,fn,broad_fp,broad_fn\n' | tee "${BENCH_CSV}"
@@ -147,10 +146,7 @@ exec 1>&2
 "${PYTHON}" "${BENCHMARK_DIR}/bench_postprocess.py" \
     "${BENCH_CSV}" "${BENCH_AGG_CSV}" "${BENCH_FIGURE_DIR}" "${BENCH_REPORT_TEX}" "${DATA_DIR}"
 
-pdflatex "${BENCHMARK_DIR}"
-
-BENCH_REPORT_PDF="${BENCH_REPORT_TEX%.tex}.pdf"
 BENCH_ARCHIVE="${BENCHMARK_DIR}/sccd-benchmark-$(date +%Y-%m-%d).tar.gz"
 tar -czf "${BENCH_ARCHIVE}" \
-    -C "$(dirname "${BENCH_REPORT_PDF}")" "$(basename "${BENCH_REPORT_PDF}")" \
+    -C "$(dirname "${BENCH_REPORT_TEX}")" "$(basename "${BENCH_REPORT_TEX}")" \
     -C "$(dirname "${BENCH_FIGURE_DIR}")" "$(basename "${BENCH_FIGURE_DIR}")"
