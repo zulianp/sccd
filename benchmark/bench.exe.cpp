@@ -9,9 +9,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <chrono>
 #include <cmath>
-#include <cctype>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -54,10 +54,10 @@ namespace {
         int err = SCCD_SUCCESS;
         std::unordered_set<std::uint64_t> pairs;
         std::uint64_t false_positives = 0;
-        std::vector<idx_t> v_overlap;
-        std::vector<idx_t> f_overlap;
-        std::vector<idx_t> e0_overlap;
-        std::vector<idx_t> e1_overlap;
+        smesh::SharedBuffer<idx_t> v_overlap;
+        smesh::SharedBuffer<idx_t> f_overlap;
+        smesh::SharedBuffer<idx_t> e0_overlap;
+        smesh::SharedBuffer<idx_t> e1_overlap;
     };
 
     struct CCDRun {
@@ -119,6 +119,7 @@ namespace {
             return cases;
         }
 
+        const fs::path queries_dir = boxes_dir.parent_path() / "queries";
         for (const auto& entry : fs::directory_iterator(boxes_dir)) {
             if (!entry.is_directory()) {
                 continue;
@@ -126,6 +127,9 @@ namespace {
             const fs::path dir = entry.path();
             const std::string key = dir.filename().string();
             if ((key.size() < 3) || !fs::exists(dir / "c0.int32") || !fs::exists(dir / "c1.int32")) {
+                continue;
+            }
+            if (!fs::exists(queries_dir / (key + ".csv"))) {
                 continue;
             }
             if (key.rfind("vf") == key.size() - 2) {
@@ -366,12 +370,6 @@ namespace {
         return true;
     }
 
-    template <typename T>
-    std::vector<T> to_vector(const smesh::SharedBuffer<T>& buffer) {
-        auto host = smesh::to_host(buffer);
-        return std::vector<T>(host->data(), host->data() + host->size());
-    }
-
     std::unordered_set<std::uint64_t> expected_pairs(const std::vector<std::int32_t>& c0,
                                                      const std::vector<std::int32_t>& c1) {
         std::unordered_set<std::uint64_t> set;
@@ -496,24 +494,14 @@ namespace {
     BroadphaseResult run_broadphase(const bool is_vf, CCDRun& ccd_run) {
         SMESH_TRACE_SCOPE("benchmark broadphase");
 
-        smesh::SharedBuffer<idx_t> v_overlap;
-        smesh::SharedBuffer<idx_t> f_overlap;
-        smesh::SharedBuffer<idx_t> e0_overlap;
-        smesh::SharedBuffer<idx_t> e1_overlap;
-
         BroadphaseResult result;
         if (is_vf) {
-            result.err = ccd_run.ccd->broad_phase_fv(ccd_run.points0, ccd_run.points1, v_overlap, f_overlap);
-            if (result.err == SCCD_SUCCESS) {
-                result.v_overlap = to_vector(v_overlap);
-                result.f_overlap = to_vector(f_overlap);
-            }
+            result.err =
+                ccd_run.ccd->broad_phase_fv(ccd_run.points0, ccd_run.points1, result.v_overlap, result.f_overlap);
+
         } else {
-            result.err = ccd_run.ccd->broad_phase_ee(ccd_run.points0, ccd_run.points1, e0_overlap, e1_overlap);
-            if (result.err == SCCD_SUCCESS) {
-                result.e0_overlap = to_vector(e0_overlap);
-                result.e1_overlap = to_vector(e1_overlap);
-            }
+            result.err =
+                ccd_run.ccd->broad_phase_ee(ccd_run.points0, ccd_run.points1, result.e0_overlap, result.e1_overlap);
         }
 
         return result;
@@ -531,15 +519,19 @@ namespace {
         const ptrdiff_t edge_offset = n_nodes;
 
         if (is_vf) {
-            result.pairs.reserve(result.v_overlap.size() * 2 + 1);
-            for (std::size_t i = 0; i < result.v_overlap.size(); ++i) {
-                result.pairs.insert(pair_key(result.v_overlap[i], result.f_overlap[i] + face_offset));
+            auto v_overlap = smesh::to_host(result.v_overlap);
+            auto f_overlap = smesh::to_host(result.f_overlap);
+            result.pairs.reserve(v_overlap->size() * 2 + 1);
+            for (std::size_t i = 0; i < v_overlap->size(); ++i) {
+                result.pairs.insert(pair_key(v_overlap->data()[i], f_overlap->data()[i] + face_offset));
             }
         } else {
-            result.pairs.reserve(result.e0_overlap.size() * 2 + 1);
-            for (std::size_t i = 0; i < result.e0_overlap.size(); ++i) {
-                const idx_t e0 = edge_id_map.empty() ? result.e0_overlap[i] : edge_id_map[result.e0_overlap[i]];
-                const idx_t e1 = edge_id_map.empty() ? result.e1_overlap[i] : edge_id_map[result.e1_overlap[i]];
+            auto e0_overlap = smesh::to_host(result.e0_overlap);
+            auto e1_overlap = smesh::to_host(result.e1_overlap);
+            result.pairs.reserve(e0_overlap->size() * 2 + 1);
+            for (std::size_t i = 0; i < e0_overlap->size(); ++i) {
+                const idx_t e0 = edge_id_map.empty() ? e0_overlap->data()[i] : edge_id_map[e0_overlap->data()[i]];
+                const idx_t e1 = edge_id_map.empty() ? e1_overlap->data()[i] : edge_id_map[e1_overlap->data()[i]];
                 result.pairs.insert(pair_key(e0 + edge_offset, e1 + edge_offset));
             }
         }
@@ -569,71 +561,125 @@ namespace {
         return std::chrono::duration<double, std::milli>(stop - start).count();
     }
 
-    bool run_case(const std::shared_ptr<smesh::Communicator>& comm,
-                  const fs::path& dataset_dir,
-                  const std::string& dataset,
-                  const CaseFile& case_file,
-                  std::vector<double>& timings_ms) {
-        std::vector<std::int32_t> c0;
-        std::vector<std::int32_t> c1;
-        if (!read_raw(case_file.dir / "c0.int32", c0) || !read_raw(case_file.dir / "c1.int32", c1)) {
-            return false;
+    template <typename T>
+    smesh::SharedBuffer<T> vector_buffer(std::vector<T>& values) {
+        return smesh::Buffer<T>::wrap(values.size(), values.data(), smesh::MEMORY_SPACE_HOST);
+    }
+
+    template <typename T, std::size_t N>
+    smesh::SharedBuffer<T*> make_2d_buffer(std::array<std::vector<T>, N>& values,
+                                           const smesh::ExecutionSpace execution_space) {
+        std::vector<smesh::SharedBuffer<T>> buffers;
+        buffers.reserve(N);
+        for (std::vector<T>& value : values) {
+            buffers.push_back(vector_buffer(value));
         }
 
-        MeshPair meshes;
-        if (!load_mesh_pair(comm, dataset_dir, dataset, case_file.key, meshes)) {
+        if (execution_space == smesh::EXECUTION_SPACE_DEVICE) {
+            buffers = smesh::to_device(buffers);
+        }
+        return smesh::create_2d(buffers);
+    }
+
+    bool compute_query_toi(const bool is_vf,
+                           QueryGeometry& query_geometry,
+                           const smesh::ExecutionSpace execution_space,
+                           std::vector<scalar_t>& sccd_toi) {
+        sccd_toi.assign(query_geometry.q0.size(), scalar_t(1));
+
+        if (execution_space == smesh::EXECUTION_SPACE_DEVICE) {
+#if defined(SCCD_ENABLE_CUDA)
+            smesh::SharedBuffer<idx_t> q0 = smesh::to_device(vector_buffer(query_geometry.q0));
+            smesh::SharedBuffer<idx_t> q1 = smesh::to_device(vector_buffer(query_geometry.q1));
+            smesh::SharedBuffer<scalar_t*> points0 = make_2d_buffer(query_geometry.points0, execution_space);
+            smesh::SharedBuffer<scalar_t*> points1 = make_2d_buffer(query_geometry.points1, execution_space);
+            smesh::SharedBuffer<scalar_t> toi = smesh::to_device(vector_buffer(sccd_toi));
+
+            if (is_vf) {
+                smesh::SharedBuffer<idx_t*> faces = make_2d_buffer(query_geometry.faces, execution_space);
+                sccd::device::narrow_phase_vf<3>(query_geometry.q0.size(),
+                                                 q0->data(),
+                                                 q1->data(),
+                                                 points0->data(),
+                                                 points1->data(),
+                                                 1,
+                                                 faces->data(),
+                                                 scalar_t(1),
+                                                 toi->data(),
+                                                 1);
+            } else {
+                smesh::SharedBuffer<idx_t*> edges = make_2d_buffer(query_geometry.edges, execution_space);
+                sccd::device::narrow_phase_ee(query_geometry.q0.size(),
+                                              q0->data(),
+                                              q1->data(),
+                                              points0->data(),
+                                              points1->data(),
+                                              1,
+                                              edges->data(),
+                                              scalar_t(1),
+                                              toi->data(),
+                                              1);
+            }
+
+            auto host_toi = smesh::to_host(toi);
+            sccd_toi.assign(host_toi->data(), host_toi->data() + host_toi->size());
+            return true;
+#else
+            std::cerr << "error: CUDA query narrowphase requested but SCCD was built without CUDA\n";
             return false;
+#endif
         }
 
-        const fs::path trace_file = dataset_dir / "benchmark" / "traces" / (case_file.key + ".csv");
-        std::error_code trace_ec;
-        fs::create_directories(trace_file.parent_path(), trace_ec);
-        if (trace_ec) {
-            std::cerr << "error: failed to create " << trace_file.parent_path() << ": " << trace_ec.message() << "\n";
-            return false;
+        scalar_t* points0[3] = {
+            query_geometry.points0[0].data(), query_geometry.points0[1].data(), query_geometry.points0[2].data()};
+        scalar_t* points1[3] = {
+            query_geometry.points1[0].data(), query_geometry.points1[1].data(), query_geometry.points1[2].data()};
+        if (is_vf) {
+            idx_t* faces[3] = {
+                query_geometry.faces[0].data(), query_geometry.faces[1].data(), query_geometry.faces[2].data()};
+            sccd::narrow_phase_vf<3, scalar_t, idx_t>(query_geometry.q0.size(),
+                                                      query_geometry.q0.data(),
+                                                      query_geometry.q1.data(),
+                                                      points0,
+                                                      points1,
+                                                      1,
+                                                      faces,
+                                                      scalar_t(1),
+                                                      sccd_toi.data(),
+                                                      1);
+        } else {
+            idx_t* edges[2] = {query_geometry.edges[0].data(), query_geometry.edges[1].data()};
+            sccd::narrow_phase_ee<scalar_t, idx_t>(query_geometry.q0.size(),
+                                                   query_geometry.q0.data(),
+                                                   query_geometry.q1.data(),
+                                                   points0,
+                                                   points1,
+                                                   1,
+                                                   edges,
+                                                   scalar_t(1),
+                                                   sccd_toi.data(),
+                                                   1);
         }
-        setenv("SMESH_TRACE_FILE", trace_file.string().c_str(), 1);
+        return true;
+    }
 
-        const ptrdiff_t n_nodes = meshes.t0->n_nodes();
-        const ptrdiff_t n_edges = meshes.t0->edge_graph()->nnz();
-        std::vector<idx_t> q0;
-        std::vector<idx_t> q1;
-        if (!normalize_pairs(c0, c1, case_file.is_vf, n_nodes, n_edges, q0, q1)) {
-            return false;
-        }
-
-        QueryGeometry query_geometry;
-        const fs::path query_file = query_path(dataset_dir, case_file.key);
-        if (!read_query_geometry(query_file, case_file.is_vf, query_geometry)) {
-            return false;
-        }
-        if (query_geometry.q0.size() != q0.size()) {
-            std::cerr << "error: query count mismatch for " << query_file << "\n";
-            return false;
-        }
-
-        std::vector<idx_t> edge_id_map;
-        if (!case_file.is_vf && !make_benchmark_edge_id_map(meshes.t0, edge_id_map)) {
-            return false;
-        }
-
-        CCDRun ccd_run = make_ccd_run(meshes, benchmark_execution_space());
-        const auto broad_expected = expected_pairs(c0, c1);
-        const auto broad_start = std::chrono::steady_clock::now();
-        BroadphaseResult broadphase = run_broadphase(case_file.is_vf, ccd_run);
-        const auto broad_stop = std::chrono::steady_clock::now();
-        if (broadphase.err != SCCD_SUCCESS) {
-            std::cerr << "error: CCD broadphase failed for " << dataset << "/" << case_file.key << "\n";
-            return false;
-        }
-        const double broad_ms = std::chrono::duration<double, std::milli>(broad_stop - broad_start).count();
-        int narrow_err = SCCD_SUCCESS;
-        const double narrow_ms = time_narrowphase_zero_stride(case_file.is_vf, ccd_run, narrow_err);
-        if (narrow_err != SCCD_SUCCESS) {
-            std::cerr << "error: CCD narrowphase failed for " << dataset << "/" << case_file.key << "\n";
-            return false;
-        }
-        const std::size_t narrow_queries = case_file.is_vf ? broadphase.v_overlap.size() : broadphase.e0_overlap.size();
+    bool write_case_outputs(const fs::path& dataset_dir,
+                            const std::string& dataset,
+                            const CaseFile& case_file,
+                            const MeshPair& meshes,
+                            const std::vector<std::int32_t>& c0,
+                            const std::vector<std::int32_t>& c1,
+                            const std::vector<idx_t>& q0,
+                            QueryGeometry& query_geometry,
+                            const std::vector<idx_t>& edge_id_map,
+                            const std::unordered_set<std::uint64_t>& broad_expected,
+                            const double broad_ms,
+                            const double narrow_ms,
+                            const smesh::ExecutionSpace execution_space,
+                            BroadphaseResult& broadphase,
+                            std::vector<double>& timings_ms) {
+        const std::size_t narrow_queries =
+            case_file.is_vf ? broadphase.v_overlap->size() : broadphase.e0_overlap->size();
         timings_ms.push_back(narrow_ms);
         populate_broadphase_pairs(meshes, case_file.is_vf, broad_expected, edge_id_map, broadphase);
 
@@ -650,37 +696,9 @@ namespace {
             return false;
         }
 
-        std::vector<scalar_t> sccd_toi(q0.size(), scalar_t(1));
-
-        scalar_t* points0[3] = {
-            query_geometry.points0[0].data(), query_geometry.points0[1].data(), query_geometry.points0[2].data()};
-        scalar_t* points1[3] = {
-            query_geometry.points1[0].data(), query_geometry.points1[1].data(), query_geometry.points1[2].data()};
-        if (case_file.is_vf) {
-            idx_t* faces[3] = {
-                query_geometry.faces[0].data(), query_geometry.faces[1].data(), query_geometry.faces[2].data()};
-            sccd::narrow_phase_vf<3, scalar_t, idx_t>(query_geometry.q0.size(),
-                                                      query_geometry.q0.data(),
-                                                      query_geometry.q1.data(),
-                                                      points0,
-                                                      points1,
-                                                      1,
-                                                      faces,
-                                                      1.0,
-                                                      sccd_toi.data(),
-                                                      1);
-        } else {
-            idx_t* edges[2] = {query_geometry.edges[0].data(), query_geometry.edges[1].data()};
-            sccd::narrow_phase_ee<scalar_t, idx_t>(query_geometry.q0.size(),
-                                                   query_geometry.q0.data(),
-                                                   query_geometry.q1.data(),
-                                                   points0,
-                                                   points1,
-                                                   1,
-                                                   edges,
-                                                   1.0,
-                                                   sccd_toi.data(),
-                                                   1);
+        std::vector<scalar_t> sccd_toi;
+        if (!compute_query_toi(case_file.is_vf, query_geometry, execution_space, sccd_toi)) {
+            return false;
         }
 
         std::vector<std::uint8_t> fp(q0.size(), 0);
@@ -748,6 +766,89 @@ namespace {
             return false;
         }
         return wrote;
+    }
+
+    bool run_case(const std::shared_ptr<smesh::Communicator>& comm,
+                  const fs::path& dataset_dir,
+                  const std::string& dataset,
+                  const CaseFile& case_file,
+                  std::vector<double>& timings_ms) {
+        std::vector<std::int32_t> c0;
+        std::vector<std::int32_t> c1;
+        if (!read_raw(case_file.dir / "c0.int32", c0) || !read_raw(case_file.dir / "c1.int32", c1)) {
+            return false;
+        }
+
+        MeshPair meshes;
+        if (!load_mesh_pair(comm, dataset_dir, dataset, case_file.key, meshes)) {
+            return false;
+        }
+
+        const fs::path trace_file = dataset_dir / "benchmark" / "traces" / (case_file.key + ".csv");
+        std::error_code trace_ec;
+        fs::create_directories(trace_file.parent_path(), trace_ec);
+        if (trace_ec) {
+            std::cerr << "error: failed to create " << trace_file.parent_path() << ": " << trace_ec.message() << "\n";
+            return false;
+        }
+        setenv("SMESH_TRACE_FILE", trace_file.string().c_str(), 1);
+
+        const ptrdiff_t n_nodes = meshes.t0->n_nodes();
+        const ptrdiff_t n_edges = meshes.t0->edge_graph()->nnz();
+        std::vector<idx_t> q0;
+        std::vector<idx_t> q1;
+        if (!normalize_pairs(c0, c1, case_file.is_vf, n_nodes, n_edges, q0, q1)) {
+            return false;
+        }
+
+        QueryGeometry query_geometry;
+        const fs::path query_file = query_path(dataset_dir, case_file.key);
+        if (!read_query_geometry(query_file, case_file.is_vf, query_geometry)) {
+            return false;
+        }
+        if (query_geometry.q0.size() != q0.size()) {
+            std::cerr << "error: query count mismatch for " << query_file << "\n";
+            return false;
+        }
+
+        std::vector<idx_t> edge_id_map;
+        if (!case_file.is_vf && !make_benchmark_edge_id_map(meshes.t0, edge_id_map)) {
+            return false;
+        }
+
+        const smesh::ExecutionSpace execution_space = benchmark_execution_space();
+        CCDRun ccd_run = make_ccd_run(meshes, execution_space);
+        const auto broad_expected = expected_pairs(c0, c1);
+        const auto broad_start = std::chrono::steady_clock::now();
+        BroadphaseResult broadphase = run_broadphase(case_file.is_vf, ccd_run);
+        const auto broad_stop = std::chrono::steady_clock::now();
+        if (broadphase.err != SCCD_SUCCESS) {
+            std::cerr << "error: CCD broadphase failed for " << dataset << "/" << case_file.key << "\n";
+            return false;
+        }
+        const double broad_ms = std::chrono::duration<double, std::milli>(broad_stop - broad_start).count();
+        int narrow_err = SCCD_SUCCESS;
+        const double narrow_ms = time_narrowphase_zero_stride(case_file.is_vf, ccd_run, narrow_err);
+        if (narrow_err != SCCD_SUCCESS) {
+            std::cerr << "error: CCD narrowphase failed for " << dataset << "/" << case_file.key << "\n";
+            return false;
+        }
+
+        return write_case_outputs(dataset_dir,
+                                  dataset,
+                                  case_file,
+                                  meshes,
+                                  c0,
+                                  c1,
+                                  q0,
+                                  query_geometry,
+                                  edge_id_map,
+                                  broad_expected,
+                                  broad_ms,
+                                  narrow_ms,
+                                  execution_space,
+                                  broadphase,
+                                  timings_ms);
     }
 
 }  // namespace
