@@ -52,6 +52,7 @@ namespace {
 
     struct BroadphaseResult {
         int err = SCCD_SUCCESS;
+        double elapsed_ms = 0.0;
         std::unordered_set<std::uint64_t> pairs;
         std::uint64_t false_positives = 0;
         smesh::SharedBuffer<idx_t> v_overlap;
@@ -495,6 +496,7 @@ namespace {
         SMESH_TRACE_SCOPE("benchmark broadphase");
 
         BroadphaseResult result;
+        const auto start = std::chrono::steady_clock::now();
         if (is_vf) {
             result.err =
                 ccd_run.ccd->broad_phase_fv(ccd_run.points0, ccd_run.points1, result.v_overlap, result.f_overlap);
@@ -503,6 +505,8 @@ namespace {
             result.err =
                 ccd_run.ccd->broad_phase_ee(ccd_run.points0, ccd_run.points1, result.e0_overlap, result.e1_overlap);
         }
+        const auto stop = std::chrono::steady_clock::now();
+        result.elapsed_ms = std::chrono::duration<double, std::milli>(stop - start).count();
 
         return result;
     }
@@ -819,14 +823,19 @@ namespace {
         const smesh::ExecutionSpace execution_space = benchmark_execution_space();
         CCDRun ccd_run = make_ccd_run(meshes, execution_space);
         const auto broad_expected = expected_pairs(c0, c1);
-        const auto broad_start = std::chrono::steady_clock::now();
+        if (timings_ms.empty()) {
+            BroadphaseResult warmup = run_broadphase(case_file.is_vf, ccd_run);
+            if (warmup.err != SCCD_SUCCESS) {
+                std::cerr << "error: CCD broadphase warmup failed for " << dataset << "/" << case_file.key << "\n";
+                return false;
+            }
+        }
         BroadphaseResult broadphase = run_broadphase(case_file.is_vf, ccd_run);
-        const auto broad_stop = std::chrono::steady_clock::now();
         if (broadphase.err != SCCD_SUCCESS) {
             std::cerr << "error: CCD broadphase failed for " << dataset << "/" << case_file.key << "\n";
             return false;
         }
-        const double broad_ms = std::chrono::duration<double, std::milli>(broad_stop - broad_start).count();
+        const double broad_ms = broadphase.elapsed_ms;
         int narrow_err = SCCD_SUCCESS;
         const double narrow_ms = time_narrowphase_zero_stride(case_file.is_vf, ccd_run, narrow_err);
         if (narrow_err != SCCD_SUCCESS) {
