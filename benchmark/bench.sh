@@ -131,6 +131,14 @@ exec 1>&3
 
 BENCH_CSV="${SCCD_BENCH_CSV:-"${BENCHMARK_DIR}/bench.csv"}"
 BENCH_AGG_CSV="${SCCD_BENCH_AGG_CSV:-"${BENCHMARK_DIR}/bench_aggregate.csv"}"
+BENCH_PAIRED_CSV="${BENCH_AGG_CSV/_aggregate/_paired}"
+if [[ "${BENCH_PAIRED_CSV}" == "${BENCH_AGG_CSV}" ]]; then
+    BENCH_PAIRED_CSV="$(dirname "${BENCH_AGG_CSV}")/$(basename "${BENCH_AGG_CSV%.*}")_paired.${BENCH_AGG_CSV##*.}"
+fi
+BENCH_TOI_ERROR_CSV="${BENCH_AGG_CSV/_aggregate/_toi_error}"
+if [[ "${BENCH_TOI_ERROR_CSV}" == "${BENCH_AGG_CSV}" ]]; then
+    BENCH_TOI_ERROR_CSV="$(dirname "${BENCH_AGG_CSV}")/$(basename "${BENCH_AGG_CSV%.*}")_toi_error.${BENCH_AGG_CSV##*.}"
+fi
 BENCH_FIGURE_DIR="${SCCD_BENCH_FIGURE_DIR:-"${BENCHMARK_DIR}/figures"}"
 BENCH_REPORT_TEX="${SCCD_BENCH_REPORT_TEX:-"${BENCHMARK_DIR}/bench_report.tex"}"
 mkdir -p "$(dirname "${BENCH_CSV}")" "$(dirname "${BENCH_AGG_CSV}")" "${BENCH_FIGURE_DIR}" "$(dirname "${BENCH_REPORT_TEX}")"
@@ -148,5 +156,9 @@ exec 1>&2
 
 BENCH_ARCHIVE="${BENCHMARK_DIR}/sccd-benchmark-$(date +%Y-%m-%d).tar.gz"
 tar -czf "${BENCH_ARCHIVE}" \
+    -C "$(dirname "${BENCH_CSV}")" "$(basename "${BENCH_CSV}")" \
+    -C "$(dirname "${BENCH_AGG_CSV}")" "$(basename "${BENCH_AGG_CSV}")" \
+    -C "$(dirname "${BENCH_PAIRED_CSV}")" "$(basename "${BENCH_PAIRED_CSV}")" \
+    -C "$(dirname "${BENCH_TOI_ERROR_CSV}")" "$(basename "${BENCH_TOI_ERROR_CSV}")" \
     -C "$(dirname "${BENCH_REPORT_TEX}")" "$(basename "${BENCH_REPORT_TEX}")" \
     -C "$(dirname "${BENCH_FIGURE_DIR}")" "$(basename "${BENCH_FIGURE_DIR}")"
