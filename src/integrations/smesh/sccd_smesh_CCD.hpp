@@ -148,6 +148,7 @@ namespace sccd {
         // F2V and E2E sorts/scans within the same broad_phase invocation.
         int sort_axis_{0};
 
+    public:
         int broad_phase_fv(const smesh::SharedBuffer<scalar_t*>& points_t0,
                            const smesh::SharedBuffer<scalar_t*>& points_t1,
                            smesh::SharedBuffer<smesh::idx_t>& v_overlap,
@@ -232,6 +233,7 @@ namespace sccd {
             return err;
         }
 
+    private:
         // ---- Host stage helpers ----------------------------------------------
 
         int broad_phase_prep_host_() {
