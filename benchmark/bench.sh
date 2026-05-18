@@ -12,7 +12,7 @@ export  SCCD_ENABLE_CLOTH_BALL=1
 export  SCCD_ENABLE_CLOTH_FUNNEL=0
 export  SCCD_ENABLE_N_BODY_SIMULATION=0
 export  SCCD_ENABLE_PUFFER_BALL=0
-export  SCCD_ENABLE_ROD_TWIST=0
+export  SCCD_ENABLE_ROD_TWIST=1
 
 BENCHMARK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -145,3 +145,5 @@ exec 1>&2
 
 "${PYTHON}" "${BENCHMARK_DIR}/bench_postprocess.py" \
     "${BENCH_CSV}" "${BENCH_AGG_CSV}" "${BENCH_FIGURE_DIR}" "${BENCH_REPORT_TEX}" "${DATA_DIR}"
+
+pdflatex "${BENCHMARK_DIR}"

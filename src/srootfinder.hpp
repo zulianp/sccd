@@ -22,6 +22,9 @@
 #include "tight_inclusion/interval_root_finder.hpp"
 #endif
 
+#define ADAPTIVE_NUM_SPLITS 2
+#define UNIFORM_NUM_SPLITS 4
+
 namespace sccd {
 
 #ifdef SCCD_ENABLE_TIGHT_INCLUSION
@@ -511,6 +514,22 @@ namespace sccd {
         return contains_zero;
     }
 
+    // template <typename T>
+    // inline bool codomain_acceptance(const T fmin[3], const T fmax[3], const T tol, const T tols[3], bool &accept) {
+    //     // Replicates predicates of TI
+    //     accept = true;
+    //     bool contains_zero = true;
+
+    //     for (int d = 0; d < 3; ++d) {
+    //         contains_zero = contains_zero &&  //
+    //                         (fmin[d] <= tols[d]) && (fmax[d] >= -tols[d]);
+    //         accept = accept && ((fmin[d] >= -tols[d]) && (fmax[d] <= tols[d]));
+    //     }
+
+    //     accept = contains_zero && accept;
+    //     return contains_zero;
+    // }
+
     template <typename T>
     inline bool accept_grid_root_vf(const Box<T> &box,
                                     const T tol,
@@ -748,7 +767,13 @@ namespace sccd {
         const T lo = domain.tuv[SplitDim].lower;
         const T hi = domain.tuv[SplitDim].upper;
         const T h = (hi - lo) / T(N + 1);
-        const T radius = h * T(0.45);
+
+        T damping = 0.45;
+        if constexpr (N == 1) {
+            damping = 0.6;
+        }
+
+        const T radius = h * damping;
         const T mid_t = (domain.tuv[0].lower + domain.tuv[0].upper) * T(0.5);
         const T mid_u = (domain.tuv[1].lower + domain.tuv[1].upper) * T(0.5);
         const T mid_v = (domain.tuv[2].lower + domain.tuv[2].upper) * T(0.5);
@@ -831,6 +856,8 @@ namespace sccd {
             samples[i + 1] = splitters[i];
         }
 
+        auto stack_size = stack.size();
+
         bool found = false;
         for (int i = 0; i < N + 1; ++i) {
             // for (int i = N; i >= 0; --i) {
@@ -875,6 +902,11 @@ namespace sccd {
             }
 
             stack.push_back(box);
+        }
+
+        // Make sure the tmin is on top of the stack
+        if constexpr (SplitDim == 0) {
+            std::reverse(stack.begin() + stack_size, stack.end());
         }
 
         return found;
@@ -946,7 +978,7 @@ namespace sccd {
 
             // box.tuv[0].upper = std::min(box.tuv[0].upper, t);
 
-            found |= grid_search_adaptive_split_vf<4, T>(
+            found |= grid_search_adaptive_split_vf<ADAPTIVE_NUM_SPLITS, T>(
                 box, max_iter, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack, refine);
         }
 
@@ -1046,6 +1078,8 @@ namespace sccd {
             contains_zero[i] = codomain_acceptance<T>(fmin_i, fmax_i, tol, tols, accept[i]);
         }
 
+        auto stack_size = stack.size();
+
         bool found = false;
         for (int i = 0; i < N; ++i) {
             if (!contains_zero[i]) {
@@ -1075,6 +1109,11 @@ namespace sccd {
 
             // box.tuv[0].lower = std::min(box.tuv[0].lower, toi);
             stack.push_back(box);
+        }
+
+        // Make sure the tmin is on top of the stack
+        if constexpr (SplitDim == 0) {
+            std::reverse(stack.begin() + stack_size, stack.end());
         }
 
         return found;
@@ -1146,7 +1185,7 @@ namespace sccd {
 
             // box.tuv[0].upper = std::min(box.tuv[0].upper, t);
 
-            found |= grid_search_uniform_split_vf<4, T>(
+            found |= grid_search_uniform_split_vf<UNIFORM_NUM_SPLITS, T>(
                 box, max_iter, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack, refine);
         }
 
@@ -1405,7 +1444,7 @@ namespace sccd {
 
             // box.tuv[0].upper = std::min(box.tuv[0].upper, t);
 
-            found |= grid_search_adaptive_split_ee<4, T>(
+            found |= grid_search_adaptive_split_ee<ADAPTIVE_NUM_SPLITS, T>(
                 box, max_iter, tol, tols, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v, stack, refine);
         }
 
@@ -1606,7 +1645,7 @@ namespace sccd {
 
             // box.tuv[0].upper = std::min(box.tuv[0].upper, t);
 
-            found |= grid_search_uniform_split_ee<4, T>(
+            found |= grid_search_uniform_split_ee<UNIFORM_NUM_SPLITS, T>(
                 box, max_iter, tol, tols, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v, stack, refine);
         }
 
