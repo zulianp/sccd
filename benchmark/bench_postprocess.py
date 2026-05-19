@@ -283,14 +283,14 @@ def write_pgf_plot(figure_dir, dataset, values):
             r"    };"
             "\n"
         )
-        f.write(r"\addlegendentry{Broad-phase prep}" "\n")
+        f.write(r"\addlegendentry{AABB}" "\n")
         f.write(
             r"\addplot+[mark=none,thick] coordinates {"
             "\n" + broad + "\n"
             r"    };"
             "\n"
         )
-        f.write(r"\addlegendentry{Broad-phase scan}" "\n")
+        f.write(r"\addlegendentry{Broad-phase}" "\n")
         f.write(
             r"\addplot+[mark=none,thick] coordinates {"
             "\n" + narrow + "\n"
@@ -366,13 +366,13 @@ def write_figures(figure_dir, by_dataset):
             ax.plot(
                 steps,
                 prep,
-                label=f"Broad-phase prep mean {mean(prep):.3g} ms",
+                label=f"AABB mean {mean(prep):.3g} ms",
                 linewidth=1.5,
             )
             ax.plot(
                 steps,
                 broad,
-                label=f"Broad-phase scan mean {mean(broad):.3g} ms",
+                label=f"Broad-phase mean {mean(broad):.3g} ms",
                 linewidth=1.5,
             )
             ax.plot(
@@ -385,7 +385,7 @@ def write_figures(figure_dir, by_dataset):
                 steps,
                 total,
                 label=f"Total mean {mean(total):.3g} ms",
-                color="green",
+                color="red",
                 linewidth=1.5,
             )
             ax.set_title(dataset)
@@ -611,12 +611,12 @@ def write_report(report_tex, agg_csv, paired_csv, toi_error_csv, figures):
     columns={dataset,cases,prep_ms_mean,prep_ms_min,prep_ms_max,broad_ms_mean,broad_ms_min,broad_ms_max,broad_fp_sum,broad_fn_sum},
     columns/dataset/.style={string type,column name=Dataset},
     columns/cases/.style={column name=Cases},
-    columns/prep_ms_mean/.style={fixed,precision=3,column name={Prep mean}},
-    columns/prep_ms_min/.style={fixed,precision=3,column name={Prep min}},
-    columns/prep_ms_max/.style={fixed,precision=3,column name={Prep max}},
-    columns/broad_ms_mean/.style={fixed,precision=3,column name={BP scan mean}},
-    columns/broad_ms_min/.style={fixed,precision=3,column name={BP scan min}},
-    columns/broad_ms_max/.style={fixed,precision=3,column name={BP scan max}},
+    columns/prep_ms_mean/.style={fixed,precision=3,column name={AABB mean}},
+    columns/prep_ms_min/.style={fixed,precision=3,column name={AABB min}},
+    columns/prep_ms_max/.style={fixed,precision=3,column name={AABB max}},
+    columns/broad_ms_mean/.style={fixed,precision=3,column name={BP mean}},
+    columns/broad_ms_min/.style={fixed,precision=3,column name={BP min}},
+    columns/broad_ms_max/.style={fixed,precision=3,column name={BP max}},
     columns/broad_fp_sum/.style={fixed,precision=0,column name={BP FP}},
     columns/broad_fn_sum/.style={fixed,precision=0,column name={BP FN}},
     every head row/.style={before row=\toprule,after row=\midrule},
