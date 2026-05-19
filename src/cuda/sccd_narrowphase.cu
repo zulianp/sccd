@@ -26,11 +26,12 @@
 
 // Maximum number of bisections (per-thread DFS depth)
 #ifndef SCCD_NP_MAX_BISECTIONS
-#define SCCD_NP_MAX_BISECTIONS 69
+// #define SCCD_NP_MAX_BISECTIONS 69
+#define SCCD_NP_MAX_BISECTIONS 90
 #endif
 
 #ifndef SCCD_CUDA_ADAPTIVE_SPLIT
-#define SCCD_CUDA_ADAPTIVE_SPLIT 0
+#define SCCD_CUDA_ADAPTIVE_SPLIT 1
 #endif
 
 namespace sccd {

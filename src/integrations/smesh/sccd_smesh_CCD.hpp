@@ -425,6 +425,7 @@ namespace sccd {
 
         int broad_phase_prep_device_() {
 #if defined(SCCD_ENABLE_CUDA)
+            SMESH_TRACE_SCOPE("AABBs");
             const int dim = mesh_->spatial_dimension();
             const ptrdiff_t n_nodes = mesh_->n_nodes();
             const ptrdiff_t n_faces = mesh_->block(0)->n_elements();
