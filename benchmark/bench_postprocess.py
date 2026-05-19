@@ -60,6 +60,7 @@ def read_rows(bench_csv):
                 "case": row["case"],
                 "type": row["type"],
                 "queries": float(row["queries"]),
+                "prep_ms": float(row.get("prep_ms", 0.0)),
                 "broad_ms": float(row["broad_ms"]),
                 "narrow_ms": float(row["narrow_ms"]),
                 "fp": float(row["fp"]),
@@ -85,6 +86,7 @@ def pair_rows(rows):
             prev = grouped[key][row["type"]]
             for value_key in (
                 "queries",
+                "prep_ms",
                 "broad_ms",
                 "narrow_ms",
                 "fp",
@@ -111,7 +113,6 @@ def pair_rows(rows):
         }
         for key in (
             "queries",
-            "broad_ms",
             "narrow_ms",
             "fp",
             "fn",
@@ -121,6 +122,11 @@ def pair_rows(rows):
             pair[f"ee_{key}"] = by_type["ee"][key]
             pair[f"vf_{key}"] = by_type["vf"][key]
             pair[key] = by_type["ee"][key] + by_type["vf"][key]
+        for key in ("prep_ms", "broad_ms"):
+            pair[f"ee_{key}"] = by_type["ee"][key]
+            pair[f"vf_{key}"] = by_type["vf"][key]
+        pair["prep_ms"] = 0.5 * (by_type["ee"]["prep_ms"] + by_type["vf"]["prep_ms"])
+        pair["broad_ms"] = by_type["ee"]["broad_ms"] + by_type["vf"]["broad_ms"]
         paired.append(pair)
 
     by_dataset = defaultdict(list)
@@ -147,6 +153,7 @@ def write_paired_csv(paired_csv, paired_rows):
             f"{prefix}{key}"
             for key in (
                 "queries",
+                "prep_ms",
                 "broad_ms",
                 "narrow_ms",
                 "fp",
@@ -180,6 +187,10 @@ def write_aggregate_csv(agg_csv, by_dataset):
         "queries_std",
         "queries_min",
         "queries_max",
+        "prep_ms_mean",
+        "prep_ms_std",
+        "prep_ms_min",
+        "prep_ms_max",
         "broad_ms_mean",
         "broad_ms_std",
         "broad_ms_min",
@@ -198,7 +209,7 @@ def write_aggregate_csv(agg_csv, by_dataset):
     for dataset in sorted(by_dataset):
         values = by_dataset[dataset]
         out = {"dataset": dataset, "cases": len(values)}
-        for key in ("queries", "broad_ms", "narrow_ms"):
+        for key in ("queries", "prep_ms", "broad_ms", "narrow_ms"):
             values_for_key = [value[key] for value in values]
             (
                 out[f"{key}_mean"],
@@ -242,6 +253,9 @@ def write_pgf_plot(figure_dir, dataset, values):
     values = sorted(values, key=lambda row: row["step"])
     if not values:
         return None
+    prep = "\n".join(
+        f"        ({row['step']},{row['prep_ms']:.12g})" for row in values
+    )
     broad = "\n".join(
         f"        ({row['step']},{row['broad_ms']:.12g})" for row in values
     )
@@ -249,7 +263,7 @@ def write_pgf_plot(figure_dir, dataset, values):
         f"        ({row['step']},{row['narrow_ms']:.12g})" for row in values
     )
     total = "\n".join(
-        f"        ({row['step']},{(row['broad_ms'] + row['narrow_ms']):.12g})"
+        f"        ({row['step']},{(row['prep_ms'] + row['broad_ms'] + row['narrow_ms']):.12g})"
         for row in values
     )
     path = figure_dir / f"{dataset}_average_timings.tex"
@@ -265,11 +279,18 @@ def write_pgf_plot(figure_dir, dataset, values):
         f.write(r"]" "\n")
         f.write(
             r"\addplot+[mark=none,thick] coordinates {"
+            "\n" + prep + "\n"
+            r"    };"
+            "\n"
+        )
+        f.write(r"\addlegendentry{Broad-phase prep}" "\n")
+        f.write(
+            r"\addplot+[mark=none,thick] coordinates {"
             "\n" + broad + "\n"
             r"    };"
             "\n"
         )
-        f.write(r"\addlegendentry{Broad phase}" "\n")
+        f.write(r"\addlegendentry{Broad-phase scan}" "\n")
         f.write(
             r"\addplot+[mark=none,thick] coordinates {"
             "\n" + narrow + "\n"
@@ -334,14 +355,24 @@ def write_figures(figure_dir, by_dataset):
             if not values:
                 continue
             steps = [row["step"] for row in values]
+            prep = [row["prep_ms"] for row in values]
             broad = [row["broad_ms"] for row in values]
             narrow = [row["narrow_ms"] for row in values]
-            total = [row["broad_ms"] + row["narrow_ms"] for row in values]
+            total = [
+                row["prep_ms"] + row["broad_ms"] + row["narrow_ms"]
+                for row in values
+            ]
             fig, ax = plt.subplots(figsize=(7.0, 3.8), constrained_layout=True)
             ax.plot(
                 steps,
+                prep,
+                label=f"Broad-phase prep mean {mean(prep):.3g} ms",
+                linewidth=1.5,
+            )
+            ax.plot(
+                steps,
                 broad,
-                label=f"Broad phase mean {mean(broad):.3g} ms",
+                label=f"Broad-phase scan mean {mean(broad):.3g} ms",
                 linewidth=1.5,
             )
             ax.plot(
@@ -572,17 +603,20 @@ def write_report(report_tex, agg_csv, paired_csv, toi_error_csv, figures):
         )
         f.write(tex_escape(rel_paired))
         f.write(
-            r"""}. Timing columns aggregate complete-case EE+VF sums.
+            r"""}. Prep timing is counted once per complete EE/VF pair; broad and narrow timing columns aggregate EE+VF sums.
 
 {\footnotesize
 \pgfplotstabletypeset[
     col sep=comma,
-    columns={dataset,cases,broad_ms_mean,broad_ms_min,broad_ms_max,broad_fp_sum,broad_fn_sum},
+    columns={dataset,cases,prep_ms_mean,prep_ms_min,prep_ms_max,broad_ms_mean,broad_ms_min,broad_ms_max,broad_fp_sum,broad_fn_sum},
     columns/dataset/.style={string type,column name=Dataset},
     columns/cases/.style={column name=Cases},
-    columns/broad_ms_mean/.style={fixed,precision=3,column name={BP mean}},
-    columns/broad_ms_min/.style={fixed,precision=3,column name={BP min}},
-    columns/broad_ms_max/.style={fixed,precision=3,column name={BP max}},
+    columns/prep_ms_mean/.style={fixed,precision=3,column name={Prep mean}},
+    columns/prep_ms_min/.style={fixed,precision=3,column name={Prep min}},
+    columns/prep_ms_max/.style={fixed,precision=3,column name={Prep max}},
+    columns/broad_ms_mean/.style={fixed,precision=3,column name={BP scan mean}},
+    columns/broad_ms_min/.style={fixed,precision=3,column name={BP scan min}},
+    columns/broad_ms_max/.style={fixed,precision=3,column name={BP scan max}},
     columns/broad_fp_sum/.style={fixed,precision=0,column name={BP FP}},
     columns/broad_fn_sum/.style={fixed,precision=0,column name={BP FN}},
     every head row/.style={before row=\toprule,after row=\midrule},
