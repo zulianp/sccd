@@ -52,6 +52,7 @@ namespace {
 
     struct BroadphaseResult {
         int err = SCCD_SUCCESS;
+        double prep_elapsed_ms = 0.0;
         double elapsed_ms = 0.0;
         std::unordered_set<std::uint64_t> pairs;
         std::uint64_t false_positives = 0;
@@ -496,16 +497,21 @@ namespace {
         SMESH_TRACE_SCOPE("benchmark broadphase");
 
         BroadphaseResult result;
-        const auto start = std::chrono::steady_clock::now();
-        if (is_vf) {
-            result.err =
-                ccd_run.ccd->broad_phase_fv(ccd_run.points0, ccd_run.points1, result.v_overlap, result.f_overlap);
-
-        } else {
-            result.err =
-                ccd_run.ccd->broad_phase_ee(ccd_run.points0, ccd_run.points1, result.e0_overlap, result.e1_overlap);
+        auto start = std::chrono::steady_clock::now();
+        result.err = ccd_run.ccd->broad_phase_prep(ccd_run.points0, ccd_run.points1);
+        auto stop = std::chrono::steady_clock::now();
+        result.prep_elapsed_ms = std::chrono::duration<double, std::milli>(stop - start).count();
+        if (result.err != SCCD_SUCCESS) {
+            return result;
         }
-        const auto stop = std::chrono::steady_clock::now();
+
+        start = std::chrono::steady_clock::now();
+        if (is_vf) {
+            result.err = ccd_run.ccd->broad_phase_fv_step(result.v_overlap, result.f_overlap);
+        } else {
+            result.err = ccd_run.ccd->broad_phase_ee_step(result.e0_overlap, result.e1_overlap);
+        }
+        stop = std::chrono::steady_clock::now();
         result.elapsed_ms = std::chrono::duration<double, std::milli>(stop - start).count();
 
         return result;
@@ -677,6 +683,7 @@ namespace {
                             QueryGeometry& query_geometry,
                             const std::vector<idx_t>& edge_id_map,
                             const std::unordered_set<std::uint64_t>& broad_expected,
+                            const double prep_ms,
                             const double broad_ms,
                             const double narrow_ms,
                             const smesh::ExecutionSpace execution_space,
@@ -753,7 +760,7 @@ namespace {
 
         const std::uint64_t broad_fn_count = static_cast<std::uint64_t>(fn_broad_c0.size());
         std::cout << dataset << ',' << case_file.key << ',' << (case_file.is_vf ? "vf" : "ee") << ',' << narrow_queries
-                  << ',' << broad_ms << ',' << narrow_ms << ',' << fp_count << ',' << fn_count << ','
+                  << ',' << prep_ms << ',' << broad_ms << ',' << narrow_ms << ',' << fp_count << ',' << fn_count << ','
                   << broadphase.false_positives << ',' << broad_fn_count << '\n';
 
         const bool wrote = write_raw(roots_dir / "sccd_toi.float64", sccd_toi) &&
@@ -836,6 +843,7 @@ namespace {
             std::cerr << "error: CCD broadphase failed for " << dataset << "/" << case_file.key << "\n";
             return false;
         }
+        const double prep_ms = broadphase.prep_elapsed_ms;
         const double broad_ms = broadphase.elapsed_ms;
         int narrow_err = SCCD_SUCCESS;
         if (warmup_first_case) {
@@ -862,6 +870,7 @@ namespace {
                                   query_geometry,
                                   edge_id_map,
                                   broad_expected,
+                                  prep_ms,
                                   broad_ms,
                                   narrow_ms,
                                   execution_space,
@@ -880,7 +889,7 @@ int main(int argc, char** argv) {
 
     const fs::path data_dir = argv[1];
     bool ok = true;
-    std::cout << "dataset,case,type,queries,broad_ms,narrow_ms,fp,fn,broad_fp,broad_fn\n";
+    std::cout << "dataset,case,type,queries,prep_ms,broad_ms,narrow_ms,fp,fn,broad_fp,broad_fn\n";
     for (int i = 2; i < argc; ++i) {
         const std::string dataset = argv[i];
         const fs::path dataset_dir = data_dir / dataset;

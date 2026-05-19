@@ -153,25 +153,9 @@ namespace sccd {
                            const smesh::SharedBuffer<scalar_t*>& points_t1,
                            smesh::SharedBuffer<smesh::idx_t>& v_overlap,
                            smesh::SharedBuffer<smesh::idx_t>& f_overlap) {
-            points_t0_ = points_t0;
-            points_t1_ = points_t1;
-            if (!vaabb_) {
-                init();
-            }
-
             int err = SCCD_SUCCESS;
-            if (execution_space_ == smesh::EXECUTION_SPACE_HOST) {
-                SMESH_TRACE_SCOPE("Broad_phase (FV)");
-                err |= broad_phase_prep_host_();
-                err |= broad_phase_fv_step_host_();
-            } else {
-                SMESH_TRACE_SCOPE("Broad_phase (FV)");
-                err |= broad_phase_prep_device_();
-                err |= broad_phase_fv_step_device_();
-            }
-
-            v_overlap = v_overlap_;
-            f_overlap = f_overlap_;
+            err |= broad_phase_prep(points_t0, points_t1);
+            err |= broad_phase_fv_step(v_overlap, f_overlap);
             return err;
         }
 
@@ -179,6 +163,14 @@ namespace sccd {
                            const smesh::SharedBuffer<scalar_t*>& points_t1,
                            smesh::SharedBuffer<smesh::idx_t>& e0_overlap,
                            smesh::SharedBuffer<smesh::idx_t>& e1_overlap) {
+            int err = SCCD_SUCCESS;
+            err |= broad_phase_prep(points_t0, points_t1);
+            err |= broad_phase_ee_step(e0_overlap, e1_overlap);
+            return err;
+        }
+
+        int broad_phase_prep(const smesh::SharedBuffer<scalar_t*>& points_t0,
+                             const smesh::SharedBuffer<scalar_t*>& points_t1) {
             points_t0_ = points_t0;
             points_t1_ = points_t1;
             if (!vaabb_) {
@@ -187,12 +179,46 @@ namespace sccd {
 
             int err = SCCD_SUCCESS;
             if (execution_space_ == smesh::EXECUTION_SPACE_HOST) {
-                SMESH_TRACE_SCOPE("Broad_phase (EE)");
+                SMESH_TRACE_SCOPE("Broad_phase prep");
                 err |= broad_phase_prep_host_();
+            } else {
+                SMESH_TRACE_SCOPE("Broad_phase prep");
+                err |= broad_phase_prep_device_();
+            }
+            return err;
+        }
+
+        int broad_phase_fv_step(smesh::SharedBuffer<smesh::idx_t>& v_overlap,
+                                smesh::SharedBuffer<smesh::idx_t>& f_overlap) {
+            if (!vaabb_) {
+                init();
+            }
+
+            int err = SCCD_SUCCESS;
+            if (execution_space_ == smesh::EXECUTION_SPACE_HOST) {
+                SMESH_TRACE_SCOPE("Broad_phase (FV)");
+                err |= broad_phase_fv_step_host_();
+            } else {
+                SMESH_TRACE_SCOPE("Broad_phase (FV)");
+                err |= broad_phase_fv_step_device_();
+            }
+            v_overlap = v_overlap_;
+            f_overlap = f_overlap_;
+            return err;
+        }
+
+        int broad_phase_ee_step(smesh::SharedBuffer<smesh::idx_t>& e0_overlap,
+                                smesh::SharedBuffer<smesh::idx_t>& e1_overlap) {
+            if (!vaabb_) {
+                init();
+            }
+
+            int err = SCCD_SUCCESS;
+            if (execution_space_ == smesh::EXECUTION_SPACE_HOST) {
+                SMESH_TRACE_SCOPE("Broad_phase (EE)");
                 err |= broad_phase_ee_step_host_();
             } else {
                 SMESH_TRACE_SCOPE("Broad_phase (EE)");
-                err |= broad_phase_prep_device_();
                 err |= broad_phase_ee_step_device_();
             }
 
