@@ -6,6 +6,7 @@ set -euo pipefail
 # 1) for performance in timing
 # 2) for accuracy compared to the ground truth
 # 3) Number of false positives (should be as low as possible for the narrow-phase) and negatives (should be 0)
+# For cuda on Alps: OMP_NUM_THREADS=72 SCCD_BENCH_EXECUTION_SPACE=device srun ./bench.sh 
 
 export  SCCD_ENABLE_ARMADILLO_ROLLERS=1
 export  SCCD_ENABLE_CLOTH_BALL=1
