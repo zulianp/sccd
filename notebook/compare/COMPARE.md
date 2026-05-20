@@ -25,66 +25,41 @@ TBB_NUM_THREADS=72 ./tests/scalable_ccd_tests  "Test CUDA broad phase" -c "Armad
 TBB_NUM_THREADS=72 ./tests/scalable_ccd_tests  "Test CUDA broad phase" -c "N-Body"            --log 0
 # Or
 TBB_NUM_THREADS=72 ./tests/scalable_ccd_tests  "Test CUDA broad phase" -c "Rod-Twist"         --log 0
+# Or
+TBB_NUM_THREADS=72 ./tests/scalable_ccd_tests  "Test CUDA broad phase" -c "Cloth-Ball"        --log 0
 ```
 
 The key broad-phase timing in `Scalable-CCD` is `sweep_and_tiniest_queue` (it excludes output buffer allocation timing, included in `sccd`):
 
-```json
+```c
 // Armadillo-Rollers
-float : 32.821696281433105 [ms]
-double : 15 [ms]
+17.772 [ms]
 
 // N-Body
-float: 109.64368057250977
-double: 55.731937408447266
+56.204 [ms]
 
-// Rod-Twist
-float: 14.969567775726318
-double: 8.026240110397339
+// Rod-Twist 
+7.806 [ms]
 
 // Cloth-Ball
-double: 65.87 [ms]
-
+38.910 [ms]
 ```
+
 
 In `sccd`:
 
 ```c
 // Armadillo-Rollers
-E2E: 0.00470495 [s]
-F2V: 0.00219941 [s]
-Total 6.90436 [ms] # 2.1x speed-up (faster)
+6.904 [ms] 
 
-// N-Body (1)
-EE: 0.0443335 [s]
-FV: 0.0248334 [s]
-Total: 69.17 [ms]   # 0.79x speed-up (slower)
+// N-Body
+31 [ms]
 
-// N-Body (2)
-E2E: 0.019861 [s]
-F2V: 0.0115311 [s]
-Total: 31.3921 [ms]  # 1.77 speed-up (faster)
-
-// N-Body (3)
-EE: 0.0209968 [s]
-FV: 0.0100455 [s]
-Total: 31 [ms]
-
-// Rod-Twist (1)
-E2E: 0.00593066
-F2V: 0.00706148
-Total: 12.99214 [ms] # 0.61x speed-up (slower)
-
-// Rod-Twist (2)
-EE: 0.00230765 [s]
-FV: 0.00108385 [s]
-Total: 3.3915 [ms] # 2.3  speed-up (faster)
+// Rod-Twist
+3.391 [ms] 
 
 // Cloth-ball
-Total: 28.954 [ms]
-Total: 28.3766 [ms]
-Total: 28.4576 [ms]
-Total: 28.2121 [ms]
+28.212 [ms]
 ```
 
 ## Narrow-Phase
@@ -114,6 +89,16 @@ EE: 17.664     [ms]
 FV: 8.029      [ms]
 EE+FV: 25.693 [ms], TOI:  7.49206e-06
 ```
+
+
+
+
+
+
+
+
+
+
 
 # SCCD
 

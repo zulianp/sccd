@@ -22,6 +22,9 @@
 #include "tight_inclusion/interval_root_finder.hpp"
 #endif
 
+#define ADAPTIVE_NUM_SPLITS 2
+#define UNIFORM_NUM_SPLITS 4
+
 namespace sccd {
 
 #ifdef SCCD_ENABLE_TIGHT_INCLUSION
@@ -381,6 +384,12 @@ namespace sccd {
                 Interval{tuv[split_dim].lower, (tuv[split_dim].lower + tuv[split_dim].upper) * T(0.5)},
                 Interval{(tuv[split_dim].lower + tuv[split_dim].upper) * T(0.5), tuv[split_dim].upper}};
 
+            // // NEW
+            // if (split_dim == 0) {
+            //     split_intervals.first.lower = std::min(split_intervals.first.lower, toi);
+            //     split_intervals.second.lower = std::min(split_intervals.second.lower, toi);
+            // }
+
             if (split_intervals.first.is_terminal() || split_intervals.second.is_terminal()) {
                 return true;
             }
@@ -419,6 +428,12 @@ namespace sccd {
                 Interval{tuv[split_dim].lower, (tuv[split_dim].lower + tuv[split_dim].upper) * T(0.5)},
                 Interval{(tuv[split_dim].lower + tuv[split_dim].upper) * T(0.5), tuv[split_dim].upper}};
 
+            // // NEW
+            // if (split_dim == 0) {
+            //     split_intervals.first.lower = std::min(split_intervals.first.lower, toi);
+            //     split_intervals.second.lower = std::min(split_intervals.second.lower, toi);
+            // }
+
             if (split_intervals.first.is_terminal() || split_intervals.second.is_terminal()) {
                 return true;
             }
@@ -442,6 +457,12 @@ namespace sccd {
             return false;
         }
     };
+
+    template <typename T>
+    inline Box<T> unit_domain_box() {
+        using Interval = sccd::Interval<T>;
+        return Box<T>(Interval{T(0), T(1)}, Interval{T(0), T(1)}, Interval{T(0), T(1)}, 0);
+    }
 
     template <int SplitDim, typename T>
     inline Box<T> split_axis_box(const Box<T> &domain, const T sample_min, const T sample_max) {
@@ -492,6 +513,22 @@ namespace sccd {
                                    degenerate_interval);
         return contains_zero;
     }
+
+    // template <typename T>
+    // inline bool codomain_acceptance(const T fmin[3], const T fmax[3], const T tol, const T tols[3], bool &accept) {
+    //     // Replicates predicates of TI
+    //     accept = true;
+    //     bool contains_zero = true;
+
+    //     for (int d = 0; d < 3; ++d) {
+    //         contains_zero = contains_zero &&  //
+    //                         (fmin[d] <= tols[d]) && (fmax[d] >= -tols[d]);
+    //         accept = accept && ((fmin[d] >= -tols[d]) && (fmax[d] <= tols[d]));
+    //     }
+
+    //     accept = contains_zero && accept;
+    //     return contains_zero;
+    // }
 
     template <typename T>
     inline bool accept_grid_root_vf(const Box<T> &box,
@@ -557,11 +594,11 @@ namespace sccd {
                              const T e1[3],
                              const T e2[3],
                              const T e3[3],
+                             const Box<T> &initial_domain,
                              T &t,
                              T &u,
                              T &v) {
         using Box = sccd::Box<T>;
-        using Interval = sccd::Interval<T>;
 
         auto codomain_box = [=](const Box &domain, Box &codomain) -> void {
             codomain.tuv[0].lower = std::numeric_limits<T>::max();
@@ -622,9 +659,9 @@ namespace sccd {
 
         std::vector<Box> stack;
         stack.reserve(1024);
-        stack.push_back(Box(Interval{T(0), T(1)}, Interval{T(0), T(1)}, Interval{T(0), T(1)}, 0));
+        stack.push_back(initial_domain);
 
-        T toi = 1;
+        T toi = t;
 
         bool found_root = false;
         while (!stack.empty()) {
@@ -696,6 +733,23 @@ namespace sccd {
         return found_root;
     }
 
+    template <typename T>
+    bool find_root_bisection(const int max_iter,
+                             const T tol,
+                             const T sv[3],
+                             const T s1[3],
+                             const T s2[3],
+                             const T s3[3],
+                             const T ev[3],
+                             const T e1[3],
+                             const T e2[3],
+                             const T e3[3],
+                             T &t,
+                             T &u,
+                             T &v) {
+        return find_root_bisection<T>(max_iter, tol, sv, s1, s2, s3, ev, e1, e2, e3, unit_domain_box<T>(), t, u, v);
+    }
+
     template <int SplitDim, int N, typename T>
     inline static void normal_equation_axis_splitters_vf(const Box<T> &domain,
                                                          const T sv[3],
@@ -713,7 +767,13 @@ namespace sccd {
         const T lo = domain.tuv[SplitDim].lower;
         const T hi = domain.tuv[SplitDim].upper;
         const T h = (hi - lo) / T(N + 1);
-        const T radius = h * T(0.45);
+
+        T damping = 0.45;
+        if constexpr (N == 1) {
+            damping = 0.6;
+        }
+
+        const T radius = h * damping;
         const T mid_t = (domain.tuv[0].lower + domain.tuv[0].upper) * T(0.5);
         const T mid_u = (domain.tuv[1].lower + domain.tuv[1].upper) * T(0.5);
         const T mid_v = (domain.tuv[2].lower + domain.tuv[2].upper) * T(0.5);
@@ -796,8 +856,11 @@ namespace sccd {
             samples[i + 1] = splitters[i];
         }
 
+        auto stack_size = stack.size();
+
         bool found = false;
         for (int i = 0; i < N + 1; ++i) {
+            // for (int i = N; i >= 0; --i) {
             const T sample_min = samples[i];
             const T sample_max = samples[i + 1];
             const T tt_min = SplitDim == 0 ? sample_min : domain.tuv[0].lower;
@@ -839,6 +902,11 @@ namespace sccd {
             }
 
             stack.push_back(box);
+        }
+
+        // Make sure the tmin is on top of the stack
+        if constexpr (SplitDim == 0) {
+            std::reverse(stack.begin() + stack_size, stack.end());
         }
 
         return found;
@@ -886,20 +954,20 @@ namespace sccd {
                                           const T e1[3],
                                           const T e2[3],
                                           const T e3[3],
+                                          const Box<T> &initial_domain,
                                           T &t,
                                           T &u,
                                           T &v,
                                           std::vector<Box<T>> &stack,
                                           const bool refine = false) {
         using Box = sccd::Box<T>;
-        using Interval = sccd::Interval<T>;
 
         T tols[3];
         compute_face_vertex_tolerance<T>(tol, sv, s1, s2, s3, ev, e1, e2, e3, tols);
 
         bool found = false;
         stack.clear();
-        stack.push_back(Box(Interval{T(0), T(1)}, Interval{T(0), T(1)}, Interval{T(0), T(1)}, 0));
+        stack.push_back(initial_domain);
         while (!stack.empty()) {
             Box box = stack.back();
             stack.pop_back();
@@ -908,11 +976,33 @@ namespace sccd {
                 continue;
             }
 
-            found |= grid_search_adaptive_split_vf<4, T>(
+            // box.tuv[0].upper = std::min(box.tuv[0].upper, t);
+
+            found |= grid_search_adaptive_split_vf<ADAPTIVE_NUM_SPLITS, T>(
                 box, max_iter, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack, refine);
         }
 
         return found;
+    }
+
+    template <typename T>
+    bool find_root_grid_adaptive_split_vf(const int max_iter,
+                                          const T tol,
+                                          const T sv[3],
+                                          const T s1[3],
+                                          const T s2[3],
+                                          const T s3[3],
+                                          const T ev[3],
+                                          const T e1[3],
+                                          const T e2[3],
+                                          const T e3[3],
+                                          T &t,
+                                          T &u,
+                                          T &v,
+                                          std::vector<Box<T>> &stack,
+                                          const bool refine = false) {
+        return find_root_grid_adaptive_split_vf<T>(
+            max_iter, tol, sv, s1, s2, s3, ev, e1, e2, e3, unit_domain_box<T>(), t, u, v, stack, refine);
     }
 
     template <int SplitDim, int N, typename T>
@@ -988,6 +1078,8 @@ namespace sccd {
             contains_zero[i] = codomain_acceptance<T>(fmin_i, fmax_i, tol, tols, accept[i]);
         }
 
+        auto stack_size = stack.size();
+
         bool found = false;
         for (int i = 0; i < N; ++i) {
             if (!contains_zero[i]) {
@@ -1015,7 +1107,13 @@ namespace sccd {
                 continue;
             }
 
+            // box.tuv[0].lower = std::min(box.tuv[0].lower, toi);
             stack.push_back(box);
+        }
+
+        // Make sure the tmin is on top of the stack
+        if constexpr (SplitDim == 0) {
+            std::reverse(stack.begin() + stack_size, stack.end());
         }
 
         return found;
@@ -1063,20 +1161,20 @@ namespace sccd {
                                          const T e1[3],
                                          const T e2[3],
                                          const T e3[3],
+                                         const Box<T> &initial_domain,
                                          T &t,
                                          T &u,
                                          T &v,
                                          std::vector<Box<T>> &stack,
                                          const bool refine = false) {
         using Box = sccd::Box<T>;
-        using Interval = sccd::Interval<T>;
 
         T tols[3];
         compute_face_vertex_tolerance<T>(tol, sv, s1, s2, s3, ev, e1, e2, e3, tols);
 
         bool found = false;
         stack.clear();
-        stack.push_back(Box(Interval{T(0), T(1)}, Interval{T(0), T(1)}, Interval{T(0), T(1)}, 0));
+        stack.push_back(initial_domain);
         while (!stack.empty()) {
             Box box = stack.back();
             stack.pop_back();
@@ -1085,11 +1183,33 @@ namespace sccd {
                 continue;
             }
 
-            found |= grid_search_uniform_split_vf<4, T>(
+            // box.tuv[0].upper = std::min(box.tuv[0].upper, t);
+
+            found |= grid_search_uniform_split_vf<UNIFORM_NUM_SPLITS, T>(
                 box, max_iter, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack, refine);
         }
 
         return found;
+    }
+
+    template <typename T>
+    bool find_root_grid_uniform_split_vf(const int max_iter,
+                                         const T tol,
+                                         const T sv[3],
+                                         const T s1[3],
+                                         const T s2[3],
+                                         const T s3[3],
+                                         const T ev[3],
+                                         const T e1[3],
+                                         const T e2[3],
+                                         const T e3[3],
+                                         T &t,
+                                         T &u,
+                                         T &v,
+                                         std::vector<Box<T>> &stack,
+                                         const bool refine = false) {
+        return find_root_grid_uniform_split_vf<T>(
+            max_iter, tol, sv, s1, s2, s3, ev, e1, e2, e3, unit_domain_box<T>(), t, u, v, stack, refine);
     }
 
     template <typename T>
@@ -1251,6 +1371,7 @@ namespace sccd {
                 continue;
             }
 
+            // box.tuv[0].lower = std::min(box.tuv[0].lower, toi);
             stack.push_back(box);
         }
 
@@ -1299,20 +1420,20 @@ namespace sccd {
                                           const T e2[3],
                                           const T e3[3],
                                           const T e4[3],
+                                          const Box<T> &initial_domain,
                                           T &t,
                                           T &u,
                                           T &v,
                                           std::vector<Box<T>> &stack,
                                           const bool refine = false) {
         using Box = sccd::Box<T>;
-        using Interval = sccd::Interval<T>;
 
         T tols[3];
         compute_edge_edge_tolerance<T>(tol, s1, s2, s3, s4, e1, e2, e3, e4, tols);
 
         bool found = false;
         stack.clear();
-        stack.push_back(Box(Interval{T(0), T(1)}, Interval{T(0), T(1)}, Interval{T(0), T(1)}, 0));
+        stack.push_back(initial_domain);
         while (!stack.empty()) {
             Box box = stack.back();
             stack.pop_back();
@@ -1321,11 +1442,33 @@ namespace sccd {
                 continue;
             }
 
-            found |= grid_search_adaptive_split_ee<4, T>(
+            // box.tuv[0].upper = std::min(box.tuv[0].upper, t);
+
+            found |= grid_search_adaptive_split_ee<ADAPTIVE_NUM_SPLITS, T>(
                 box, max_iter, tol, tols, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v, stack, refine);
         }
 
         return found;
+    }
+
+    template <typename T>
+    bool find_root_grid_adaptive_split_ee(const int max_iter,
+                                          const T tol,
+                                          const T s1[3],
+                                          const T s2[3],
+                                          const T s3[3],
+                                          const T s4[3],
+                                          const T e1[3],
+                                          const T e2[3],
+                                          const T e3[3],
+                                          const T e4[3],
+                                          T &t,
+                                          T &u,
+                                          T &v,
+                                          std::vector<Box<T>> &stack,
+                                          const bool refine = false) {
+        return find_root_grid_adaptive_split_ee<T>(
+            max_iter, tol, s1, s2, s3, s4, e1, e2, e3, e4, unit_domain_box<T>(), t, u, v, stack, refine);
     }
 
     template <int SplitDim, int N, typename T>
@@ -1429,6 +1572,7 @@ namespace sccd {
                 continue;
             }
 
+            // box.tuv[0].lower = std::min(box.tuv[0].lower, toi);
             stack.push_back(box);
         }
 
@@ -1477,20 +1621,20 @@ namespace sccd {
                                          const T e2[3],
                                          const T e3[3],
                                          const T e4[3],
+                                         const Box<T> &initial_domain,
                                          T &t,
                                          T &u,
                                          T &v,
                                          std::vector<Box<T>> &stack,
                                          const bool refine = false) {
         using Box = sccd::Box<T>;
-        using Interval = sccd::Interval<T>;
 
         T tols[3];
         compute_edge_edge_tolerance<T>(tol, s1, s2, s3, s4, e1, e2, e3, e4, tols);
 
         bool found = false;
         stack.clear();
-        stack.push_back(Box(Interval{T(0), T(1)}, Interval{T(0), T(1)}, Interval{T(0), T(1)}, 0));
+        stack.push_back(initial_domain);
         while (!stack.empty()) {
             Box box = stack.back();
             stack.pop_back();
@@ -1499,11 +1643,33 @@ namespace sccd {
                 continue;
             }
 
-            found |= grid_search_uniform_split_ee<4, T>(
+            // box.tuv[0].upper = std::min(box.tuv[0].upper, t);
+
+            found |= grid_search_uniform_split_ee<UNIFORM_NUM_SPLITS, T>(
                 box, max_iter, tol, tols, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v, stack, refine);
         }
 
         return found;
+    }
+
+    template <typename T>
+    bool find_root_grid_uniform_split_ee(const int max_iter,
+                                         const T tol,
+                                         const T s1[3],
+                                         const T s2[3],
+                                         const T s3[3],
+                                         const T s4[3],
+                                         const T e1[3],
+                                         const T e2[3],
+                                         const T e3[3],
+                                         const T e4[3],
+                                         T &t,
+                                         T &u,
+                                         T &v,
+                                         std::vector<Box<T>> &stack,
+                                         const bool refine = false) {
+        return find_root_grid_uniform_split_ee<T>(
+            max_iter, tol, s1, s2, s3, s4, e1, e2, e3, e4, unit_domain_box<T>(), t, u, v, stack, refine);
     }
 
 }  // namespace sccd
