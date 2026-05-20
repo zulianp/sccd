@@ -497,20 +497,19 @@ namespace sccd {
         bool contains_zero = true;
         bool smaller_than_axis_tol = true;
         bool inside_epsilon_box = true;
-        bool last_axis_smaller_than_scalar_tol = false;
+        bool smaller_than_scalar_tol = true;
         bool degenerate_interval = true;
 
         for (int d = 0; d < 3; ++d) {
             const T interval_width = fmax[d] - fmin[d];
             contains_zero = contains_zero && (fmin[d] <= tol) && (fmax[d] >= -tol);
             smaller_than_axis_tol = smaller_than_axis_tol && (interval_width <= tols[d]);
-            inside_epsilon_box = inside_epsilon_box && !((fmin[d] < tol) || (fmax[d] > -tol));
-            last_axis_smaller_than_scalar_tol = interval_width < tol;
+            inside_epsilon_box = inside_epsilon_box && (fmin[d] >= -tol) && (fmax[d] <= tol);
+            smaller_than_scalar_tol = smaller_than_scalar_tol && (interval_width < tol);
             degenerate_interval = degenerate_interval && (fmin[d] >= fmax[d]);
         }
 
-        accept = contains_zero && (smaller_than_axis_tol || inside_epsilon_box || last_axis_smaller_than_scalar_tol ||
-                                   degenerate_interval);
+        accept = contains_zero && (smaller_than_axis_tol || inside_epsilon_box || smaller_than_scalar_tol || degenerate_interval);
         return contains_zero;
     }
 
