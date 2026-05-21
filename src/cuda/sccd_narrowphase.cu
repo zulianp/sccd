@@ -24,12 +24,6 @@
 #define SCCD_NP_THREADS_PER_BLOCK 128
 #endif
 
-// Maximum number of bisections (per-thread DFS depth)
-#ifndef SCCD_NP_MAX_BISECTIONS
-// #define SCCD_NP_MAX_BISECTIONS 69
-#define SCCD_NP_MAX_BISECTIONS 90
-#endif
-
 #ifndef SCCD_CUDA_ADAPTIVE_SPLIT
 #define SCCD_CUDA_ADAPTIVE_SPLIT 1
 #endif
@@ -869,6 +863,7 @@ namespace sccd {
                                                                  const size_t element_stride,
                                                                  I** const SCCD_RESTRICT elements,
                                                                  const T tol,
+                                                                 const int max_depth,
                                                                  T* SCCD_RESTRICT toi,
                                                                  Stack<T> g_stack,
                                                                  int qid_in,
@@ -878,8 +873,6 @@ namespace sccd {
             static_assert(N == 64 || N == 128 || N == 256, "SCCD_NP_THREADS_PER_BLOCK must be one of 64/128/256");
             using Vec4 = typename device::Vec4Type<T>::type;
             constexpr int S_CAP = SCCD_NP_SHARED_STACK_CAP;
-            constexpr int max_bisections = SCCD_NP_MAX_BISECTIONS;
-
             __shared__ T s_tlower[S_CAP];
             __shared__ T s_tupper[S_CAP];
             __shared__ T s_ulower[S_CAP];
@@ -933,7 +926,7 @@ namespace sccd {
 
                 if (active && cur.tlower >= s_toi) active = 0;
 
-                if (active && level >= max_bisections) {
+                if (active && level >= max_depth) {
                     device::atomic_min(&s_toi, cur.tlower);
                     active = 0;
                 }
@@ -1086,6 +1079,7 @@ namespace sccd {
                                                             const size_t element_stride,
                                                             I** const SCCD_RESTRICT elements,
                                                             const T tol,
+                                                            const int max_depth,
                                                             T* SCCD_RESTRICT toi,
                                                             Stack<T> g_stack,
                                                             const int seed_begin,
@@ -1121,7 +1115,7 @@ namespace sccd {
             }
 
             narrow_phase_dfs_zero_stride_body<is_vf, N, T, I>(
-                overlap0, overlap1, sp, ep, element_stride, elements, tol, toi, g_stack, qid, cur, level, active);
+                overlap0, overlap1, sp, ep, element_stride, elements, tol, max_depth, toi, g_stack, qid, cur, level, active);
         }
 
         template <bool is_vf, int N, typename T, typename I>
@@ -1132,6 +1126,7 @@ namespace sccd {
                                                                        const size_t element_stride,
                                                                        I** const SCCD_RESTRICT elements,
                                                                        const T tol,
+                                                                       const int max_depth,
                                                                        T* SCCD_RESTRICT toi,
                                                                        Stack<T> g_stack) {
             int qid = -1;
@@ -1144,7 +1139,7 @@ namespace sccd {
             }
 
             narrow_phase_dfs_zero_stride_body<is_vf, N, T, I>(
-                overlap0, overlap1, sp, ep, element_stride, elements, tol, toi, g_stack, qid, cur, level, active);
+                overlap0, overlap1, sp, ep, element_stride, elements, tol, max_depth, toi, g_stack, qid, cur, level, active);
         }
 
         template <bool is_vf, int N, typename T, typename I>
@@ -1155,6 +1150,7 @@ namespace sccd {
                                                      const size_t element_stride,
                                                      I** const SCCD_RESTRICT elements,
                                                      const T tol,
+                                                     const int max_depth,
                                                      T* SCCD_RESTRICT toi,
                                                      const int toi_stride,
                                                      Stack<T> g_stack,
@@ -1169,8 +1165,6 @@ namespace sccd {
             constexpr int NU = DfsSplit<N>::NU;
             constexpr int NV = DfsSplit<N>::NV;
             constexpr int S_CAP = SCCD_NP_SHARED_STACK_CAP;
-            constexpr int max_bisections = SCCD_NP_MAX_BISECTIONS;
-
             const int tid = threadIdx.x;
 
             __shared__ T s_tlower[S_CAP];
@@ -1289,7 +1283,7 @@ namespace sccd {
 
                 if (active && cur.tlower >= s_toi) active = 0;
 
-                if (active && level >= max_bisections) {
+                if (active && level >= max_depth) {
                     if (is_domain_valid<is_vf>(cur, s_toi, atol)) {
                         device::atomic_min(&s_toi, cur.tlower);
                     }
@@ -1423,6 +1417,7 @@ namespace sccd {
                                                 const size_t element_stride,
                                                 I** const SCCD_RESTRICT elements,
                                                 const T tol,
+                                                const int max_depth,
                                                 T* SCCD_RESTRICT toi,
                                                 const int toi_stride,
                                                 Stack<T> g_stack,
@@ -1440,6 +1435,7 @@ namespace sccd {
                                                   element_stride,
                                                   elements,
                                                   tol,
+                                                  max_depth,
                                                   toi,
                                                   toi_stride,
                                                   g_stack,
@@ -1458,6 +1454,7 @@ namespace sccd {
                                                            const size_t element_stride,
                                                            I** const SCCD_RESTRICT elements,
                                                            const T tol,
+                                                           const int max_depth,
                                                            T* SCCD_RESTRICT toi,
                                                            const int toi_stride,
                                                            Stack<T> g_stack) {
@@ -1490,6 +1487,7 @@ namespace sccd {
                                                   element_stride,
                                                   elements,
                                                   tol,
+                                                  max_depth,
                                                   toi,
                                                   toi_stride,
                                                   g_stack,
@@ -1512,6 +1510,8 @@ namespace sccd {
                                  // Output
                                  const T max_toi,
                                  T* const SCCD_RESTRICT d_toi,
+                                 const int max_depth,
+                                 const T tol,
                                  const int toi_stride) {
             SCCD_CUDA_LAST_ERROR();
 
@@ -1523,12 +1523,6 @@ namespace sccd {
             //             noverlaps when stride==1 (one toi per candidate).
             const size_t toi_n = (toi_stride == 0) ? 1 : noverlaps;
 
-            T tol = std::is_same_v<T, float> ? T(1e-8) : T(1e-12);
-            {
-                double SCCD_TOL = (double)tol;
-                SCCD_READ_ENV(SCCD_TOL, atof);
-                tol = (T)SCCD_TOL;
-            }
             T SCCD_NP_ALPHA = T(0.5);
             {
                 double alpha = (double)SCCD_NP_ALPHA;
@@ -1681,6 +1675,7 @@ namespace sccd {
                                                              element_stride,
                                                              elements,
                                                              tol,
+                                                             max_depth,
                                                              d_toi,
                                                              g_stack,
                                                              (int)begin,
@@ -1695,6 +1690,7 @@ namespace sccd {
                                                           element_stride,
                                                           elements,
                                                           tol,
+                                                          max_depth,
                                                           d_toi,
                                                           toi_stride,
                                                           g_stack,
@@ -1721,10 +1717,20 @@ namespace sccd {
 
                         if (toi_stride == 0) {
                             narrow_phase_dfs_zero_stride_from_stack_kernel<is_vf, N, T, I><<<grid_pass2, block_pass1>>>(
-                                overlap0, overlap1, v0, v1, element_stride, elements, tol, d_toi, g_stack);
+                                overlap0, overlap1, v0, v1, element_stride, elements, tol, max_depth, d_toi, g_stack);
                         } else {
                             narrow_phase_dfs_from_stack_kernel<is_vf, N, T, I><<<grid_pass2, block_pass1>>>(
-                                overlap0, overlap1, v0, v1, element_stride, elements, tol, d_toi, toi_stride, g_stack);
+                                overlap0,
+                                overlap1,
+                                v0,
+                                v1,
+                                element_stride,
+                                elements,
+                                tol,
+                                max_depth,
+                                d_toi,
+                                toi_stride,
+                                g_stack);
                         }
                         SCCD_CUDA_LAST_ERROR();
 
@@ -1776,9 +1782,11 @@ namespace sccd {
                             // Output
                             const T max_toi,
                             T* const SCCD_RESTRICT toi,
+                            const int max_depth,
+                            const T tol,
                             const int toi_stride) {
             return narrow_phase_generic<false, T, I>(
-                noverlaps, overlap0, overlap1, v0, v1, edge_stride, edges, max_toi, toi, toi_stride);
+                noverlaps, overlap0, overlap1, v0, v1, edge_stride, edges, max_toi, toi, max_depth, tol, toi_stride);
         }
 
         template <int nxe, typename T, typename I>
@@ -1792,9 +1800,11 @@ namespace sccd {
                             I** const SCCD_RESTRICT faces,
                             const T max_toi,
                             T* const SCCD_RESTRICT toi,
+                            const int max_depth,
+                            const T tol,
                             const int toi_stride) {
             return narrow_phase_generic<true, T, I>(
-                noverlaps, voveralp, foveralp, v0, v1, face_stride, faces, max_toi, toi, toi_stride);
+                noverlaps, voveralp, foveralp, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_stride);
         }
 
         template <typename T>
@@ -1827,6 +1837,8 @@ namespace sccd {
                                                      I** const SCCD_RESTRICT elements,      \
                                                      const T max_toi,                       \
                                                      T* const SCCD_RESTRICT toi,            \
+                                                     const int max_depth,                   \
+                                                     const T tol,                           \
                                                      const int toi_stride);
 
 #define INSTANTIATE_NARROW_PHASE_VF(NXE, T, I)                                                   \
@@ -1839,6 +1851,8 @@ namespace sccd {
                                                           I** const SCCD_RESTRICT elements,      \
                                                           const T max_toi,                       \
                                                           T* const SCCD_RESTRICT toi,            \
+                                                          const int max_depth,                   \
+                                                          const T tol,                           \
                                                           const int toi_stride);
 
 INSTANTIATE_NARROW_PHASE_EE(float, int32_t);

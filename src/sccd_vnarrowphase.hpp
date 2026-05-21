@@ -1239,6 +1239,8 @@ namespace sccd {
                           I** const SCCD_RESTRICT faces,
                           const T max_toi,
                           T* const SCCD_RESTRICT toi,
+                          const int max_depth,
+                          const T tol,
                           const int toi_stride) {
         using T_HP = double;
 
@@ -1252,12 +1254,6 @@ namespace sccd {
         assert(toi != nullptr);
 
         const T_HP max_domain_toi = sccd::min<T_HP>(T_HP(1), T_HP(max_toi));
-
-        int SCCD_MAX_DEPTH = 69;
-        SCCD_READ_ENV(SCCD_MAX_DEPTH, atoi);
-
-        T_HP SCCD_TOL = std::is_same<float, T_HP>::value ? T_HP(1e-8) : T_HP(1e-14);
-        SCCD_READ_ENV(SCCD_TOL, atof);
 
         int constexpr VSIZE = 8;
         using VQueryT = VQuery<T_HP, VSIZE>;
@@ -1282,7 +1278,7 @@ namespace sccd {
                 load_query<T_HP, T, I, VSIZE>(ib, block_size, voveralp, foveralp, v0, v1, face_stride, faces, query);
 
                 VTolerancesT tols;
-                compute_tolerances<T_HP, VSIZE>(SCCD_TOL, query, tols);
+                compute_tolerances<T_HP, VSIZE>(tol, query, tols);
 
                 T_HP toi_packed[VSIZE];
                 const T_HP initial_toi = toi_stride == 0 ? global_min.load(std::memory_order_relaxed) : max_domain_toi;
@@ -1341,10 +1337,10 @@ namespace sccd {
                     uint8_t contains_origin_mask[VSIZE];
                     uint8_t acceptance_mask[VSIZE];
                     compute_masks<T_HP, I, VSIZE>(
-                        domain, codomain, tols, SCCD_TOL, contains_origin_mask, acceptance_mask);
+                        domain, codomain, tols, tol, contains_origin_mask, acceptance_mask);
 
                     process_accepted_domains<T_HP, I, VSIZE>(
-                        domain, contains_origin_mask, acceptance_mask, toi_packed, tols, SCCD_MAX_DEPTH);
+                        domain, contains_origin_mask, acceptance_mask, toi_packed, tols, max_depth);
 
                     if (toi_stride == 0) {
                         T_HP local_min = max_domain_toi;
@@ -1357,7 +1353,7 @@ namespace sccd {
                     }
 
                     if (!has_pending_split_lanes<T_HP, I, VSIZE>(
-                            domain, contains_origin_mask, acceptance_mask, SCCD_MAX_DEPTH)) {
+                            domain, contains_origin_mask, acceptance_mask, max_depth)) {
                         for (int i = 0; i < VSIZE; ++i) {
                             if (domain.active[i]) {
                                 deactivate_lane<T_HP, I, VSIZE>(domain, i);
@@ -1372,8 +1368,8 @@ namespace sccd {
                                                                    query,
                                                                    toi_packed,
                                                                    tols,
-                                                                   SCCD_TOL,
-                                                                   SCCD_MAX_DEPTH,
+                                                                   tol,
+                                                                   max_depth,
                                                                    stack);
                 }
 

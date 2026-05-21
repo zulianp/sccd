@@ -39,6 +39,7 @@ namespace sccd {
                                     I** const SCCD_RESTRICT faces,
                                     const T max_toi,
                                     T* const SCCD_RESTRICT toi,
+                                    const T tol,
                                     const int toi_stride = 0);
 
     template <int nxe, typename T, typename I>
@@ -52,6 +53,8 @@ namespace sccd {
                         I** const SCCD_RESTRICT faces,
                         const T max_toi,
                         T* const SCCD_RESTRICT toi,
+                        const int max_depth,
+                        const T tol,
                         const int toi_stride = 0) {
         using T_HP = double;
         const T infty = 100000;
@@ -68,17 +71,11 @@ namespace sccd {
 
         if (SCCD_USE_VNARROW_PHASE) {
             return v_narrow_phase_vf<nxe, T, I>(
-                noverlaps, voveralp, foveralp, v0, v1, face_stride, faces, max_toi, toi, toi_stride);
+                noverlaps, voveralp, foveralp, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_stride);
         }
 
         int SCCD_USE_TI = 0;
         SCCD_READ_ENV(SCCD_USE_TI, atoi);
-
-        int SCCD_MAX_DEPTH = 69;
-        SCCD_READ_ENV(SCCD_MAX_DEPTH, atoi);
-
-        T_HP SCCD_TOL = std::is_same_v<float, T_HP> ? T(1e-6) : T(3e-8);
-        SCCD_READ_ENV(SCCD_TOL, atof);
 
         int SCCD_REFINE = 0;
         SCCD_READ_ENV(SCCD_REFINE, atoi);
@@ -99,7 +96,7 @@ namespace sccd {
         SCCD_READ_ENV(SCCD_USE_NEWTON_PASS, atoi);
         if (SCCD_USE_NEWTON_PASS) {
             narrow_phase_newton_pass_vf<nxe, T, I>(
-                noverlaps, voveralp, foveralp, v0, v1, face_stride, faces, max_toi, toi, toi_stride);
+                noverlaps, voveralp, foveralp, v0, v1, face_stride, faces, max_toi, toi, tol, toi_stride);
 
             if (toi_stride == 0) {
                 min_t = sccd::min<T>(min_t, T(toi[0]));
@@ -144,7 +141,7 @@ namespace sccd {
 #warning "SCCD_ENABLE_TIGHT_INCLUSION"
                 if (SCCD_USE_TI) {
                     if (find_root_tight_inclusion_vf<T_HP>(
-                            SCCD_MAX_DEPTH, SCCD_TOL, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v)) {
+                            max_depth, tol, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v)) {
                         if (toi_stride == 0) {
                             atomic_min<T>(min_t, t);
                         } else {
@@ -163,8 +160,8 @@ namespace sccd {
 
                 bool found = false;
                 if (SCCD_ADAPTIVE_SPLIT) {
-                    found = find_root_grid_adaptive_split_vf<T_HP>(SCCD_MAX_DEPTH,
-                                                                   SCCD_TOL,
+                    found = find_root_grid_adaptive_split_vf<T_HP>(max_depth,
+                                                                   tol,
                                                                    sv,
                                                                    s1,
                                                                    s2,
@@ -180,8 +177,8 @@ namespace sccd {
                                                                    stack,
                                                                    SCCD_REFINE);
                 } else {
-                    found = find_root_grid_uniform_split_vf<T_HP>(SCCD_MAX_DEPTH,
-                                                                  SCCD_TOL,
+                    found = find_root_grid_uniform_split_vf<T_HP>(max_depth,
+                                                                  tol,
                                                                   sv,
                                                                   s1,
                                                                   s2,
@@ -222,6 +219,8 @@ namespace sccd {
                                     I** const SCCD_RESTRICT edges,
                                     const T max_toi,
                                     T* const SCCD_RESTRICT toi,
+                                    const int max_depth,
+                                    const T tol,
                                     const int toi_stride = 0);
 
     template <typename T, typename I>
@@ -236,6 +235,8 @@ namespace sccd {
                         // Output
                         const T max_toi,
                         T* const SCCD_RESTRICT toi,
+                        const int max_depth,
+                        const T tol,
                         const int toi_stride = 0) {
         using T_HP = double;
         const T infty = 100000;
@@ -263,12 +264,6 @@ namespace sccd {
         int SCCD_USE_TI = 0;
         SCCD_READ_ENV(SCCD_USE_TI, atoi);
 
-        int SCCD_MAX_DEPTH = 69;
-        SCCD_READ_ENV(SCCD_MAX_DEPTH, atoi);
-
-        T_HP SCCD_TOL = std::is_same_v<float, T_HP> ? T(1e-6) : T(3e-8);
-        SCCD_READ_ENV(SCCD_TOL, atof);
-
         int SCCD_REFINE = 0;
         SCCD_READ_ENV(SCCD_REFINE, atoi);
 
@@ -281,7 +276,7 @@ namespace sccd {
         // SCCD_READ_ENV(SCCD_USE_NEWTON_PASS, atoi);
         // if (SCCD_USE_NEWTON_PASS) {
         //     narrow_phase_newton_pass_ee<T, I>(
-        //         noverlaps, e0overalp, e1overalp, v0, v1, edge_stride, edges, max_toi, toi, toi_stride);
+        //         noverlaps, e0overalp, e1overalp, v0, v1, edge_stride, edges, max_toi, toi, max_depth, tol, toi_stride);
 
         //     if (toi_stride == 0) {
         //         min_t = sccd::min<T>(min_t, T(toi[0]));
@@ -333,7 +328,7 @@ namespace sccd {
 #warning "SCCD_ENABLE_TIGHT_INCLUSION"
                 if (SCCD_USE_TI) {
                     if (find_root_tight_inclusion_ee<T_HP>(
-                            SCCD_MAX_DEPTH, SCCD_TOL, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v)) {
+                            max_depth, tol, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v)) {
                         if (toi_stride == 0) {
                             atomic_min<T>(min_t, t);
                         } else {
@@ -345,8 +340,8 @@ namespace sccd {
 #endif
                 bool found = false;
                 if (SCCD_ADAPTIVE_SPLIT) {
-                    found = find_root_grid_adaptive_split_ee<T_HP>(SCCD_MAX_DEPTH,
-                                                                   SCCD_TOL,
+                    found = find_root_grid_adaptive_split_ee<T_HP>(max_depth,
+                                                                   tol,
                                                                    s1,
                                                                    s2,
                                                                    s3,
@@ -362,8 +357,8 @@ namespace sccd {
                                                                    stack,
                                                                    SCCD_REFINE);
                 } else {
-                    found = find_root_grid_uniform_split_ee<T_HP>(SCCD_MAX_DEPTH,
-                                                                  SCCD_TOL,
+                    found = find_root_grid_uniform_split_ee<T_HP>(max_depth,
+                                                                  tol,
                                                                   s1,
                                                                   s2,
                                                                   s3,
@@ -648,6 +643,7 @@ namespace sccd {
                                     I** const SCCD_RESTRICT faces,
                                     const T max_toi,
                                     T* const SCCD_RESTRICT toi,
+                                    const T tol,
                                     const int toi_stride) {
         using T_HP = double;
 
@@ -660,9 +656,6 @@ namespace sccd {
 
         int SCCD_NEWTON_ITERATIONS = 10;
         SCCD_READ_ENV(SCCD_NEWTON_ITERATIONS, atoi);
-
-        T_HP SCCD_TOL = std::is_same_v<float, T_HP> ? T(1e-6) : T(3e-8);
-        SCCD_READ_ENV(SCCD_TOL, atof);
 
         std::atomic<T> min_t = max_toi;
         if (toi_stride == 0) toi[0] = max_toi;
@@ -695,7 +688,7 @@ namespace sccd {
                 T_HP v = T_HP(1.0 / 3.0);
 
                 if (!find_root_newton_vf<T_HP>(
-                        SCCD_NEWTON_ITERATIONS, SCCD_TOL, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v)) {
+                        SCCD_NEWTON_ITERATIONS, tol, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v)) {
                     continue;
                 }
 
@@ -703,7 +696,7 @@ namespace sccd {
                     continue;
                 }
 
-                if (!newton_epsilon_box_accept_vf<T_HP>(SCCD_TOL, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v)) {
+                if (!newton_epsilon_box_accept_vf<T_HP>(tol, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v)) {
                     continue;
                 }
 
@@ -734,6 +727,8 @@ namespace sccd {
                                     I** const SCCD_RESTRICT edges,
                                     const T max_toi,
                                     T* const SCCD_RESTRICT toi,
+                                    const int max_depth,
+                                    const T tol,
                                     const int toi_stride) {
         using T_HP = double;
 
@@ -743,12 +738,6 @@ namespace sccd {
             return 0;
         }
         assert(toi != nullptr);
-
-        int SCCD_MAX_DEPTH = 69;
-        SCCD_READ_ENV(SCCD_MAX_DEPTH, atoi);
-
-        T_HP SCCD_TOL = std::is_same_v<float, T_HP> ? T(1e-6) : T(3e-8);
-        SCCD_READ_ENV(SCCD_TOL, atof);
 
         std::atomic<T> min_t = max_toi;
         if (toi_stride == 0) toi[0] = max_toi;
@@ -779,7 +768,7 @@ namespace sccd {
                 T_HP u = T_HP(0.5);
                 T_HP v = T_HP(0.5);
 
-                if (!find_root_newton_ee<T_HP>(SCCD_MAX_DEPTH, SCCD_TOL, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v)) {
+                if (!find_root_newton_ee<T_HP>(max_depth, tol, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v)) {
                     continue;
                 }
 
@@ -787,7 +776,7 @@ namespace sccd {
                     continue;
                 }
 
-                if (!newton_epsilon_box_accept_ee<T_HP>(SCCD_TOL, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v)) {
+                if (!newton_epsilon_box_accept_ee<T_HP>(tol, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v)) {
                     continue;
                 }
 
@@ -796,7 +785,7 @@ namespace sccd {
                 //                 T_HP ti_u = u;
                 //                 T_HP ti_v = v;
                 //                 if (!find_root_tight_inclusion_ee<T_HP>(
-                //                         SCCD_MAX_DEPTH, SCCD_TOL, s1, s2, s3, s4, e1, e2, e3, e4, ti_t, ti_u, ti_v))
+                //                         max_depth, tol, s1, s2, s3, s4, e1, e2, e3, e4, ti_t, ti_u, ti_v))
                 //                         {
                 //                     continue;
                 //                 }

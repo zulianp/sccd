@@ -23,6 +23,8 @@ namespace sccd {
                             // Output
                             const T max_toi,
                             T* const SCCD_RESTRICT toi,
+                            const int max_depth,
+                            const T tol,
                             const int toi_stride = 0);
 
         template <int nxe, typename T, typename I>
@@ -36,6 +38,8 @@ namespace sccd {
                             I** const SCCD_RESTRICT faces,
                             const T max_toi,
                             T* const SCCD_RESTRICT toi,
+                            const int max_depth,
+                            const T tol,
                             const int toi_stride = 0);
 
         template <typename T>
