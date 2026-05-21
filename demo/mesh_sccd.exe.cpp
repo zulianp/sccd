@@ -57,13 +57,18 @@ int main(int argc, char** argv) {
     int SCCD_USE_FIND_EARLIEST_IMPACT_TIME = 1;
     SCCD_READ_ENV(SCCD_USE_FIND_EARLIEST_IMPACT_TIME, atoi);
 
+    int SCCD_MAX_DEPTH = 69;
+    SCCD_READ_ENV(SCCD_MAX_DEPTH, atoi);
+    scalar_t SCCD_TOL = scalar_t(3e-8);
+    SCCD_READ_ENV(SCCD_TOL, atof);
+
     const ptrdiff_t n_edges = t0->edge_graph()->nnz();
 
     if (SCCD_USE_FIND_EARLIEST_IMPACT_TIME) {
         scalar_t toi = 1;
 
         // find the earliest impact time
-        ccd->find_earliest_impact_time(points0, points1, toi);
+        ccd->find_earliest_impact_time(points0, points1, toi, SCCD_MAX_DEPTH, SCCD_TOL);
 
         double tock = smesh::time_seconds();
         printf("#faces %ld #edges %ld $nodes %ld, %g [s], toi %g\n",
@@ -87,7 +92,8 @@ int main(int argc, char** argv) {
         smesh::SharedBuffer<scalar_t> ee_toi;
 
         // find impact times
-        ccd->find_impact_times(points0, points1, v_overlap, f_overlap, vf_toi, e0_overlap, e1_overlap, ee_toi);
+        ccd->find_impact_times(
+            points0, points1, v_overlap, f_overlap, vf_toi, e0_overlap, e1_overlap, ee_toi, SCCD_MAX_DEPTH, SCCD_TOL);
 
         double tock = smesh::time_seconds();
 
