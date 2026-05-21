@@ -85,7 +85,8 @@ static CandidateData run_ccd(const std::shared_ptr<smesh::Mesh>& t0,
     smesh::SharedBuffer<scalar_t> ee_toi;
 
     auto ccd = sccd::CCD<scalar_t>::create(t0, execution_space);
-    out.err = ccd->find_impact_times(points0, points1, v_overlap, f_overlap, vf_toi, e0_overlap, e1_overlap, ee_toi);
+    out.err = ccd->find_impact_times(
+        points0, points1, v_overlap, f_overlap, vf_toi, e0_overlap, e1_overlap, ee_toi, 69, scalar_t(3e-8));
     if (out.err != SCCD_SUCCESS) {
         return out;
     }
