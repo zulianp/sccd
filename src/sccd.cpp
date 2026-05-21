@@ -56,13 +56,24 @@ int sccd_find_root_vf_f(int max_iter,
     int SCCD_ADAPTIVE_SPLIT = 0;
     SCCD_READ_ENV(SCCD_ADAPTIVE_SPLIT, atoi);
 
-    if (SCCD_ADAPTIVE_SPLIT) {
-        return sccd::find_root_grid_adaptive_split_vf<float>(
-            max_iter, tol, sv, s1, s2, s3, ev, e1, e2, e3, *t, *u, *v, stack);
-    } else {
-        return sccd::find_root_grid_uniform_split_vf<float>(
-            max_iter, tol, sv, s1, s2, s3, ev, e1, e2, e3, *t, *u, *v, stack);
+    float tols[3];
+    compute_face_vertex_tolerance<float>(tol, sv, s1, s2, s3, ev, e1, e2, e3, tols);
+
+    bool found = false;
+    stack.push_back(sccd::unit_domain_box<float>());
+    while (!stack.empty()) {
+        const sccd::Box<float> box = stack.back();
+        stack.pop_back();
+
+        if (SCCD_ADAPTIVE_SPLIT) {
+            found |= sccd::find_root_grid_adaptive_split_vf<float>(
+                max_iter, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, box, *t, *u, *v, stack);
+        } else {
+            found |= sccd::find_root_grid_uniform_split_vf<float>(
+                max_iter, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, box, *t, *u, *v, stack);
+        }
     }
+    return found;
 }
 
 int sccd_find_root_vf_d(int max_iter,
@@ -84,13 +95,24 @@ int sccd_find_root_vf_d(int max_iter,
     std::vector<sccd::Box<double>> stack;
     stack.reserve(1024);
 
-    if (SCCD_ADAPTIVE_SPLIT) {
-        return sccd::find_root_grid_adaptive_split_vf<double>(
-            max_iter, tol, sv, s1, s2, s3, ev, e1, e2, e3, *t, *u, *v, stack);
-    } else {
-        return sccd::find_root_grid_uniform_split_vf<double>(
-            max_iter, tol, sv, s1, s2, s3, ev, e1, e2, e3, *t, *u, *v, stack);
+    double tols[3];
+    compute_face_vertex_tolerance<double>(tol, sv, s1, s2, s3, ev, e1, e2, e3, tols);
+
+    bool found = false;
+    stack.push_back(sccd::unit_domain_box<double>());
+    while (!stack.empty()) {
+        const sccd::Box<double> box = stack.back();
+        stack.pop_back();
+
+        if (SCCD_ADAPTIVE_SPLIT) {
+            found |= sccd::find_root_grid_adaptive_split_vf<double>(
+                max_iter, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, box, *t, *u, *v, stack);
+        } else {
+            found |= sccd::find_root_grid_uniform_split_vf<double>(
+                max_iter, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, box, *t, *u, *v, stack);
+        }
     }
+    return found;
 }
 
 #ifdef SCCD_ENABLE_TIGHT_INCLUSION
@@ -146,13 +168,24 @@ int sccd_find_root_ee_d(int max_iter,
     int SCCD_ADAPTIVE_SPLIT = 0;
     SCCD_READ_ENV(SCCD_ADAPTIVE_SPLIT, atoi);
 
-    if (SCCD_ADAPTIVE_SPLIT) {
-        return sccd::find_root_grid_adaptive_split_ee<double>(
-            max_iter, tol, s0, s1, s2, s3, e0, e1, e2, e3, *t, *u, *v, stack);
-    } else {
-        return sccd::find_root_grid_uniform_split_ee<double>(
-            max_iter, tol, s0, s1, s2, s3, e0, e1, e2, e3, *t, *u, *v, stack);
+    double tols[3];
+    compute_edge_edge_tolerance<double>(tol, s0, s1, s2, s3, e0, e1, e2, e3, tols);
+
+    bool found = false;
+    stack.push_back(sccd::unit_domain_box<double>());
+    while (!stack.empty()) {
+        const sccd::Box<double> box = stack.back();
+        stack.pop_back();
+
+        if (SCCD_ADAPTIVE_SPLIT) {
+            found |= sccd::find_root_grid_adaptive_split_ee<double>(
+                max_iter, tol, tols, s0, s1, s2, s3, e0, e1, e2, e3, box, *t, *u, *v, stack);
+        } else {
+            found |= sccd::find_root_grid_uniform_split_ee<double>(
+                max_iter, tol, tols, s0, s1, s2, s3, e0, e1, e2, e3, box, *t, *u, *v, stack);
+        }
     }
+    return found;
 }
 
 }  // extern "C"
