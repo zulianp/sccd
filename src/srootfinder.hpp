@@ -500,9 +500,11 @@ namespace sccd {
         bool smaller_than_scalar_tol = true;
         bool degenerate_interval = true;
 
+        const T eps = std::numeric_limits<T>::epsilon();
+
         for (int d = 0; d < 3; ++d) {
             const T interval_width = fmax[d] - fmin[d];
-            contains_zero = contains_zero && (fmin[d] <= tol) && (fmax[d] >= -tol);
+            contains_zero = contains_zero && (fmin[d] <= eps) && (fmax[d] >= -eps);
             smaller_than_axis_tol = smaller_than_axis_tol && (interval_width <= tols[d]);
             inside_epsilon_box = inside_epsilon_box && (fmin[d] >= -tol) && (fmax[d] <= tol);
             smaller_than_scalar_tol = smaller_than_scalar_tol && (interval_width < tol);
