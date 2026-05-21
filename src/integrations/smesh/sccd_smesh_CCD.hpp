@@ -111,6 +111,8 @@ namespace sccd {
             return err;
         }
 
+        const smesh::SharedBuffer<smesh::idx_t*>& edges() const { return edges_; }
+
     private:
         std::shared_ptr<smesh::Mesh> mesh_;
         smesh::ExecutionSpace execution_space_{smesh::EXECUTION_SPACE_HOST};
