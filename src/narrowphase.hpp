@@ -341,11 +341,6 @@ namespace sccd {
         return 0;
     }
 
-    template <typename T>
-    inline T clamp_unit(const T x) {
-        return sccd::min<T>(T(1), sccd::max<T>(T(0), x));
-    }
-
 }  // namespace sccd
 
 #endif
