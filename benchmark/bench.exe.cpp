@@ -30,6 +30,9 @@ namespace {
     using scalar_t = double;
     using idx_t = smesh::idx_t;
 
+    int narrowphase_max_depth = 69;
+    scalar_t narrowphase_tol = scalar_t(3e-8);
+
     struct CaseFile {
         fs::path dir;
         std::string key;
@@ -561,9 +564,9 @@ namespace {
 
         const auto start = std::chrono::steady_clock::now();
         if (is_vf) {
-            err = ccd_run.ccd->narrow_phase_fv(toi, vf_tois, 0);
+            err = ccd_run.ccd->narrow_phase_fv(toi, vf_tois, narrowphase_max_depth, narrowphase_tol, 0);
         } else {
-            err = ccd_run.ccd->narrow_phase_ee(toi, ee_tois, 0);
+            err = ccd_run.ccd->narrow_phase_ee(toi, ee_tois, narrowphase_max_depth, narrowphase_tol, 0);
         }
         const auto stop = std::chrono::steady_clock::now();
         static volatile scalar_t toi_sink;
@@ -616,6 +619,8 @@ namespace {
                                                  faces->data(),
                                                  scalar_t(1),
                                                  toi->data(),
+                                                 narrowphase_max_depth,
+                                                 narrowphase_tol,
                                                  1);
             } else {
                 smesh::SharedBuffer<idx_t*> edges = make_2d_buffer(query_geometry.edges, execution_space);
@@ -628,6 +633,8 @@ namespace {
                                               edges->data(),
                                               scalar_t(1),
                                               toi->data(),
+                                              narrowphase_max_depth,
+                                              narrowphase_tol,
                                               1);
             }
 
@@ -656,6 +663,8 @@ namespace {
                                                       faces,
                                                       scalar_t(1),
                                                       sccd_toi.data(),
+                                                      narrowphase_max_depth,
+                                                      narrowphase_tol,
                                                       1);
         } else {
             idx_t* edges[2] = {query_geometry.edges[0].data(), query_geometry.edges[1].data()};
@@ -668,6 +677,8 @@ namespace {
                                                    edges,
                                                    scalar_t(1),
                                                    sccd_toi.data(),
+                                                   narrowphase_max_depth,
+                                                   narrowphase_tol,
                                                    1);
         }
         return true;
@@ -886,6 +897,14 @@ int main(int argc, char** argv) {
         std::cerr << "usage: " << argv[0] << " <data-dir> <dataset> [<dataset> ...]\n";
         return EXIT_FAILURE;
     }
+
+    int SCCD_MAX_DEPTH = narrowphase_max_depth;
+    SCCD_READ_ENV(SCCD_MAX_DEPTH, atoi);
+    narrowphase_max_depth = SCCD_MAX_DEPTH;
+
+    scalar_t SCCD_TOL = narrowphase_tol;
+    SCCD_READ_ENV(SCCD_TOL, atof);
+    narrowphase_tol = SCCD_TOL;
 
     const fs::path data_dir = argv[1];
     bool ok = true;

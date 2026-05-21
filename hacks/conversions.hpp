@@ -506,7 +506,7 @@ namespace sccd {
             });
         }
 
-        geom_t narrow_phase() {
+        geom_t narrow_phase(const int max_depth = 69, const geom_t tol = geom_t(3e-8)) {
             geom_t* v0[3] = {x0.data(), y0.data(), z0.data()};
             geom_t* v1[3] = {x1.data(), y1.data(), z1.data()};
             const auto min_toi = [](const std::vector<geom_t>& values, const geom_t fallback) {
@@ -534,6 +534,8 @@ namespace sccd {
                                              soafaces,
                                              max_toi,
                                              vf_toi.data(),
+                                             max_depth,
+                                             tol,
                                              1);
 
             geom_t toi_vf = min_toi(vf_toi, max_toi);
@@ -555,6 +557,8 @@ namespace sccd {
                                           soaedges,
                                           max_toi,
                                           ee_toi.data(),
+                                          max_depth,
+                                          tol,
                                           1);
 
             geom_t toi_ee = min_toi(ee_toi, max_toi);

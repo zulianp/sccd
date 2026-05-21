@@ -111,8 +111,13 @@ TEST_CASE("Test Lean Narrow phase", "[narrow_phase]")
     printf(
         "Broad time: %g [ms]\n", tts_broad_phase);
 
+    int SCCD_MAX_DEPTH = 69;
+    SCCD_READ_ENV(SCCD_MAX_DEPTH, atoi);
+    Scalar SCCD_TOL = Scalar(3e-8);
+    SCCD_READ_ENV(SCCD_TOL, atof);
+
     timer_ccd.start();
-    Scalar toi = ccd_algo.narrow_phase();
+    Scalar toi = ccd_algo.narrow_phase(SCCD_MAX_DEPTH, SCCD_TOL);
     timer_ccd.stop();
 
     double tts_narrow_phase = timer_ccd.getElapsedTimeInMilliSec();
