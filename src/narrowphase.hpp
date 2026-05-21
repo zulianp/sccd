@@ -77,7 +77,7 @@ namespace sccd {
         int SCCD_MAX_DEPTH = 69;
         SCCD_READ_ENV(SCCD_MAX_DEPTH, atoi);
 
-        T_HP SCCD_TOL = std::is_same_v<float, T_HP> ? T(1e-6) : T(1e-7);
+        T_HP SCCD_TOL = std::is_same_v<float, T_HP> ? T(1e-6) : T(3e-8);
         SCCD_READ_ENV(SCCD_TOL, atof);
 
         int SCCD_REFINE = 0;
@@ -266,7 +266,7 @@ namespace sccd {
         int SCCD_MAX_DEPTH = 69;
         SCCD_READ_ENV(SCCD_MAX_DEPTH, atoi);
 
-        T_HP SCCD_TOL = std::is_same_v<float, T_HP> ? T(1e-6) : T(1e-7);
+        T_HP SCCD_TOL = std::is_same_v<float, T_HP> ? T(1e-6) : T(3e-8);
         SCCD_READ_ENV(SCCD_TOL, atof);
 
         int SCCD_REFINE = 0;
@@ -661,7 +661,7 @@ namespace sccd {
         int SCCD_NEWTON_ITERATIONS = 10;
         SCCD_READ_ENV(SCCD_NEWTON_ITERATIONS, atoi);
 
-        T_HP SCCD_TOL = std::is_same_v<float, T_HP> ? T(1e-6) : T(1e-7);
+        T_HP SCCD_TOL = std::is_same_v<float, T_HP> ? T(1e-6) : T(3e-8);
         SCCD_READ_ENV(SCCD_TOL, atof);
 
         std::atomic<T> min_t = max_toi;
@@ -747,7 +747,7 @@ namespace sccd {
         int SCCD_MAX_DEPTH = 69;
         SCCD_READ_ENV(SCCD_MAX_DEPTH, atoi);
 
-        T_HP SCCD_TOL = std::is_same_v<float, T_HP> ? T(1e-6) : T(1e-7);
+        T_HP SCCD_TOL = std::is_same_v<float, T_HP> ? T(1e-6) : T(3e-8);
         SCCD_READ_ENV(SCCD_TOL, atof);
 
         std::atomic<T> min_t = max_toi;
