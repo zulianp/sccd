@@ -405,6 +405,43 @@ def write_np_qps_pgf_plot(figure_dir, dataset, values):
     return path
 
 
+def write_query_np_timing_pgf_plot(figure_dir, dataset, values):
+    values = sorted(values, key=lambda row: row["step"])
+    if not values:
+        return None
+    ee = "\n".join(
+        f"        ({row['step']},{row['ee_query_narrow_ms']:.12g})" for row in values
+    )
+    fv = "\n".join(
+        f"        ({row['step']},{row['vf_query_narrow_ms']:.12g})" for row in values
+    )
+    combined = "\n".join(
+        f"        ({row['step']},{row['query_narrow_ms']:.12g})" for row in values
+    )
+    path = figure_dir / f"{dataset}_np_query_timings.tex"
+    with path.open("w") as f:
+        f.write(r"\begin{tikzpicture}" "\n")
+        f.write(r"\begin{axis}[" "\n")
+        f.write(r"    width=\linewidth,height=6cm," "\n")
+        f.write(f"    title={{{tex_escape(dataset)}}},\n")
+        f.write(r"    xlabel={Case}," "\n")
+        f.write(r"    ylabel={TOI query narrow-phase time [ms]}," "\n")
+        f.write(r"    grid=both," "\n")
+        f.write(r"    legend pos=north west" "\n")
+        f.write(r"]" "\n")
+        for label, coordinates in (("EE", ee), ("FV", fv), ("EE+FV", combined)):
+            f.write(
+                r"\addplot+[mark=none,thick] coordinates {"
+                "\n" + coordinates + "\n"
+                r"    };"
+                "\n"
+            )
+            f.write(r"\addlegendentry{" + label + "}\n")
+        f.write(r"\end{axis}" "\n")
+        f.write(r"\end{tikzpicture}" "\n")
+    return path
+
+
 def write_figures(figure_dir, by_dataset):
     figures = []
     try:
@@ -483,6 +520,30 @@ def write_figures(figure_dir, by_dataset):
                 fig.savefig(png, dpi=180)
                 plt.close(fig)
                 figures.append(pdf)
+
+            ee_query = [row["ee_query_narrow_ms"] for row in values]
+            fv_query = [row["vf_query_narrow_ms"] for row in values]
+            combined_query = [row["query_narrow_ms"] for row in values]
+            fig, ax = plt.subplots(figsize=(7.0, 3.8), constrained_layout=True)
+            ax.plot(steps, ee_query, label=f"EE mean {mean(ee_query):.3g} ms", linewidth=1.5)
+            ax.plot(steps, fv_query, label=f"FV mean {mean(fv_query):.3g} ms", linewidth=1.5)
+            ax.plot(
+                steps,
+                combined_query,
+                label=f"EE+FV mean {mean(combined_query):.3g} ms",
+                linewidth=1.5,
+            )
+            ax.set_title(dataset)
+            ax.set_xlabel("Case")
+            ax.set_ylabel("TOI query narrow-phase time [ms]")
+            ax.grid(True, alpha=0.25)
+            ax.legend()
+            pdf = figure_dir / f"{dataset}_np_query_timings.pdf"
+            png = figure_dir / f"{dataset}_np_query_timings.png"
+            fig.savefig(pdf)
+            fig.savefig(png, dpi=180)
+            plt.close(fig)
+            figures.append(pdf)
     except Exception as exc:
         print(
             f"warning: matplotlib timing plots were not generated; using PGFPlots fallback: {exc}",
@@ -495,6 +556,9 @@ def write_figures(figure_dir, by_dataset):
             qps_figure = write_np_qps_pgf_plot(figure_dir, dataset, by_dataset[dataset])
             if qps_figure is not None:
                 figures.append(qps_figure)
+            query_np_figure = write_query_np_timing_pgf_plot(figure_dir, dataset, by_dataset[dataset])
+            if query_np_figure is not None:
+                figures.append(query_np_figure)
     return figures
 
 
