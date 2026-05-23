@@ -8,9 +8,9 @@ set -euo pipefail
 # 3) Number of false positives (should be as low as possible for the narrow-phase) and negatives (should be 0)
 # For cuda on Alps: OMP_NUM_THREADS=72 SCCD_BENCH_EXECUTION_SPACE=device srun ./bench.sh 
 
-export  SCCD_ENABLE_ARMADILLO_ROLLERS=1
-export  SCCD_ENABLE_CLOTH_BALL=1
-export  SCCD_ENABLE_CLOTH_FUNNEL=0
+export  SCCD_ENABLE_ARMADILLO_ROLLERS=0
+export  SCCD_ENABLE_CLOTH_BALL=0
+export  SCCD_ENABLE_CLOTH_FUNNEL=1
 export  SCCD_ENABLE_N_BODY_SIMULATION=0
 export  SCCD_ENABLE_PUFFER_BALL=0
 export  SCCD_ENABLE_ROD_TWIST=0
@@ -79,6 +79,8 @@ done
 
 "${PYTHON}" "${BENCHMARK_DIR}/roots_to_raw.py" "${DATA_DIR}" "${PYTHON_DIR}" "${datasets[@]}"
 
+is_enabled "${SCCD_ENABLE_CLOTH_FUNNEL}" && "${PYTHON}" "${PYTHON_DIR}"/remove_nonascii.py "${DATA_DIR}"/cloth-funnel/frames/*.ply
+
 for dataset in "${datasets[@]}"; do
     mma_bool_dir="${DATA_DIR}/${dataset}/mma_bool"
     [[ -d "${mma_bool_dir}" ]] || continue
@@ -140,14 +142,19 @@ BENCH_TOI_ERROR_CSV="${BENCH_AGG_CSV/_aggregate/_toi_error}"
 if [[ "${BENCH_TOI_ERROR_CSV}" == "${BENCH_AGG_CSV}" ]]; then
     BENCH_TOI_ERROR_CSV="$(dirname "${BENCH_AGG_CSV}")/$(basename "${BENCH_AGG_CSV%.*}")_toi_error.${BENCH_AGG_CSV##*.}"
 fi
+BENCH_MISSING_PAIRS_CSV="${SCCD_MISSING_PAIRS_CSV:-"${BENCH_AGG_CSV/_aggregate/_missing_pairs}"}"
+if [[ "${BENCH_MISSING_PAIRS_CSV}" == "${BENCH_AGG_CSV}" ]]; then
+    BENCH_MISSING_PAIRS_CSV="$(dirname "${BENCH_AGG_CSV}")/$(basename "${BENCH_AGG_CSV%.*}")_missing_pairs.${BENCH_AGG_CSV##*.}"
+fi
 BENCH_FIGURE_DIR="${SCCD_BENCH_FIGURE_DIR:-"${BENCHMARK_DIR}/figures"}"
 BENCH_REPORT_TEX="${SCCD_BENCH_REPORT_TEX:-"${BENCHMARK_DIR}/bench_report.tex"}"
-mkdir -p "$(dirname "${BENCH_CSV}")" "$(dirname "${BENCH_AGG_CSV}")" "${BENCH_FIGURE_DIR}" "$(dirname "${BENCH_REPORT_TEX}")"
+mkdir -p "$(dirname "${BENCH_CSV}")" "$(dirname "${BENCH_AGG_CSV}")" "$(dirname "${BENCH_MISSING_PAIRS_CSV}")" "${BENCH_FIGURE_DIR}" "$(dirname "${BENCH_REPORT_TEX}")"
 
 if [[ "${#datasets[@]}" -gt 0 ]]; then
-    "${SCCD_BENCH}" "${DATA_DIR}" "${datasets[@]}" | tee "${BENCH_CSV}"
+    SCCD_MISSING_PAIRS_CSV="${BENCH_MISSING_PAIRS_CSV}" "${SCCD_BENCH}" "${DATA_DIR}" "${datasets[@]}" | tee "${BENCH_CSV}"
 else
     printf 'dataset,case,type,queries,broad_ms,narrow_ms,fp,fn,broad_fp,broad_fn\n' | tee "${BENCH_CSV}"
+    printf 'dataset,case,type,phase,query_id,c0,c1\n' > "${BENCH_MISSING_PAIRS_CSV}"
 fi
 
 exec 1>&2
@@ -161,5 +168,6 @@ tar -czf "${BENCH_ARCHIVE}" \
     -C "$(dirname "${BENCH_AGG_CSV}")" "$(basename "${BENCH_AGG_CSV}")" \
     -C "$(dirname "${BENCH_PAIRED_CSV}")" "$(basename "${BENCH_PAIRED_CSV}")" \
     -C "$(dirname "${BENCH_TOI_ERROR_CSV}")" "$(basename "${BENCH_TOI_ERROR_CSV}")" \
+    -C "$(dirname "${BENCH_MISSING_PAIRS_CSV}")" "$(basename "${BENCH_MISSING_PAIRS_CSV}")" \
     -C "$(dirname "${BENCH_REPORT_TEX}")" "$(basename "${BENCH_REPORT_TEX}")" \
     -C "$(dirname "${BENCH_FIGURE_DIR}")" "$(basename "${BENCH_FIGURE_DIR}")"

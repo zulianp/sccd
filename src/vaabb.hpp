@@ -428,7 +428,8 @@ namespace sccd {
                        const geom_t* const SCCD_RESTRICT* const SCCD_RESTRICT points0,
                        const geom_t* const SCCD_RESTRICT* const SCCD_RESTRICT points1,
                        aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_min,
-                       aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_max) {
+                       aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_max,
+                       const bool safe_inflate) {
         for (int d = 0; d < dim; d++) {
 #pragma omp parallel for
             for (int i = 0; i < n_elements; i++) {
@@ -436,16 +437,31 @@ namespace sccd {
                 aabb_max[d][i] = std::numeric_limits<aabb_t>::lowest();
             }
 
-            for (int v = 0; v < nxe; v++) {
+            if (safe_inflate) {
+                for (int v = 0; v < nxe; v++) {
 #pragma omp parallel for
-                for (int i = 0; i < n_elements; i++) {
-                    const idx_t ii = elements[v][i];
-                    const geom_t p0 = points0[d][ii];
-                    const geom_t p1 = points1[d][ii];
-                    const aabb_t p_min = std::min(p0, p1);
-                    const aabb_t p_max = std::max(p0, p1);
-                    aabb_min[d][i] = std::min(aabb_min[d][i], p_min);
-                    aabb_max[d][i] = std::max(aabb_max[d][i], p_max);
+                    for (int i = 0; i < n_elements; i++) {
+                        const idx_t ii = elements[v][i];
+                        const geom_t p0 = points0[d][ii];
+                        const geom_t p1 = points1[d][ii];
+                        const aabb_t p_min = nextafter_down<aabb_t>(std::min(p0, p1));
+                        const aabb_t p_max = nextafter_up<aabb_t>(std::max(p0, p1));
+                        aabb_min[d][i] = std::min(aabb_min[d][i], p_min);
+                        aabb_max[d][i] = std::max(aabb_max[d][i], p_max);
+                    }
+                }
+            } else {
+                for (int v = 0; v < nxe; v++) {
+#pragma omp parallel for
+                    for (int i = 0; i < n_elements; i++) {
+                        const idx_t ii = elements[v][i];
+                        const geom_t p0 = points0[d][ii];
+                        const geom_t p1 = points1[d][ii];
+                        const aabb_t p_min = std::min(p0, p1);
+                        const aabb_t p_max = std::max(p0, p1);
+                        aabb_min[d][i] = std::min(aabb_min[d][i], p_min);
+                        aabb_max[d][i] = std::max(aabb_max[d][i], p_max);
+                    }
                 }
             }
         }
@@ -457,19 +473,32 @@ namespace sccd {
                        const geom_t* const SCCD_RESTRICT* const SCCD_RESTRICT points0,
                        const geom_t* const SCCD_RESTRICT* const SCCD_RESTRICT points1,
                        aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_min,
-                       aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_max) {
-        for (int d = 0; d < dim; d++) {
+                       aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_max,
+                       const bool safe_inflate) {
+        if (safe_inflate) {
+            for (int d = 0; d < dim; d++) {
 #pragma omp parallel for
-            for (int i = 0; i < n_nodes; i++) {
-                const geom_t p_min = std::min(points0[d][i], points1[d][i]);
-                const geom_t p_max = std::max(points0[d][i], points1[d][i]);
-                aabb_min[d][i] = p_min;
-                aabb_max[d][i] = p_max;
+                for (int i = 0; i < n_nodes; i++) {
+                    const aabb_t p_min = nextafter_down<aabb_t>(std::min(points0[d][i], points1[d][i]));
+                    const aabb_t p_max = nextafter_up<aabb_t>(std::max(points0[d][i], points1[d][i]));
+                    aabb_min[d][i] = p_min;
+                    aabb_max[d][i] = p_max;
+                }
+            }
+        } else {
+            for (int d = 0; d < dim; d++) {
+#pragma omp parallel for
+                for (int i = 0; i < n_nodes; i++) {
+                    const aabb_t p_min = std::min(points0[d][i], points1[d][i]);
+                    const aabb_t p_max = std::max(points0[d][i], points1[d][i]);
+                    aabb_min[d][i] = p_min;
+                    aabb_max[d][i] = p_max;
+                }
             }
         }
     }
 
-    template <typename idx_t, typename geom_t, typename disp_t>
+    template <typename idx_t, typename geom_t, typename disp_t, typename aabb_t>
     void compute_aabbs(const int nxe,
                        const ptrdiff_t n_elements,
                        const idx_t* const SCCD_RESTRICT* const SCCD_RESTRICT elements,
@@ -478,81 +507,124 @@ namespace sccd {
                        const ptrdiff_t stride_disp,
                        const disp_t* const SCCD_RESTRICT* const SCCD_RESTRICT disp0,
                        const disp_t* const SCCD_RESTRICT* const SCCD_RESTRICT disp1,
-                       geom_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_min,
-                       geom_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_max) {
+                       aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_min,
+                       aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_max,
+                       const bool safe_inflate) {
         for (int d = 0; d < dim; d++) {
 #pragma omp parallel for
             for (int i = 0; i < n_elements; i++) {
-                aabb_min[d][i] = std::numeric_limits<geom_t>::max();
-                aabb_max[d][i] = std::numeric_limits<geom_t>::lowest();
+                aabb_min[d][i] = std::numeric_limits<aabb_t>::max();
+                aabb_max[d][i] = std::numeric_limits<aabb_t>::lowest();
             }
 
             for (int v = 0; v < nxe; v++) {
+                if (safe_inflate) {
 #pragma omp parallel for
-                for (int i = 0; i < n_elements; i++) {
-                    const idx_t ii = elements[v][i];
-                    const geom_t p = points[d][ii];
-                    const geom_t disp0_i = p + disp0[d][ii * stride_disp];
-                    const geom_t disp1_i = p + disp1[d][ii * stride_disp];
-                    const geom_t p_min = std::min(disp0_i, disp1_i);
-                    const geom_t p_max = std::max(disp0_i, disp1_i);
-                    aabb_min[d][i] = std::min(aabb_min[d][i], p_min);
-                    aabb_max[d][i] = std::max(aabb_max[d][i], p_max);
+                    for (int i = 0; i < n_elements; i++) {
+                        const idx_t ii = elements[v][i];
+                        const geom_t p = points[d][ii];
+                        const geom_t disp0_i = p + disp0[d][ii * stride_disp];
+                        const geom_t disp1_i = p + disp1[d][ii * stride_disp];
+                        const aabb_t p_min = nextafter_down<aabb_t>(std::min(disp0_i, disp1_i));
+                        const aabb_t p_max = nextafter_up<aabb_t>(std::max(disp0_i, disp1_i));
+                        aabb_min[d][i] = std::min(aabb_min[d][i], p_min);
+                        aabb_max[d][i] = std::max(aabb_max[d][i], p_max);
+                    }
+                } else {
+#pragma omp parallel for
+                    for (int i = 0; i < n_elements; i++) {
+                        const idx_t ii = elements[v][i];
+                        const geom_t p = points[d][ii];
+                        const geom_t disp0_i = p + disp0[d][ii * stride_disp];
+                        const geom_t disp1_i = p + disp1[d][ii * stride_disp];
+                        const aabb_t p_min = std::min(disp0_i, disp1_i);
+                        const aabb_t p_max = std::max(disp0_i, disp1_i);
+                        aabb_min[d][i] = std::min(aabb_min[d][i], p_min);
+                        aabb_max[d][i] = std::max(aabb_max[d][i], p_max);
+                    }
                 }
             }
         }
     }
 
-    template <typename geom_t, typename disp_t>
+    template <typename geom_t, typename disp_t, typename aabb_t>
     void compute_aabbs(const int dim,
                        const ptrdiff_t n_nodes,
                        const geom_t* const SCCD_RESTRICT* const SCCD_RESTRICT points,
                        const ptrdiff_t stride_disp,
                        const disp_t* const SCCD_RESTRICT* const SCCD_RESTRICT disp0,
                        const disp_t* const SCCD_RESTRICT* const SCCD_RESTRICT disp1,
-                       geom_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_min,
-                       geom_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_max) {
+                       aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_min,
+                       aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_max,
+                       const bool safe_inflate) {
         for (int d = 0; d < dim; d++) {
+            if (safe_inflate) {
 #pragma omp parallel for
-            for (int i = 0; i < n_nodes; i++) {
-                const geom_t p = points[d][i];
-                const geom_t disp0_i = p + disp0[d][i * stride_disp];
-                const geom_t disp1_i = p + disp1[d][i * stride_disp];
-                const geom_t p_min = std::min(disp0_i, disp1_i);
-                const geom_t p_max = std::max(disp0_i, disp1_i);
-                aabb_min[d][i] = p_min;
-                aabb_max[d][i] = p_max;
-            }
-        }
-    }
-
-    template <typename idx_t, typename geom_t>
-    void compute_aabbs(const int nxe,
-                       const ptrdiff_t n_elements,
-                       const idx_t* const SCCD_RESTRICT* const SCCD_RESTRICT elements,
-                       const int dim,
-                       const geom_t* const SCCD_RESTRICT* const SCCD_RESTRICT points,
-                       geom_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_min,
-                       geom_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_max) {
-        for (int d = 0; d < dim; d++) {
+                for (int i = 0; i < n_nodes; i++) {
+                    const geom_t p = points[d][i];
+                    const geom_t disp0_i = p + disp0[d][i * stride_disp];
+                    const geom_t disp1_i = p + disp1[d][i * stride_disp];
+                    const aabb_t p_min = nextafter_down<aabb_t>(std::min(disp0_i, disp1_i));
+                    const aabb_t p_max = nextafter_up<aabb_t>(std::max(disp0_i, disp1_i));
+                    aabb_min[d][i] = p_min;
+                    aabb_max[d][i] = p_max;
+                }
+            } else {
 #pragma omp parallel for
-            for (int i = 0; i < n_elements; i++) {
-                aabb_min[d][i] = std::numeric_limits<geom_t>::max();
-                aabb_max[d][i] = std::numeric_limits<geom_t>::lowest();
-            }
-
-            for (int v = 0; v < nxe; v++) {
-#pragma omp parallel for
-                for (int i = 0; i < n_elements; i++) {
-                    const idx_t ii = elements[v][i];
-                    const geom_t p = points[d][ii];
-                    aabb_min[d][i] = std::min(aabb_min[d][i], p);
-                    aabb_max[d][i] = std::max(aabb_max[d][i], p);
+                for (int i = 0; i < n_nodes; i++) {
+                    const geom_t p = points[d][i];
+                    const geom_t disp0_i = p + disp0[d][i * stride_disp];
+                    const geom_t disp1_i = p + disp1[d][i * stride_disp];
+                    const geom_t p_min = std::min(disp0_i, disp1_i);
+                    const geom_t p_max = std::max(disp0_i, disp1_i);
+                    aabb_min[d][i] = p_min;
+                    aabb_max[d][i] = p_max;
                 }
             }
         }
     }
 
+    template <typename idx_t, typename geom_t, typename aabb_t>
+    void compute_aabbs(const int nxe,
+                       const ptrdiff_t n_elements,
+                       const idx_t* const SCCD_RESTRICT* const SCCD_RESTRICT elements,
+                       const int dim,
+                       const geom_t* const SCCD_RESTRICT* const SCCD_RESTRICT points,
+                       aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_min,
+                       aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_max,
+                       const bool safe_inflate) {
+        for (int d = 0; d < dim; d++) {
+#pragma omp parallel for
+            for (int i = 0; i < n_elements; i++) {
+                aabb_min[d][i] = std::numeric_limits<aabb_t>::max();
+                aabb_max[d][i] = std::numeric_limits<aabb_t>::lowest();
+            }
+
+            if (safe_inflate) {
+                for (int v = 0; v < nxe; v++) {
+#pragma omp parallel for
+                    for (int i = 0; i < n_elements; i++) {
+                        const idx_t ii = elements[v][i];
+                        const geom_t p = points[d][ii];
+                        const aabb_t p_min = nextafter_down<aabb_t>(p);
+                        const aabb_t p_max = nextafter_up<aabb_t>(p);
+                        aabb_min[d][i] = std::min(aabb_min[d][i], p_min);
+                        aabb_max[d][i] = std::max(aabb_max[d][i], p_max);
+                    }
+                }
+            } else {
+                for (int v = 0; v < nxe; v++) {
+#pragma omp parallel for
+                    for (int i = 0; i < n_elements; i++) {
+                        const idx_t ii = elements[v][i];
+                        const aabb_t p = points[d][ii];
+                        aabb_min[d][i] = std::min(aabb_min[d][i], p);
+                        aabb_max[d][i] = std::max(aabb_max[d][i], p);
+                    }
+                }
+            }
+        }
+    }
 }  // namespace sccd
 
 #endif  // VAABB_H
