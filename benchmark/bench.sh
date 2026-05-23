@@ -138,6 +138,10 @@ BENCH_PAIRED_CSV="${BENCH_AGG_CSV/_aggregate/_paired}"
 if [[ "${BENCH_PAIRED_CSV}" == "${BENCH_AGG_CSV}" ]]; then
     BENCH_PAIRED_CSV="$(dirname "${BENCH_AGG_CSV}")/$(basename "${BENCH_AGG_CSV%.*}")_paired.${BENCH_AGG_CSV##*.}"
 fi
+BENCH_NP_QUERY_TIMING_CSV="${BENCH_AGG_CSV/_aggregate/_np_query_timing}"
+if [[ "${BENCH_NP_QUERY_TIMING_CSV}" == "${BENCH_AGG_CSV}" ]]; then
+    BENCH_NP_QUERY_TIMING_CSV="$(dirname "${BENCH_AGG_CSV}")/$(basename "${BENCH_AGG_CSV%.*}")_np_query_timing.${BENCH_AGG_CSV##*.}"
+fi
 BENCH_TOI_ERROR_CSV="${BENCH_AGG_CSV/_aggregate/_toi_error}"
 if [[ "${BENCH_TOI_ERROR_CSV}" == "${BENCH_AGG_CSV}" ]]; then
     BENCH_TOI_ERROR_CSV="$(dirname "${BENCH_AGG_CSV}")/$(basename "${BENCH_AGG_CSV%.*}")_toi_error.${BENCH_AGG_CSV##*.}"
@@ -153,7 +157,7 @@ mkdir -p "$(dirname "${BENCH_CSV}")" "$(dirname "${BENCH_AGG_CSV}")" "$(dirname 
 if [[ "${#datasets[@]}" -gt 0 ]]; then
     SCCD_MISSING_PAIRS_CSV="${BENCH_MISSING_PAIRS_CSV}" "${SCCD_BENCH}" "${DATA_DIR}" "${datasets[@]}" | tee "${BENCH_CSV}"
 else
-    printf 'dataset,case,type,queries,broad_ms,narrow_ms,fp,fn,broad_fp,broad_fn\n' | tee "${BENCH_CSV}"
+    printf 'dataset,case,type,queries,prep_ms,broad_ms,narrow_ms,query_narrow_ms,fp,fn,broad_fp,broad_fn\n' | tee "${BENCH_CSV}"
     printf 'dataset,case,type,phase,query_id,c0,c1\n' > "${BENCH_MISSING_PAIRS_CSV}"
 fi
 
@@ -167,6 +171,7 @@ tar -czf "${BENCH_ARCHIVE}" \
     -C "$(dirname "${BENCH_CSV}")" "$(basename "${BENCH_CSV}")" \
     -C "$(dirname "${BENCH_AGG_CSV}")" "$(basename "${BENCH_AGG_CSV}")" \
     -C "$(dirname "${BENCH_PAIRED_CSV}")" "$(basename "${BENCH_PAIRED_CSV}")" \
+    -C "$(dirname "${BENCH_NP_QUERY_TIMING_CSV}")" "$(basename "${BENCH_NP_QUERY_TIMING_CSV}")" \
     -C "$(dirname "${BENCH_TOI_ERROR_CSV}")" "$(basename "${BENCH_TOI_ERROR_CSV}")" \
     -C "$(dirname "${BENCH_MISSING_PAIRS_CSV}")" "$(basename "${BENCH_MISSING_PAIRS_CSV}")" \
     -C "$(dirname "${BENCH_REPORT_TEX}")" "$(basename "${BENCH_REPORT_TEX}")" \

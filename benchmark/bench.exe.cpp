@@ -662,8 +662,10 @@ namespace {
     bool compute_query_toi(const bool is_vf,
                            QueryGeometry& query_geometry,
                            const smesh::ExecutionSpace execution_space,
-                           std::vector<scalar_t>& sccd_toi) {
+                           std::vector<scalar_t>& sccd_toi,
+                           double& query_narrow_ms) {
         sccd_toi.assign(query_geometry.q0.size(), scalar_t(1));
+        query_narrow_ms = 0.0;
 
         if (execution_space == smesh::EXECUTION_SPACE_DEVICE) {
 #if defined(SCCD_ENABLE_CUDA)
@@ -675,6 +677,7 @@ namespace {
 
             if (is_vf) {
                 smesh::SharedBuffer<idx_t*> faces = make_2d_buffer(query_geometry.faces, execution_space);
+                const auto start = std::chrono::steady_clock::now();
                 sccd::device::narrow_phase_vf<3>(query_geometry.q0.size(),
                                                  q0->data(),
                                                  q1->data(),
@@ -687,8 +690,11 @@ namespace {
                                                  narrowphase_max_depth,
                                                  narrowphase_tol,
                                                  1);
+                const auto stop = std::chrono::steady_clock::now();
+                query_narrow_ms = std::chrono::duration<double, std::milli>(stop - start).count();
             } else {
                 smesh::SharedBuffer<idx_t*> edges = make_2d_buffer(query_geometry.edges, execution_space);
+                const auto start = std::chrono::steady_clock::now();
                 sccd::device::narrow_phase_ee(query_geometry.q0.size(),
                                               q0->data(),
                                               q1->data(),
@@ -701,6 +707,8 @@ namespace {
                                               narrowphase_max_depth,
                                               narrowphase_tol,
                                               1);
+                const auto stop = std::chrono::steady_clock::now();
+                query_narrow_ms = std::chrono::duration<double, std::milli>(stop - start).count();
             }
 
             auto host_toi = smesh::to_host(toi);
@@ -716,6 +724,7 @@ namespace {
             query_geometry.points0[0].data(), query_geometry.points0[1].data(), query_geometry.points0[2].data()};
         scalar_t* points1[3] = {
             query_geometry.points1[0].data(), query_geometry.points1[1].data(), query_geometry.points1[2].data()};
+        const auto start = std::chrono::steady_clock::now();
         if (is_vf) {
             idx_t* faces[3] = {
                 query_geometry.faces[0].data(), query_geometry.faces[1].data(), query_geometry.faces[2].data()};
@@ -746,6 +755,8 @@ namespace {
                                                    narrowphase_tol,
                                                    1);
         }
+        const auto stop = std::chrono::steady_clock::now();
+        query_narrow_ms = std::chrono::duration<double, std::milli>(stop - start).count();
         return true;
     }
 
@@ -767,7 +778,6 @@ namespace {
                             std::vector<double>& timings_ms) {
         const std::size_t narrow_queries =
             case_file.is_vf ? broadphase.v_overlap->size() : broadphase.e0_overlap->size();
-        timings_ms.push_back(narrow_ms);
         populate_broadphase_pairs(meshes, case_file.is_vf, broad_expected, edge_id_map, broadphase);
 
         std::vector<std::uint8_t> mma;
@@ -784,7 +794,8 @@ namespace {
         }
 
         std::vector<scalar_t> sccd_toi;
-        if (!compute_query_toi(case_file.is_vf, query_geometry, execution_space, sccd_toi)) {
+        double query_narrow_ms = 0.0;
+        if (!compute_query_toi(case_file.is_vf, query_geometry, execution_space, sccd_toi, query_narrow_ms)) {
             return false;
         }
 
@@ -835,10 +846,6 @@ namespace {
         }
 
         const std::uint64_t broad_fn_count = static_cast<std::uint64_t>(fn_broad_c0.size());
-        std::cout << dataset << ',' << case_file.key << ',' << (case_file.is_vf ? "vf" : "ee") << ',' << narrow_queries
-                  << ',' << prep_ms << ',' << broad_ms << ',' << narrow_ms << ',' << fp_count << ',' << fn_count << ','
-                  << broadphase.false_positives << ',' << broad_fn_count << '\n';
-
         const bool wrote = write_raw(roots_dir / "sccd_toi.float64", sccd_toi) &&
                            write_raw(roots_dir / "sccd_fp.uint8", fp) && write_raw(roots_dir / "sccd_fn.uint8", fn) &&
                            write_raw(roots_dir / "sccd_fp_broad.uint8", fp_broad) &&
@@ -852,6 +859,11 @@ namespace {
                       << " broad_fn=" << broad_fn_count << "\n";
             return wrote && append_missing_pairs_report(dataset_dir, dataset, case_file, c0, c1, fn, fn_broad);
         }
+
+        timings_ms.push_back(narrow_ms);
+        std::cout << dataset << ',' << case_file.key << ',' << (case_file.is_vf ? "vf" : "ee") << ',' << narrow_queries
+                  << ',' << prep_ms << ',' << broad_ms << ',' << narrow_ms << ',' << query_narrow_ms << ','
+                  << fp_count << ',' << fn_count << ',' << broadphase.false_positives << ',' << broad_fn_count << '\n';
         return wrote;
     }
 
@@ -977,7 +989,7 @@ int main(int argc, char** argv) {
     if (using_global_missing_pairs_report) {
         ok = initialize_missing_pairs_report(data_dir) && ok;
     }
-    std::cout << "dataset,case,type,queries,prep_ms,broad_ms,narrow_ms,fp,fn,broad_fp,broad_fn\n";
+    std::cout << "dataset,case,type,queries,prep_ms,broad_ms,narrow_ms,query_narrow_ms,fp,fn,broad_fp,broad_fn\n";
     for (int i = 2; i < argc; ++i) {
         const std::string dataset = argv[i];
         const fs::path dataset_dir = data_dir / dataset;

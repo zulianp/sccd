@@ -22,6 +22,16 @@ def std(values):
     )
 
 
+def median(values):
+    if not values:
+        return 0.0
+    sorted_values = sorted(values)
+    mid = len(sorted_values) // 2
+    if len(sorted_values) % 2:
+        return sorted_values[mid]
+    return 0.5 * (sorted_values[mid - 1] + sorted_values[mid])
+
+
 def stats(values):
     return (
         mean(values),
@@ -63,6 +73,7 @@ def read_rows(bench_csv):
                 "prep_ms": float(row.get("prep_ms", 0.0)),
                 "broad_ms": float(row["broad_ms"]),
                 "narrow_ms": float(row["narrow_ms"]),
+                "query_narrow_ms": float(row.get("query_narrow_ms", 0.0)),
                 "fp": float(row["fp"]),
                 "fn": float(row["fn"]),
                 "broad_fp": float(row["broad_fp"]),
@@ -89,6 +100,7 @@ def pair_rows(rows):
                 "prep_ms",
                 "broad_ms",
                 "narrow_ms",
+                "query_narrow_ms",
                 "fp",
                 "fn",
                 "broad_fp",
@@ -114,6 +126,7 @@ def pair_rows(rows):
         for key in (
             "queries",
             "narrow_ms",
+            "query_narrow_ms",
             "fp",
             "fn",
             "broad_fp",
@@ -156,6 +169,7 @@ def write_paired_csv(paired_csv, paired_rows):
                 "prep_ms",
                 "broad_ms",
                 "narrow_ms",
+                "query_narrow_ms",
                 "fp",
                 "fn",
                 "broad_fp",
@@ -188,17 +202,26 @@ def write_aggregate_csv(agg_csv, by_dataset):
         "queries_min",
         "queries_max",
         "prep_ms_mean",
+        "prep_ms_median",
         "prep_ms_std",
         "prep_ms_min",
         "prep_ms_max",
         "broad_ms_mean",
+        "broad_ms_median",
         "broad_ms_std",
         "broad_ms_min",
         "broad_ms_max",
         "narrow_ms_mean",
+        "narrow_ms_median",
         "narrow_ms_std",
         "narrow_ms_min",
         "narrow_ms_max",
+        "total_ms_median",
+        "query_narrow_ms_mean",
+        "query_narrow_ms_median",
+        "query_narrow_ms_std",
+        "query_narrow_ms_min",
+        "query_narrow_ms_max",
         "fp_sum",
         "fn_sum",
         "broad_fp_sum",
@@ -209,7 +232,13 @@ def write_aggregate_csv(agg_csv, by_dataset):
     for dataset in sorted(by_dataset):
         values = by_dataset[dataset]
         out = {"dataset": dataset, "cases": len(values)}
-        for key in ("queries", "prep_ms", "broad_ms", "narrow_ms"):
+        for key in (
+            "queries",
+            "prep_ms",
+            "broad_ms",
+            "narrow_ms",
+            "query_narrow_ms",
+        ):
             values_for_key = [value[key] for value in values]
             (
                 out[f"{key}_mean"],
@@ -217,8 +246,12 @@ def write_aggregate_csv(agg_csv, by_dataset):
                 out[f"{key}_min"],
                 out[f"{key}_max"],
             ) = stats(values_for_key)
+            out[f"{key}_median"] = median(values_for_key)
             if key == "queries":
                 out[f"{key}_sum"] = sum(values_for_key)
+        out["total_ms_median"] = median(
+            value["prep_ms"] + value["broad_ms"] + value["narrow_ms"] for value in values
+        )
         for key in ("fp", "fn", "broad_fp", "broad_fn"):
             out[f"{key}_sum"] = sum(value[key] for value in values)
         agg_rows.append(out)
@@ -237,6 +270,36 @@ def write_aggregate_csv(agg_csv, by_dataset):
                     for key in fields
                 }
             )
+
+
+def write_np_query_timing_csv(np_query_timing_csv, by_dataset):
+    fields = [
+        "dataset",
+        "phase",
+        "ms_mean",
+        "ms_min",
+        "ms_max",
+    ]
+    with np_query_timing_csv.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fields)
+        writer.writeheader()
+        for dataset in sorted(by_dataset):
+            values = by_dataset[dataset]
+            rows = (
+                ("EE", [row["ee_query_narrow_ms"] for row in values]),
+                ("FV", [row["vf_query_narrow_ms"] for row in values]),
+                ("EE+FV", [row["query_narrow_ms"] for row in values]),
+            )
+            for phase, phase_values in rows:
+                writer.writerow(
+                    {
+                        "dataset": dataset,
+                        "phase": phase,
+                        "ms_mean": f"{mean(phase_values):.9g}",
+                        "ms_min": f"{min(phase_values) if phase_values else 0.0:.9g}",
+                        "ms_max": f"{max(phase_values) if phase_values else 0.0:.9g}",
+                    }
+                )
 
 
 def tex_escape(text):
@@ -480,6 +543,7 @@ def write_toi_error_csv(toi_error_csv, points_by_dataset):
         "dataset",
         "toi_count",
         "toi_rel_error_avg",
+        "toi_rel_error_median",
         "toi_rel_error_min",
         "toi_rel_error_max",
     ]
@@ -495,6 +559,7 @@ def write_toi_error_csv(toi_error_csv, points_by_dataset):
                     "dataset": dataset,
                     "toi_count": len(errors),
                     "toi_rel_error_avg": f"{mean(errors):.9g}",
+                    "toi_rel_error_median": f"{median(errors):.9g}",
                     "toi_rel_error_min": f"{min(errors):.9g}",
                     "toi_rel_error_max": f"{max(errors):.9g}",
                 }
@@ -628,7 +693,8 @@ def write_toi_error_histograms(figure_dir, errors_by_dataset):
         ]
 
         datasets = sorted(errors_by_dataset)
-        x = np.arange(len(labels))
+        bin_centers = np.arange(len(labels)) + 0.5
+        bin_edges = np.arange(len(labels) + 1)
         width = min(0.8 / len(datasets), 0.18)
         offsets = (np.arange(len(datasets)) - (len(datasets) - 1) / 2.0) * width
         colors = plt.get_cmap("tab10")(np.linspace(0.0, 1.0, max(len(datasets), 2)))
@@ -638,13 +704,18 @@ def write_toi_error_histograms(figure_dir, errors_by_dataset):
         for i, dataset in enumerate(datasets):
             counts, _ = np.histogram(errors_by_dataset[dataset], bins=bins)
             percentages = counts * (100.0 / len(errors_by_dataset[dataset]))
-            ax.bar(x + offsets[i], percentages, width=width, label=dataset, color=colors[i], edgecolor="none")
+            ax.bar(bin_centers + offsets[i], percentages, width=width, label=dataset, color=colors[i], edgecolor="none")
 
         ax.set_title("TOI relative error histogram")
         ax.set_xlabel("Relative TOI error range")
         ax.set_ylabel("Error samples (%)")
-        ax.set_xticks(x)
-        ax.set_xticklabels(labels, rotation=45, ha="right")
+        ax.set_xlim(bin_edges[0], bin_edges[-1])
+        ax.set_xticks(bin_edges)
+        ax.set_xticklabels([])
+        ax.set_xticks(bin_centers, minor=True)
+        ax.set_xticklabels(labels, minor=True, rotation=45, ha="right")
+        ax.tick_params(axis="x", which="major", length=6)
+        ax.tick_params(axis="x", which="minor", length=0)
         ax.grid(axis="y", alpha=0.25)
         ax.legend()
 
@@ -662,9 +733,10 @@ def write_toi_error_histograms(figure_dir, errors_by_dataset):
     return figures
 
 
-def write_report(report_tex, agg_csv, paired_csv, toi_error_csv, figures):
+def write_report(report_tex, agg_csv, paired_csv, np_query_timing_csv, toi_error_csv, figures):
     rel_agg = relative_to_or_self(agg_csv, report_tex.parent)
     rel_paired = relative_to_or_self(paired_csv, report_tex.parent)
+    rel_np_query_timing = relative_to_or_self(np_query_timing_csv, report_tex.parent)
     rel_toi_error = relative_to_or_self(toi_error_csv, report_tex.parent)
     with report_tex.open("w") as f:
         f.write(
@@ -731,10 +803,48 @@ def write_report(report_tex, agg_csv, paired_csv, toi_error_csv, figures):
 {\footnotesize
 \pgfplotstabletypeset[
     col sep=comma,
-    columns={dataset,toi_count,toi_rel_error_avg,toi_rel_error_min,toi_rel_error_max},
+    columns={dataset,cases,total_ms_median,prep_ms_median,broad_ms_median,narrow_ms_median},
+    columns/dataset/.style={string type,column name=Dataset},
+    columns/cases/.style={column name=Cases},
+    columns/total_ms_median/.style={fixed,precision=3,column name={Total median}},
+    columns/prep_ms_median/.style={fixed,precision=3,column name={AABB median}},
+    columns/broad_ms_median/.style={fixed,precision=3,column name={BP median}},
+    columns/narrow_ms_median/.style={fixed,precision=3,column name={NP median}},
+    every head row/.style={before row=\toprule,after row=\midrule},
+    every last row/.style={after row=\bottomrule}
+]{"""
+        )
+        f.write(tex_path(rel_agg))
+        f.write(
+            r"""}
+}
+
+{\footnotesize
+\pgfplotstabletypeset[
+    col sep=comma,
+    columns={dataset,phase,ms_mean,ms_min,ms_max},
+    columns/dataset/.style={string type,column name=Dataset},
+    columns/phase/.style={string type,column name=Phase},
+    columns/ms_mean/.style={fixed,precision=3,column name={Mean ms}},
+    columns/ms_min/.style={fixed,precision=3,column name={Min ms}},
+    columns/ms_max/.style={fixed,precision=3,column name={Max ms}},
+    every head row/.style={before row=\toprule,after row=\midrule},
+    every last row/.style={after row=\bottomrule}
+]{"""
+        )
+        f.write(tex_path(rel_np_query_timing))
+        f.write(
+            r"""}
+}
+
+{\footnotesize
+\pgfplotstabletypeset[
+    col sep=comma,
+    columns={dataset,toi_count,toi_rel_error_avg,toi_rel_error_median,toi_rel_error_min,toi_rel_error_max},
     columns/dataset/.style={string type,column name=Dataset},
     columns/toi_count/.style={fixed,precision=0,column name={TOI count}},
     columns/toi_rel_error_avg/.style={sci,precision=3,column name={Avg rel error}},
+    columns/toi_rel_error_median/.style={sci,precision=3,column name={Median rel error}},
     columns/toi_rel_error_min/.style={sci,precision=3,column name={Min rel error}},
     columns/toi_rel_error_max/.style={sci,precision=3,column name={Max rel error}},
     every head row/.style={before row=\toprule,after row=\midrule},
@@ -773,6 +883,9 @@ def main(argv):
     paired_csv = agg_csv.with_name(agg_csv.name.replace("_aggregate", "_paired"))
     if paired_csv == agg_csv:
         paired_csv = agg_csv.with_name(f"{agg_csv.stem}_paired{agg_csv.suffix}")
+    np_query_timing_csv = agg_csv.with_name(agg_csv.name.replace("_aggregate", "_np_query_timing"))
+    if np_query_timing_csv == agg_csv:
+        np_query_timing_csv = agg_csv.with_name(f"{agg_csv.stem}_np_query_timing{agg_csv.suffix}")
     toi_error_csv = agg_csv.with_name(agg_csv.name.replace("_aggregate", "_toi_error"))
     if toi_error_csv == agg_csv:
         toi_error_csv = agg_csv.with_name(f"{agg_csv.stem}_toi_error{agg_csv.suffix}")
@@ -781,6 +894,7 @@ def main(argv):
     data_dir = Path(argv[5]) if len(argv) == 6 else bench_csv.parent.parent / "data"
     agg_csv.parent.mkdir(parents=True, exist_ok=True)
     paired_csv.parent.mkdir(parents=True, exist_ok=True)
+    np_query_timing_csv.parent.mkdir(parents=True, exist_ok=True)
     toi_error_csv.parent.mkdir(parents=True, exist_ok=True)
     figure_dir.mkdir(parents=True, exist_ok=True)
     report_tex.parent.mkdir(parents=True, exist_ok=True)
@@ -789,6 +903,7 @@ def main(argv):
     by_dataset, paired_rows = pair_rows(rows)
     write_paired_csv(paired_csv, paired_rows)
     write_aggregate_csv(agg_csv, by_dataset)
+    write_np_query_timing_csv(np_query_timing_csv, by_dataset)
     figures = write_figures(figure_dir, by_dataset)
     if data_dir.exists():
         points_by_dataset, errors_by_dataset = collect_toi_points(data_dir, rows)
@@ -801,7 +916,7 @@ def main(argv):
             file=sys.stderr,
         )
         write_toi_error_csv(toi_error_csv, {})
-    write_report(report_tex, agg_csv, paired_csv, toi_error_csv, figures)
+    write_report(report_tex, agg_csv, paired_csv, np_query_timing_csv, toi_error_csv, figures)
     return 0
 
 
