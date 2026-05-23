@@ -101,7 +101,6 @@ namespace sccd {
         ticcd::Array3 err(-1, -1, -1);
 
         ticcd::Scalar ms = 0;
-        ticcd::Scalar max_time = 1;
         // ticcd::Scalar output_tolerance = 1e-6;
         ticcd::Scalar output_tolerance = atol;
         bool no_zero_toi = false;
@@ -174,7 +173,6 @@ namespace sccd {
         ticcd::Array3 err(-1, -1, -1);
 
         ticcd::Scalar ms = 0;
-        ticcd::Scalar max_time = 1;
         // ticcd::Scalar output_tolerance = 1e-6;
         ticcd::Scalar output_tolerance = atol;
         bool no_zero_toi = true;
