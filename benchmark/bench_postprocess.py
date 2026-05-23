@@ -437,6 +437,7 @@ def write_figures(figure_dir, by_dataset):
 
 def collect_toi_points(data_dir, rows):
     points_by_dataset = defaultdict(list)
+    errors_by_dataset = defaultdict(list)
     missing = 0
     mismatched = 0
     for row in rows:
@@ -458,7 +459,9 @@ def collect_toi_points(data_dir, rows):
             if not math.isfinite(reference_toi) or not math.isfinite(sccd_toi):
                 continue
             denominator = reference_toi + 1.0e-12
-            points.append((reference_toi, sccd_toi / denominator, abs(sccd_toi - reference_toi) / denominator))
+            error = abs(sccd_toi - reference_toi) / denominator
+            points.append((reference_toi, sccd_toi / denominator, error))
+            errors_by_dataset[row["dataset"]].append(error)
 
     if missing:
         print(
@@ -469,7 +472,7 @@ def collect_toi_points(data_dir, rows):
             f"warning: skipped {mismatched} cases with mismatched TOI raw sizes",
             file=sys.stderr,
         )
-    return points_by_dataset
+    return points_by_dataset, errors_by_dataset
 
 
 def write_toi_error_csv(toi_error_csv, points_by_dataset):
@@ -580,6 +583,82 @@ def write_toi_figures(figure_dir, points_by_dataset):
             figure = write_toi_pgf_plot(figure_dir, dataset, points_by_dataset[dataset])
             if figure is not None:
                 figures.append(figure)
+    return figures
+
+
+def write_toi_error_histograms(figure_dir, errors_by_dataset):
+    figures = []
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        errors_by_dataset = {
+            dataset: [error for error in errors if math.isfinite(error) and error >= 0.0]
+            for dataset, errors in errors_by_dataset.items()
+        }
+        errors_by_dataset = {
+            dataset: errors for dataset, errors in errors_by_dataset.items() if errors
+        }
+        if not errors_by_dataset:
+            return figures
+
+        all_errors = [error for errors in errors_by_dataset.values() for error in errors]
+        positive = [error for error in all_errors if error > 0.0]
+        min_positive = min(positive) if positive else 1.0e-16
+        min_edge = 10.0 ** math.floor(math.log10(max(min_positive, 1.0e-16)))
+        max_edge = 10.0 ** math.ceil(math.log10(max(max(all_errors), min_edge)))
+        if max_edge <= min_edge:
+            max_edge = min_edge * 10.0
+        bins = np.concatenate(
+            (
+                [0.0],
+                np.logspace(
+                    math.log10(min_edge),
+                    math.log10(max_edge),
+                    int(round(math.log10(max_edge / min_edge))) + 1,
+                ),
+            )
+        )
+        labels = [
+            f"[{lo:.0e}, {hi:.0e})" if lo > 0.0 else f"[0, {hi:.0e})"
+            for lo, hi in zip(bins[:-1], bins[1:])
+        ]
+
+        datasets = sorted(errors_by_dataset)
+        x = np.arange(len(labels))
+        width = min(0.8 / len(datasets), 0.18)
+        offsets = (np.arange(len(datasets)) - (len(datasets) - 1) / 2.0) * width
+        colors = plt.get_cmap("tab10")(np.linspace(0.0, 1.0, max(len(datasets), 2)))
+
+        fig_width = max(9.0, 0.42 * len(labels))
+        fig, ax = plt.subplots(figsize=(fig_width, 4.8), constrained_layout=True)
+        for i, dataset in enumerate(datasets):
+            counts, _ = np.histogram(errors_by_dataset[dataset], bins=bins)
+            percentages = counts * (100.0 / len(errors_by_dataset[dataset]))
+            ax.bar(x + offsets[i], percentages, width=width, label=dataset, color=colors[i], edgecolor="none")
+
+        ax.set_title("TOI relative error histogram")
+        ax.set_xlabel("Relative TOI error range")
+        ax.set_ylabel("Error samples (%)")
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels, rotation=45, ha="right")
+        ax.grid(axis="y", alpha=0.25)
+        ax.legend()
+
+        pdf = figure_dir / "toi_error_histogram.pdf"
+        png = figure_dir / "toi_error_histogram.png"
+        fig.savefig(pdf)
+        fig.savefig(png, dpi=180)
+        plt.close(fig)
+        figures.append(png)
+    except Exception as exc:
+        print(
+            f"warning: matplotlib TOI error histograms were not generated: {exc}",
+            file=sys.stderr,
+        )
     return figures
 
 
@@ -712,9 +791,10 @@ def main(argv):
     write_aggregate_csv(agg_csv, by_dataset)
     figures = write_figures(figure_dir, by_dataset)
     if data_dir.exists():
-        points_by_dataset = collect_toi_points(data_dir, rows)
+        points_by_dataset, errors_by_dataset = collect_toi_points(data_dir, rows)
         write_toi_error_csv(toi_error_csv, points_by_dataset)
         figures.extend(write_toi_figures(figure_dir, points_by_dataset))
+        figures.extend(write_toi_error_histograms(figure_dir, errors_by_dataset))
     else:
         print(
             f"warning: skipped TOI plots because data directory does not exist: {data_dir}",

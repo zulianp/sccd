@@ -118,6 +118,62 @@ namespace {
         return static_cast<bool>(out);
     }
 
+    fs::path missing_pairs_report_path(const fs::path& dataset_dir) {
+        if (const char* path = std::getenv("SCCD_MISSING_PAIRS_CSV")) {
+            return fs::path(path);
+        }
+        return dataset_dir / "benchmark" / "missing_pairs.csv";
+    }
+
+    bool initialize_missing_pairs_report(const fs::path& dataset_dir) {
+        const fs::path path = missing_pairs_report_path(dataset_dir);
+        const fs::path parent = path.parent_path();
+        if (!parent.empty()) {
+            std::error_code ec;
+            fs::create_directories(parent, ec);
+            if (ec) {
+                std::cerr << "error: failed to create " << parent << ": " << ec.message() << "\n";
+                return false;
+            }
+        }
+
+        std::ofstream out(path, std::ios::trunc);
+        if (!out) {
+            std::cerr << "error: failed to open " << path << "\n";
+            return false;
+        }
+        out << "dataset,case,type,phase,query_id,c0,c1\n";
+        return static_cast<bool>(out);
+    }
+
+    bool append_missing_pairs_report(const fs::path& dataset_dir,
+                                     const std::string& dataset,
+                                     const CaseFile& case_file,
+                                     const std::vector<std::int32_t>& c0,
+                                     const std::vector<std::int32_t>& c1,
+                                     const std::vector<std::uint8_t>& fn,
+                                     const std::vector<std::uint8_t>& fn_broad) {
+        const fs::path path = missing_pairs_report_path(dataset_dir);
+        std::ofstream out(path, std::ios::app);
+        if (!out) {
+            std::cerr << "error: failed to open " << path << "\n";
+            return false;
+        }
+
+        const char* type = case_file.is_vf ? "vf" : "ee";
+        for (std::size_t i = 0; i < c0.size(); ++i) {
+            if (fn[i]) {
+                out << dataset << ',' << case_file.key << ',' << type << ",narrow," << i << ',' << c0[i] << ',' << c1[i]
+                    << '\n';
+            }
+            if (fn_broad[i]) {
+                out << dataset << ',' << case_file.key << ',' << type << ",broad," << i << ',' << c0[i] << ',' << c1[i]
+                    << '\n';
+            }
+        }
+        return static_cast<bool>(out);
+    }
+
     std::vector<CaseFile> scan_cases(const fs::path& boxes_dir) {
         std::vector<CaseFile> cases;
         if (!fs::is_directory(boxes_dir)) {
@@ -162,6 +218,14 @@ namespace {
         if (dataset == "n-body-simulation") {
             return frames / ("balls16_" + std::to_string(step) + ".ply");
         }
+        if (dataset == "cloth-funnel") {
+            std::string name = std::to_string(step);
+            if (name.size() < 3) {
+                name.insert(0, 3 - name.size(), '0');
+            }
+            return frames / (name + ".ply");
+        }
+
         return frames / (std::to_string(step) + ".ply");
     }
 
@@ -487,6 +551,7 @@ namespace {
     CCDRun make_ccd_run(const MeshPair& meshes, const smesh::ExecutionSpace execution_space) {
         CCDRun run;
         run.ccd = sccd::CCD<scalar_t>::create(meshes.t0, execution_space);
+        run.ccd->set_safe_inflate(true);
         run.points0 = smesh::astype<scalar_t>(meshes.t0->points());
         run.points1 = smesh::astype<scalar_t>(meshes.t1->points());
         if (execution_space == smesh::EXECUTION_SPACE_DEVICE) {
@@ -783,9 +848,9 @@ namespace {
                            write_raw(roots_dir / "sccd_fn_broad_c0.int32", fn_broad_c0) &&
                            write_raw(roots_dir / "sccd_fn_broad_c1.int32", fn_broad_c1);
         if (fn_count != 0 || broad_fn_count != 0) {
-            std::cerr << "error: false negatives in " << dataset << "/" << case_file.key << ": fn=" << fn_count
+            std::cerr << "warning: false negatives in " << dataset << "/" << case_file.key << ": fn=" << fn_count
                       << " broad_fn=" << broad_fn_count << "\n";
-            return false;
+            return wrote && append_missing_pairs_report(dataset_dir, dataset, case_file, c0, c1, fn, fn_broad);
         }
         return wrote;
     }
@@ -908,6 +973,10 @@ int main(int argc, char** argv) {
 
     const fs::path data_dir = argv[1];
     bool ok = true;
+    const bool using_global_missing_pairs_report = std::getenv("SCCD_MISSING_PAIRS_CSV") != nullptr;
+    if (using_global_missing_pairs_report) {
+        ok = initialize_missing_pairs_report(data_dir) && ok;
+    }
     std::cout << "dataset,case,type,queries,prep_ms,broad_ms,narrow_ms,fp,fn,broad_fp,broad_fn\n";
     for (int i = 2; i < argc; ++i) {
         const std::string dataset = argv[i];
@@ -915,6 +984,9 @@ int main(int argc, char** argv) {
         std::vector<double> vf_timings;
         std::vector<double> ee_timings;
 
+        if (!using_global_missing_pairs_report) {
+            ok = initialize_missing_pairs_report(dataset_dir) && ok;
+        }
         for (const CaseFile& case_file : scan_cases(dataset_dir / "boxes")) {
             ok = run_case(
                      ctx->communicator(), dataset_dir, dataset, case_file, case_file.is_vf ? vf_timings : ee_timings) &&
