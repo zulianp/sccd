@@ -938,6 +938,8 @@ namespace sccd {
                 if (active) {
                     Domain<T> left, right;
 
+                    cur.tupper = device::min<T>(cur.tupper, s_toi);
+
                     if (SCCD_CUDA_ADAPTIVE_SPLIT) {
                         adaptive_split_longest_axis<is_vf, T, Vec4>(cur, sx, sy, sz, ex, ey, ez, left, right);
                     } else {
@@ -1114,8 +1116,20 @@ namespace sccd {
                 }
             }
 
-            narrow_phase_dfs_zero_stride_body<is_vf, N, T, I>(
-                overlap0, overlap1, sp, ep, element_stride, elements, tol, max_depth, toi, g_stack, qid, cur, level, active);
+            narrow_phase_dfs_zero_stride_body<is_vf, N, T, I>(overlap0,
+                                                              overlap1,
+                                                              sp,
+                                                              ep,
+                                                              element_stride,
+                                                              elements,
+                                                              tol,
+                                                              max_depth,
+                                                              toi,
+                                                              g_stack,
+                                                              qid,
+                                                              cur,
+                                                              level,
+                                                              active);
         }
 
         template <bool is_vf, int N, typename T, typename I>
@@ -1138,8 +1152,20 @@ namespace sccd {
                 active = 1;
             }
 
-            narrow_phase_dfs_zero_stride_body<is_vf, N, T, I>(
-                overlap0, overlap1, sp, ep, element_stride, elements, tol, max_depth, toi, g_stack, qid, cur, level, active);
+            narrow_phase_dfs_zero_stride_body<is_vf, N, T, I>(overlap0,
+                                                              overlap1,
+                                                              sp,
+                                                              ep,
+                                                              element_stride,
+                                                              elements,
+                                                              tol,
+                                                              max_depth,
+                                                              toi,
+                                                              g_stack,
+                                                              qid,
+                                                              cur,
+                                                              level,
+                                                              active);
         }
 
         template <bool is_vf, int N, typename T, typename I>
@@ -1296,6 +1322,8 @@ namespace sccd {
 
                 if (active) {
                     Domain<T> left, right;
+
+                    cur.tupper = device::min<T>(cur.tupper, s_toi);
 
                     if (SCCD_CUDA_ADAPTIVE_SPLIT) {
                         adaptive_split_longest_axis<is_vf, T, Vec4>(cur, sx, sy, sz, ex, ey, ez, left, right);
@@ -1719,18 +1747,18 @@ namespace sccd {
                             narrow_phase_dfs_zero_stride_from_stack_kernel<is_vf, N, T, I><<<grid_pass2, block_pass1>>>(
                                 overlap0, overlap1, v0, v1, element_stride, elements, tol, max_depth, d_toi, g_stack);
                         } else {
-                            narrow_phase_dfs_from_stack_kernel<is_vf, N, T, I><<<grid_pass2, block_pass1>>>(
-                                overlap0,
-                                overlap1,
-                                v0,
-                                v1,
-                                element_stride,
-                                elements,
-                                tol,
-                                max_depth,
-                                d_toi,
-                                toi_stride,
-                                g_stack);
+                            narrow_phase_dfs_from_stack_kernel<is_vf, N, T, I>
+                                <<<grid_pass2, block_pass1>>>(overlap0,
+                                                              overlap1,
+                                                              v0,
+                                                              v1,
+                                                              element_stride,
+                                                              elements,
+                                                              tol,
+                                                              max_depth,
+                                                              d_toi,
+                                                              toi_stride,
+                                                              g_stack);
                         }
                         SCCD_CUDA_LAST_ERROR();
 
