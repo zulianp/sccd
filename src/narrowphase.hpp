@@ -99,10 +99,16 @@ namespace sccd {
         }
 
         if (toi_stride == 0) toi[0] = max_toi;
-        sccd::parallel_for_br(0, noverlaps, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
-            std::vector<Box<T_HP>> stack;
+            // sccd::parallel_for_br_dynamic(0, noverlaps, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+            // std::vector<Box<T_HP>> stack;
 
-            for (ptrdiff_t i = rbegin; i < rend; i++) {
+#pragma omp parallel
+        {
+            std::vector<Box<T_HP>> stack;
+            stack.reserve(64);
+
+#pragma omp for schedule(dynamic, 64) nowait
+            for (ptrdiff_t i = 0; i < noverlaps; i++) {
                 if (toi_stride == 1) toi[i] = max_toi;
 
                 const I vi = voveralp[i];
@@ -190,7 +196,10 @@ namespace sccd {
                     }
                 }
             }
-        });
+
+            // printf("VF max capacity: %zu\n", stack.capacity());
+        }
+        // );
 
         if (toi_stride == 0) toi[0] = min_t;
         return 0;
@@ -277,10 +286,16 @@ namespace sccd {
 
         std::atomic<T> min_t = max_toi;
         if (toi_stride == 0) toi[0] = max_toi;
-        sccd::parallel_for_br(0, noverlaps, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
-            std::vector<Box<T_HP>> stack;
 
-            for (ptrdiff_t i = rbegin; i < rend; i++) {
+            // sccd::parallel_for_br_dynamic(0, noverlaps, [&](const ptrdiff_t rbegin, const ptrdiff_t rend)
+
+#pragma omp parallel
+        {
+            std::vector<Box<T_HP>> stack;
+            stack.reserve(64);
+
+#pragma omp for schedule(dynamic, 64) nowait
+            for (ptrdiff_t i = 0; i < noverlaps; i++) {
                 if (toi_stride == 1) toi[i] = max_toi;
 
                 const I i0 = e0overalp[i];
@@ -367,7 +382,10 @@ namespace sccd {
                     }
                 }
             }
-        });
+
+            // printf("EE max capacity: %zu\n", stack.capacity());
+        }
+        // );
 
         if (toi_stride == 0) toi[0] = min_t;
         return 0;
