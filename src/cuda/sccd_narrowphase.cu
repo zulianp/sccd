@@ -376,7 +376,7 @@ namespace sccd {
         template <typename T>
         __device__ uint8_t cond_mask(const T fmin, const T fmax, const T tol, const T adaptive_tol) {
             bool cond1 = (fmax - fmin <= adaptive_tol);
-            bool cond2 = !((fmin < tol) | (fmax > -tol));
+            bool cond2 = (fmin > -tol) & (fmax < tol);
             bool cond3 = (fmax - fmin < tol);
             bool cond4 = (fmin >= fmax);
 
@@ -814,8 +814,170 @@ namespace sccd {
                                                                   Domain<T>& right) {
             left = in;
             right = in;
+#define SCCD_ENABLE_CODOMAIN_SCALING
+#ifdef SCCD_ENABLE_CODOMAIN_SCALING
+            const T t0 = in.tlower;
+            const T t1 = in.tupper;
+            const T u0 = in.ulower;
+            const T u1 = in.uupper;
+            const T v0 = in.vlower;
+            const T v1 = in.vupper;
+            T wt = T(0);
+            T wu = T(0);
+            T wv = T(0);
 
+            if constexpr (is_vf) {
+                const T tvx = ex.x - sx.x;
+                const T tp1x = ex.y - sx.y;
+                const T tp2x = ex.z - sx.z;
+                const T tp3x = ex.w - sx.w;
+                const T jtx0 = tvx - tp1x;
+                const T jtxu = tp1x - tp2x;
+                const T jtxv = tp1x - tp3x;
+                wt = device::max<T>(
+                    wt,
+                    device::max<T>(
+                        device::max<T>(device::abs<T>(jtx0 + jtxu * u0 + jtxv * v0),
+                                       device::abs<T>(jtx0 + jtxu * u1 + jtxv * v0)),
+                        device::max<T>(device::abs<T>(jtx0 + jtxu * u0 + jtxv * v1),
+                                       device::abs<T>(jtx0 + jtxu * u1 + jtxv * v1))));
+                const T sux = sx.z - sx.y;
+                const T eux = ex.z - ex.y;
+                const T svx = sx.w - sx.y;
+                const T evx = ex.w - ex.y;
+                wu = device::max<T>(wu, device::max<T>(device::abs<T>(sux + (eux - sux) * t0),
+                                                       device::abs<T>(sux + (eux - sux) * t1)));
+                wv = device::max<T>(wv, device::max<T>(device::abs<T>(svx + (evx - svx) * t0),
+                                                       device::abs<T>(svx + (evx - svx) * t1)));
+
+                const T tvy = ey.x - sy.x;
+                const T tp1y = ey.y - sy.y;
+                const T tp2y = ey.z - sy.z;
+                const T tp3y = ey.w - sy.w;
+                const T jty0 = tvy - tp1y;
+                const T jtyu = tp1y - tp2y;
+                const T jtyv = tp1y - tp3y;
+                wt = device::max<T>(
+                    wt,
+                    device::max<T>(
+                        device::max<T>(device::abs<T>(jty0 + jtyu * u0 + jtyv * v0),
+                                       device::abs<T>(jty0 + jtyu * u1 + jtyv * v0)),
+                        device::max<T>(device::abs<T>(jty0 + jtyu * u0 + jtyv * v1),
+                                       device::abs<T>(jty0 + jtyu * u1 + jtyv * v1))));
+                const T suy = sy.z - sy.y;
+                const T euy = ey.z - ey.y;
+                const T svy = sy.w - sy.y;
+                const T evy = ey.w - ey.y;
+                wu = device::max<T>(wu, device::max<T>(device::abs<T>(suy + (euy - suy) * t0),
+                                                       device::abs<T>(suy + (euy - suy) * t1)));
+                wv = device::max<T>(wv, device::max<T>(device::abs<T>(svy + (evy - svy) * t0),
+                                                       device::abs<T>(svy + (evy - svy) * t1)));
+
+                const T tvz = ez.x - sz.x;
+                const T tp1z = ez.y - sz.y;
+                const T tp2z = ez.z - sz.z;
+                const T tp3z = ez.w - sz.w;
+                const T jtz0 = tvz - tp1z;
+                const T jtzu = tp1z - tp2z;
+                const T jtzv = tp1z - tp3z;
+                wt = device::max<T>(
+                    wt,
+                    device::max<T>(
+                        device::max<T>(device::abs<T>(jtz0 + jtzu * u0 + jtzv * v0),
+                                       device::abs<T>(jtz0 + jtzu * u1 + jtzv * v0)),
+                        device::max<T>(device::abs<T>(jtz0 + jtzu * u0 + jtzv * v1),
+                                       device::abs<T>(jtz0 + jtzu * u1 + jtzv * v1))));
+                const T suz = sz.z - sz.y;
+                const T euz = ez.z - ez.y;
+                const T svz = sz.w - sz.y;
+                const T evz = ez.w - ez.y;
+                wu = device::max<T>(wu, device::max<T>(device::abs<T>(suz + (euz - suz) * t0),
+                                                       device::abs<T>(suz + (euz - suz) * t1)));
+                wv = device::max<T>(wv, device::max<T>(device::abs<T>(svz + (evz - svz) * t0),
+                                                       device::abs<T>(svz + (evz - svz) * t1)));
+            } else {
+                const T a0x = ex.x - sx.x;
+                const T a1x = ex.y - sx.y;
+                const T b0x = ex.z - sx.z;
+                const T b1x = ex.w - sx.w;
+                const T jtx0 = a0x - b0x;
+                const T jtxu = a1x - a0x;
+                const T jtxv = b0x - b1x;
+                wt = device::max<T>(
+                    wt,
+                    device::max<T>(
+                        device::max<T>(device::abs<T>(jtx0 + jtxu * u0 + jtxv * v0),
+                                       device::abs<T>(jtx0 + jtxu * u1 + jtxv * v0)),
+                        device::max<T>(device::abs<T>(jtx0 + jtxu * u0 + jtxv * v1),
+                                       device::abs<T>(jtx0 + jtxu * u1 + jtxv * v1))));
+                const T sux = sx.y - sx.x;
+                const T eux = ex.y - ex.x;
+                const T svx = sx.w - sx.z;
+                const T evx = ex.w - ex.z;
+                wu = device::max<T>(wu, device::max<T>(device::abs<T>(sux + (eux - sux) * t0),
+                                                       device::abs<T>(sux + (eux - sux) * t1)));
+                wv = device::max<T>(wv, device::max<T>(device::abs<T>(svx + (evx - svx) * t0),
+                                                       device::abs<T>(svx + (evx - svx) * t1)));
+
+                const T a0y = ey.x - sy.x;
+                const T a1y = ey.y - sy.y;
+                const T b0y = ey.z - sy.z;
+                const T b1y = ey.w - sy.w;
+                const T jty0 = a0y - b0y;
+                const T jtyu = a1y - a0y;
+                const T jtyv = b0y - b1y;
+                wt = device::max<T>(
+                    wt,
+                    device::max<T>(
+                        device::max<T>(device::abs<T>(jty0 + jtyu * u0 + jtyv * v0),
+                                       device::abs<T>(jty0 + jtyu * u1 + jtyv * v0)),
+                        device::max<T>(device::abs<T>(jty0 + jtyu * u0 + jtyv * v1),
+                                       device::abs<T>(jty0 + jtyu * u1 + jtyv * v1))));
+                const T suy = sy.y - sy.x;
+                const T euy = ey.y - ey.x;
+                const T svy = sy.w - sy.z;
+                const T evy = ey.w - ey.z;
+                wu = device::max<T>(wu, device::max<T>(device::abs<T>(suy + (euy - suy) * t0),
+                                                       device::abs<T>(suy + (euy - suy) * t1)));
+                wv = device::max<T>(wv, device::max<T>(device::abs<T>(svy + (evy - svy) * t0),
+                                                       device::abs<T>(svy + (evy - svy) * t1)));
+
+                const T a0z = ez.x - sz.x;
+                const T a1z = ez.y - sz.y;
+                const T b0z = ez.z - sz.z;
+                const T b1z = ez.w - sz.w;
+                const T jtz0 = a0z - b0z;
+                const T jtzu = a1z - a0z;
+                const T jtzv = b0z - b1z;
+                wt = device::max<T>(
+                    wt,
+                    device::max<T>(
+                        device::max<T>(device::abs<T>(jtz0 + jtzu * u0 + jtzv * v0),
+                                       device::abs<T>(jtz0 + jtzu * u1 + jtzv * v0)),
+                        device::max<T>(device::abs<T>(jtz0 + jtzu * u0 + jtzv * v1),
+                                       device::abs<T>(jtz0 + jtzu * u1 + jtzv * v1))));
+                const T suz = sz.y - sz.x;
+                const T euz = ez.y - ez.x;
+                const T svz = sz.w - sz.z;
+                const T evz = ez.w - ez.z;
+                wu = device::max<T>(wu, device::max<T>(device::abs<T>(suz + (euz - suz) * t0),
+                                                       device::abs<T>(suz + (euz - suz) * t1)));
+                wv = device::max<T>(wv, device::max<T>(device::abs<T>(svz + (evz - svz) * t0),
+                                                       device::abs<T>(svz + (evz - svz) * t1)));
+            }
+
+            const T inv_total = T(1) / (wt + wu + wv + T(1e-16));
+            wt = device::max<T>(T(1e-4), wt * inv_total);
+            wu = device::max<T>(T(1e-4), wu * inv_total);
+            wv = device::max<T>(T(1e-4), wv * inv_total);
+
+            const T dt = (in.tupper - in.tlower) * wt;
+            const T du = (in.uupper - in.ulower) * wu;
+            const T dv = (in.vupper - in.vlower) * wv;
+            const int split_dim = (du > dt && du >= dv) ? 1 : ((dv > dt && dv > du) ? 2 : 0);
+#else
             const int split_dim = widest_dimension<T>(in);
+#endif
             const T lo = split_dim == 0 ? in.tlower : (split_dim == 1 ? in.ulower : in.vlower);
             const T hi = split_dim == 0 ? in.tupper : (split_dim == 1 ? in.uupper : in.vupper);
             const T h = (hi - lo) * T(0.5);
