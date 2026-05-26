@@ -96,7 +96,7 @@ namespace sccd {
 
         if (toi_stride == 0 && min_t == 0) {
             toi[0] = 0;
-            printf("[after newton pass vf] min_t is 0 returning\n");
+            // printf("[after newton pass vf] min_t is 0 returning\n");
             return 0;
         }
 
@@ -183,6 +183,13 @@ namespace sccd {
                     const T_HP v_upper = sv0 + (ev0 - sv0) * t_upper;
                     codomain_widths[2] = sccd::max<T_HP>(
                         codomain_widths[2], sccd::max<T_HP>(sccd::abs<T_HP>(sv0), sccd::abs<T_HP>(v_upper)));
+                }
+
+                T_HP tot_widths = codomain_widths[0] + codomain_widths[1] + codomain_widths[2] + 1e-16;
+
+                for (int d = 0; d < 3; d++) {
+                    codomain_widths[d] /= tot_widths;
+                    codomain_widths[d] = sccd::max<T_HP>(0.01, codomain_widths[d]);
                 }
 #endif
 
@@ -323,7 +330,7 @@ namespace sccd {
 
         if (toi_stride == 0 && max_toi == 0) {
             toi[0] = 0;
-            printf("max_toi is 0 returning\n");
+            // printf("max_toi is 0 returning\n");
             return 0;
         }
 
@@ -422,6 +429,15 @@ namespace sccd {
                     codomain_widths[2] = sccd::max<T_HP>(
                         codomain_widths[2], sccd::max<T_HP>(sccd::abs<T_HP>(sv), sccd::abs<T_HP>(v_upper)));
                 }
+
+                T_HP tot_widths = codomain_widths[0] + codomain_widths[1] + codomain_widths[2] + 1e-16;
+
+                for (int d = 0; d < 3; d++) {
+                    codomain_widths[d] /= tot_widths;
+                    codomain_widths[d] = sccd::max<T_HP>(0.01, codomain_widths[d]);
+                }
+
+                // printf("%g %g %g\n", codomain_widths[0], codomain_widths[1], codomain_widths[2]);
 #endif
 
 #ifdef SCCD_ENABLE_TIGHT_INCLUSION
