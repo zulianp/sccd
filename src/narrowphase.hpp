@@ -189,7 +189,7 @@ namespace sccd {
 
                 for (int d = 0; d < 3; d++) {
                     codomain_widths[d] /= tot_widths;
-                    codomain_widths[d] = sccd::max<T_HP>(0.01, codomain_widths[d]);
+                    codomain_widths[d] = sccd::max<T_HP>(1e-4, codomain_widths[d]);
                 }
 #endif
 
@@ -434,7 +434,7 @@ namespace sccd {
 
                 for (int d = 0; d < 3; d++) {
                     codomain_widths[d] /= tot_widths;
-                    codomain_widths[d] = sccd::max<T_HP>(0.01, codomain_widths[d]);
+                    codomain_widths[d] = sccd::max<T_HP>(1e-4, codomain_widths[d]);
                 }
 
                 // printf("%g %g %g\n", codomain_widths[0], codomain_widths[1], codomain_widths[2]);
