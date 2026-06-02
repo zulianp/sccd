@@ -31,6 +31,21 @@ namespace sccd {
 #endif
     }
 
+    template <typename F>
+    void parallel_for_br_dynamic(const ptrdiff_t start, const ptrdiff_t end, F fun) {
+#ifdef SCCD_ENABLE_TBB
+        tbb::parallel_for(tbb::blocked_range<ptrdiff_t>(start, end),
+                          [&](const tbb::blocked_range<ptrdiff_t>& r) { fun(r.begin(), r.end()); });
+#else
+        static const ptrdiff_t TILE_SIZE = 8;
+#pragma omp parallel for schedule(dynamic, 8)
+        for (ptrdiff_t i = start; i < end; i += TILE_SIZE) {
+            ptrdiff_t iend = min(i + TILE_SIZE, end);
+            fun(i, iend);
+        }
+#endif
+    }
+
     template <typename T, typename F>
     void parallel_sort(T* const begin, T* const end, F fun) {
 #ifdef SCCD_ENABLE_TBB

@@ -99,10 +99,16 @@ namespace sccd {
         }
 
         if (toi_stride == 0) toi[0] = max_toi;
-        sccd::parallel_for_br(0, noverlaps, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
-            std::vector<Box<T_HP>> stack;
+            // sccd::parallel_for_br_dynamic(0, noverlaps, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+            // std::vector<Box<T_HP>> stack;
 
-            for (ptrdiff_t i = rbegin; i < rend; i++) {
+#pragma omp parallel
+        {
+            std::vector<Box<T_HP>> stack;
+            stack.reserve(64);
+
+#pragma omp for schedule(dynamic, 64) nowait
+            for (ptrdiff_t i = 0; i < noverlaps; i++) {
                 if (toi_stride == 1) toi[i] = max_toi;
 
                 const I vi = voveralp[i];
@@ -187,10 +193,45 @@ namespace sccd {
                     }
                 }
             }
-        });
+
+            // printf("VF max capacity: %zu\n", stack.capacity());
+        }
+        // );
 
         if (toi_stride == 0) toi[0] = min_t;
         return 0;
+    }
+
+    // Legacy direct-call overload: the old API only exposed toi_stride here.
+    template <int nxe, typename T, typename I>
+    int narrow_phase_vf(const size_t noverlaps,
+                        const I* const SCCD_RESTRICT voveralp,
+                        const I* const SCCD_RESTRICT foveralp,
+                        T** const SCCD_RESTRICT v0,
+                        T** const SCCD_RESTRICT v1,
+                        const size_t face_stride,
+                        I** const SCCD_RESTRICT faces,
+                        const T max_toi,
+                        T* const SCCD_RESTRICT toi,
+                        const int toi_stride = 0) {
+        int SCCD_MAX_DEPTH = 69;
+        SCCD_READ_ENV(SCCD_MAX_DEPTH, atoi);
+
+        T SCCD_TOL = T(3e-8);
+        SCCD_READ_ENV(SCCD_TOL, atof);
+
+        return narrow_phase_vf<nxe, T, I>(noverlaps,
+                                          voveralp,
+                                          foveralp,
+                                          v0,
+                                          v1,
+                                          face_stride,
+                                          faces,
+                                          max_toi,
+                                          toi,
+                                          SCCD_MAX_DEPTH,
+                                          SCCD_TOL,
+                                          toi_stride);
     }
 
     template <typename T, typename I>
@@ -242,10 +283,16 @@ namespace sccd {
 
         std::atomic<T> min_t = max_toi;
         if (toi_stride == 0) toi[0] = max_toi;
-        sccd::parallel_for_br(0, noverlaps, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
-            std::vector<Box<T_HP>> stack;
 
-            for (ptrdiff_t i = rbegin; i < rend; i++) {
+            // sccd::parallel_for_br_dynamic(0, noverlaps, [&](const ptrdiff_t rbegin, const ptrdiff_t rend)
+
+#pragma omp parallel
+        {
+            std::vector<Box<T_HP>> stack;
+            stack.reserve(64);
+
+#pragma omp for schedule(dynamic, 64) nowait
+            for (ptrdiff_t i = 0; i < noverlaps; i++) {
                 if (toi_stride == 1) toi[i] = max_toi;
 
                 const I i0 = e0overalp[i];
@@ -330,10 +377,45 @@ namespace sccd {
                     }
                 }
             }
-        });
+
+            // printf("EE max capacity: %zu\n", stack.capacity());
+        }
+        // );
 
         if (toi_stride == 0) toi[0] = min_t;
         return 0;
+    }
+
+    // Legacy direct-call overload: the old API only exposed toi_stride here.
+    template <typename T, typename I>
+    int narrow_phase_ee(const size_t noverlaps,
+                        const I* const SCCD_RESTRICT e0overalp,
+                        const I* const SCCD_RESTRICT e1overalp,
+                        T** const SCCD_RESTRICT v0,
+                        T** const SCCD_RESTRICT v1,
+                        const size_t edge_stride,
+                        I** const SCCD_RESTRICT edges,
+                        const T max_toi,
+                        T* const SCCD_RESTRICT toi,
+                        const int toi_stride = 0) {
+        int SCCD_MAX_DEPTH = 69;
+        SCCD_READ_ENV(SCCD_MAX_DEPTH, atoi);
+
+        T SCCD_TOL = T(3e-8);
+        SCCD_READ_ENV(SCCD_TOL, atof);
+
+        return narrow_phase_ee<T, I>(noverlaps,
+                                     e0overalp,
+                                     e1overalp,
+                                     v0,
+                                     v1,
+                                     edge_stride,
+                                     edges,
+                                     max_toi,
+                                     toi,
+                                     SCCD_MAX_DEPTH,
+                                     SCCD_TOL,
+                                     toi_stride);
     }
 
 }  // namespace sccd
