@@ -119,6 +119,8 @@ namespace sccd {
 
         const smesh::SharedBuffer<smesh::idx_t*>& edges() const { return edges_; }
 
+        void set_safe_inflate(const bool safe_inflate) { safe_inflate_ = safe_inflate; }
+
     private:
         std::shared_ptr<smesh::Mesh> mesh_;
         smesh::ExecutionSpace execution_space_{smesh::EXECUTION_SPACE_HOST};
@@ -155,6 +157,7 @@ namespace sccd {
         // Separating axis chosen from the vertex AABBs and reused across the
         // F2V and E2E sorts/scans within the same broad_phase invocation.
         int sort_axis_{0};
+        bool safe_inflate_{false};
 
     public:
         int broad_phase_fv(const smesh::SharedBuffer<scalar_t*>& points_t0,
@@ -284,8 +287,13 @@ namespace sccd {
 
             {
                 SMESH_TRACE_SCOPE("Broad_phase: AABB");
-                sccd::compute_aabbs(
-                    dim, n_nodes, points_t0_->data(), points_t1_->data(), vaabb_->data(), vaabb_->data() + dim);
+                sccd::compute_aabbs(dim,
+                                    n_nodes,
+                                    points_t0_->data(),
+                                    points_t1_->data(),
+                                    vaabb_->data(),
+                                    vaabb_->data() + dim,
+                                    safe_inflate_);
 
                 sccd::compute_aabbs(mesh_->block(0)->n_nodes_per_element(),
                                     n_faces,
@@ -294,7 +302,8 @@ namespace sccd {
                                     points_t0_->data(),
                                     points_t1_->data(),
                                     faabb_->data(),
-                                    faabb_->data() + dim);
+                                    faabb_->data() + dim,
+                                    safe_inflate_);
 
                 sccd::compute_aabbs(2,
                                     n_edges,
@@ -303,7 +312,8 @@ namespace sccd {
                                     points_t0_->data(),
                                     points_t1_->data(),
                                     eaabb_->data(),
-                                    eaabb_->data() + dim);
+                                    eaabb_->data() + dim,
+                                    safe_inflate_);
             }
 
             {
@@ -483,7 +493,8 @@ namespace sccd {
 
             {
                 SMESH_TRACE_SCOPE("Broad_phase: AABB");
-                sccd::device::compute_aabbs(dim, n_nodes, points_t0_->data(), points_t1_->data(), vaabb_->data());
+                sccd::device::compute_aabbs(
+                    dim, n_nodes, points_t0_->data(), points_t1_->data(), vaabb_->data(), safe_inflate_);
 
                 sccd::device::compute_aabbs(mesh_->block(0)->n_nodes_per_element(),
                                             n_faces,
@@ -491,10 +502,17 @@ namespace sccd {
                                             dim,
                                             points_t0_->data(),
                                             points_t1_->data(),
-                                            faabb_->data());
+                                            faabb_->data(),
+                                            safe_inflate_);
 
-                sccd::device::compute_aabbs(
-                    2, n_edges, edges_->data(), dim, points_t0_->data(), points_t1_->data(), eaabb_->data());
+                sccd::device::compute_aabbs(2,
+                                            n_edges,
+                                            edges_->data(),
+                                            dim,
+                                            points_t0_->data(),
+                                            points_t1_->data(),
+                                            eaabb_->data(),
+                                            safe_inflate_);
             }
 
             {
