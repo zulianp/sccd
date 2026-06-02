@@ -819,7 +819,7 @@ namespace sccd {
             const T lo = split_dim == 0 ? in.tlower : (split_dim == 1 ? in.ulower : in.vlower);
             const T hi = split_dim == 0 ? in.tupper : (split_dim == 1 ? in.uupper : in.vupper);
             const T h = (hi - lo) * T(0.5);
-            const T radius = h * T(0.45);
+            const T radius = h * T(0.6);
             const T x0 = lo + h;
             const T mid_t = (in.tlower + in.tupper) * T(0.5);
             const T mid_u = (in.ulower + in.uupper) * T(0.5);
@@ -937,6 +937,7 @@ namespace sccd {
 
                 if (active) {
                     Domain<T> left, right;
+                    cur.tupper = device::min<T>(cur.tupper, s_toi);
 
                     if (SCCD_CUDA_ADAPTIVE_SPLIT) {
                         adaptive_split_longest_axis<is_vf, T, Vec4>(cur, sx, sy, sz, ex, ey, ez, left, right);
@@ -1114,8 +1115,20 @@ namespace sccd {
                 }
             }
 
-            narrow_phase_dfs_zero_stride_body<is_vf, N, T, I>(
-                overlap0, overlap1, sp, ep, element_stride, elements, tol, max_depth, toi, g_stack, qid, cur, level, active);
+            narrow_phase_dfs_zero_stride_body<is_vf, N, T, I>(overlap0,
+                                                              overlap1,
+                                                              sp,
+                                                              ep,
+                                                              element_stride,
+                                                              elements,
+                                                              tol,
+                                                              max_depth,
+                                                              toi,
+                                                              g_stack,
+                                                              qid,
+                                                              cur,
+                                                              level,
+                                                              active);
         }
 
         template <bool is_vf, int N, typename T, typename I>
@@ -1138,8 +1151,20 @@ namespace sccd {
                 active = 1;
             }
 
-            narrow_phase_dfs_zero_stride_body<is_vf, N, T, I>(
-                overlap0, overlap1, sp, ep, element_stride, elements, tol, max_depth, toi, g_stack, qid, cur, level, active);
+            narrow_phase_dfs_zero_stride_body<is_vf, N, T, I>(overlap0,
+                                                              overlap1,
+                                                              sp,
+                                                              ep,
+                                                              element_stride,
+                                                              elements,
+                                                              tol,
+                                                              max_depth,
+                                                              toi,
+                                                              g_stack,
+                                                              qid,
+                                                              cur,
+                                                              level,
+                                                              active);
         }
 
         template <bool is_vf, int N, typename T, typename I>
@@ -1256,7 +1281,7 @@ namespace sccd {
                     const int slot = s_defer_base + rank;
                     if (slot >= 0 && slot < g_stack.capacity) {
                         g_stack.tlower[slot] = cur.tlower;
-                        g_stack.tupper[slot] = cur.tupper;
+                        g_stack.tupper[slot] = sccd::min<T>(cur.tupper, s_toi);
                         g_stack.ulower[slot] = cur.ulower;
                         g_stack.uupper[slot] = cur.uupper;
                         g_stack.vlower[slot] = cur.vlower;
@@ -1719,18 +1744,18 @@ namespace sccd {
                             narrow_phase_dfs_zero_stride_from_stack_kernel<is_vf, N, T, I><<<grid_pass2, block_pass1>>>(
                                 overlap0, overlap1, v0, v1, element_stride, elements, tol, max_depth, d_toi, g_stack);
                         } else {
-                            narrow_phase_dfs_from_stack_kernel<is_vf, N, T, I><<<grid_pass2, block_pass1>>>(
-                                overlap0,
-                                overlap1,
-                                v0,
-                                v1,
-                                element_stride,
-                                elements,
-                                tol,
-                                max_depth,
-                                d_toi,
-                                toi_stride,
-                                g_stack);
+                            narrow_phase_dfs_from_stack_kernel<is_vf, N, T, I>
+                                <<<grid_pass2, block_pass1>>>(overlap0,
+                                                              overlap1,
+                                                              v0,
+                                                              v1,
+                                                              element_stride,
+                                                              elements,
+                                                              tol,
+                                                              max_depth,
+                                                              d_toi,
+                                                              toi_stride,
+                                                              g_stack);
                         }
                         SCCD_CUDA_LAST_ERROR();
 
