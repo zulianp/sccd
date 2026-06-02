@@ -140,8 +140,7 @@ namespace sccd {
                 }
 #endif
 
-                const T_HP t_upper = sccd::min<T_HP>(t, T_HP(1));
-                const Box<T_HP> initial_domain(Interval<T_HP>{T_HP(0), t_upper},
+                const Box<T_HP> initial_domain(Interval<T_HP>{T_HP(0), sccd::min<T_HP>(t, T_HP(1))},
                                                Interval<T_HP>{T_HP(0), T_HP(1)},
                                                Interval<T_HP>{T_HP(0), T_HP(1)},
                                                0);
@@ -160,9 +159,7 @@ namespace sccd {
                         continue;
                     }
 
-                    if (toi_stride == 0) {
-                        box.tuv[0].upper = sccd::min<T_HP>(box.tuv[0].upper, t);
-                    }
+                    box.tuv[0].upper = sccd::min<T_HP>(box.tuv[0].upper, t);
 
                     bool found = false;
                     if (SCCD_ADAPTIVE_SPLIT) {
@@ -305,9 +302,7 @@ namespace sccd {
                         continue;
                     }
 
-                    if (toi_stride == 0) {
-                        box.tuv[0].upper = sccd::min<T_HP>(box.tuv[0].upper, t);
-                    }
+                    box.tuv[0].upper = sccd::min<T_HP>(box.tuv[0].upper, t);
 
                     bool found = false;
                     if (SCCD_ADAPTIVE_SPLIT) {
