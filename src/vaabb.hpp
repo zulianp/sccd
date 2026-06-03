@@ -429,7 +429,7 @@ namespace sccd {
                        const geom_t* const SCCD_RESTRICT* const SCCD_RESTRICT points1,
                        aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_min,
                        aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_max,
-                       const bool safe_inflate) {
+                       const bool safe_inflate = false) {
         for (int d = 0; d < dim; d++) {
 #pragma omp parallel for
             for (int i = 0; i < n_elements; i++) {
@@ -474,7 +474,7 @@ namespace sccd {
                        const geom_t* const SCCD_RESTRICT* const SCCD_RESTRICT points1,
                        aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_min,
                        aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_max,
-                       const bool safe_inflate) {
+                       const bool safe_inflate = false) {
         if (safe_inflate) {
             for (int d = 0; d < dim; d++) {
 #pragma omp parallel for
@@ -509,7 +509,7 @@ namespace sccd {
                        const disp_t* const SCCD_RESTRICT* const SCCD_RESTRICT disp1,
                        aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_min,
                        aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_max,
-                       const bool safe_inflate) {
+                       const bool safe_inflate = false) {
         for (int d = 0; d < dim; d++) {
 #pragma omp parallel for
             for (int i = 0; i < n_elements; i++) {
@@ -556,7 +556,7 @@ namespace sccd {
                        const disp_t* const SCCD_RESTRICT* const SCCD_RESTRICT disp1,
                        aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_min,
                        aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_max,
-                       const bool safe_inflate) {
+                       const bool safe_inflate = false) {
         for (int d = 0; d < dim; d++) {
             if (safe_inflate) {
 #pragma omp parallel for
@@ -592,7 +592,7 @@ namespace sccd {
                        const geom_t* const SCCD_RESTRICT* const SCCD_RESTRICT points,
                        aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_min,
                        aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_max,
-                       const bool safe_inflate) {
+                       const bool safe_inflate = false) {
         for (int d = 0; d < dim; d++) {
 #pragma omp parallel for
             for (int i = 0; i < n_elements; i++) {
