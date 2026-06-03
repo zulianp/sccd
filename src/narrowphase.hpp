@@ -13,6 +13,8 @@
 
 #include <atomic>
 
+#define SCCD_ENABLE_CODOMAIN_SCALING 1
+
 namespace sccd {
 
     template <typename T>
@@ -94,13 +96,13 @@ namespace sccd {
 
         if (toi_stride == 0 && min_t == 0) {
             toi[0] = 0;
-            printf("[after newton pass vf] min_t is 0 returning\n");
+            // printf("[after newton pass vf] min_t is 0 returning\n");
             return 0;
         }
 
         if (toi_stride == 0) toi[0] = max_toi;
-            // sccd::parallel_for_br_dynamic(0, noverlaps, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
-            // std::vector<Box<T_HP>> stack;
+        // sccd::parallel_for_br_dynamic(0, noverlaps, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+        // std::vector<Box<T_HP>> stack;
 
 #pragma omp parallel
         {
@@ -151,6 +153,45 @@ namespace sccd {
                                                Interval<T_HP>{T_HP(0), T_HP(1)},
                                                0);
 
+#ifndef SCCD_ENABLE_CODOMAIN_SCALING
+                T_HP codomain_widths[3] = {1, 1, 1};
+#else
+                T_HP codomain_widths[3];
+                codomain_widths[0] = T_HP(0);
+                codomain_widths[1] = T_HP(0);
+                codomain_widths[2] = T_HP(0);
+                for (int d = 0; d < 3; ++d) {
+                    const T_HP vv = ev[d] - sv[d];
+                    const T_HP p1 = e1[d] - s1[d];
+                    const T_HP p2 = e2[d] - s2[d];
+                    const T_HP p3 = e3[d] - s3[d];
+
+                    codomain_widths[0] = sccd::max<T_HP>(
+                        codomain_widths[0],
+                        sccd::max<T_HP>(sccd::max<T_HP>(sccd::abs<T_HP>(vv - p1), sccd::abs<T_HP>(vv - p2)),
+                                        sccd::max<T_HP>(sccd::abs<T_HP>(vv - p3), sccd::abs<T_HP>(vv + p1 - p2 - p3))));
+
+                    const T_HP su = s2[d] - s1[d];
+                    const T_HP eu = e2[d] - e1[d];
+                    const T_HP u_upper = su + (eu - su) * t_upper;
+                    codomain_widths[1] = sccd::max<T_HP>(
+                        codomain_widths[1], sccd::max<T_HP>(sccd::abs<T_HP>(su), sccd::abs<T_HP>(u_upper)));
+
+                    const T_HP sv0 = s3[d] - s1[d];
+                    const T_HP ev0 = e3[d] - e1[d];
+                    const T_HP v_upper = sv0 + (ev0 - sv0) * t_upper;
+                    codomain_widths[2] = sccd::max<T_HP>(
+                        codomain_widths[2], sccd::max<T_HP>(sccd::abs<T_HP>(sv0), sccd::abs<T_HP>(v_upper)));
+                }
+
+                T_HP tot_widths = codomain_widths[0] + codomain_widths[1] + codomain_widths[2] + 1e-16;
+
+                for (int d = 0; d < 3; d++) {
+                    codomain_widths[d] /= tot_widths;
+                    codomain_widths[d] = sccd::max<T_HP>(1e-4, codomain_widths[d]);
+                }
+#endif
+
                 T_HP tols[3];
                 compute_face_vertex_tolerance<T_HP>(tol, sv, s1, s2, s3, ev, e1, e2, e3, tols);
 
@@ -169,11 +210,43 @@ namespace sccd {
 
                     bool found = false;
                     if (SCCD_ADAPTIVE_SPLIT) {
-                        found = find_root_grid_adaptive_split_vf<T_HP>(
-                            max_depth, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, box, t, u, v, stack, SCCD_REFINE);
+                        found = find_root_grid_adaptive_split_vf<T_HP>(max_depth,
+                                                                       tol,
+                                                                       tols,
+                                                                       codomain_widths,
+                                                                       sv,
+                                                                       s1,
+                                                                       s2,
+                                                                       s3,
+                                                                       ev,
+                                                                       e1,
+                                                                       e2,
+                                                                       e3,
+                                                                       box,
+                                                                       t,
+                                                                       u,
+                                                                       v,
+                                                                       stack,
+                                                                       SCCD_REFINE);
                     } else {
-                        found = find_root_grid_uniform_split_vf<T_HP>(
-                            max_depth, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, box, t, u, v, stack, SCCD_REFINE);
+                        found = find_root_grid_uniform_split_vf<T_HP>(max_depth,
+                                                                      tol,
+                                                                      tols,
+                                                                      codomain_widths,
+                                                                      sv,
+                                                                      s1,
+                                                                      s2,
+                                                                      s3,
+                                                                      ev,
+                                                                      e1,
+                                                                      e2,
+                                                                      e3,
+                                                                      box,
+                                                                      t,
+                                                                      u,
+                                                                      v,
+                                                                      stack,
+                                                                      SCCD_REFINE);
                     }
 
                     if (found) {
@@ -254,7 +327,7 @@ namespace sccd {
 
         if (toi_stride == 0 && max_toi == 0) {
             toi[0] = 0;
-            printf("max_toi is 0 returning\n");
+            // printf("max_toi is 0 returning\n");
             return 0;
         }
 
@@ -284,7 +357,7 @@ namespace sccd {
         std::atomic<T> min_t = max_toi;
         if (toi_stride == 0) toi[0] = max_toi;
 
-            // sccd::parallel_for_br_dynamic(0, noverlaps, [&](const ptrdiff_t rbegin, const ptrdiff_t rend)
+        // sccd::parallel_for_br_dynamic(0, noverlaps, [&](const ptrdiff_t rbegin, const ptrdiff_t rend)
 
 #pragma omp parallel
         {
@@ -323,6 +396,47 @@ namespace sccd {
                                                Interval<T_HP>{T_HP(0), T_HP(1)},
                                                0);
 
+#ifndef SCCD_ENABLE_CODOMAIN_SCALING
+                T_HP codomain_widths[3] = {1, 1, 1};
+#else
+                T_HP codomain_widths[3];
+                codomain_widths[0] = T_HP(0);
+                codomain_widths[1] = T_HP(0);
+                codomain_widths[2] = T_HP(0);
+                for (int d = 0; d < 3; ++d) {
+                    const T_HP a0 = e1[d] - s1[d];
+                    const T_HP a1 = e2[d] - s2[d];
+                    const T_HP b0 = e3[d] - s3[d];
+                    const T_HP b1 = e4[d] - s4[d];
+
+                    codomain_widths[0] = sccd::max<T_HP>(
+                        codomain_widths[0],
+                        sccd::max<T_HP>(sccd::max<T_HP>(sccd::abs<T_HP>(a0 - b0), sccd::abs<T_HP>(a0 - b1)),
+                                        sccd::max<T_HP>(sccd::abs<T_HP>(a1 - b0), sccd::abs<T_HP>(a1 - b1))));
+
+                    const T_HP su = s2[d] - s1[d];
+                    const T_HP eu = e2[d] - e1[d];
+                    const T_HP u_upper = su + (eu - su) * t_upper;
+                    codomain_widths[1] = sccd::max<T_HP>(
+                        codomain_widths[1], sccd::max<T_HP>(sccd::abs<T_HP>(su), sccd::abs<T_HP>(u_upper)));
+
+                    const T_HP sv = s4[d] - s3[d];
+                    const T_HP ev = e4[d] - e3[d];
+                    const T_HP v_upper = sv + (ev - sv) * t_upper;
+                    codomain_widths[2] = sccd::max<T_HP>(
+                        codomain_widths[2], sccd::max<T_HP>(sccd::abs<T_HP>(sv), sccd::abs<T_HP>(v_upper)));
+                }
+
+                T_HP tot_widths = codomain_widths[0] + codomain_widths[1] + codomain_widths[2] + 1e-16;
+
+                for (int d = 0; d < 3; d++) {
+                    codomain_widths[d] /= tot_widths;
+                    codomain_widths[d] = sccd::max<T_HP>(1e-4, codomain_widths[d]);
+                }
+
+                // printf("%g %g %g\n", codomain_widths[0], codomain_widths[1], codomain_widths[2]);
+#endif
+
 #ifdef SCCD_ENABLE_TIGHT_INCLUSION
 #warning "SCCD_ENABLE_TIGHT_INCLUSION"
                 if (SCCD_USE_TI) {
@@ -353,11 +467,43 @@ namespace sccd {
 
                     bool found = false;
                     if (SCCD_ADAPTIVE_SPLIT) {
-                        found = find_root_grid_adaptive_split_ee<T_HP>(
-                            max_depth, tol, tols, s1, s2, s3, s4, e1, e2, e3, e4, box, t, u, v, stack, SCCD_REFINE);
+                        found = find_root_grid_adaptive_split_ee<T_HP>(max_depth,
+                                                                       tol,
+                                                                       tols,
+                                                                       codomain_widths,
+                                                                       s1,
+                                                                       s2,
+                                                                       s3,
+                                                                       s4,
+                                                                       e1,
+                                                                       e2,
+                                                                       e3,
+                                                                       e4,
+                                                                       box,
+                                                                       t,
+                                                                       u,
+                                                                       v,
+                                                                       stack,
+                                                                       SCCD_REFINE);
                     } else {
-                        found = find_root_grid_uniform_split_ee<T_HP>(
-                            max_depth, tol, tols, s1, s2, s3, s4, e1, e2, e3, e4, box, t, u, v, stack, SCCD_REFINE);
+                        found = find_root_grid_uniform_split_ee<T_HP>(max_depth,
+                                                                      tol,
+                                                                      tols,
+                                                                      codomain_widths,
+                                                                      s1,
+                                                                      s2,
+                                                                      s3,
+                                                                      s4,
+                                                                      e1,
+                                                                      e2,
+                                                                      e3,
+                                                                      e4,
+                                                                      box,
+                                                                      t,
+                                                                      u,
+                                                                      v,
+                                                                      stack,
+                                                                      SCCD_REFINE);
                     }
 
                     if (found) {
