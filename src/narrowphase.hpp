@@ -173,13 +173,13 @@ namespace sccd {
 
                     const T_HP su = s2[d] - s1[d];
                     const T_HP eu = e2[d] - e1[d];
-                    const T_HP u_upper = su + (eu - su) * t_upper;
+                    const T_HP u_upper = su + (eu - su) * t;
                     codomain_widths[1] = sccd::max<T_HP>(
                         codomain_widths[1], sccd::max<T_HP>(sccd::abs<T_HP>(su), sccd::abs<T_HP>(u_upper)));
 
                     const T_HP sv0 = s3[d] - s1[d];
                     const T_HP ev0 = e3[d] - e1[d];
-                    const T_HP v_upper = sv0 + (ev0 - sv0) * t_upper;
+                    const T_HP v_upper = sv0 + (ev0 - sv0) * t;
                     codomain_widths[2] = sccd::max<T_HP>(
                         codomain_widths[2], sccd::max<T_HP>(sccd::abs<T_HP>(sv0), sccd::abs<T_HP>(v_upper)));
                 }
