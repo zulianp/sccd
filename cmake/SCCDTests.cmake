@@ -1,7 +1,3 @@
-if(NOT SCCD_ENABLE_CUDA)
-  return()
-endif()
-
 function(sccd_find_db_to_raw SCCD_DB_TO_RAW_OUT)
   if(SCCD_DB_TO_RAW_EXECUTABLE)
     set(${SCCD_DB_TO_RAW_OUT} "${SCCD_DB_TO_RAW_EXECUTABLE}" PARENT_SCOPE)
@@ -75,7 +71,22 @@ endfunction()
 
 enable_testing()
 
-file(GLOB_RECURSE SCCD_CUDA_TESTS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tests/cuda/*.exe.cpp")
+if(SCCD_ENABLE_SMESH)
+  file(GLOB SCCD_TESTS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/*.exe.cpp")
+  foreach(SCCD_TEST IN LISTS SCCD_TESTS)
+    get_filename_component(SCCD_TEST_TARGET "${SCCD_TEST}" NAME_WE)
+    string(REGEX REPLACE "\\.exe$" "" SCCD_TEST_TARGET "${SCCD_TEST_TARGET}")
+    add_executable(${SCCD_TEST_TARGET} "${SCCD_TEST}")
+    target_link_libraries(${SCCD_TEST_TARGET} PRIVATE sccd)
+    add_test(NAME ${SCCD_TEST_TARGET} COMMAND $<TARGET_FILE:${SCCD_TEST_TARGET}>)
+  endforeach()
+endif()
+
+if(NOT SCCD_ENABLE_CUDA)
+  return()
+endif()
+
+file(GLOB_RECURSE SCCD_CUDA_TESTS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/cuda/*.exe.cpp")
 foreach(SCCD_CUDA_TEST IN LISTS SCCD_CUDA_TESTS)
   get_filename_component(SCCD_CUDA_TEST_TARGET "${SCCD_CUDA_TEST}" NAME_WE)
   string(REGEX REPLACE "\\.exe$" "" SCCD_CUDA_TEST_TARGET "${SCCD_CUDA_TEST_TARGET}")
