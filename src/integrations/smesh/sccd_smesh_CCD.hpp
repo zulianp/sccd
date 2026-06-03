@@ -5,7 +5,9 @@
 
 #include "broadphase.hpp"
 #include "narrowphase.hpp"
+#include "narrowphase_vertex_quad.hpp"
 #include "smesh_device_buffer.hpp"
+#include "smesh_elem_type.hpp"
 #include "smesh_graph.hpp"
 #include "smesh_mesh.hpp"
 #include "smesh_tracer.hpp"
@@ -17,6 +19,10 @@
 
 #include <cuda_runtime_api.h>
 #endif
+
+#include <algorithm>
+#include <utility>
+#include <vector>
 
 namespace sccd {
     template <typename scalar_t>
@@ -335,6 +341,7 @@ namespace sccd {
             const int dim = mesh_->spatial_dimension();
             const ptrdiff_t n_nodes = mesh_->n_nodes();
             const ptrdiff_t n_faces = mesh_->block(0)->n_elements();
+            const auto element_type = mesh_->block(0)->element_type();
 
             {
                 SMESH_TRACE_SCOPE("cummax");
@@ -343,19 +350,37 @@ namespace sccd {
 
             {
                 SMESH_TRACE_SCOPE("count_overlaps");
-                sccd::count_overlaps<3, 1, scalar_t, smesh::idx_t>(sort_axis_,
-                                                                   n_faces,
-                                                                   faabb_->data(),
-                                                                   fidx_->data(),
-                                                                   1,
-                                                                   faces_->data(),
-                                                                   n_nodes,
-                                                                   vaabb_->data(),
-                                                                   vidx_->data(),
-                                                                   0,
-                                                                   nullptr,
-                                                                   ccdptr_->data(),
-                                                                   cumulative_max_->data());
+                if (element_type == smesh::TRISHELL3) {
+                    sccd::count_overlaps<3, 1, scalar_t, smesh::idx_t>(sort_axis_,
+                                                                       n_faces,
+                                                                       faabb_->data(),
+                                                                       fidx_->data(),
+                                                                       1,
+                                                                       faces_->data(),
+                                                                       n_nodes,
+                                                                       vaabb_->data(),
+                                                                       vidx_->data(),
+                                                                       0,
+                                                                       nullptr,
+                                                                       ccdptr_->data(),
+                                                                       cumulative_max_->data());
+                } else if (element_type == smesh::QUADSHELL4) {
+                    sccd::count_overlaps<4, 1, scalar_t, smesh::idx_t>(sort_axis_,
+                                                                       n_faces,
+                                                                       faabb_->data(),
+                                                                       fidx_->data(),
+                                                                       1,
+                                                                       faces_->data(),
+                                                                       n_nodes,
+                                                                       vaabb_->data(),
+                                                                       vidx_->data(),
+                                                                       0,
+                                                                       nullptr,
+                                                                       ccdptr_->data(),
+                                                                       cumulative_max_->data());
+                } else {
+                    SMESH_ERROR("Unsupported CCD face element type: %s\n", smesh::type_to_string(element_type));
+                }
             }
 
             const ptrdiff_t n_vertex_face_overlaps = ccdptr_->data()[n_faces];
@@ -368,21 +393,39 @@ namespace sccd {
 
             {
                 SMESH_TRACE_SCOPE("collect_overlaps");
-                sccd::collect_overlaps<3, 1, scalar_t, smesh::idx_t>(sort_axis_,
-                                                                     n_faces,
-                                                                     faabb_->data(),
-                                                                     fidx_->data(),
-                                                                     1,
-                                                                     faces_->data(),
-                                                                     n_nodes,
-                                                                     vaabb_->data(),
-                                                                     vidx_->data(),
-                                                                     0,
-                                                                     nullptr,
-                                                                     ccdptr_->data(),
-                                                                     cumulative_max_->data(),
-                                                                     f_overlap_->data(),
-                                                                     v_overlap_->data());
+                if (element_type == smesh::TRISHELL3) {
+                    sccd::collect_overlaps<3, 1, scalar_t, smesh::idx_t>(sort_axis_,
+                                                                         n_faces,
+                                                                         faabb_->data(),
+                                                                         fidx_->data(),
+                                                                         1,
+                                                                         faces_->data(),
+                                                                         n_nodes,
+                                                                         vaabb_->data(),
+                                                                         vidx_->data(),
+                                                                         0,
+                                                                         nullptr,
+                                                                         ccdptr_->data(),
+                                                                         cumulative_max_->data(),
+                                                                         f_overlap_->data(),
+                                                                         v_overlap_->data());
+                } else if (element_type == smesh::QUADSHELL4) {
+                    sccd::collect_overlaps<4, 1, scalar_t, smesh::idx_t>(sort_axis_,
+                                                                         n_faces,
+                                                                         faabb_->data(),
+                                                                         fidx_->data(),
+                                                                         1,
+                                                                         faces_->data(),
+                                                                         n_nodes,
+                                                                         vaabb_->data(),
+                                                                         vidx_->data(),
+                                                                         0,
+                                                                         nullptr,
+                                                                         ccdptr_->data(),
+                                                                         cumulative_max_->data(),
+                                                                         f_overlap_->data(),
+                                                                         v_overlap_->data());
+                }
             }
 
             return SCCD_SUCCESS;
@@ -434,18 +477,36 @@ namespace sccd {
             };
 
             vf_tois_ = smesh::create_buffer<scalar_t>(toi_storage_size(v_overlap_->size()), execution_space_);
-            sccd::narrow_phase_vf<3, scalar_t, smesh::idx_t>(v_overlap_->size(),
-                                                             v_overlap_->data(),
-                                                             f_overlap_->data(),
-                                                             points_t0_->data(),
-                                                             points_t1_->data(),
-                                                             1,
-                                                             faces_->data(),
-                                                             max_toi,
-                                                             vf_tois_->data(),
-                                                             max_depth,
-                                                             tol,
-                                                             toi_stride);
+            const auto element_type = mesh_->block(0)->element_type();
+            if (element_type == smesh::TRISHELL3) {
+                sccd::narrow_phase_vf<3, scalar_t, smesh::idx_t>(v_overlap_->size(),
+                                                                 v_overlap_->data(),
+                                                                 f_overlap_->data(),
+                                                                 points_t0_->data(),
+                                                                 points_t1_->data(),
+                                                                 1,
+                                                                 faces_->data(),
+                                                                 max_toi,
+                                                                 vf_tois_->data(),
+                                                                 max_depth,
+                                                                 tol,
+                                                                 toi_stride);
+            } else if (element_type == smesh::QUADSHELL4) {
+                sccd::narrow_phase_vq<4, scalar_t, smesh::idx_t>(v_overlap_->size(),
+                                                                 v_overlap_->data(),
+                                                                 f_overlap_->data(),
+                                                                 points_t0_->data(),
+                                                                 points_t1_->data(),
+                                                                 1,
+                                                                 faces_->data(),
+                                                                 max_toi,
+                                                                 vf_tois_->data(),
+                                                                 max_depth,
+                                                                 tol,
+                                                                 toi_stride);
+            } else {
+                SMESH_ERROR("Unsupported CCD face element type: %s\n", smesh::type_to_string(element_type));
+            }
 
             if (toi_stride == 0 && v_overlap_->size() != 0) {
                 max_toi = vf_tois_->data()[0];
@@ -543,6 +604,7 @@ namespace sccd {
             const int dim = mesh_->spatial_dimension();
             const ptrdiff_t n_nodes = mesh_->n_nodes();
             const ptrdiff_t n_faces = mesh_->block(0)->n_elements();
+            const auto element_type = mesh_->block(0)->element_type();
 
             scalar_t* vaabb_max_axis = nullptr;
             cudaMemcpy(
@@ -555,19 +617,37 @@ namespace sccd {
 
             {
                 SMESH_TRACE_SCOPE("count_overlaps");
-                sccd::device::count_overlaps<3, 1>(sort_axis_,
-                                                   n_faces,
-                                                   faabb_->data(),
-                                                   fidx_->data(),
-                                                   1,
-                                                   faces_->data(),
-                                                   n_nodes,
-                                                   vaabb_->data(),
-                                                   vidx_->data(),
-                                                   0,
-                                                   (smesh::idx_t**)nullptr,
-                                                   ccdptr_->data(),
-                                                   cumulative_max_->data());
+                if (element_type == smesh::TRISHELL3) {
+                    sccd::device::count_overlaps<3, 1>(sort_axis_,
+                                                       n_faces,
+                                                       faabb_->data(),
+                                                       fidx_->data(),
+                                                       1,
+                                                       faces_->data(),
+                                                       n_nodes,
+                                                       vaabb_->data(),
+                                                       vidx_->data(),
+                                                       0,
+                                                       (smesh::idx_t**)nullptr,
+                                                       ccdptr_->data(),
+                                                       cumulative_max_->data());
+                } else if (element_type == smesh::QUADSHELL4) {
+                    sccd::device::count_overlaps<4, 1>(sort_axis_,
+                                                       n_faces,
+                                                       faabb_->data(),
+                                                       fidx_->data(),
+                                                       1,
+                                                       faces_->data(),
+                                                       n_nodes,
+                                                       vaabb_->data(),
+                                                       vidx_->data(),
+                                                       0,
+                                                       (smesh::idx_t**)nullptr,
+                                                       ccdptr_->data(),
+                                                       cumulative_max_->data());
+                } else {
+                    SMESH_ERROR("Unsupported CCD face element type: %s\n", smesh::type_to_string(element_type));
+                }
             }
 
             ptrdiff_t n_vertex_face_overlaps = 0;
@@ -584,21 +664,39 @@ namespace sccd {
 
             {
                 SMESH_TRACE_SCOPE("collect_overlaps");
-                sccd::device::collect_overlaps<3, 1>(sort_axis_,
-                                                     n_faces,
-                                                     faabb_->data(),
-                                                     fidx_->data(),
-                                                     1,
-                                                     faces_->data(),
-                                                     n_nodes,
-                                                     vaabb_->data(),
-                                                     vidx_->data(),
-                                                     0,
-                                                     (smesh::idx_t**)nullptr,
-                                                     ccdptr_->data(),
-                                                     cumulative_max_->data(),
-                                                     f_overlap_->data(),
-                                                     v_overlap_->data());
+                if (element_type == smesh::TRISHELL3) {
+                    sccd::device::collect_overlaps<3, 1>(sort_axis_,
+                                                         n_faces,
+                                                         faabb_->data(),
+                                                         fidx_->data(),
+                                                         1,
+                                                         faces_->data(),
+                                                         n_nodes,
+                                                         vaabb_->data(),
+                                                         vidx_->data(),
+                                                         0,
+                                                         (smesh::idx_t**)nullptr,
+                                                         ccdptr_->data(),
+                                                         cumulative_max_->data(),
+                                                         f_overlap_->data(),
+                                                         v_overlap_->data());
+                } else if (element_type == smesh::QUADSHELL4) {
+                    sccd::device::collect_overlaps<4, 1>(sort_axis_,
+                                                         n_faces,
+                                                         faabb_->data(),
+                                                         fidx_->data(),
+                                                         1,
+                                                         faces_->data(),
+                                                         n_nodes,
+                                                         vaabb_->data(),
+                                                         vidx_->data(),
+                                                         0,
+                                                         (smesh::idx_t**)nullptr,
+                                                         ccdptr_->data(),
+                                                         cumulative_max_->data(),
+                                                         f_overlap_->data(),
+                                                         v_overlap_->data());
+                }
             }
 
             return SCCD_SUCCESS;
@@ -661,6 +759,13 @@ namespace sccd {
             };
 
             vf_tois_ = smesh::create_buffer<scalar_t>(toi_storage_size(v_overlap_->size()), execution_space_);
+            const auto element_type = mesh_->block(0)->element_type();
+            if (element_type == smesh::QUADSHELL4) {
+                SMESH_ERROR("CUDA QUADSHELL4 narrow phase is not implemented\n");
+            }
+            if (element_type != smesh::TRISHELL3) {
+                SMESH_ERROR("Unsupported CCD face element type: %s\n", smesh::type_to_string(element_type));
+            }
             sccd::device::narrow_phase_vf<3>(v_overlap_->size(),
                                              v_overlap_->data(),
                                              f_overlap_->data(),
@@ -812,27 +917,58 @@ namespace sccd {
             }
         }
 
+        std::pair<smesh::SharedBuffer<smesh::idx_t>, smesh::SharedBuffer<smesh::idx_t>> create_shell_edges_host_() const {
+            const auto element_type = mesh_->block(0)->element_type();
+            const int nxe = mesh_->block(0)->n_nodes_per_element();
+            if (element_type != smesh::TRISHELL3 && element_type != smesh::QUADSHELL4) {
+                SMESH_ERROR("Unsupported CCD face element type: %s\n", smesh::type_to_string(element_type));
+            }
+
+            auto faces = mesh_->block(0)->elements();
+            const ptrdiff_t n_faces = mesh_->block(0)->n_elements();
+
+            std::vector<std::pair<smesh::idx_t, smesh::idx_t>> edge_pairs;
+            edge_pairs.reserve(static_cast<std::size_t>(nxe * n_faces));
+            for (ptrdiff_t f = 0; f < n_faces; ++f) {
+                for (int local_edge = 0; local_edge < nxe; ++local_edge) {
+                    const smesh::idx_t a = faces->data()[local_edge][f];
+                    const smesh::idx_t b = faces->data()[(local_edge + 1) % nxe][f];
+                    edge_pairs.emplace_back(std::min(a, b), std::max(a, b));
+                }
+            }
+
+            std::sort(edge_pairs.begin(), edge_pairs.end());
+            edge_pairs.erase(std::unique(edge_pairs.begin(), edge_pairs.end()), edge_pairs.end());
+
+            auto e0 = smesh::create_host_buffer<smesh::idx_t>(edge_pairs.size());
+            auto e1 = smesh::create_host_buffer<smesh::idx_t>(edge_pairs.size());
+            for (std::size_t i = 0; i < edge_pairs.size(); ++i) {
+                e0->data()[i] = edge_pairs[i].first;
+                e1->data()[i] = edge_pairs[i].second;
+            }
+
+            return {e0, e1};
+        }
+
         void init() {
             SMESH_TRACE_SCOPE("CCD::init");
 
-            auto n2n_crs = mesh_->edge_graph();
-            auto row_idx_temp = smesh::create_host_buffer<smesh::idx_t>(n2n_crs->nnz());
-            smesh::crs_to_coo(mesh_->n_nodes(), n2n_crs->rowptr()->data(), row_idx_temp->data());
+            const auto host_edges = create_shell_edges_host_();
 
             const int dim = mesh_->spatial_dimension();
             SMESH_ASSERT(dim == 3);
 
             const ptrdiff_t n_nodes = mesh_->n_nodes();
             const ptrdiff_t n_faces = mesh_->block(0)->n_elements();
-            const ptrdiff_t n_edges = n2n_crs->nnz();
+            const ptrdiff_t n_edges = host_edges.first->size();
 
             if (execution_space_ == smesh::EXECUTION_SPACE_HOST) {
-                e0_ = row_idx_temp;
-                e1_ = n2n_crs->colidx();
+                e0_ = host_edges.first;
+                e1_ = host_edges.second;
                 faces_ = mesh_->block(0)->elements();
             } else {
-                e0_ = smesh::to_device(row_idx_temp);
-                e1_ = smesh::to_device(n2n_crs->colidx());
+                e0_ = smesh::to_device(host_edges.first);
+                e1_ = smesh::to_device(host_edges.second);
                 faces_ = mesh_->block(0)->device_elements_SoA();
             }
 
