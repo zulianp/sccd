@@ -953,22 +953,43 @@ namespace sccd {
         void init() {
             SMESH_TRACE_SCOPE("CCD::init");
 
-            const auto host_edges = create_shell_edges_host_();
+            // const auto host_edges = create_shell_edges_host_();
+
+            // const int dim = mesh_->spatial_dimension();
+            // SMESH_ASSERT(dim == 3);
+
+            // const ptrdiff_t n_nodes = mesh_->n_nodes();
+            // const ptrdiff_t n_faces = mesh_->block(0)->n_elements();
+            // const ptrdiff_t n_edges = host_edges.first->size();
+
+            // if (execution_space_ == smesh::EXECUTION_SPACE_HOST) {
+            //     e0_ = host_edges.first;
+            //     e1_ = host_edges.second;
+            //     faces_ = mesh_->block(0)->elements();
+            // } else {
+            //     e0_ = smesh::to_device(host_edges.first);
+            //     e1_ = smesh::to_device(host_edges.second);
+            //     faces_ = mesh_->block(0)->device_elements_SoA();
+            // }
+
+            auto n2n_crs = mesh_->edge_graph();
+            auto row_idx_temp = smesh::create_host_buffer<smesh::idx_t>(n2n_crs->nnz());
+            smesh::crs_to_coo(mesh_->n_nodes(), n2n_crs->rowptr()->data(), row_idx_temp->data());
 
             const int dim = mesh_->spatial_dimension();
             SMESH_ASSERT(dim == 3);
 
             const ptrdiff_t n_nodes = mesh_->n_nodes();
             const ptrdiff_t n_faces = mesh_->block(0)->n_elements();
-            const ptrdiff_t n_edges = host_edges.first->size();
+            const ptrdiff_t n_edges = n2n_crs->nnz();
 
             if (execution_space_ == smesh::EXECUTION_SPACE_HOST) {
-                e0_ = host_edges.first;
-                e1_ = host_edges.second;
+                e0_ = row_idx_temp;
+                e1_ = n2n_crs->colidx();
                 faces_ = mesh_->block(0)->elements();
             } else {
-                e0_ = smesh::to_device(host_edges.first);
-                e1_ = smesh::to_device(host_edges.second);
+                e0_ = smesh::to_device(row_idx_temp);
+                e1_ = smesh::to_device(n2n_crs->colidx());
                 faces_ = mesh_->block(0)->device_elements_SoA();
             }
 
