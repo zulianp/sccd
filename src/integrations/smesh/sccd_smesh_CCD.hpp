@@ -917,7 +917,8 @@ namespace sccd {
             }
         }
 
-        std::pair<smesh::SharedBuffer<smesh::idx_t>, smesh::SharedBuffer<smesh::idx_t>> create_shell_edges_host_() const {
+        std::pair<smesh::SharedBuffer<smesh::idx_t>, smesh::SharedBuffer<smesh::idx_t>> create_shell_edges_host_()
+            const {
             const auto element_type = mesh_->block(0)->element_type();
             const int nxe = mesh_->block(0)->n_nodes_per_element();
             if (element_type != smesh::TRISHELL3 && element_type != smesh::QUADSHELL4) {
