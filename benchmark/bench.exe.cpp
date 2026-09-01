@@ -1,3 +1,4 @@
+#include "sccd_narrowphase_mode.hpp"
 #include "sccd_smesh_CCD.hpp"
 #include "smesh_buffer.hpp"
 #include "smesh_context.hpp"
@@ -861,7 +862,11 @@ namespace {
         }
 
         timings_ms.push_back(narrow_ms);
-        std::cout << dataset << ',' << case_file.key << ',' << (case_file.is_vf ? "vf" : "ee") << ',' << narrow_queries
+        // The narrow-phase mode is read from the environment per call, so it is
+        // recorded per row: a sweep runs the binary once per mode and the rows
+        // stay distinguishable when the results are concatenated.
+        std::cout << dataset << ',' << sccd::narrow_phase_mode_name(sccd::narrow_phase_mode()) << ','
+                  << case_file.key << ',' << (case_file.is_vf ? "vf" : "ee") << ',' << narrow_queries
                   << ',' << prep_ms << ',' << broad_ms << ',' << narrow_ms << ',' << query_narrow_ms << ','
                   << fp_count << ',' << fn_count << ',' << broadphase.false_positives << ',' << broad_fn_count << '\n';
         return wrote;
@@ -989,7 +994,7 @@ int main(int argc, char** argv) {
     if (using_global_missing_pairs_report) {
         ok = initialize_missing_pairs_report(data_dir) && ok;
     }
-    std::cout << "dataset,case,type,queries,prep_ms,broad_ms,narrow_ms,query_narrow_ms,fp,fn,broad_fp,broad_fn\n";
+    std::cout << "dataset,mode,case,type,queries,prep_ms,broad_ms,narrow_ms,query_narrow_ms,fp,fn,broad_fp,broad_fn\n";
     for (int i = 2; i < argc; ++i) {
         const std::string dataset = argv[i];
         const fs::path dataset_dir = data_dir / dataset;

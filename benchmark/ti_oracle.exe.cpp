@@ -24,6 +24,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -156,6 +157,31 @@ namespace {
         return true;
     }
 
+    /**
+     * \brief Exact time of impact per query, from the dataset's own roots.
+     *
+     * NaN marks a query with no collision. These come from the benchmark's
+     * symbolic root finder, so unlike TightInclusion's output they are the true
+     * value rather than a certified lower bound on it -- which is what the
+     * conservativeness invariant is actually stated against.
+     */
+    bool read_ground_truth_toi(const fs::path& dataset_dir, const std::string& key,
+                               std::vector<double>& out) {
+        const fs::path path = dataset_dir / "roots" / key / "toi.float64";
+        std::ifstream in(path, std::ios::binary | std::ios::ate);
+        if (!in) {
+            return false;
+        }
+        const auto bytes = in.tellg();
+        if (bytes <= 0 || (static_cast<std::size_t>(bytes) % sizeof(double)) != 0) {
+            return false;
+        }
+        out.resize(static_cast<std::size_t>(bytes) / sizeof(double));
+        in.seekg(0);
+        in.read(reinterpret_cast<char*>(out.data()), bytes);
+        return static_cast<bool>(in);
+    }
+
     // Optional Mathematica-verified ground truth, one byte per query.
     bool read_ground_truth(const fs::path& dataset_dir, const std::string& key, std::vector<std::uint8_t>& out) {
         const fs::path path = dataset_dir / "mma_bool" / key / "mma_bool.uint8";
@@ -198,7 +224,11 @@ namespace {
         std::size_t hits = 0;
         std::size_t false_negative = 0;  // TI hit, mode missed -- UNSAFE
         std::size_t false_positive = 0;  // mode hit, TI missed -- conservative
-        std::size_t late = 0;            // toi later than TI's -- UNSAFE
+        std::size_t late = 0;            // toi later than TI's reported value
+        std::size_t gt_late = 0;         // toi later than the TRUE toi -- UNSAFE
+        std::size_t gt_missed = 0;       // exact root exists, mode found none -- UNSAFE
+        std::size_t gt_checked = 0;      // queries with an exact root available
+        double gt_worst_overshoot = 0;   // largest amount by which we ran late
         std::size_t near_zero_ref = 0;   // TI toi below REL_ERR_FLOOR
         std::size_t gt_false_negative = 0;
         std::vector<double> rel_err;
@@ -366,6 +396,11 @@ int main(int argc, char** argv) {
             std::vector<std::uint8_t> gt;
             const bool have_gt = read_ground_truth(opt.dataset_dir, key, gt) && gt.size() >= qs.n_queries;
 
+            // The exact roots are the reference the invariant is stated against.
+            std::vector<double> gt_toi;
+            const bool have_gt_toi =
+                read_ground_truth_toi(opt.dataset_dir, key, gt_toi) && gt_toi.size() >= qs.n_queries;
+
             // --- reference: TightInclusion, one query at a time ---
             std::vector<double> ti_toi(qs.n_queries, 1.0);
             std::vector<std::uint8_t> ti_hit(qs.n_queries, 0);
@@ -456,15 +491,40 @@ int main(int argc, char** argv) {
                         }
                     }
                     if (have_gt && gt[i] && !hit) stats[m].gt_false_negative += 1;
+
+                    // --- the real invariant check, against the exact root ---
+                    if (have_gt_toi) {
+                        const double truth = gt_toi[i];
+                        if (!std::isnan(truth)) {
+                            stats[m].gt_checked += 1;
+                            if (!hit) {
+                                stats[m].gt_missed += 1;
+                                if (stats[m].violations.size() < MAX_RECORDED_VIOLATIONS) {
+                                    stats[m].violations.push_back(
+                                        {key, i, "missed(truth)", truth, double(toi[i])});
+                                }
+                            } else if (double(toi[i]) > truth) {
+                                stats[m].gt_late += 1;
+                                const double over = double(toi[i]) - truth;
+                                if (over > stats[m].gt_worst_overshoot) {
+                                    stats[m].gt_worst_overshoot = over;
+                                }
+                                if (stats[m].violations.size() < MAX_RECORDED_VIOLATIONS) {
+                                    stats[m].violations.push_back(
+                                        {key, i, "late(truth)", truth, double(toi[i])});
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
 
         std::printf("\n%s / %s  (%zu files, %zu queries; TI hits %zu)\n",
                     dataset.c_str(), phase.name, files.size(), total_queries, ti_hits);
-        std::printf("%-8s %9s %8s %6s %6s %6s   %10s %10s   %10s %10s %9s\n",
-                    "mode", "queries", "hits", "FN!", "FP", "late!",
-                    "relerr_med", "relerr_p95", "abserr_p95", "abserr_max", "ms");
+        std::printf("%-8s %9s %8s %6s %6s %6s %8s %8s   %10s %10s %9s\n",
+                    "mode", "queries", "hits", "FN!", "FP", "lateTI",
+                    "gtMISS!", "gtLATE!", "relerr_med", "abserr_max", "ms");
         for (int m = 0; m < N_MODES; ++m) {
             Stats& s = stats[m];
             const char* name = mode_name(mode_of(m));
@@ -472,22 +532,39 @@ int main(int argc, char** argv) {
             const double rel_p95 = Stats::quantile_of(s.rel_err, 0.95);
             const double abs_p95 = Stats::quantile_of(s.abs_err, 0.95);
             const double abs_max = Stats::max_of(s.abs_err);
-            std::printf("%-8s %9zu %8zu %6zu %6zu %6zu   %10.3e %10.3e   %10.3e %10.3e %9.1f\n",
+            std::printf("%-8s %9zu %8zu %6zu %6zu %6zu %8zu %8zu   %10.3e %10.3e %9.1f\n",
                         name, s.n, s.hits, s.false_negative, s.false_positive, s.late,
-                        rel_med, rel_p95, abs_p95, abs_max, s.seconds * 1e3);
+                        s.gt_missed, s.gt_late, rel_med, abs_max, s.seconds * 1e3);
+            (void)rel_p95;
+            (void)abs_p95;
             char row[640];
             std::snprintf(row, sizeof(row),
-                          "%s,%s,%s,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%.17g,%.17g,%.17g,%.17g,%.17g,%.6f",
+                          "%s,%s,%s,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%.17g,%.17g,%.17g,%.17g,%.17g,%.6f,"
+                          "%zu,%zu,%zu,%.17g",
                           dataset.c_str(), phase.name, name, s.n, s.hits, s.false_negative,
                           s.false_positive, s.late, s.near_zero_ref, s.gt_false_negative,
                           Stats::mean_of(s.rel_err), rel_med, rel_p95, abs_p95, abs_max,
-                          s.seconds * 1e3);
+                          s.seconds * 1e3, s.gt_checked, s.gt_missed, s.gt_late,
+                          s.gt_worst_overshoot);
             csv_rows.push_back(row);
         }
         std::printf("%-8s %9zu %8zu %6s %6s %6s   %10s %10s   %10s %10s %9.1f\n",
                     "TI(ref)", total_queries, ti_hits, "-", "-", "-", "-", "-", "-", "-",
                     ti_seconds * 1e3);
-        std::printf("  FN! = missed collision (unsafe).  late! = toi reported after TI's (unsafe).\n"
+
+        // The reference goes in the CSV too: "how fast is this mode" is only
+        // meaningful next to the implementation it reproduces.
+        {
+            char row[640];
+            std::snprintf(row, sizeof(row),
+                          "%s,%s,%s,%zu,%zu,0,0,0,0,0,0,0,0,0,0,%.6f,0,0,0,0",
+                          dataset.c_str(), phase.name, "ti-reference", total_queries, ti_hits,
+                          ti_seconds * 1e3);
+            csv_rows.push_back(row);
+        }
+        std::printf("  gtMISS!/gtLATE! are measured against the dataset's exact roots and are the\n"
+                    "  real conservativeness test. FN!/lateTI compare with TightInclusion, whose\n"
+                    "  own answer is a lower bound on the truth, so lateTI over-reports.\n"
                     "  relerr over the %zu/%zu queries with TI toi >= %g; the rest are covered by abserr.\n",
                     stats[0].rel_err.size(), stats[0].rel_err.size() + stats[0].near_zero_ref, REL_ERR_FLOOR);
         if (gt_available) {
@@ -498,7 +575,10 @@ int main(int argc, char** argv) {
 
         for (int m = 0; m < N_MODES; ++m) {
             Stats& s = stats[m];
-            const std::size_t bad = s.false_negative + s.late;
+            // Gate on the exact roots when the dataset ships them; fall back to the
+            // TightInclusion comparison only where it does not.
+            const std::size_t bad = s.gt_checked ? (s.gt_missed + s.gt_late)
+                                                 : (s.false_negative + s.late);
             if (bad == 0) {
                 continue;
             }
@@ -508,7 +588,9 @@ int main(int argc, char** argv) {
             }
             std::printf("  %s %s violates conservativeness on %zu queries "
                         "(%zu missed, %zu late). First few:\n",
-                        gated ? "!!" : "  ", mode_name(mode_of(m)), bad, s.false_negative, s.late);
+                        gated ? "!!" : "  ", mode_name(mode_of(m)), bad,
+                        s.gt_checked ? s.gt_missed : s.false_negative,
+                        s.gt_checked ? s.gt_late : s.late);
             std::size_t shown = 0;
             for (const Violation& v : s.violations) {
                 if (shown++ >= 5) break;
@@ -530,7 +612,8 @@ int main(int argc, char** argv) {
     if (!opt.csv.empty()) {
         std::ofstream out(opt.csv);
         out << "dataset,phase,mode,queries,hits,false_negative,false_positive,late,near_zero_ref,"
-               "gt_false_negative,relerr_mean,relerr_median,relerr_p95,abserr_p95,abserr_max,ms\n";
+               "gt_false_negative,relerr_mean,relerr_median,relerr_p95,abserr_p95,abserr_max,ms,"
+               "gt_checked,gt_missed,gt_late,gt_worst_overshoot\n";
         for (const std::string& r : csv_rows) {
             out << r << "\n";
         }

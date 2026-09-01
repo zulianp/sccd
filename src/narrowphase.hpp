@@ -8,6 +8,7 @@
 #include "roots.hpp"
 #include "sparallel.hpp"
 #include "sccd_base.hpp"
+#include "sccd_narrowphase_mode.hpp"
 #include "sccd_vnarrowphase.hpp"
 #include "sccd_vnarrowphase_ti.hpp"
 #include "srootfinder.hpp"
@@ -82,17 +83,16 @@ namespace sccd {
         }
         assert(toi != nullptr);
 
-        // 0 = scalar reference, 1 = fast vectorized kernel,
-        // 2 = TightInclusion-equivalent vectorized kernel (conservative).
-        int SCCD_USE_VNARROW_PHASE = SCCD_USE_VNARROW_PHASE_DEFAULT;
-        SCCD_READ_ENV(SCCD_USE_VNARROW_PHASE, atoi);
+        const NarrowPhaseMode mode = narrow_phase_mode();
 
-        if (SCCD_USE_VNARROW_PHASE == 2) {
+        if (mode == NarrowPhaseMode::Conservative) {
             return v_narrow_phase_ti_vf<nxe, T, I>(
                 noverlaps, voveralp, foveralp, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_stride);
         }
 
-        if (SCCD_USE_VNARROW_PHASE) {
+        // FastVector and TightInclusionCompat both enter the vectorized kernel;
+        // the compat mode then corrects its results inside v_narrow_phase_vf.
+        if (mode == NarrowPhaseMode::FastVector || mode == NarrowPhaseMode::TightInclusionCompat) {
             return v_narrow_phase_vf<nxe, T, I>(
                 noverlaps, voveralp, foveralp, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_stride);
         }
@@ -369,12 +369,9 @@ namespace sccd {
         }
         assert(toi != nullptr);
 
-        // Edge-edge had no vectorized path at all; mode 2 supplies one. Modes 0
-        // and 1 both fall through to the scalar search below, as before.
-        int SCCD_USE_VNARROW_PHASE = SCCD_USE_VNARROW_PHASE_DEFAULT;
-        SCCD_READ_ENV(SCCD_USE_VNARROW_PHASE, atoi);
-
-        if (SCCD_USE_VNARROW_PHASE == 2) {
+        // Edge-edge had no vectorized path at all; the conservative mode supplies
+        // one. Every other mode falls through to the scalar search below.
+        if (narrow_phase_mode() == NarrowPhaseMode::Conservative) {
             return v_narrow_phase_ti_ee<T, I>(noverlaps,
                                               e0overalp,
                                               e1overalp,
