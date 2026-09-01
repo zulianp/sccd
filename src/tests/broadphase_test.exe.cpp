@@ -197,7 +197,52 @@ static int test_broadphase_vertex_quad() {
     return SMESH_TEST_SUCCESS;
 }
 
-static int test_smesh_ccd_quad_shell_vertex() {
+static int test_smesh_ccd_triangle_surface_types() {
+    constexpr std::size_t n_points = 4;
+    const std::array<std::array<double, n_points>, 3> points_t0 = {{
+        {{0.0, -1.0, 1.0, 0.0}},
+        {{0.0, -1.0, -1.0, 1.0}},
+        {{1.0, 0.0, 0.0, 0.0}},
+    }};
+    const std::array<std::array<double, n_points>, 3> points_t1 = {{
+        {{0.0, -1.0, 1.0, 0.0}},
+        {{0.0, -1.0, -1.0, 1.0}},
+        {{-1.0, 0.0, 0.0, 0.0}},
+    }};
+
+    for (const smesh::ElemType element_type : {smesh::TRI3, smesh::TRISHELL3}) {
+        auto elements = smesh::create_host_buffer<smesh::idx_t>(3, 1);
+        elements->data()[0][0] = 1;
+        elements->data()[1][0] = 2;
+        elements->data()[2][0] = 3;
+
+        auto mesh = std::make_shared<smesh::Mesh>(smesh::Communicator::self(),
+                                                  element_type,
+                                                  elements,
+                                                  make_points_soa<smesh::geom_t, n_points>(points_t0));
+        auto ccd = sccd::CCD<double>::create(mesh, smesh::EXECUTION_SPACE_HOST);
+        auto p0 = make_points_soa<double, n_points>(points_t0);
+        auto p1 = make_points_soa<double, n_points>(points_t1);
+
+        smesh::SharedBuffer<smesh::idx_t> v_overlap;
+        smesh::SharedBuffer<smesh::idx_t> f_overlap;
+        int err = ccd->broad_phase_fv(p0, p1, v_overlap, f_overlap);
+        SMESH_TEST_EQ(err, SCCD_SUCCESS);
+        SMESH_TEST_EQ(v_overlap->size(), std::size_t(1));
+        SMESH_TEST_EQ(v_overlap->data()[0], smesh::idx_t(0));
+        SMESH_TEST_EQ(f_overlap->data()[0], smesh::idx_t(0));
+
+        double max_toi = 1.0;
+        smesh::SharedBuffer<double> vf_tois;
+        err = ccd->narrow_phase_fv(max_toi, vf_tois, 40, 1e-8, 0);
+        SMESH_TEST_EQ(err, SCCD_SUCCESS);
+        SMESH_TEST_APPROXEQ(max_toi, 0.5, 1e-6);
+        SMESH_TEST_APPROXEQ(vf_tois->data()[0], 0.5, 1e-6);
+    }
+    return SMESH_TEST_SUCCESS;
+}
+
+static int test_smesh_ccd_quad_surface_types() {
     constexpr std::size_t n_points = 5;
     const std::array<std::array<double, n_points>, 3> points_t0 = {{
         {{0.0, -1.0, 1.0, -1.0, 1.0}},
@@ -210,33 +255,36 @@ static int test_smesh_ccd_quad_shell_vertex() {
         {{-1.0, 0.0, 0.0, 0.0, 0.0}},
     }};
 
-    auto elements = smesh::create_host_buffer<smesh::idx_t>(4, 1);
-    elements->data()[0][0] = 1;
-    elements->data()[1][0] = 2;
-    elements->data()[2][0] = 3;
-    elements->data()[3][0] = 4;
+    for (const smesh::ElemType element_type : {smesh::QUAD4, smesh::QUADSHELL4}) {
+        auto elements = smesh::create_host_buffer<smesh::idx_t>(4, 1);
+        elements->data()[0][0] = 1;
+        elements->data()[1][0] = 2;
+        elements->data()[2][0] = 3;
+        elements->data()[3][0] = 4;
 
-    auto mesh = std::make_shared<smesh::Mesh>(
-        smesh::Communicator::self(), smesh::QUADSHELL4, elements, make_points_soa<smesh::geom_t, n_points>(points_t0));
-    auto ccd = sccd::CCD<double>::create(mesh, smesh::EXECUTION_SPACE_HOST);
+        auto mesh = std::make_shared<smesh::Mesh>(smesh::Communicator::self(),
+                                                  element_type,
+                                                  elements,
+                                                  make_points_soa<smesh::geom_t, n_points>(points_t0));
+        auto ccd = sccd::CCD<double>::create(mesh, smesh::EXECUTION_SPACE_HOST);
+        auto p0 = make_points_soa<double, n_points>(points_t0);
+        auto p1 = make_points_soa<double, n_points>(points_t1);
 
-    auto p0 = make_points_soa<double, n_points>(points_t0);
-    auto p1 = make_points_soa<double, n_points>(points_t1);
+        smesh::SharedBuffer<smesh::idx_t> v_overlap;
+        smesh::SharedBuffer<smesh::idx_t> f_overlap;
+        int err = ccd->broad_phase_fv(p0, p1, v_overlap, f_overlap);
+        SMESH_TEST_EQ(err, SCCD_SUCCESS);
+        SMESH_TEST_EQ(v_overlap->size(), std::size_t(1));
+        SMESH_TEST_EQ(v_overlap->data()[0], smesh::idx_t(0));
+        SMESH_TEST_EQ(f_overlap->data()[0], smesh::idx_t(0));
 
-    smesh::SharedBuffer<smesh::idx_t> v_overlap;
-    smesh::SharedBuffer<smesh::idx_t> f_overlap;
-    int err = ccd->broad_phase_fv(p0, p1, v_overlap, f_overlap);
-    SMESH_TEST_EQ(err, SCCD_SUCCESS);
-    SMESH_TEST_EQ(v_overlap->size(), std::size_t(1));
-    SMESH_TEST_EQ(v_overlap->data()[0], smesh::idx_t(0));
-    SMESH_TEST_EQ(f_overlap->data()[0], smesh::idx_t(0));
-
-    double max_toi = 1.0;
-    smesh::SharedBuffer<double> vf_tois;
-    err = ccd->narrow_phase_fv(max_toi, vf_tois, 40, 1e-8, 0);
-    SMESH_TEST_EQ(err, SCCD_SUCCESS);
-    SMESH_TEST_APPROXEQ(max_toi, 0.5, 1e-6);
-    SMESH_TEST_APPROXEQ(vf_tois->data()[0], 0.5, 1e-6);
+        double max_toi = 1.0;
+        smesh::SharedBuffer<double> vf_tois;
+        err = ccd->narrow_phase_fv(max_toi, vf_tois, 40, 1e-8, 0);
+        SMESH_TEST_EQ(err, SCCD_SUCCESS);
+        SMESH_TEST_APPROXEQ(max_toi, 0.5, 1e-6);
+        SMESH_TEST_APPROXEQ(vf_tois->data()[0], 0.5, 1e-6);
+    }
     return SMESH_TEST_SUCCESS;
 }
 
@@ -246,7 +294,8 @@ int main(int argc, char** argv) {
     {
         SMESH_RUN_TEST(test_broadphase_vertex_triangle);
         SMESH_RUN_TEST(test_broadphase_vertex_quad);
-        SMESH_RUN_TEST(test_smesh_ccd_quad_shell_vertex);
+        SMESH_RUN_TEST(test_smesh_ccd_triangle_surface_types);
+        SMESH_RUN_TEST(test_smesh_ccd_quad_surface_types);
     }
 
     SMESH_UNIT_TEST_FINALIZE();

@@ -30,7 +30,9 @@ namespace sccd {
     public:
         CCD(const std::shared_ptr<smesh::Mesh>& mesh,
             const smesh::ExecutionSpace execution_space = smesh::EXECUTION_SPACE_HOST)
-            : mesh_(mesh), execution_space_(execution_space) {}
+            : mesh_(mesh),
+              execution_space_(execution_space),
+              face_element_type_(canonical_face_element_type(mesh)) {}
 
         static std::shared_ptr<CCD> create(const std::shared_ptr<smesh::Mesh>& mesh,
                                            const smesh::ExecutionSpace execution_space = smesh::EXECUTION_SPACE_HOST) {
@@ -128,8 +130,26 @@ namespace sccd {
         void set_safe_inflate(const bool safe_inflate) { safe_inflate_ = safe_inflate; }
 
     private:
+        static smesh::ElemType canonical_face_element_type(const std::shared_ptr<smesh::Mesh>& mesh) {
+            if (!mesh || mesh->n_blocks() != 1) {
+                SMESH_ERROR("SCCD requires a non-null, single-block surface mesh\n");
+            }
+
+            const smesh::ElemType element_type = mesh->block(0)->element_type();
+            if (element_type == smesh::TRI3 || element_type == smesh::TRISHELL3) {
+                return smesh::TRISHELL3;
+            }
+            if (element_type == smesh::QUAD4 || element_type == smesh::QUADSHELL4) {
+                return smesh::QUADSHELL4;
+            }
+
+            SMESH_ERROR("Unsupported SCCD face element type: %s\n", smesh::type_to_string(element_type));
+            return smesh::INVALID;
+        }
+
         std::shared_ptr<smesh::Mesh> mesh_;
         smesh::ExecutionSpace execution_space_{smesh::EXECUTION_SPACE_HOST};
+        const smesh::ElemType face_element_type_;
 
         smesh::SharedBuffer<smesh::idx_t*> faces_;
         smesh::SharedBuffer<smesh::idx_t> e0_;
@@ -341,7 +361,7 @@ namespace sccd {
             const int dim = mesh_->spatial_dimension();
             const ptrdiff_t n_nodes = mesh_->n_nodes();
             const ptrdiff_t n_faces = mesh_->block(0)->n_elements();
-            const auto element_type = mesh_->block(0)->element_type();
+            const auto element_type = face_element_type_;
 
             {
                 SMESH_TRACE_SCOPE("cummax");
@@ -477,7 +497,7 @@ namespace sccd {
             };
 
             vf_tois_ = smesh::create_buffer<scalar_t>(toi_storage_size(v_overlap_->size()), execution_space_);
-            const auto element_type = mesh_->block(0)->element_type();
+            const auto element_type = face_element_type_;
             if (element_type == smesh::TRISHELL3) {
                 sccd::narrow_phase_vf<3, scalar_t, smesh::idx_t>(v_overlap_->size(),
                                                                  v_overlap_->data(),
@@ -604,7 +624,7 @@ namespace sccd {
             const int dim = mesh_->spatial_dimension();
             const ptrdiff_t n_nodes = mesh_->n_nodes();
             const ptrdiff_t n_faces = mesh_->block(0)->n_elements();
-            const auto element_type = mesh_->block(0)->element_type();
+            const auto element_type = face_element_type_;
 
             scalar_t* vaabb_max_axis = nullptr;
             cudaMemcpy(
@@ -759,7 +779,7 @@ namespace sccd {
             };
 
             vf_tois_ = smesh::create_buffer<scalar_t>(toi_storage_size(v_overlap_->size()), execution_space_);
-            const auto element_type = mesh_->block(0)->element_type();
+            const auto element_type = face_element_type_;
             if (element_type == smesh::QUADSHELL4) {
                 SMESH_ERROR("CUDA QUADSHELL4 narrow phase is not implemented\n");
             }
@@ -917,38 +937,40 @@ namespace sccd {
             }
         }
 
-        // std::pair<smesh::SharedBuffer<smesh::idx_t>, smesh::SharedBuffer<smesh::idx_t>> create_shell_edges_host_() const {
-        //     const auto element_type = mesh_->block(0)->element_type();
-        //     const int nxe = mesh_->block(0)->n_nodes_per_element();
-        //     if (element_type != smesh::TRISHELL3 && element_type != smesh::QUADSHELL4) {
-        //         SMESH_ERROR("Unsupported CCD face element type: %s\n", smesh::type_to_string(element_type));
-        //     }
 
-        //     auto faces = mesh_->block(0)->elements();
-        //     const ptrdiff_t n_faces = mesh_->block(0)->n_elements();
+        std::pair<smesh::SharedBuffer<smesh::idx_t>, smesh::SharedBuffer<smesh::idx_t>> create_shell_edges_host_()
+            const {
+            const auto element_type = face_element_type_;
+            const int nxe = mesh_->block(0)->n_nodes_per_element();
+            if (element_type != smesh::TRISHELL3 && element_type != smesh::QUADSHELL4) {
+                SMESH_ERROR("Unsupported CCD face element type: %s\n", smesh::type_to_string(element_type));
+            }
 
-        //     std::vector<std::pair<smesh::idx_t, smesh::idx_t>> edge_pairs;
-        //     edge_pairs.reserve(static_cast<std::size_t>(nxe * n_faces));
-        //     for (ptrdiff_t f = 0; f < n_faces; ++f) {
-        //         for (int local_edge = 0; local_edge < nxe; ++local_edge) {
-        //             const smesh::idx_t a = faces->data()[local_edge][f];
-        //             const smesh::idx_t b = faces->data()[(local_edge + 1) % nxe][f];
-        //             edge_pairs.emplace_back(std::min(a, b), std::max(a, b));
-        //         }
-        //     }
+            auto faces = mesh_->block(0)->elements();
+            const ptrdiff_t n_faces = mesh_->block(0)->n_elements();
 
-        //     std::sort(edge_pairs.begin(), edge_pairs.end());
-        //     edge_pairs.erase(std::unique(edge_pairs.begin(), edge_pairs.end()), edge_pairs.end());
+            std::vector<std::pair<smesh::idx_t, smesh::idx_t>> edge_pairs;
+            edge_pairs.reserve(static_cast<std::size_t>(nxe * n_faces));
+            for (ptrdiff_t f = 0; f < n_faces; ++f) {
+                for (int local_edge = 0; local_edge < nxe; ++local_edge) {
+                    const smesh::idx_t a = faces->data()[local_edge][f];
+                    const smesh::idx_t b = faces->data()[(local_edge + 1) % nxe][f];
+                    edge_pairs.emplace_back(std::min(a, b), std::max(a, b));
+                }
+            }
 
-        //     auto e0 = smesh::create_host_buffer<smesh::idx_t>(edge_pairs.size());
-        //     auto e1 = smesh::create_host_buffer<smesh::idx_t>(edge_pairs.size());
-        //     for (std::size_t i = 0; i < edge_pairs.size(); ++i) {
-        //         e0->data()[i] = edge_pairs[i].first;
-        //         e1->data()[i] = edge_pairs[i].second;
-        //     }
+            std::sort(edge_pairs.begin(), edge_pairs.end());
+            edge_pairs.erase(std::unique(edge_pairs.begin(), edge_pairs.end()), edge_pairs.end());
 
-        //     return {e0, e1};
-        // }
+            auto e0 = smesh::create_host_buffer<smesh::idx_t>(edge_pairs.size());
+            auto e1 = smesh::create_host_buffer<smesh::idx_t>(edge_pairs.size());
+            for (std::size_t i = 0; i < edge_pairs.size(); ++i) {
+                e0->data()[i] = edge_pairs[i].first;
+                e1->data()[i] = edge_pairs[i].second;
+            }
+
+            return {e0, e1};
+        }
 
         void init() {
             SMESH_TRACE_SCOPE("CCD::init");
