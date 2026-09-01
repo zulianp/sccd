@@ -349,7 +349,7 @@ namespace sccd {
             }
 
             bool accepted = false;
-            if (!codomain_acceptance<T>(fmin, fmax, tol, tols, accepted)) {
+            if (!codomain_acceptance_vq<T>(fmin, fmax, tol, tols, accepted)) {
                 continue;
             }
 

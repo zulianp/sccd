@@ -194,6 +194,8 @@ namespace sccd {
 
                 T_HP tols[3];
                 compute_face_vertex_tolerance<T_HP>(tol, sv, s1, s2, s3, ev, e1, e2, e3, tols);
+                T_HP numerical_error[3];
+                numerical_error_bound<true, T_HP>(sv, s1, s2, s3, ev, e1, e2, e3, numerical_error);
 
                 stack.clear();
                 stack.push_back(initial_domain);
@@ -213,6 +215,7 @@ namespace sccd {
                         found = find_root_grid_adaptive_split_vf<T_HP>(max_depth,
                                                                        tol,
                                                                        tols,
+                                                                       numerical_error,
                                                                        codomain_widths,
                                                                        sv,
                                                                        s1,
@@ -232,6 +235,7 @@ namespace sccd {
                         found = find_root_grid_uniform_split_vf<T_HP>(max_depth,
                                                                       tol,
                                                                       tols,
+                                                                      numerical_error,
                                                                       codomain_widths,
                                                                       sv,
                                                                       s1,
@@ -452,6 +456,8 @@ namespace sccd {
 #endif
                 T_HP tols[3];
                 compute_edge_edge_tolerance<T_HP>(tol, s1, s2, s3, s4, e1, e2, e3, e4, tols);
+                T_HP numerical_error[3];
+                numerical_error_bound<false, T_HP>(s1, s2, s3, s4, e1, e2, e3, e4, numerical_error);
 
                 stack.clear();
                 stack.push_back(initial_domain);
@@ -470,6 +476,7 @@ namespace sccd {
                         found = find_root_grid_adaptive_split_ee<T_HP>(max_depth,
                                                                        tol,
                                                                        tols,
+                                                                       numerical_error,
                                                                        codomain_widths,
                                                                        s1,
                                                                        s2,
@@ -489,6 +496,7 @@ namespace sccd {
                         found = find_root_grid_uniform_split_ee<T_HP>(max_depth,
                                                                       tol,
                                                                       tols,
+                                                                      numerical_error,
                                                                       codomain_widths,
                                                                       s1,
                                                                       s2,
