@@ -8,19 +8,29 @@ set -euo pipefail
 # 3) Number of false positives (should be as low as possible for the narrow-phase) and negatives (should be 0)
 # For cuda on Alps: OMP_NUM_THREADS=72 SCCD_BENCH_EXECUTION_SPACE=device srun ./bench.sh 
 
-export  SCCD_ENABLE_ARMADILLO_ROLLERS=1
-export  SCCD_ENABLE_CLOTH_BALL=1
-export  SCCD_ENABLE_CLOTH_FUNNEL=1
-export  SCCD_ENABLE_N_BODY_SIMULATION=0
-export  SCCD_ENABLE_PUFFER_BALL=0
-export  SCCD_ENABLE_ROD_TWIST=0
+# Narrow-phase modes to sweep (see src/sccd_narrowphase_mode.hpp):
+#   0 scalar   1 fast-vector   2 conservative   3 ti-compat
+# The binary is run once per mode and the rows are concatenated; every row
+# carries its mode, so the postprocessor keeps the series apart.
+# Mode 3 is an oracle and is very slow -- add it only when you want it.
+export SCCD_BENCH_MODES="${SCCD_BENCH_MODES:-0 1 2}"
+
+# Datasets to run. Overridable from the environment so a quick check can target
+# a single dataset without editing this file.
+export SCCD_ENABLE_ARMADILLO_ROLLERS="${SCCD_ENABLE_ARMADILLO_ROLLERS:-1}"
+export SCCD_ENABLE_CLOTH_BALL="${SCCD_ENABLE_CLOTH_BALL:-1}"
+export SCCD_ENABLE_CLOTH_FUNNEL="${SCCD_ENABLE_CLOTH_FUNNEL:-1}"
+export SCCD_ENABLE_N_BODY_SIMULATION="${SCCD_ENABLE_N_BODY_SIMULATION:-0}"
+export SCCD_ENABLE_PUFFER_BALL="${SCCD_ENABLE_PUFFER_BALL:-0}"
+export SCCD_ENABLE_ROD_TWIST="${SCCD_ENABLE_ROD_TWIST:-0}"
+
+# Skip the dataset download when the data is already in place.
+export SCCD_SKIP_DOWNLOAD="${SCCD_SKIP_DOWNLOAD:-0}"
 
 BENCHMARK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 exec 3>&1
 exec 1>&2
-
-"${BENCHMARK_DIR}/download_datasets.sh"
 
 DATA_DIR="${SCCD_DATA_DIR:-"${BENCHMARK_DIR}/../data"}"
 JSON_PROJECT_DIR="${BENCHMARK_DIR}/../external/json"
@@ -46,6 +56,12 @@ parallel_jobs() {
         echo 1
     fi
 }
+
+if is_enabled "${SCCD_SKIP_DOWNLOAD}"; then
+    printf 'note: SCCD_SKIP_DOWNLOAD is set; assuming %s is already populated\n' "${DATA_DIR}" >&2
+else
+    "${BENCHMARK_DIR}/download_datasets.sh"
+fi
 
 cmake -S "${JSON_PROJECT_DIR}" -B "${JSON_BUILD_DIR}" -DCMAKE_BUILD_TYPE=Release
 cmake --build "${JSON_BUILD_DIR}" --config Release --target boxes_json_to_raw mma_bool_json_to_raw --parallel "$(parallel_jobs)"
@@ -105,6 +121,8 @@ fi
 
 cmake -S "${ROOT_DIR}" -B "${SCCD_BUILD_DIR}" "${cmake_bench_args[@]}"
 cmake --build "${SCCD_BUILD_DIR}" --config Release --target sccd_bench --parallel "$(parallel_jobs)"
+# The accuracy oracle is gated on TightInclusion, which this build enables.
+cmake --build "${SCCD_BUILD_DIR}" --config Release --target ti_oracle --parallel "$(parallel_jobs)" || true
 
 if [[ -z "${SCCD_DB_TO_RAW:-}" ]]; then
     if command -v db_to_raw >/dev/null 2>&1; then
@@ -154,10 +172,32 @@ BENCH_FIGURE_DIR="${SCCD_BENCH_FIGURE_DIR:-"${BENCHMARK_DIR}/figures"}"
 BENCH_REPORT_TEX="${SCCD_BENCH_REPORT_TEX:-"${BENCHMARK_DIR}/bench_report.tex"}"
 mkdir -p "$(dirname "${BENCH_CSV}")" "$(dirname "${BENCH_AGG_CSV}")" "$(dirname "${BENCH_MISSING_PAIRS_CSV}")" "${BENCH_FIGURE_DIR}" "$(dirname "${BENCH_REPORT_TEX}")"
 
+BENCH_HEADER='dataset,mode,case,type,queries,prep_ms,broad_ms,narrow_ms,query_narrow_ms,fp,fn,broad_fp,broad_fn'
+
+mode_label() {
+    case "$1" in
+        0) echo "scalar" ;;
+        1) echo "fast-vector" ;;
+        2) echo "conservative" ;;
+        3) echo "ti-compat" ;;
+        *) echo "mode$1" ;;
+    esac
+}
+
 if [[ "${#datasets[@]}" -gt 0 ]]; then
-    SCCD_MISSING_PAIRS_CSV="${BENCH_MISSING_PAIRS_CSV}" "${SCCD_BENCH}" "${DATA_DIR}" "${datasets[@]}" | tee "${BENCH_CSV}"
+    : > "${BENCH_CSV}"
+    printf '%s\n' "${BENCH_HEADER}" >> "${BENCH_CSV}"
+    for mode in ${SCCD_BENCH_MODES}; do
+        printf '==> narrow-phase mode %s (%s)\n' "${mode}" "$(mode_label "${mode}")" >&2
+        # Each mode gets its own process so one mode's allocator and cache state
+        # cannot colour the next one's timings.
+        SCCD_NARROWPHASE_MODE="${mode}" \
+        SCCD_MISSING_PAIRS_CSV="${BENCH_MISSING_PAIRS_CSV}" \
+            "${SCCD_BENCH}" "${DATA_DIR}" "${datasets[@]}" | tail -n +2 >> "${BENCH_CSV}"
+    done
+    cat "${BENCH_CSV}"
 else
-    printf 'dataset,case,type,queries,prep_ms,broad_ms,narrow_ms,query_narrow_ms,fp,fn,broad_fp,broad_fn\n' | tee "${BENCH_CSV}"
+    printf '%s\n' "${BENCH_HEADER}" | tee "${BENCH_CSV}"
     printf 'dataset,case,type,phase,query_id,c0,c1\n' > "${BENCH_MISSING_PAIRS_CSV}"
 fi
 
@@ -165,6 +205,52 @@ exec 1>&2
 
 "${PYTHON}" "${BENCHMARK_DIR}/bench_postprocess.py" \
     "${BENCH_CSV}" "${BENCH_AGG_CSV}" "${BENCH_FIGURE_DIR}" "${BENCH_REPORT_TEX}" "${DATA_DIR}"
+
+# --- accuracy against TightInclusion, per mode -----------------------------
+# Timing alone cannot tell you whether a mode is safe to use. The oracle checks
+# every query against TightInclusion and fails when a mode misses a collision or
+# reports a time of impact after the true one.
+TI_ORACLE="${SCCD_BUILD_DIR}/ti_oracle"
+if [[ ! -x "${TI_ORACLE}" && -x "${SCCD_BUILD_DIR}/Release/ti_oracle" ]]; then
+    TI_ORACLE="${SCCD_BUILD_DIR}/Release/ti_oracle"
+fi
+
+ORACLE_DIR="${SCCD_BENCH_ORACLE_DIR:-"${BENCHMARK_DIR}/oracle/run"}"
+ORACLE_CSV="${ORACLE_DIR}/oracle.csv"
+if [[ -x "${TI_ORACLE}" ]]; then
+    mkdir -p "${ORACLE_DIR}"
+    : > "${ORACLE_CSV}"
+    oracle_header_written=0
+    for dataset in "${datasets[@]}"; do
+        [[ -d "${DATA_DIR}/${dataset}/queries" ]] || continue
+        per_dataset="${ORACLE_DIR}/${dataset}.csv"
+        # --no-strict: collect every dataset before deciding pass or fail.
+        "${TI_ORACLE}" "${DATA_DIR}/${dataset}" \
+            --no-strict \
+            ${SCCD_ORACLE_MAX_FILES:+--max-files "${SCCD_ORACLE_MAX_FILES}"} \
+            --csv "${per_dataset}" \
+            --violations-csv "${ORACLE_DIR}/${dataset}-violations.csv" || true
+        if [[ -f "${per_dataset}" ]]; then
+            if [[ "${oracle_header_written}" -eq 0 ]]; then
+                cat "${per_dataset}" >> "${ORACLE_CSV}"
+                oracle_header_written=1
+            else
+                tail -n +2 "${per_dataset}" >> "${ORACLE_CSV}"
+            fi
+        fi
+    done
+else
+    printf 'note: ti_oracle was not built; skipping the accuracy comparison\n' >&2
+fi
+
+# --- HTML report ------------------------------------------------------------
+BENCH_REPORT_HTML="${SCCD_BENCH_REPORT_HTML:-"${BENCHMARK_DIR}/bench_report.html"}"
+"${PYTHON}" "${BENCHMARK_DIR}/bench_report_html.py" \
+    --aggregate "${BENCH_AGG_CSV}" \
+    --toi-error "${BENCH_TOI_ERROR_CSV}" \
+    --oracle "${ORACLE_CSV}" \
+    --out "${BENCH_REPORT_HTML}" \
+  && printf 'report: %s\n' "${BENCH_REPORT_HTML}" >&2
 
 BENCH_ARCHIVE="${BENCHMARK_DIR}/sccd-benchmark-$(date +%Y-%m-%d).tar.gz"
 tar -czf "${BENCH_ARCHIVE}" \
@@ -175,4 +261,5 @@ tar -czf "${BENCH_ARCHIVE}" \
     -C "$(dirname "${BENCH_TOI_ERROR_CSV}")" "$(basename "${BENCH_TOI_ERROR_CSV}")" \
     -C "$(dirname "${BENCH_MISSING_PAIRS_CSV}")" "$(basename "${BENCH_MISSING_PAIRS_CSV}")" \
     -C "$(dirname "${BENCH_REPORT_TEX}")" "$(basename "${BENCH_REPORT_TEX}")" \
-    -C "$(dirname "${BENCH_FIGURE_DIR}")" "$(basename "${BENCH_FIGURE_DIR}")"
+    -C "$(dirname "${BENCH_FIGURE_DIR}")" "$(basename "${BENCH_FIGURE_DIR}")" \
+    -C "$(dirname "${BENCH_REPORT_HTML}")" "$(basename "${BENCH_REPORT_HTML}")"

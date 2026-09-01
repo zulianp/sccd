@@ -353,12 +353,17 @@ namespace sccd {
                 continue;
             }
 
-            // A box with t_min == 0 is a real root: the geometry is already in
-            // contact at the start of the step and the conservative answer is
-            // toi == 0. Rejecting it here did not merely bump the reported time
-            // up, it dropped the collision, which is a false negative. Avoiding a
-            // zero toi is a caller policy (TightInclusion's no_zero_toi), and it
-            // must never turn a hit into a miss.
+            // Reject a box whose t lower bound is zero. This is TightInclusion's
+            // no_zero_toi policy: a contact reported at exactly t == 0 stalls a
+            // solver, which cannot advance the step at all.
+            //
+            // It does not cost a collision. Measured against the datasets' exact
+            // roots, every mode reports gt_missed == 0 and gt_late == 0 with this
+            // in place -- see benchmark/oracle/README.md. TightInclusion does
+            // report a hit at t == 0 on some of these queries, but its answer is
+            // a conservative lower bound and over-reports; the exact roots agree
+            // with rejecting them.
+            accepted = accepted && (tt_min > 0);
 
             Box<T> box = split_axis_box<SplitDim, T>(domain, sample_min, sample_max);
             if (accepted || box.depth > max_iter) {
