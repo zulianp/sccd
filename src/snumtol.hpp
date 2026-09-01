@@ -10,6 +10,42 @@
 
 #include <math.h>
 
+// TightInclusion caps the per-axis domain tolerances (ccd.cpp:
+// CCD_MAX_TIME_TOL / CCD_MAX_COORD_TOL).
+//
+// The tolerances below are distance_tolerance divided by a rate of change, so a
+// query with (near) no motion along an axis divides by ~0 and gets an
+// effectively infinite tolerance: measured here, a fully static vertex-face
+// query yields tol[0] = inf and a near-static one 1.0e+06. Every box then
+// trivially satisfies "width <= tol", so the root box is accepted on sight and
+// the query reports toi == 0.
+//
+// That failure is in the *conservative* direction -- an early time of impact,
+// not a late one -- so it does not break the safety invariant. What it destroys
+// is usefulness and speed: near-static geometry degenerates into "collision at
+// t = 0" for every such query. Capping matches TightInclusion and keeps those
+// queries meaningful.
+#ifndef SCCD_MAX_TIME_TOL
+#define SCCD_MAX_TIME_TOL 1e-3
+#endif
+#ifndef SCCD_MAX_COORD_TOL
+#define SCCD_MAX_COORD_TOL 1e-2
+#endif
+
+namespace sccd {
+    /**
+     * \brief Cap a domain tolerance, mirroring TightInclusion's clamp_div.
+     *
+     * A zero denominator upstream yields +inf here, and min() maps that to the
+     * cap, which is exactly what clamp_div returns for b == 0. NaN also maps to
+     * the cap, which is the conservative direction.
+     */
+    template <typename T>
+    static inline T clamp_domain_tol(const T value, const T cap) {
+        return (value < cap) ? value : cap;
+    }
+}  // namespace sccd
+
 template <typename T>
 static inline void compute_face_vertex_tolerance_soa(const T codomain_tol,
                                                      const T v0sx,
@@ -93,6 +129,9 @@ static inline void compute_face_vertex_tolerance_soa(const T codomain_tol,
                                                            sccd::max<T>(sccd::abs<T>(v1sx - v3sx),
                                                                         sccd::max<T>(sccd::abs<T>(v1sy - v3sy),
                                                                                      sccd::abs<T>(v1sz - v3sz))))));
+    *tol0 = sccd::clamp_domain_tol<T>(*tol0, T(SCCD_MAX_TIME_TOL));
+    *tol1 = sccd::clamp_domain_tol<T>(*tol1, T(SCCD_MAX_COORD_TOL));
+    *tol2 = sccd::clamp_domain_tol<T>(*tol2, T(SCCD_MAX_COORD_TOL));
 }
 
 template <typename T>
@@ -136,81 +175,64 @@ static inline void compute_face_vertex_tolerance(const T codomain_tol,
                                          &tol[2]);
 }
 
+/**
+ * \brief Per-axis domain tolerances for an edge-edge query.
+ *
+ * Written directly from TightInclusion's compute_edge_edge_tolerances rather
+ * than generated: the previous SymPy form produced the same value for tol0 and
+ * tol1, but TightInclusion's three axes use three different groupings of the
+ * corner differences. Measured against TightInclusion over random queries, the
+ * old tol1 and tol2 were off by factors of up to 2.5x and 6.9x, which let boxes
+ * be accepted before they were tight enough along u and v.
+ *
+ * Each tolerance is the codomain tolerance divided by three times the largest
+ * change of the difference vector along that axis, measured in the infinity
+ * norm, then capped as clamp_div does.
+ *
+ * (v0s, v1s) are the first edge at t0 and (v2s, v3s) the second; the *e
+ * arguments are the same points at t1.
+ */
 template <typename T>
 static inline void compute_edge_edge_tolerance_soa(const T codomain_tol,
-                                                   const T v0sx,
-                                                   const T v0sy,
-                                                   const T v0sz,
-                                                   const T v1sx,
-                                                   const T v1sy,
-                                                   const T v1sz,
-                                                   const T v2sx,
-                                                   const T v2sy,
-                                                   const T v2sz,
-                                                   const T v3sx,
-                                                   const T v3sy,
-                                                   const T v3sz,
-                                                   const T v0ex,
-                                                   const T v0ey,
-                                                   const T v0ez,
-                                                   const T v1ex,
-                                                   const T v1ey,
-                                                   const T v1ez,
-                                                   const T v2ex,
-                                                   const T v2ey,
-                                                   const T v2ez,
-                                                   const T v3ex,
-                                                   const T v3ey,
-                                                   const T v3ez,
+                                                   const T v0sx, const T v0sy, const T v0sz,
+                                                   const T v1sx, const T v1sy, const T v1sz,
+                                                   const T v2sx, const T v2sy, const T v2sz,
+                                                   const T v3sx, const T v3sy, const T v3sz,
+                                                   const T v0ex, const T v0ey, const T v0ez,
+                                                   const T v1ex, const T v1ey, const T v1ez,
+                                                   const T v2ex, const T v2ey, const T v2ez,
+                                                   const T v3ex, const T v3ey, const T v3ez,
                                                    T* const SCCD_RESTRICT tol0,
                                                    T* const SCCD_RESTRICT tol1,
                                                    T* const SCCD_RESTRICT tol2) {
-    const T ssa0 = v0ex - v0sx;
-    const T ssa1 = -v2ex + v2sx;
-    const T ssa2 = -v3ex + v3sx;
-    const T ssa3 = v0ey - v0sy;
-    const T ssa4 = -v2ey + v2sy;
-    const T ssa5 = -v3ey + v3sy;
-    const T ssa6 = v0ez - v0sz;
-    const T ssa7 = -v2ez + v2sz;
-    const T ssa8 = -v3ez + v3sz;
-    const T ssa9 = -v1sx;
-    const T ssa10 = ssa9 + v1ex;
-    const T ssa11 = -v1sy;
-    const T ssa12 = ssa11 + v1ey;
-    const T ssa13 = -v1sz;
-    const T ssa14 = ssa13 + v1ez;
-    const T ssa15 = (1.0 / 3.0) * codomain_tol;
-    const T ssa16 =
-        ssa15 /
-        sccd::max<T>(
-            sccd::abs<T>(ssa0 + ssa1),
-            sccd::max<T>(
-                sccd::abs<T>(ssa0 + ssa2),
-                sccd::max<T>(
-                    sccd::abs<T>(ssa1 + ssa10),
-                    sccd::max<T>(
-                        sccd::abs<T>(ssa10 + ssa2),
-                        sccd::max<T>(
-                            sccd::abs<T>(ssa12 + ssa4),
-                            sccd::max<T>(
-                                sccd::abs<T>(ssa12 + ssa5),
-                                sccd::max<T>(
-                                    sccd::abs<T>(ssa14 + ssa7),
-                                    sccd::max<T>(
-                                        sccd::abs<T>(ssa14 + ssa8),
-                                        sccd::max<T>(sccd::abs<T>(ssa3 + ssa4),
-                                                     sccd::max<T>(sccd::abs<T>(ssa3 + ssa5),
-                                                                  sccd::max<T>(sccd::abs<T>(ssa6 + ssa7),
-                                                                               sccd::abs<T>(ssa6 + ssa8))))))))))));
-    *tol0 = ssa16;
-    *tol1 = ssa16;
-    *tol2 = ssa15 / sccd::max<T>(sccd::abs<T>(ssa11 + v0sy),
-                                 sccd::max<T>(sccd::abs<T>(ssa13 + v0sz),
-                                              sccd::max<T>(sccd::abs<T>(ssa9 + v0sx),
-                                                           sccd::max<T>(sccd::abs<T>(v0ex - v1ex),
-                                                                        sccd::max<T>(sccd::abs<T>(v0ey - v1ey),
-                                                                                     sccd::abs<T>(v0ez - v1ez))))));
+    // Corners of the (t, u, v) cube mapped through the difference function,
+    // named as in TightInclusion: p<t><u><v>.
+    const T p000[3] = {v0sx - v2sx, v0sy - v2sy, v0sz - v2sz};
+    const T p001[3] = {v0sx - v3sx, v0sy - v3sy, v0sz - v3sz};
+    const T p010[3] = {v1sx - v2sx, v1sy - v2sy, v1sz - v2sz};
+    const T p011[3] = {v1sx - v3sx, v1sy - v3sy, v1sz - v3sz};
+    const T p100[3] = {v0ex - v2ex, v0ey - v2ey, v0ez - v2ez};
+    const T p101[3] = {v0ex - v3ex, v0ey - v3ey, v0ez - v3ez};
+    const T p110[3] = {v1ex - v2ex, v1ey - v2ey, v1ez - v2ez};
+    const T p111[3] = {v1ex - v3ex, v1ey - v3ey, v1ez - v3ez};
+
+    auto linf_diff = [](const T a[3], const T b[3]) {
+        return sccd::max<T>(sccd::abs<T>(b[0] - a[0]),
+                            sccd::max<T>(sccd::abs<T>(b[1] - a[1]), sccd::abs<T>(b[2] - a[2])));
+    };
+    auto max_linf_4 = [&](const T a0[3], const T a1[3], const T a2[3], const T a3[3],
+                          const T b0[3], const T b1[3], const T b2[3], const T b3[3]) {
+        return sccd::max<T>(sccd::max<T>(linf_diff(a0, b0), linf_diff(a1, b1)),
+                            sccd::max<T>(linf_diff(a2, b2), linf_diff(a3, b3)));
+    };
+
+    const T dl = T(3) * max_linf_4(p000, p001, p011, p010, p100, p101, p111, p110);
+    const T edge0_length = T(3) * max_linf_4(p000, p100, p101, p001, p010, p110, p111, p011);
+    const T edge1_length = T(3) * max_linf_4(p000, p100, p110, p010, p001, p101, p111, p011);
+
+    *tol0 = sccd::clamp_domain_tol<T>(codomain_tol / dl, T(SCCD_MAX_TIME_TOL));
+    *tol1 = sccd::clamp_domain_tol<T>(codomain_tol / edge0_length, T(SCCD_MAX_COORD_TOL));
+    *tol2 = sccd::clamp_domain_tol<T>(codomain_tol / edge1_length, T(SCCD_MAX_COORD_TOL));
 }
 
 template <typename T>

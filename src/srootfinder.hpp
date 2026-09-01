@@ -1022,7 +1022,12 @@ namespace sccd {
                 continue;
             }
 
-            accepted = accepted && (tt_min > 0);
+            // A box with t_min == 0 is a real root: the geometry is already in
+            // contact at the start of the step and the conservative answer is
+            // toi == 0. Rejecting it here did not merely bump the reported time
+            // up, it dropped the collision, which is a false negative. Avoiding a
+            // zero toi is a caller policy (TightInclusion's no_zero_toi), and it
+            // must never turn a hit into a miss.
 
             Box<T> box = split_axis_box<SplitDim, T>(domain, sample_min, sample_max);
             if (accepted || box.depth > max_iter) {
@@ -1290,7 +1295,12 @@ namespace sccd {
                 continue;
             }
 
-            accept[i] = accept[i] && (tt_min > 0);
+            // A box with t_min == 0 is a real root: the geometry is already in
+            // contact at the start of the step and the conservative answer is
+            // toi == 0. Rejecting it here did not merely bump the reported time
+            // up, it dropped the collision, which is a false negative. Avoiding a
+            // zero toi is a caller policy (TightInclusion's no_zero_toi), and it
+            // must never turn a hit into a miss.
 
             Box<T> box = split_axis_box<SplitDim, T>(domain, sample_lo, sample_hi);
             if (accept[i] || box.depth > max_iter) {
@@ -1651,7 +1661,12 @@ namespace sccd {
                 continue;
             }
 
-            accepted = accepted && (tt_min > 0);
+            // A box with t_min == 0 is a real root: the geometry is already in
+            // contact at the start of the step and the conservative answer is
+            // toi == 0. Rejecting it here did not merely bump the reported time
+            // up, it dropped the collision, which is a false negative. Avoiding a
+            // zero toi is a caller policy (TightInclusion's no_zero_toi), and it
+            // must never turn a hit into a miss.
 
             Box<T> box = split_axis_box<SplitDim, T>(domain, sample_min, sample_max);
             if (accepted || box.depth > max_iter) {
@@ -1914,7 +1929,12 @@ namespace sccd {
                 continue;
             }
 
-            accept[i] = accept[i] && (tt_min > 0);
+            // A box with t_min == 0 is a real root: the geometry is already in
+            // contact at the start of the step and the conservative answer is
+            // toi == 0. Rejecting it here did not merely bump the reported time
+            // up, it dropped the collision, which is a false negative. Avoiding a
+            // zero toi is a caller policy (TightInclusion's no_zero_toi), and it
+            // must never turn a hit into a miss.
 
             Box<T> box = split_axis_box<SplitDim, T>(domain, sample_lo, sample_hi);
             if (accept[i] || box.depth > max_iter) {

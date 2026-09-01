@@ -198,4 +198,12 @@ if(SCCD_ENABLE_SMESH)
   target_link_libraries(sccd_bench PRIVATE sccd)
 endif()
 
+# Accuracy oracle: compares every narrow-phase mode against TightInclusion on the
+# CCD benchmark query sets. Needs TightInclusion but deliberately not smesh, so
+# it can be built and run without the mesh stack.
+if(SCCD_ENABLE_TIGHT_INCLUSION)
+  add_executable(ti_oracle "${CMAKE_CURRENT_SOURCE_DIR}/benchmark/ti_oracle.exe.cpp")
+  target_link_libraries(ti_oracle PRIVATE sccd)
+endif()
+
 include(SCCDTests)

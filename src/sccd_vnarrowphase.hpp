@@ -764,9 +764,10 @@ namespace sccd {
                     widths_within_tol && ((domain.tuv[d].upper[i] - domain.tuv[d].lower[i]) <= tols.axis[d][q]);
             }
 
-            const bool positive_time = domain.tuv[0].lower[i] > T(0);
+            // t_min == 0 boxes are accepted: contact at the start of the step is a
+            // real collision and must not be dropped. See srootfinder.hpp.
             contains_origin[i] = contains;
-            accepted[i] = contains && positive_time && (box_in_error || widths_within_tol);
+            accepted[i] = contains && (box_in_error || widths_within_tol);
         }
     }
 
@@ -778,7 +779,6 @@ namespace sccd {
                                    uint8_t* const SCCD_RESTRICT contains_origin,
                                    uint8_t* const SCCD_RESTRICT accepted) {
         static_assert((VSIZE % 2) == 0, "double NEON mask kernel expects an even vector size");
-        const float64x2_t vzero = vdupq_n_f64(0.0);
 
         for (int i = 0; i < VSIZE; i += 2) {
             uint64x2_t contains = vdupq_n_u64(~uint64_t(0));
@@ -801,9 +801,9 @@ namespace sccd {
                     vandq_u64(widths_within_tol, vcleq_f64(width, load2_indexed_f64(tols.axis[d], q0, q1)));
             }
 
-            const uint64x2_t positive_time = vcgtq_f64(vld1q_f64(domain.tuv[0].lower + i), vzero);
+
             const uint64x2_t accept =
-                vandq_u64(vandq_u64(contains, positive_time), vorrq_u64(box_in_error, widths_within_tol));
+                vandq_u64(contains, vorrq_u64(box_in_error, widths_within_tol));
             uint64_t co_tmp[2];
             uint64_t ac_tmp[2];
             vst1q_u64(co_tmp, contains);
@@ -1423,7 +1423,6 @@ namespace sccd {
 
                 bool accepted = false;
                 if (active_box_codomain_acceptance_vf<T, I, VSIZE>(child, query, q, tol, tols, accepted)) {
-                    accepted = accepted && (child.lower[0] > T(0));
                     if (accepted || child.depth > max_depth) {
                         if (child.lower[0] < toi &&
                             child.lower[1] + child.lower[2] < T(1) + tols.axis[1][q] + tols.axis[2][q]) {

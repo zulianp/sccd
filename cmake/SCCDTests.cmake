@@ -71,11 +71,32 @@ endfunction()
 
 enable_testing()
 
+# Tests that need TightInclusion but not smesh. Listed by name so they can be
+# excluded from the smesh glob below; otherwise enabling both options registers
+# each of them twice and configuration fails on the duplicate target.
+set(SCCD_TI_ONLY_TESTS
+  numerical_error_ti_parity_test
+  tolerance_ti_parity_test)
+
+if(SCCD_ENABLE_TIGHT_INCLUSION)
+  foreach(SCCD_TI_TEST IN LISTS SCCD_TI_ONLY_TESTS)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/${SCCD_TI_TEST}.exe.cpp")
+      add_executable(${SCCD_TI_TEST} "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/${SCCD_TI_TEST}.exe.cpp")
+      target_link_libraries(${SCCD_TI_TEST} PRIVATE sccd)
+      add_test(NAME ${SCCD_TI_TEST} COMMAND $<TARGET_FILE:${SCCD_TI_TEST}>)
+    endif()
+  endforeach()
+endif()
+
 if(SCCD_ENABLE_SMESH)
   file(GLOB SCCD_TESTS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/*.exe.cpp")
   foreach(SCCD_TEST IN LISTS SCCD_TESTS)
     get_filename_component(SCCD_TEST_TARGET "${SCCD_TEST}" NAME_WE)
     string(REGEX REPLACE "\\.exe$" "" SCCD_TEST_TARGET "${SCCD_TEST_TARGET}")
+    # Already registered above, and it must stay gated on TightInclusion.
+    if(SCCD_TEST_TARGET IN_LIST SCCD_TI_ONLY_TESTS)
+      continue()
+    endif()
     add_executable(${SCCD_TEST_TARGET} "${SCCD_TEST}")
     target_link_libraries(${SCCD_TEST_TARGET} PRIVATE sccd)
     add_test(NAME ${SCCD_TEST_TARGET} COMMAND $<TARGET_FILE:${SCCD_TEST_TARGET}>)

@@ -9,6 +9,7 @@
 #include "sparallel.hpp"
 #include "sccd_base.hpp"
 #include "sccd_vnarrowphase.hpp"
+#include "sccd_vnarrowphase_ti.hpp"
 #include "srootfinder.hpp"
 #include "vaabb.hpp"
 
@@ -81,8 +82,15 @@ namespace sccd {
         }
         assert(toi != nullptr);
 
+        // 0 = scalar reference, 1 = fast vectorized kernel,
+        // 2 = TightInclusion-equivalent vectorized kernel (conservative).
         int SCCD_USE_VNARROW_PHASE = SCCD_USE_VNARROW_PHASE_DEFAULT;
         SCCD_READ_ENV(SCCD_USE_VNARROW_PHASE, atoi);
+
+        if (SCCD_USE_VNARROW_PHASE == 2) {
+            return v_narrow_phase_ti_vf<nxe, T, I>(
+                noverlaps, voveralp, foveralp, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_stride);
+        }
 
         if (SCCD_USE_VNARROW_PHASE) {
             return v_narrow_phase_vf<nxe, T, I>(
@@ -360,6 +368,26 @@ namespace sccd {
             return 0;
         }
         assert(toi != nullptr);
+
+        // Edge-edge had no vectorized path at all; mode 2 supplies one. Modes 0
+        // and 1 both fall through to the scalar search below, as before.
+        int SCCD_USE_VNARROW_PHASE = SCCD_USE_VNARROW_PHASE_DEFAULT;
+        SCCD_READ_ENV(SCCD_USE_VNARROW_PHASE, atoi);
+
+        if (SCCD_USE_VNARROW_PHASE == 2) {
+            return v_narrow_phase_ti_ee<T, I>(noverlaps,
+                                              e0overalp,
+                                              e1overalp,
+                                              v0,
+                                              v1,
+                                              edge_stride,
+                                              edges,
+                                              max_toi,
+                                              toi,
+                                              max_depth,
+                                              tol,
+                                              toi_stride);
+        }
 
         int SCCD_USE_TI = 0;
         SCCD_READ_ENV(SCCD_USE_TI, atoi);
