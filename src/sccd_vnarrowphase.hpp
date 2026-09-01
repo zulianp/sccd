@@ -3,6 +3,7 @@
 
 #include "sccd_base.hpp"
 #include "smath.hpp"
+#include "snumerical_error.hpp"
 #include "snumtol.hpp"
 #include "sparallel.hpp"
 
@@ -68,6 +69,7 @@ namespace sccd {
     template <typename T, int VSIZE>
     struct VTolerances {
         T axis[3][VSIZE];
+        T numerical_error[3][VSIZE];
     };
 
     template <typename T, typename I, int VSIZE>
@@ -242,6 +244,30 @@ namespace sccd {
                                                  &tols.axis[0][i],
                                                  &tols.axis[1][i],
                                                  &tols.axis[2][i]);
+            tols.numerical_error[0][i] = numerical_error_bound_component<true, T>(query.s0.x[i],
+                                                                                  query.s1.x[i],
+                                                                                  query.s2.x[i],
+                                                                                  query.s3.x[i],
+                                                                                  query.e0.x[i],
+                                                                                  query.e1.x[i],
+                                                                                  query.e2.x[i],
+                                                                                  query.e3.x[i]);
+            tols.numerical_error[1][i] = numerical_error_bound_component<true, T>(query.s0.y[i],
+                                                                                  query.s1.y[i],
+                                                                                  query.s2.y[i],
+                                                                                  query.s3.y[i],
+                                                                                  query.e0.y[i],
+                                                                                  query.e1.y[i],
+                                                                                  query.e2.y[i],
+                                                                                  query.e3.y[i]);
+            tols.numerical_error[2][i] = numerical_error_bound_component<true, T>(query.s0.z[i],
+                                                                                  query.s1.z[i],
+                                                                                  query.s2.z[i],
+                                                                                  query.s3.z[i],
+                                                                                  query.e0.z[i],
+                                                                                  query.e1.z[i],
+                                                                                  query.e2.z[i],
+                                                                                  query.e3.z[i]);
         }
     }
 
@@ -467,27 +493,27 @@ namespace sccd {
     static void compute_masks_scalar(const VDomain<T, I, VSIZE>& domain,
                                      const VCodomain<T, VSIZE>& codomain,
                                      const VTolerances<T, VSIZE>& tols,
-                                     const T tol,
                                      uint8_t* const SCCD_RESTRICT contains_origin,
                                      uint8_t* const SCCD_RESTRICT accepted) {
         for (int i = 0; i < VSIZE; ++i) {
             const int q = static_cast<int>(domain.query_index[i]);
             bool contains = domain.active[i] != 0;
-            bool box_in_eps = true;
+            bool box_in_error = true;
             bool widths_within_tol = true;
 
             for (int d = 0; d < 3; ++d) {
                 const T fmin = codomain.xyz[d].lower[i];
                 const T fmax = codomain.xyz[d].upper[i];
-                contains = contains && (fmin <= tol) && (fmax >= -tol);
-                box_in_eps = box_in_eps && (fmin >= -tol) && (fmax <= tol);
+                const T error = tols.numerical_error[d][q];
+                contains = contains && (fmin <= error) && (fmax >= -error);
+                box_in_error = box_in_error && (fmin >= -error) && (fmax <= error);
                 widths_within_tol =
                     widths_within_tol && ((domain.tuv[d].upper[i] - domain.tuv[d].lower[i]) <= tols.axis[d][q]);
             }
 
             const bool positive_time = domain.tuv[0].lower[i] > T(0);
             contains_origin[i] = contains;
-            accepted[i] = contains && positive_time && (box_in_eps || widths_within_tol);
+            accepted[i] = contains && positive_time && (box_in_error || widths_within_tol);
         }
     }
 
@@ -496,17 +522,14 @@ namespace sccd {
     static void compute_masks_neon(const VDomain<double, I, VSIZE>& domain,
                                    const VCodomain<double, VSIZE>& codomain,
                                    const VTolerances<double, VSIZE>& tols,
-                                   const double tol,
                                    uint8_t* const SCCD_RESTRICT contains_origin,
                                    uint8_t* const SCCD_RESTRICT accepted) {
         static_assert((VSIZE % 2) == 0, "double NEON mask kernel expects an even vector size");
-        const float64x2_t vtol = vdupq_n_f64(tol);
-        const float64x2_t vntol = vdupq_n_f64(-tol);
         const float64x2_t vzero = vdupq_n_f64(0.0);
 
         for (int i = 0; i < VSIZE; i += 2) {
             uint64x2_t contains = vdupq_n_u64(~uint64_t(0));
-            uint64x2_t box_in_eps = vdupq_n_u64(~uint64_t(0));
+            uint64x2_t box_in_error = vdupq_n_u64(~uint64_t(0));
             uint64x2_t widths_within_tol = vdupq_n_u64(~uint64_t(0));
             const int q0 = static_cast<int>(domain.query_index[i]);
             const int q1 = static_cast<int>(domain.query_index[i + 1]);
@@ -514,17 +537,20 @@ namespace sccd {
             for (int d = 0; d < 3; ++d) {
                 const float64x2_t fmin = vld1q_f64(codomain.xyz[d].lower + i);
                 const float64x2_t fmax = vld1q_f64(codomain.xyz[d].upper + i);
+                const float64x2_t error = load2_indexed_f64(tols.numerical_error[d], q0, q1);
+                const float64x2_t negative_error = vnegq_f64(error);
                 const float64x2_t width =
                     vsubq_f64(vld1q_f64(domain.tuv[d].upper + i), vld1q_f64(domain.tuv[d].lower + i));
-                contains = vandq_u64(contains, vandq_u64(vcleq_f64(fmin, vtol), vcgeq_f64(fmax, vntol)));
-                box_in_eps = vandq_u64(box_in_eps, vandq_u64(vcgeq_f64(fmin, vntol), vcleq_f64(fmax, vtol)));
+                contains = vandq_u64(contains, vandq_u64(vcleq_f64(fmin, error), vcgeq_f64(fmax, negative_error)));
+                box_in_error =
+                    vandq_u64(box_in_error, vandq_u64(vcgeq_f64(fmin, negative_error), vcleq_f64(fmax, error)));
                 widths_within_tol =
                     vandq_u64(widths_within_tol, vcleq_f64(width, load2_indexed_f64(tols.axis[d], q0, q1)));
             }
 
             const uint64x2_t positive_time = vcgtq_f64(vld1q_f64(domain.tuv[0].lower + i), vzero);
             const uint64x2_t accept =
-                vandq_u64(vandq_u64(contains, positive_time), vorrq_u64(box_in_eps, widths_within_tol));
+                vandq_u64(vandq_u64(contains, positive_time), vorrq_u64(box_in_error, widths_within_tol));
             uint64_t co_tmp[2];
             uint64_t ac_tmp[2];
             vst1q_u64(co_tmp, contains);
@@ -544,13 +570,14 @@ namespace sccd {
                               const T tol,
                               uint8_t* const SCCD_RESTRICT contains_origin,
                               uint8_t* const SCCD_RESTRICT accepted) {
+        (void)tol;
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
         if constexpr (std::is_same<T, double>::value) {
-            compute_masks_neon<I, VSIZE>(domain, codomain, tols, tol, contains_origin, accepted);
+            compute_masks_neon<I, VSIZE>(domain, codomain, tols, contains_origin, accepted);
             return;
         }
 #endif
-        compute_masks_scalar<T, I, VSIZE>(domain, codomain, tols, tol, contains_origin, accepted);
+        compute_masks_scalar<T, I, VSIZE>(domain, codomain, tols, contains_origin, accepted);
     }
 
     template <typename T, typename I, int VSIZE>
@@ -719,23 +746,25 @@ namespace sccd {
                                                    const T fmax[3],
                                                    const T tol,
                                                    const T tols[3],
+                                                   const T numerical_error[3],
                                                    bool& accept) {
         bool contains_zero = true;
         bool smaller_than_axis_tol = true;
-        bool inside_epsilon_box = true;
-        bool last_axis_smaller_than_scalar_tol = false;
+        bool inside_error_box = true;
+        bool smaller_than_scalar_tol = true;
         bool degenerate_interval = true;
 
         for (int d = 0; d < 3; ++d) {
             const T interval_width = fmax[d] - fmin[d];
-            contains_zero = contains_zero && (fmin[d] <= tol) && (fmax[d] >= -tol);
+            contains_zero = contains_zero && (fmin[d] <= numerical_error[d]) && (fmax[d] >= -numerical_error[d]);
             smaller_than_axis_tol = smaller_than_axis_tol && (interval_width <= tols[d]);
-            inside_epsilon_box = inside_epsilon_box && !((fmin[d] < tol) || (fmax[d] > -tol));
-            last_axis_smaller_than_scalar_tol = interval_width < tol;
+            inside_error_box =
+                inside_error_box && (fmin[d] >= -numerical_error[d]) && (fmax[d] <= numerical_error[d]);
+            smaller_than_scalar_tol = smaller_than_scalar_tol && (interval_width < tol);
             degenerate_interval = degenerate_interval && (fmin[d] >= fmax[d]);
         }
 
-        accept = contains_zero && (smaller_than_axis_tol || inside_epsilon_box || last_axis_smaller_than_scalar_tol ||
+        accept = contains_zero && (smaller_than_axis_tol || inside_error_box || smaller_than_scalar_tol ||
                                    degenerate_interval);
         return contains_zero;
     }
@@ -804,7 +833,9 @@ namespace sccd {
         }
 
         const T query_tols[3] = {tols.axis[0][q], tols.axis[1][q], tols.axis[2][q]};
-        return codomain_acceptance_grid_vf<T>(fmin, fmax, tol, query_tols, accepted);
+        const T query_error[3] = {
+            tols.numerical_error[0][q], tols.numerical_error[1][q], tols.numerical_error[2][q]};
+        return codomain_acceptance_grid_vf<T>(fmin, fmax, tol, query_tols, query_error, accepted);
     }
 
     template <typename T, typename I, int VSIZE>

@@ -917,60 +917,41 @@ namespace sccd {
             }
         }
 
-        std::pair<smesh::SharedBuffer<smesh::idx_t>, smesh::SharedBuffer<smesh::idx_t>> create_shell_edges_host_() const {
-            const auto element_type = mesh_->block(0)->element_type();
-            const int nxe = mesh_->block(0)->n_nodes_per_element();
-            if (element_type != smesh::TRISHELL3 && element_type != smesh::QUADSHELL4) {
-                SMESH_ERROR("Unsupported CCD face element type: %s\n", smesh::type_to_string(element_type));
-            }
+        // std::pair<smesh::SharedBuffer<smesh::idx_t>, smesh::SharedBuffer<smesh::idx_t>> create_shell_edges_host_() const {
+        //     const auto element_type = mesh_->block(0)->element_type();
+        //     const int nxe = mesh_->block(0)->n_nodes_per_element();
+        //     if (element_type != smesh::TRISHELL3 && element_type != smesh::QUADSHELL4) {
+        //         SMESH_ERROR("Unsupported CCD face element type: %s\n", smesh::type_to_string(element_type));
+        //     }
 
-            auto faces = mesh_->block(0)->elements();
-            const ptrdiff_t n_faces = mesh_->block(0)->n_elements();
+        //     auto faces = mesh_->block(0)->elements();
+        //     const ptrdiff_t n_faces = mesh_->block(0)->n_elements();
 
-            std::vector<std::pair<smesh::idx_t, smesh::idx_t>> edge_pairs;
-            edge_pairs.reserve(static_cast<std::size_t>(nxe * n_faces));
-            for (ptrdiff_t f = 0; f < n_faces; ++f) {
-                for (int local_edge = 0; local_edge < nxe; ++local_edge) {
-                    const smesh::idx_t a = faces->data()[local_edge][f];
-                    const smesh::idx_t b = faces->data()[(local_edge + 1) % nxe][f];
-                    edge_pairs.emplace_back(std::min(a, b), std::max(a, b));
-                }
-            }
+        //     std::vector<std::pair<smesh::idx_t, smesh::idx_t>> edge_pairs;
+        //     edge_pairs.reserve(static_cast<std::size_t>(nxe * n_faces));
+        //     for (ptrdiff_t f = 0; f < n_faces; ++f) {
+        //         for (int local_edge = 0; local_edge < nxe; ++local_edge) {
+        //             const smesh::idx_t a = faces->data()[local_edge][f];
+        //             const smesh::idx_t b = faces->data()[(local_edge + 1) % nxe][f];
+        //             edge_pairs.emplace_back(std::min(a, b), std::max(a, b));
+        //         }
+        //     }
 
-            std::sort(edge_pairs.begin(), edge_pairs.end());
-            edge_pairs.erase(std::unique(edge_pairs.begin(), edge_pairs.end()), edge_pairs.end());
+        //     std::sort(edge_pairs.begin(), edge_pairs.end());
+        //     edge_pairs.erase(std::unique(edge_pairs.begin(), edge_pairs.end()), edge_pairs.end());
 
-            auto e0 = smesh::create_host_buffer<smesh::idx_t>(edge_pairs.size());
-            auto e1 = smesh::create_host_buffer<smesh::idx_t>(edge_pairs.size());
-            for (std::size_t i = 0; i < edge_pairs.size(); ++i) {
-                e0->data()[i] = edge_pairs[i].first;
-                e1->data()[i] = edge_pairs[i].second;
-            }
+        //     auto e0 = smesh::create_host_buffer<smesh::idx_t>(edge_pairs.size());
+        //     auto e1 = smesh::create_host_buffer<smesh::idx_t>(edge_pairs.size());
+        //     for (std::size_t i = 0; i < edge_pairs.size(); ++i) {
+        //         e0->data()[i] = edge_pairs[i].first;
+        //         e1->data()[i] = edge_pairs[i].second;
+        //     }
 
-            return {e0, e1};
-        }
+        //     return {e0, e1};
+        // }
 
         void init() {
             SMESH_TRACE_SCOPE("CCD::init");
-
-            // const auto host_edges = create_shell_edges_host_();
-
-            // const int dim = mesh_->spatial_dimension();
-            // SMESH_ASSERT(dim == 3);
-
-            // const ptrdiff_t n_nodes = mesh_->n_nodes();
-            // const ptrdiff_t n_faces = mesh_->block(0)->n_elements();
-            // const ptrdiff_t n_edges = host_edges.first->size();
-
-            // if (execution_space_ == smesh::EXECUTION_SPACE_HOST) {
-            //     e0_ = host_edges.first;
-            //     e1_ = host_edges.second;
-            //     faces_ = mesh_->block(0)->elements();
-            // } else {
-            //     e0_ = smesh::to_device(host_edges.first);
-            //     e1_ = smesh::to_device(host_edges.second);
-            //     faces_ = mesh_->block(0)->device_elements_SoA();
-            // }
 
             auto n2n_crs = mesh_->edge_graph();
             auto row_idx_temp = smesh::create_host_buffer<smesh::idx_t>(n2n_crs->nnz());
