@@ -135,7 +135,6 @@ namespace sccd {
                 T_HP v = 0;
 
 #ifdef SCCD_ENABLE_TIGHT_INCLUSION
-#warning "SCCD_ENABLE_TIGHT_INCLUSION"
                 if (SCCD_USE_TI) {
                     if (find_root_tight_inclusion_vf<T_HP>(max_depth, tol, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v)) {
                         if (toi_stride == 0) {
@@ -442,7 +441,6 @@ namespace sccd {
 #endif
 
 #ifdef SCCD_ENABLE_TIGHT_INCLUSION
-#warning "SCCD_ENABLE_TIGHT_INCLUSION"
                 if (SCCD_USE_TI) {
                     if (find_root_tight_inclusion_ee<T_HP>(max_depth, tol, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v)) {
                         if (toi_stride == 0) {

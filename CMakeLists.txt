@@ -18,6 +18,7 @@ option(SCCD_ENABLE_OPENMP "Use OpenMP for parallelization" ON)
 option(SCCD_ENABLE_HACKS "Do not use without Scalable-CCD library" OFF)
 option(SCCD_ENABLE_SMESH "Enable smesh and demos" OFF)
 option(SCCD_ENABLE_CUDA "Enable CUDA" OFF)
+option(SCCD_BUILD_SHARED_LIBS "Build SCCD as a shared library" ON)
 # SCCD library
 file(GLOB_RECURSE SCCD_HEADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp")
 file(GLOB_RECURSE SCCD_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
@@ -49,7 +50,11 @@ endforeach()
 
 endif()
 
-add_library(sccd SHARED ${SCCD_SOURCES})
+if(SCCD_BUILD_SHARED_LIBS)
+  add_library(sccd SHARED ${SCCD_SOURCES})
+else()
+  add_library(sccd STATIC ${SCCD_SOURCES})
+endif()
 target_compile_features(sccd PUBLIC cxx_std_17)
 
 target_include_directories(sccd
