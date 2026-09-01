@@ -6,8 +6,13 @@
 #include "snumerical_error.hpp"
 #include "snumtol.hpp"
 #include "sparallel.hpp"
+// correct_vf_with_tight_inclusion() calls find_root_tight_inclusion_vf(), which
+// lives in srootfinder.hpp. narrowphase.hpp includes this header first, so the
+// declaration has to be pulled in here rather than left to include order.
+#include "srootfinder.hpp"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cassert>
 #include <cfloat>
@@ -15,6 +20,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
+#include <queue>
 #include <type_traits>
 #include <vector>
 
@@ -269,6 +275,253 @@ namespace sccd {
                                                                                   query.e2.z[i],
                                                                                   query.e3.z[i]);
         }
+    }
+
+    struct VDyadic {
+        uint64_t numerator;
+        uint8_t denom_power;
+    };
+
+    struct VDyadicInterval {
+        VDyadic lower;
+        VDyadic upper;
+    };
+
+    struct VDyadicBox {
+        VDyadicInterval tuv[3];
+    };
+
+    static inline double vdyadic_value(const VDyadic value) {
+        return static_cast<double>(value.numerator) /
+               static_cast<double>(uint64_t(1) << value.denom_power);
+    }
+
+    static inline bool vdyadic_less(const VDyadic lhs, const VDyadic rhs) {
+        if (lhs.denom_power == rhs.denom_power) {
+            return lhs.numerator < rhs.numerator;
+        }
+        if (lhs.denom_power < rhs.denom_power) {
+            return (lhs.numerator << (rhs.denom_power - lhs.denom_power)) < rhs.numerator;
+        }
+        return lhs.numerator < (rhs.numerator << (lhs.denom_power - rhs.denom_power));
+    }
+
+    static inline VDyadic vdyadic_add(const VDyadic lhs, const VDyadic rhs) {
+        if (lhs.denom_power == rhs.denom_power) {
+            uint64_t numerator = lhs.numerator + rhs.numerator;
+            uint8_t reduction = 0;
+            while (numerator != 0 && (numerator & uint64_t(1)) == 0) {
+                numerator >>= 1;
+                ++reduction;
+            }
+            return {numerator, static_cast<uint8_t>(lhs.denom_power - reduction)};
+        }
+        if (lhs.denom_power < rhs.denom_power) {
+            return {(lhs.numerator << (rhs.denom_power - lhs.denom_power)) + rhs.numerator, rhs.denom_power};
+        }
+        return {lhs.numerator + (rhs.numerator << (lhs.denom_power - rhs.denom_power)), lhs.denom_power};
+    }
+
+    static inline bool vdyadic_bisect(const VDyadicInterval& interval,
+                                      VDyadicInterval& first,
+                                      VDyadicInterval& second) {
+        VDyadic middle = vdyadic_add(interval.upper, interval.lower);
+        if (middle.denom_power >= 62) {
+            return false;
+        }
+        ++middle.denom_power;
+        if (!vdyadic_less(interval.lower, middle) || !vdyadic_less(middle, interval.upper)) {
+            return false;
+        }
+        first = {interval.lower, middle};
+        second = {middle, interval.upper};
+        return true;
+    }
+
+    static inline bool vdyadic_sum_leq_one(const VDyadic lhs, const VDyadic rhs) {
+        if (lhs.denom_power == rhs.denom_power) {
+            return lhs.numerator + rhs.numerator <= (uint64_t(1) << lhs.denom_power);
+        }
+        const VDyadic sum = vdyadic_add(lhs, rhs);
+        return sum.numerator <= (uint64_t(1) << sum.denom_power);
+    }
+
+    struct VDyadicTimeCompare {
+        bool operator()(const VDyadicBox& lhs, const VDyadicBox& rhs) const {
+            return !vdyadic_less(lhs.tuv[0].lower, rhs.tuv[0].lower);
+        }
+    };
+
+    template <typename T, int VSIZE>
+    static void compute_tight_inclusion_tolerances(const T distance_tolerance,
+                                                   const VQuery<T, VSIZE>& query,
+                                                   VTolerances<T, VSIZE>& tols) {
+        for (int lane = 0; lane < VSIZE; ++lane) {
+            const T* start[4][3] = {{&query.s0.x[lane], &query.s0.y[lane], &query.s0.z[lane]},
+                                    {&query.s1.x[lane], &query.s1.y[lane], &query.s1.z[lane]},
+                                    {&query.s2.x[lane], &query.s2.y[lane], &query.s2.z[lane]},
+                                    {&query.s3.x[lane], &query.s3.y[lane], &query.s3.z[lane]}};
+            const T* end[4][3] = {{&query.e0.x[lane], &query.e0.y[lane], &query.e0.z[lane]},
+                                  {&query.e1.x[lane], &query.e1.y[lane], &query.e1.z[lane]},
+                                  {&query.e2.x[lane], &query.e2.y[lane], &query.e2.z[lane]},
+                                  {&query.e3.x[lane], &query.e3.y[lane], &query.e3.z[lane]}};
+            T p[8][3];
+            for (int d = 0; d < 3; ++d) {
+                const T sv = *start[0][d];
+                const T s0 = *start[1][d];
+                const T s1 = *start[2][d];
+                const T s2 = *start[3][d];
+                const T ev = *end[0][d];
+                const T e0 = *end[1][d];
+                const T e1 = *end[2][d];
+                const T e2 = *end[3][d];
+                p[0][d] = sv - s0;
+                p[1][d] = sv - s2;
+                p[2][d] = sv - (s1 + s2 - s0);
+                p[3][d] = sv - s1;
+                p[4][d] = ev - e0;
+                p[5][d] = ev - e2;
+                p[6][d] = ev - (e1 + e2 - e0);
+                p[7][d] = ev - e1;
+            }
+
+            const auto linf_difference = [&](const int a, const int b) {
+                return sccd::max<T>(sccd::abs<T>(p[b][0] - p[a][0]),
+                                    sccd::max<T>(sccd::abs<T>(p[b][1] - p[a][1]),
+                                                  sccd::abs<T>(p[b][2] - p[a][2])));
+            };
+            const T dl = T(3) * sccd::max<T>(
+                                       sccd::max<T>(linf_difference(0, 4), linf_difference(1, 5)),
+                                       sccd::max<T>(linf_difference(2, 6), linf_difference(3, 7)));
+            const T edge0 = T(3) * sccd::max<T>(
+                                          sccd::max<T>(linf_difference(0, 3), linf_difference(4, 7)),
+                                          sccd::max<T>(linf_difference(5, 6), linf_difference(1, 2)));
+            const T edge1 = T(3) * sccd::max<T>(
+                                          sccd::max<T>(linf_difference(0, 1), linf_difference(4, 5)),
+                                          sccd::max<T>(linf_difference(7, 6), linf_difference(3, 2)));
+
+            tols.axis[0][lane] = dl == T(0) ? std::numeric_limits<T>::infinity() : distance_tolerance / dl;
+            tols.axis[1][lane] = edge0 == T(0) ? std::numeric_limits<T>::infinity() : distance_tolerance / edge0;
+            tols.axis[2][lane] = edge1 == T(0) ? std::numeric_limits<T>::infinity() : distance_tolerance / edge1;
+            tols.numerical_error[0][lane] = numerical_error_bound_component<true, T>(query.s0.x[lane],
+                                                                                     query.s1.x[lane],
+                                                                                     query.s2.x[lane],
+                                                                                     query.s3.x[lane],
+                                                                                     query.e0.x[lane],
+                                                                                     query.e1.x[lane],
+                                                                                     query.e2.x[lane],
+                                                                                     query.e3.x[lane]);
+            tols.numerical_error[1][lane] = numerical_error_bound_component<true, T>(query.s0.y[lane],
+                                                                                     query.s1.y[lane],
+                                                                                     query.s2.y[lane],
+                                                                                     query.s3.y[lane],
+                                                                                     query.e0.y[lane],
+                                                                                     query.e1.y[lane],
+                                                                                     query.e2.y[lane],
+                                                                                     query.e3.y[lane]);
+            tols.numerical_error[2][lane] = numerical_error_bound_component<true, T>(query.s0.z[lane],
+                                                                                     query.s1.z[lane],
+                                                                                     query.s2.z[lane],
+                                                                                     query.s3.z[lane],
+                                                                                     query.e0.z[lane],
+                                                                                     query.e1.z[lane],
+                                                                                     query.e2.z[lane],
+                                                                                     query.e3.z[lane]);
+        }
+    }
+
+    template <typename T, int VSIZE>
+    static void compute_dyadic_codomain(const VDyadicBox* const SCCD_RESTRICT boxes,
+                                        const uint8_t* const SCCD_RESTRICT active,
+                                        const VQuery<T, VSIZE>& query,
+                                        VCodomain<T, VSIZE>& codomain) {
+#if defined(__clang__)
+#pragma clang fp contract(off)
+#endif
+        for (int d = 0; d < 3; ++d) {
+            for (int lane = 0; lane < VSIZE; ++lane) {
+                codomain.xyz[d].lower[lane] = std::numeric_limits<T>::max();
+                codomain.xyz[d].upper[lane] = std::numeric_limits<T>::lowest();
+            }
+        }
+
+        for (int corner = 0; corner < 8; ++corner) {
+            T t_up[VSIZE], t_down[VSIZE], u_up[VSIZE], u_down[VSIZE], v_up[VSIZE], v_down[VSIZE];
+            for (int lane = 0; lane < VSIZE; ++lane) {
+                const VDyadic& t = (corner & 4) ? boxes[lane].tuv[0].upper : boxes[lane].tuv[0].lower;
+                const VDyadic& u = (corner & 2) ? boxes[lane].tuv[1].upper : boxes[lane].tuv[1].lower;
+                const VDyadic& v = (corner & 1) ? boxes[lane].tuv[2].upper : boxes[lane].tuv[2].lower;
+                t_up[lane] = static_cast<T>(t.numerator);
+                t_down[lane] = static_cast<T>(uint64_t(1) << t.denom_power);
+                u_up[lane] = static_cast<T>(u.numerator);
+                u_down[lane] = static_cast<T>(uint64_t(1) << u.denom_power);
+                v_up[lane] = static_cast<T>(v.numerator);
+                v_down[lane] = static_cast<T>(uint64_t(1) << v.denom_power);
+            }
+
+            for (int d = 0; d < 3; ++d) {
+                const T* s0 = d == 0 ? query.s0.x : (d == 1 ? query.s0.y : query.s0.z);
+                const T* s1 = d == 0 ? query.s1.x : (d == 1 ? query.s1.y : query.s1.z);
+                const T* s2 = d == 0 ? query.s2.x : (d == 1 ? query.s2.y : query.s2.z);
+                const T* s3 = d == 0 ? query.s3.x : (d == 1 ? query.s3.y : query.s3.z);
+                const T* e0 = d == 0 ? query.e0.x : (d == 1 ? query.e0.y : query.e0.z);
+                const T* e1 = d == 0 ? query.e1.x : (d == 1 ? query.e1.y : query.e1.z);
+                const T* e2 = d == 0 ? query.e2.x : (d == 1 ? query.e2.y : query.e2.z);
+                const T* e3 = d == 0 ? query.e3.x : (d == 1 ? query.e3.y : query.e3.z);
+#pragma omp simd
+                for (int lane = 0; lane < VSIZE; ++lane) {
+                    const T vertex = (e0[lane] - s0[lane]) * t_up[lane] / t_down[lane] + s0[lane];
+                    const T f0 = (e1[lane] - s1[lane]) * t_up[lane] / t_down[lane] + s1[lane];
+                    const T f1 = (e2[lane] - s2[lane]) * t_up[lane] / t_down[lane] + s2[lane];
+                    const T f2 = (e3[lane] - s3[lane]) * t_up[lane] / t_down[lane] + s3[lane];
+                    const T point = (f1 - f0) * u_up[lane] / u_down[lane] +
+                                    (f2 - f0) * v_up[lane] / v_down[lane] + f0;
+                    const T value = vertex - point;
+                    if (active[lane]) {
+                        codomain.xyz[d].lower[lane] = sccd::min<T>(codomain.xyz[d].lower[lane], value);
+                        codomain.xyz[d].upper[lane] = sccd::max<T>(codomain.xyz[d].upper[lane], value);
+                    }
+                }
+            }
+        }
+    }
+
+    static inline int vdyadic_split_axis(const VDyadicBox& box, const double* const tolerance) {
+        int split_axis = 0;
+        double best_score = -std::numeric_limits<double>::infinity();
+        for (int d = 0; d < 3; ++d) {
+            const double width = vdyadic_value(box.tuv[d].upper) - vdyadic_value(box.tuv[d].lower);
+            const double score = width > tolerance[d] ? width / tolerance[d]
+                                                       : -std::numeric_limits<double>::infinity();
+            if (score > best_score) {
+                best_score = score;
+                split_axis = d;
+            }
+        }
+        return split_axis;
+    }
+
+    template <typename Queue>
+    static inline bool vdyadic_split_and_push(const VDyadicBox& box, const int split_axis, Queue& queue) {
+        VDyadicInterval first, second;
+        if (!vdyadic_bisect(box.tuv[split_axis], first, second)) {
+            return false;
+        }
+
+        VDyadicBox child = box;
+        if (split_axis == 0 ||
+            (split_axis == 1 && vdyadic_sum_leq_one(second.lower, box.tuv[2].lower)) ||
+            (split_axis == 2 && vdyadic_sum_leq_one(box.tuv[1].lower, second.lower))) {
+            child.tuv[split_axis] = second;
+            queue.push(child);
+        }
+        if (split_axis == 0 ||
+            (split_axis == 1 && vdyadic_sum_leq_one(first.lower, box.tuv[2].lower)) ||
+            (split_axis == 2 && vdyadic_sum_leq_one(box.tuv[1].lower, first.lower))) {
+            child.tuv[split_axis] = first;
+            queue.push(child);
+        }
+        return true;
     }
 
     template <typename T>
@@ -1261,18 +1514,18 @@ namespace sccd {
     }
 
     template <int nxe, typename T, typename I>
-    int v_narrow_phase_vf(const size_t noverlaps,
-                          const I* const SCCD_RESTRICT voveralp,
-                          const I* const SCCD_RESTRICT foveralp,
-                          T** const SCCD_RESTRICT v0,
-                          T** const SCCD_RESTRICT v1,
-                          const size_t face_stride,
-                          I** const SCCD_RESTRICT faces,
-                          const T max_toi,
-                          T* const SCCD_RESTRICT toi,
-                          const int max_depth,
-                          const T tol,
-                          const int toi_stride) {
+    static int v_narrow_phase_vf_impl(const size_t noverlaps,
+                                      const I* const SCCD_RESTRICT voveralp,
+                                      const I* const SCCD_RESTRICT foveralp,
+                                      T** const SCCD_RESTRICT v0,
+                                      T** const SCCD_RESTRICT v1,
+                                      const size_t face_stride,
+                                      I** const SCCD_RESTRICT faces,
+                                      const T max_toi,
+                                      T* const SCCD_RESTRICT toi,
+                                      const int max_depth,
+                                      const T tol,
+                                      const int toi_stride) {
         using T_HP = double;
 
         assert(toi_stride == 0 || toi_stride == 1);
@@ -1417,6 +1670,105 @@ namespace sccd {
         }
 
         return 0;
+    }
+
+#ifdef SCCD_ENABLE_TIGHT_INCLUSION
+    template <int nxe, typename T, typename I>
+    static int correct_vf_with_tight_inclusion(const size_t noverlaps,
+                                                const I* const SCCD_RESTRICT voveralp,
+                                                const I* const SCCD_RESTRICT foveralp,
+                                                T** const SCCD_RESTRICT v0,
+                                                T** const SCCD_RESTRICT v1,
+                                                const size_t face_stride,
+                                                I** const SCCD_RESTRICT faces,
+                                                const T max_toi,
+                                                T* const SCCD_RESTRICT toi,
+                                                const int max_depth,
+                                                const T tol,
+                                                const int toi_stride) {
+        static_assert(nxe == 3, "TightInclusion VF correction requires triangular faces");
+        const double max_domain_toi = sccd::min<double>(1.0, static_cast<double>(max_toi));
+        std::atomic<double> global_min{max_domain_toi};
+
+        sccd::parallel_for_br(0, static_cast<ptrdiff_t>(noverlaps), [&](const ptrdiff_t begin, const ptrdiff_t end) {
+            for (ptrdiff_t qi = begin; qi < end; ++qi) {
+                const I vertex = voveralp[qi];
+                const size_t face_offset = static_cast<size_t>(foveralp[qi]) * face_stride;
+                const I n0 = faces[0][face_offset];
+                const I n1 = faces[1][face_offset];
+                const I n2 = faces[2][face_offset];
+
+                const double sv[3] = {v0[0][vertex], v0[1][vertex], v0[2][vertex]};
+                const double s1[3] = {v0[0][n0], v0[1][n0], v0[2][n0]};
+                const double s2[3] = {v0[0][n1], v0[1][n1], v0[2][n1]};
+                const double s3[3] = {v0[0][n2], v0[1][n2], v0[2][n2]};
+                const double ev[3] = {v1[0][vertex], v1[1][vertex], v1[2][vertex]};
+                const double e1[3] = {v1[0][n0], v1[1][n0], v1[2][n0]};
+                const double e2[3] = {v1[0][n1], v1[1][n1], v1[2][n1]};
+                const double e3[3] = {v1[0][n2], v1[1][n2], v1[2][n2]};
+
+                double ti_t = max_domain_toi;
+                double ti_u = 0;
+                double ti_v = 0;
+                const bool hit = find_root_tight_inclusion_vf<double>(max_depth,
+                                                                       static_cast<double>(tol),
+                                                                       sv,
+                                                                       s1,
+                                                                       s2,
+                                                                       s3,
+                                                                       ev,
+                                                                       e1,
+                                                                       e2,
+                                                                       e3,
+                                                                       ti_t,
+                                                                       ti_u,
+                                                                       ti_v);
+                const double candidate = hit && ti_t < max_domain_toi ? ti_t : max_domain_toi;
+                if (toi_stride == 1) {
+                    toi[qi] = static_cast<T>(candidate);
+                } else {
+                    atomic_min_relaxed(global_min, candidate);
+                }
+            }
+        });
+
+        if (toi_stride == 0) {
+            toi[0] = static_cast<T>(global_min.load(std::memory_order_relaxed));
+        }
+        return 0;
+    }
+#endif
+
+    template <int nxe, typename T, typename I>
+    int v_narrow_phase_vf(const size_t noverlaps,
+                          const I* const SCCD_RESTRICT voveralp,
+                          const I* const SCCD_RESTRICT foveralp,
+                          T** const SCCD_RESTRICT v0,
+                          T** const SCCD_RESTRICT v1,
+                          const size_t face_stride,
+                          I** const SCCD_RESTRICT faces,
+                          const T max_toi,
+                          T* const SCCD_RESTRICT toi,
+                          const int max_depth,
+                          const T tol,
+                          const int toi_stride) {
+        int SCCD_VNARROWPHASE_TI_COMPAT = SCCD_VNARROWPHASE_TI_COMPAT_DEFAULT;
+        SCCD_READ_ENV(SCCD_VNARROWPHASE_TI_COMPAT, atoi);
+        if (SCCD_VNARROWPHASE_TI_COMPAT) {
+#ifndef SCCD_ENABLE_TIGHT_INCLUSION
+            return -1;
+#else
+            const int vector_status = v_narrow_phase_vf_impl<nxe, T, I>(
+                noverlaps, voveralp, foveralp, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_stride);
+            if (vector_status != 0) {
+                return vector_status;
+            }
+            return correct_vf_with_tight_inclusion<nxe, T, I>(
+                noverlaps, voveralp, foveralp, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_stride);
+#endif
+        }
+        return v_narrow_phase_vf_impl<nxe, T, I>(
+            noverlaps, voveralp, foveralp, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_stride);
     }
 }  // namespace sccd
 

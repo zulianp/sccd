@@ -82,7 +82,6 @@ if(SCCD_ENABLE_TIGHT_INCLUSION)
     "$<$<CONFIG:Release>:${SCCD_TIGHT_INCLUSION_CXX_RELEASE_FLAGS}>"
   )
 
-  add_compile_definitions(SCCD_ENABLE_TIGHT_INCLUSION=1)
   list(APPEND SCCD_DEP_LIBRARIES "$<BUILD_INTERFACE:tight_inclusion::tight_inclusion>")
 
 endif()

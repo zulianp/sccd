@@ -21,6 +21,14 @@
 #endif
 #endif
 
+#ifndef SCCD_ALWAYS_INLINE
+#if defined(_MSC_VER)
+#define SCCD_ALWAYS_INLINE __forceinline
+#else
+#define SCCD_ALWAYS_INLINE inline __attribute__((always_inline))
+#endif
+#endif
+
 #define SCCD_SUCCESS 0
 #define SCCD_FAILURE 1
 

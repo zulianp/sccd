@@ -6,6 +6,7 @@
 #include "assert.h"
 
 #include "roots.hpp"
+#include "sparallel.hpp"
 #include "sccd_base.hpp"
 #include "sccd_vnarrowphase.hpp"
 #include "srootfinder.hpp"
@@ -17,18 +18,30 @@
 
 namespace sccd {
 
+    /**
+     * \brief Monotonically lower a shared minimum.
+     *
+     * Relaxed ordering is sufficient: the value is a pruning bound, not a
+     * synchronization edge, and it is only ever decreased. Nothing is published
+     * alongside it, so no acquire/release pairing is needed. Under the default
+     * seq_cst this sat on the DFS inner loop and serialized every worker on one
+     * cache line.
+     *
+     * \return The value the atomic held when the exchange settled, i.e. the
+     *         prior minimum.
+     */
     template <typename T>
     T atomic_min(std::atomic<T>& atm, T val) {
-        T expected = atm.load();
+        T expected = atm.load(std::memory_order_relaxed);
         while (expected > val) {
-            // If 'atm' is still equal to 'expected', set it to 'val'.
-            // If not, 'expected' is updated to the actual current value of 'atm', and the loop retries.
-            if (atm.compare_exchange_strong(expected, val)) {
+            // compare_exchange_weak refreshes 'expected' on failure, so the loop
+            // re-tests and exits as soon as another thread has published a
+            // smaller value.
+            if (atm.compare_exchange_weak(expected, val, std::memory_order_relaxed, std::memory_order_relaxed)) {
                 break;
             }
-            // No need for a separate load() here; compare_exchange_strong updates 'expected' on failure.
         }
-        return expected;  // Returns the value 'expected' held when the operation succeeded (the prior minimum).
+        return expected;
     }
 
     template <int nxe, typename T, typename I>
@@ -68,7 +81,7 @@ namespace sccd {
         }
         assert(toi != nullptr);
 
-        int SCCD_USE_VNARROW_PHASE = 0;
+        int SCCD_USE_VNARROW_PHASE = SCCD_USE_VNARROW_PHASE_DEFAULT;
         SCCD_READ_ENV(SCCD_USE_VNARROW_PHASE, atoi);
 
         if (SCCD_USE_VNARROW_PHASE) {
@@ -88,10 +101,11 @@ namespace sccd {
         std::atomic<T> min_t = max_toi;
 
         if (toi_stride == 1) {
-#pragma omp parallel for
-            for (ptrdiff_t i = 0; i < noverlaps; i++) {
-                toi[i] = max_toi;
-            }
+            sccd::parallel_for_br(0, (ptrdiff_t)noverlaps, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+                for (ptrdiff_t i = rbegin; i < rend; i++) {
+                    toi[i] = max_toi;
+                }
+            });
         }
 
         if (toi_stride == 0 && min_t == 0) {
@@ -104,13 +118,14 @@ namespace sccd {
         // sccd::parallel_for_br_dynamic(0, noverlaps, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
         // std::vector<Box<T_HP>> stack;
 
-#pragma omp parallel
-        {
-            std::vector<Box<T_HP>> stack;
+        // Per-candidate cost varies by orders of magnitude, hence the dynamic
+        // schedule. The DFS stack is thread_local rather than block-local so it
+        // keeps its capacity across blocks instead of reallocating per chunk.
+        sccd::parallel_for_br_dynamic(0, (ptrdiff_t)noverlaps, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+            static thread_local std::vector<Box<T_HP>> stack;
             stack.reserve(64);
 
-#pragma omp for schedule(dynamic, 64) nowait
-            for (ptrdiff_t i = 0; i < noverlaps; i++) {
+            for (ptrdiff_t i = rbegin; i < rend; i++) {
                 if (toi_stride == 1) toi[i] = max_toi;
 
                 const I vi = voveralp[i];
@@ -130,7 +145,7 @@ namespace sccd {
                 const T_HP e3[3] = {v1[0][nodes[2]], v1[1][nodes[2]], v1[2][nodes[2]]};
 
                 // Iteration variables
-                T_HP t = toi_stride == 0 ? T_HP(min_t.load()) : T_HP(toi[i]);
+                T_HP t = toi_stride == 0 ? T_HP(min_t.load(std::memory_order_relaxed)) : T_HP(toi[i]);
                 T_HP u = 0;
                 T_HP v = 0;
 
@@ -264,17 +279,14 @@ namespace sccd {
                         }
                     } else if (!stack.empty()) {
                         if (toi_stride == 0) {
-                            t = sccd::min<T_HP>(t, min_t.load());
+                            t = sccd::min<T_HP>(t, min_t.load(std::memory_order_relaxed));
                         }
                     }
                 }
             }
+        });
 
-            // printf("VF max capacity: %zu\n", stack.capacity());
-        }
-        // );
-
-        if (toi_stride == 0) toi[0] = min_t;
+        if (toi_stride == 0) toi[0] = min_t.load(std::memory_order_relaxed);
         return 0;
     }
 
@@ -335,10 +347,11 @@ namespace sccd {
         }
 
         if (toi_stride == 1) {
-#pragma omp parallel for
-            for (ptrdiff_t i = 0; i < noverlaps; i++) {
-                toi[i] = max_toi;
-            }
+            sccd::parallel_for_br(0, (ptrdiff_t)noverlaps, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+                for (ptrdiff_t i = rbegin; i < rend; i++) {
+                    toi[i] = max_toi;
+                }
+            });
         }
 
         assert(toi_stride == 0 || toi_stride == 1);
@@ -362,13 +375,11 @@ namespace sccd {
 
         // sccd::parallel_for_br_dynamic(0, noverlaps, [&](const ptrdiff_t rbegin, const ptrdiff_t rend)
 
-#pragma omp parallel
-        {
-            std::vector<Box<T_HP>> stack;
+        sccd::parallel_for_br_dynamic(0, (ptrdiff_t)noverlaps, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+            static thread_local std::vector<Box<T_HP>> stack;
             stack.reserve(64);
 
-#pragma omp for schedule(dynamic, 64) nowait
-            for (ptrdiff_t i = 0; i < noverlaps; i++) {
+            for (ptrdiff_t i = rbegin; i < rend; i++) {
                 if (toi_stride == 1) toi[i] = max_toi;
 
                 const I i0 = e0overalp[i];
@@ -390,7 +401,7 @@ namespace sccd {
                 const T_HP e4[3] = {v1[0][nodes1[1]], v1[1][nodes1[1]], v1[2][nodes1[1]]};
 
                 // Iteration variables
-                T_HP t = toi_stride == 0 ? T_HP(min_t.load()) : T_HP(toi[i]);
+                T_HP t = toi_stride == 0 ? T_HP(min_t.load(std::memory_order_relaxed)) : T_HP(toi[i]);
                 T_HP u = 0;
                 T_HP v = 0;
                 const T_HP t_upper = sccd::min<T_HP>(t, T_HP(1));
@@ -524,17 +535,15 @@ namespace sccd {
                         }
                     } else if (!stack.empty()) {
                         if (toi_stride == 0) {
-                            t = sccd::min<T_HP>(t, min_t.load());
+                            t = sccd::min<T_HP>(t, min_t.load(std::memory_order_relaxed));
                         }
                     }
                 }
             }
-
-            // printf("EE max capacity: %zu\n", stack.capacity());
-        }
+        });
         // );
 
-        if (toi_stride == 0) toi[0] = min_t;
+        if (toi_stride == 0) toi[0] = min_t.load(std::memory_order_relaxed);
         return 0;
     }
 

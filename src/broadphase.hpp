@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cfloat>
 #include <cstring>
+#include <vector>
 
 #include "sparallel.hpp"
 #include "vaabb.hpp"
@@ -16,22 +17,39 @@ namespace sccd {
      * \param aabb SoA arrays of size 6: minx,miny,minz,maxx,maxy,maxz; each of
      * length n. \return Axis index in {0,1,2}.
      */
+    /**
+     * \brief Accumulate per-axis center means and variances in two sweeps.
+     *
+     * Both sweeps visit all three axes per element, so the AABB arrays are
+     * streamed twice instead of six times. The accumulation order within each
+     * axis is unchanged, so the results are bit-identical to the per-axis form.
+     */
     template <typename T>
-    static int choose_axis(const ptrdiff_t n, T **const SCCD_RESTRICT aabb) {
-        T mean[3] = {0};
-        T var[3] = {0};
-        for (int d = 0; d < 3; d++) {
-            for (ptrdiff_t i = 0; i < n; i++) {
-                const T c = (aabb[d + 3][i] + aabb[d][i]) / 2;
-                mean[d] += c;
+    static void center_variance(const ptrdiff_t n, T **const SCCD_RESTRICT aabb, T (&var)[3]) {
+        T mean[3] = {0, 0, 0};
+        for (ptrdiff_t i = 0; i < n; i++) {
+            for (int d = 0; d < 3; d++) {
+                mean[d] += (aabb[d + 3][i] + aabb[d][i]) / 2;
             }
+        }
 
+        for (int d = 0; d < 3; d++) {
             mean[d] /= n;
-            for (ptrdiff_t i = 0; i < n; i++) {
+            var[d] = 0;
+        }
+
+        for (ptrdiff_t i = 0; i < n; i++) {
+            for (int d = 0; d < 3; d++) {
                 const T c = (aabb[d + 3][i] + aabb[d][i]) / 2;
                 var[d] += (c - mean[d]) * (c - mean[d]);
             }
         }
+    }
+
+    template <typename T>
+    static int choose_axis(const ptrdiff_t n, T **const SCCD_RESTRICT aabb) {
+        T var[3];
+        center_variance(n, aabb, var);
 
         int fargmax = 0;
         T fmax = var[0];
@@ -48,20 +66,8 @@ namespace sccd {
 
     template <typename T>
     static void largest_variance_axes_sort(const ptrdiff_t n, T **const SCCD_RESTRICT aabb, int *axes) {
-        T mean[3] = {0};
-        T var[3] = {0};
-        for (int d = 0; d < 3; d++) {
-            for (ptrdiff_t i = 0; i < n; i++) {
-                const T c = (aabb[d + 3][i] + aabb[d][i]) / 2;
-                mean[d] += c;
-            }
-
-            mean[d] /= n;
-            for (ptrdiff_t i = 0; i < n; i++) {
-                const T c = (aabb[d + 3][i] + aabb[d][i]) / 2;
-                var[d] += (c - mean[d]) * (c - mean[d]);
-            }
-        }
+        T var[3];
+        center_variance(n, aabb, var);
 
         T vars[3] = {var[0], var[1], var[2]};
         // printf("vars: %g, %g, %g\n", vars[0], vars[1], vars[2]);
@@ -90,22 +96,44 @@ namespace sccd {
                                 T **const SCCD_RESTRICT arrays,
                                 I *const SCCD_RESTRICT idx,
                                 T *const SCCD_RESTRICT scratch) {
-        for (ptrdiff_t i = 0; i < n; i++) {
-            idx[i] = i;
-        }
+        // Sort (key, index) pairs rather than indices with an indirect
+        // comparator: every comparison in the old form was a random load out of
+        // arrays[sort_axis], which is the dominant cost of the sort.
+        struct KeyIndex {
+            T key;
+            I idx;
+        };
 
+        std::vector<KeyIndex> keys(n);
         const T *const SCCD_RESTRICT x = arrays[sort_axis];
-        sccd::parallel_sort(idx, idx + n, [x](const I l, const I r) {
-            if (x[l] < x[r]) return true;
-            if (x[r] < x[l]) return false;
-            return l < r;
+
+        sccd::parallel_for_br(0, n, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+            for (ptrdiff_t i = rbegin; i < rend; i++) {
+                keys[i].key = x[i];
+                keys[i].idx = I(i);
+            }
+        });
+
+        sccd::parallel_sort(keys.data(), keys.data() + n, [](const KeyIndex &l, const KeyIndex &r) {
+            if (l.key < r.key) return true;
+            if (r.key < l.key) return false;
+            return l.idx < r.idx;
+        });
+
+        sccd::parallel_for_br(0, n, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+            for (ptrdiff_t i = rbegin; i < rend; i++) {
+                idx[i] = keys[i].idx;
+            }
         });
 
         for (int d = 0; d < 6; d++) {
             memcpy(scratch, arrays[d], sizeof(T) * n);
-            for (ptrdiff_t i = 0; i < n; i++) {
-                arrays[d][i] = scratch[idx[i]];
-            }
+            T *const SCCD_RESTRICT dst = arrays[d];
+            sccd::parallel_for_br(0, n, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+                for (ptrdiff_t i = rbegin; i < rend; i++) {
+                    dst[i] = scratch[idx[i]];
+                }
+            });
         }
     }
 
@@ -388,6 +416,102 @@ namespace sccd {
                     dmask[lane] = 1;
                 }
             }
+        }
+
+        /**
+         * \brief Packed overlap mask of AABB \p fi against a block of the second list.
+         * \return Bit \p i set when second_aabbs[start+i] is not axis-disjoint from A.
+         */
+        template <typename T>
+        static inline uint32_t overlap_bits_for_block(T **const SCCD_RESTRICT second_aabbs,
+                                                      const ptrdiff_t start,
+                                                      const int chunk_len,
+                                                      const T aminx,
+                                                      const T aminy,
+                                                      const T aminz,
+                                                      const T amaxx,
+                                                      const T amaxy,
+                                                      const T amaxz) {
+            return vaabb_overlap_one_to_many_bits<T>(aminx,
+                                                     aminy,
+                                                     aminz,
+                                                     amaxx,
+                                                     amaxy,
+                                                     amaxz,
+                                                     second_aabbs[0] + start,
+                                                     second_aabbs[1] + start,
+                                                     second_aabbs[2] + start,
+                                                     second_aabbs[3] + start,
+                                                     second_aabbs[4] + start,
+                                                     second_aabbs[5] + start,
+                                                     chunk_len);
+        }
+
+        /**
+         * \brief Clear the bits of \p bits whose pair shares a vertex (two lists).
+         *
+         * Only visits lanes that survived the AABB filter, via a bit-scan, so the
+         * indirect element loads are never issued for rejected candidates.
+         */
+        template <int F, int S, typename I>
+        static inline uint32_t mask_out_shared_two_lists_bits(uint32_t bits,
+                                                              const ptrdiff_t noffset,
+                                                              const I (&ev)[F],
+                                                              const I *const SCCD_RESTRICT second_idx,
+                                                              I **const SCCD_RESTRICT second_elements,
+                                                              const ptrdiff_t second_stride) {
+            uint32_t remaining = bits;
+            while (remaining) {
+                const int lane = sccd::ctz32(remaining);
+                remaining &= remaining - 1;
+
+                const I jidx = second_idx[noffset + lane];
+                int match = 0;
+                if constexpr (S > 1) {
+                    I sev[S];
+                    for (int v = 0; v < S; ++v) {
+                        sev[v] = second_elements[v][jidx * second_stride];
+                    }
+                    for (int a = 0; a < F; ++a) {
+                        for (int b = 0; b < S; ++b) {
+                            match |= (ev[a] == sev[b]);
+                        }
+                    }
+                } else {
+                    for (int a = 0; a < F; ++a) {
+                        match |= (ev[a] == jidx);
+                    }
+                }
+                if (match) {
+                    bits &= ~(uint32_t(1) << lane);
+                }
+            }
+            return bits;
+        }
+
+        /**
+         * \brief Clear the bits of \p bits whose pair shares a vertex (self path).
+         */
+        template <int N, typename I>
+        static inline uint32_t mask_out_shared_self_bits(uint32_t bits,
+                                                         const ptrdiff_t noffset,
+                                                         const I (&ev)[N],
+                                                         const I *const SCCD_RESTRICT idx,
+                                                         I **const SCCD_RESTRICT elements,
+                                                         const ptrdiff_t stride) {
+            uint32_t remaining = bits;
+            while (remaining) {
+                const int lane = sccd::ctz32(remaining);
+                remaining &= remaining - 1;
+
+                const I jidx = idx[noffset + lane];
+                I sev[N];
+                load_ev<N>(elements, jidx, stride, sev);
+                if (shares_vertex<N, N>(ev, sev)) {
+                    bits &= ~(uint32_t(1) << lane);
+                }
+            }
+            return bits;
         }
 
         // -----------------------------
@@ -697,39 +821,25 @@ namespace sccd {
                     continue;
                 }
 
-                if (end - ni < AABB_DISJOINT_NOVECTORIZE_THRESHOLD) {
-                    ptrdiff_t count = sccd_detail::scalar_count_range_two_lists<first_nxe, second_nxe>(
-                        first_aabbs, fi, second_aabbs, second_idx, second_elements, second_stride, ev, ni, end);
-                    ccdptr[fi + 1] = count;
-                    continue;
-                }
-
                 ptrdiff_t count = 0;
-                ptrdiff_t noffset = ni;
 
-                for (; noffset < end;) {
-                    const ptrdiff_t chunk_len = sccd::min((ptrdiff_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
+                for (ptrdiff_t noffset = ni; noffset < end;) {
+                    const int chunk_len = (int)sccd::min((ptrdiff_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
 
-                    uint32_t dmask[AABB_DISJOINT_CHUNK_SIZE] = {0};
+                    uint32_t bits = sccd_detail::overlap_bits_for_block(second_aabbs,
+                                                                        noffset,
+                                                                        chunk_len,
+                                                                        first_aabbs[0][fi],
+                                                                        first_aabbs[1][fi],
+                                                                        first_aabbs[2][fi],
+                                                                        first_aabbs[3][fi],
+                                                                        first_aabbs[4][fi],
+                                                                        first_aabbs[5][fi]);
 
-                    sccd_detail::build_disjoint_mask_for_block(second_aabbs,
-                                                               noffset,
-                                                               chunk_len,
-                                                               first_aabbs[0][fi],
-                                                               first_aabbs[1][fi],
-                                                               first_aabbs[2][fi],
-                                                               first_aabbs[3][fi],
-                                                               first_aabbs[4][fi],
-                                                               first_aabbs[5][fi],
-                                                               dmask);
+                    bits = sccd_detail::mask_out_shared_two_lists_bits<first_nxe, second_nxe>(
+                        bits, noffset, ev, second_idx, second_elements, second_stride);
 
-                    sccd_detail::mask_out_shared_two_lists<first_nxe, second_nxe>(
-                        dmask, chunk_len, noffset, ev, second_idx, second_elements, second_stride);
-
-                    for (ptrdiff_t lane = 0; lane < chunk_len; ++lane) {
-                        count += dmask[lane] ? 0 : 1;
-                    }
-
+                    count += sccd::popcount32(bits);
                     noffset += chunk_len;
                 }
 
@@ -814,50 +924,29 @@ namespace sccd {
                     continue;
                 }
 
-                if (end - ni < AABB_DISJOINT_NOVECTORIZE_THRESHOLD) {
-                    ptrdiff_t count =
-                        sccd_detail::scalar_collect_range_two_lists<first_nxe, second_nxe>(first_aabbs,
-                                                                                           fi,
-                                                                                           first_idxi,
-                                                                                           second_aabbs,
-                                                                                           second_idx,
-                                                                                           second_elements,
-                                                                                           second_stride,
-                                                                                           ev,
-                                                                                           ni,
-                                                                                           end,
-                                                                                           first_local_elements,
-                                                                                           second_local_elements);
-                    assert(expected_count == count);
-                    continue;
-                }
-
                 ptrdiff_t count = 0;
-                ptrdiff_t noffset = ni;
 
-                for (; noffset < end;) {
-                    const ptrdiff_t chunk_len = sccd::min((ptrdiff_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
+                for (ptrdiff_t noffset = ni; noffset < end;) {
+                    const int chunk_len = (int)sccd::min((ptrdiff_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
 
-                    uint32_t dmask[AABB_DISJOINT_CHUNK_SIZE] = {0};
-                    sccd_detail::build_disjoint_mask_for_block(second_aabbs,
-                                                               noffset,
-                                                               chunk_len,
-                                                               first_aabbs[0][fi],
-                                                               first_aabbs[1][fi],
-                                                               first_aabbs[2][fi],
-                                                               first_aabbs[3][fi],
-                                                               first_aabbs[4][fi],
-                                                               first_aabbs[5][fi],
-                                                               dmask);
+                    uint32_t bits = sccd_detail::overlap_bits_for_block(second_aabbs,
+                                                                        noffset,
+                                                                        chunk_len,
+                                                                        first_aabbs[0][fi],
+                                                                        first_aabbs[1][fi],
+                                                                        first_aabbs[2][fi],
+                                                                        first_aabbs[3][fi],
+                                                                        first_aabbs[4][fi],
+                                                                        first_aabbs[5][fi]);
 
-                    sccd_detail::mask_out_shared_two_lists<first_nxe, second_nxe>(
-                        dmask, chunk_len, noffset, ev, second_idx, second_elements, second_stride);
+                    bits = sccd_detail::mask_out_shared_two_lists_bits<first_nxe, second_nxe>(
+                        bits, noffset, ev, second_idx, second_elements, second_stride);
 
-                    for (ptrdiff_t lane = 0; lane < chunk_len; ++lane) {
-                        if (dmask[lane]) continue;
-                        const ptrdiff_t j = noffset + lane;
+                    while (bits) {
+                        const int lane = sccd::ctz32(bits);
+                        bits &= bits - 1;
                         first_local_elements[count] = first_idxi;
-                        second_local_elements[count] = second_idx[j];
+                        second_local_elements[count] = second_idx[noffset + lane];
                         count += 1;
                     }
 
@@ -925,36 +1014,24 @@ namespace sccd {
                     continue;
                 }
 
-                if (end - noffset < AABB_DISJOINT_NOVECTORIZE_THRESHOLD) {
-                    ptrdiff_t count =
-                        sccd_detail::scalar_count_range_self<nxe>(aabbs, fi, elements, idx, stride, ev, noffset, end);
-                    ccdptr[fi + 1] = count;
-                    continue;
-                }
-
                 ptrdiff_t count = 0;
 
                 for (; noffset < end;) {
-                    const ptrdiff_t chunk_len = sccd::min((ptrdiff_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
+                    const int chunk_len = (int)sccd::min((ptrdiff_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
 
-                    uint32_t mask[AABB_DISJOINT_CHUNK_SIZE] = {0};
-                    sccd_detail::build_disjoint_mask_for_block(aabbs,
-                                                               noffset,
-                                                               chunk_len,
-                                                               aabbs[0][fi],
-                                                               aabbs[1][fi],
-                                                               aabbs[2][fi],
-                                                               aabbs[3][fi],
-                                                               aabbs[4][fi],
-                                                               aabbs[5][fi],
-                                                               mask);
+                    uint32_t bits = sccd_detail::overlap_bits_for_block(aabbs,
+                                                                        noffset,
+                                                                        chunk_len,
+                                                                        aabbs[0][fi],
+                                                                        aabbs[1][fi],
+                                                                        aabbs[2][fi],
+                                                                        aabbs[3][fi],
+                                                                        aabbs[4][fi],
+                                                                        aabbs[5][fi]);
 
-                    sccd_detail::mask_out_shared_self<nxe>(mask, chunk_len, noffset, ev, idx, elements, stride);
+                    bits = sccd_detail::mask_out_shared_self_bits<nxe>(bits, noffset, ev, idx, elements, stride);
 
-                    for (ptrdiff_t lane = 0; lane < chunk_len; ++lane) {
-                        count += mask[lane] ? 0 : 1;
-                    }
-
+                    count += sccd::popcount32(bits);
                     noffset += chunk_len;
                 }
 
@@ -1021,45 +1098,26 @@ namespace sccd {
                     continue;
                 }
 
-                if (end - noffset < AABB_DISJOINT_NOVECTORIZE_THRESHOLD) {
-                    ptrdiff_t count = sccd_detail::scalar_collect_range_self<nxe>(aabbs,
-                                                                                  fi,
-                                                                                  idxi,
-                                                                                  elements,
-                                                                                  idx,
-                                                                                  stride,
-                                                                                  ev,
-                                                                                  noffset,
-                                                                                  end,
-                                                                                  first_local_elements,
-                                                                                  second_local_elements);
-                    assert(expected_count == count);
-                    continue;
-                }
-
                 ptrdiff_t count = 0;
                 for (; noffset < end;) {
-                    const ptrdiff_t chunk_len = sccd::min((ptrdiff_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
+                    const int chunk_len = (int)sccd::min((ptrdiff_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
 
-                    uint32_t mask[AABB_DISJOINT_CHUNK_SIZE] = {0};
+                    uint32_t bits = sccd_detail::overlap_bits_for_block(aabbs,
+                                                                        noffset,
+                                                                        chunk_len,
+                                                                        aabbs[0][fi],
+                                                                        aabbs[1][fi],
+                                                                        aabbs[2][fi],
+                                                                        aabbs[3][fi],
+                                                                        aabbs[4][fi],
+                                                                        aabbs[5][fi]);
 
-                    sccd_detail::build_disjoint_mask_for_block(aabbs,
-                                                               noffset,
-                                                               chunk_len,
-                                                               aabbs[0][fi],
-                                                               aabbs[1][fi],
-                                                               aabbs[2][fi],
-                                                               aabbs[3][fi],
-                                                               aabbs[4][fi],
-                                                               aabbs[5][fi],
-                                                               mask);
+                    bits = sccd_detail::mask_out_shared_self_bits<nxe>(bits, noffset, ev, idx, elements, stride);
 
-                    sccd_detail::mask_out_shared_self<nxe>(mask, chunk_len, noffset, ev, idx, elements, stride);
-
-                    for (ptrdiff_t lane = 0; lane < chunk_len; ++lane) {
-                        if (mask[lane]) continue;
-                        const ptrdiff_t j = noffset + lane;
-                        const I jidx = idx[j];
+                    while (bits) {
+                        const int lane = sccd::ctz32(bits);
+                        bits &= bits - 1;
+                        const I jidx = idx[noffset + lane];
                         first_local_elements[count] = sccd::min(idxi, jidx);
                         second_local_elements[count] = sccd::max(idxi, jidx);
                         count += 1;

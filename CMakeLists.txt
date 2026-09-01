@@ -13,12 +13,8 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(SCCDOptions)
 include(SCCDDependencies)
 
-option(SCCD_ENABLE_TBB "Use TBB for parallelization" OFF)
-option(SCCD_ENABLE_OPENMP "Use OpenMP for parallelization" ON)
-option(SCCD_ENABLE_HACKS "Do not use without Scalable-CCD library" OFF)
-option(SCCD_ENABLE_SMESH "Enable smesh and demos" OFF)
-option(SCCD_ENABLE_CUDA "Enable CUDA" OFF)
-option(SCCD_BUILD_SHARED_LIBS "Build SCCD as a shared library" ON)
+# NOTE: every SCCD_* option is declared in cmake/SCCDOptions.cmake, which is
+# included above. Re-declaring them here would be a silent no-op.
 # SCCD library
 file(GLOB_RECURSE SCCD_HEADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp")
 file(GLOB_RECURSE SCCD_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
@@ -56,6 +52,33 @@ else()
   add_library(sccd STATIC ${SCCD_SOURCES})
 endif()
 target_compile_features(sccd PUBLIC cxx_std_17)
+
+# SCCD is almost entirely header-only, and the AVX2/AVX-512/NEON kernels in
+# vaabb.hpp are guarded on __AVX2__/__AVX512F__/__ARM_NEON. Those macros only
+# exist if the ISA flags are on the command line, so without this the hottest
+# broadphase kernel silently degrades to the scalar fallback -- in consumer
+# translation units as much as in ours. Hence PUBLIC, not PRIVATE.
+if(SCCD_ENABLE_NATIVE_ARCH)
+  include(CheckCXXCompilerFlag)
+  check_cxx_compiler_flag("-march=native" SCCD_HAS_MARCH_NATIVE)
+  if(SCCD_HAS_MARCH_NATIVE)
+    target_compile_options(sccd PUBLIC $<$<COMPILE_LANGUAGE:CXX>:-march=native>)
+    message(STATUS "SCCD: building for the host CPU (-march=native)")
+  else()
+    check_cxx_compiler_flag("/arch:AVX2" SCCD_HAS_ARCH_AVX2)
+    if(SCCD_HAS_ARCH_AVX2)
+      target_compile_options(sccd PUBLIC $<$<COMPILE_LANGUAGE:CXX>:/arch:AVX2>)
+      message(STATUS "SCCD: building with /arch:AVX2")
+    else()
+      message(WARNING "SCCD: no host-arch flag available; the vectorized AABB kernels will fall back to scalar code")
+    endif()
+  endif()
+else()
+  message(WARNING
+    "SCCD_ENABLE_NATIVE_ARCH=OFF: __AVX2__/__AVX512F__ will be undefined and the "
+    "vectorized AABB overlap kernels will fall back to scalar code. Pass an explicit "
+    "-march=/-mavx2 in CMAKE_CXX_FLAGS if you need a portable binary with SIMD.")
+endif()
 
 target_include_directories(sccd
     PUBLIC

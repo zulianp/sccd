@@ -798,6 +798,74 @@ namespace sccd {
         return find_root_bisection<T>(max_iter, tol, sv, s1, s2, s3, ev, e1, e2, e3, unit_domain_box<T>(), t, u, v);
     }
 
+    /** \brief Componentwise codomain bounds of one face of a sub-box. */
+    template <typename T>
+    struct FaceBounds {
+        T fmin[3];
+        T fmax[3];
+    };
+
+    /**
+     * \brief Codomain bounds of the 4 corners on the face where the split axis
+     *        equals \p level.
+     *
+     * Adjacent sub-intervals of a split share exactly this face, so evaluating
+     * it once and carrying it forward halves the corner evaluations: a split
+     * into N+1 sub-intervals needs N+2 faces (4 evaluations each) rather than
+     * N+1 boxes at 8 evaluations each.
+     *
+     * Returned by value rather than through out-pointers: the caller's bounds
+     * would otherwise be assumed to alias the geometry the evaluator reads,
+     * which blocks the cross-corner CSE that makes these evaluations cheap.
+     *
+     * Reassociating the min/max this way is exact -- min and max introduce no
+     * rounding, so the resulting bounds are bit-identical to reducing over all
+     * 8 corners in sequence.
+     */
+    template <int SplitDim, typename T, typename Eval>
+    SCCD_ALWAYS_INLINE static FaceBounds<T> axis_face_bounds(const T level,
+                                                             const T free_lo[3],
+                                                             const T free_hi[3],
+                                                             Eval eval) {
+        static_assert(SplitDim >= 0 && SplitDim < 3);
+        constexpr int A = (SplitDim + 1) % 3;
+        constexpr int B = (SplitDim + 2) % 3;
+
+        const T a_lo = free_lo[A];
+        const T a_hi = free_hi[A];
+        const T b_lo = free_lo[B];
+        const T b_hi = free_hi[B];
+
+        T corner[4][3];
+        {
+            T c[3];
+            c[SplitDim] = level;
+            c[A] = a_lo;
+            c[B] = b_lo;
+            eval(c[0], c[1], c[2], corner[0]);
+            c[A] = a_hi;
+            c[B] = b_lo;
+            eval(c[0], c[1], c[2], corner[1]);
+            c[A] = a_lo;
+            c[B] = b_hi;
+            eval(c[0], c[1], c[2], corner[2]);
+            c[A] = a_hi;
+            c[B] = b_hi;
+            eval(c[0], c[1], c[2], corner[3]);
+        }
+
+        FaceBounds<T> out;
+        for (int d = 0; d < 3; ++d) {
+            const T m01 = sccd::min<T>(corner[0][d], corner[1][d]);
+            const T m23 = sccd::min<T>(corner[2][d], corner[3][d]);
+            const T x01 = sccd::max<T>(corner[0][d], corner[1][d]);
+            const T x23 = sccd::max<T>(corner[2][d], corner[3][d]);
+            out.fmin[d] = sccd::min<T>(m01, m23);
+            out.fmax[d] = sccd::max<T>(x01, x23);
+        }
+        return out;
+    }
+
     template <int SplitDim, int N, typename T>
     inline static void normal_equation_axis_splitters_vf(const Box<T> &domain,
                                                          const T sv[3],
@@ -907,34 +975,46 @@ namespace sccd {
 
         auto stack_size = stack.size();
 
+        // The two axes that are not split keep the parent box's extents for
+        // every sub-interval, so they are hoisted out of the loop.
+        const T free_lo[3] = {domain.tuv[0].lower, domain.tuv[1].lower, domain.tuv[2].lower};
+        const T free_hi[3] = {domain.tuv[0].upper, domain.tuv[1].upper, domain.tuv[2].upper};
+        const auto eval_vf = [&](const T ct, const T cu, const T cv, T F[3]) {
+            diff_vf<T>(sv, s1, s2, s3, ev, e1, e2, e3, ct, cu, cv, F);
+        };
+
+        // Face shared with the previous sub-interval; `carried_level` is the
+        // sample index it was evaluated at, or -1 when nothing is carried.
+        FaceBounds<T> lower_face;
+        int carried_level = -1;
+
         bool found = false;
         for (int i = 0; i < N + 1; ++i) {
             // for (int i = N; i >= 0; --i) {
             const T sample_min = samples[i];
             const T sample_max = samples[i + 1];
             const T tt_min = SplitDim == 0 ? sample_min : domain.tuv[0].lower;
-            const T tt_max = SplitDim == 0 ? sample_max : domain.tuv[0].upper;
             const T uu_min = SplitDim == 1 ? sample_min : domain.tuv[1].lower;
-            const T uu_max = SplitDim == 1 ? sample_max : domain.tuv[1].upper;
             const T vv_min = SplitDim == 2 ? sample_min : domain.tuv[2].lower;
-            const T vv_max = SplitDim == 2 ? sample_max : domain.tuv[2].upper;
 
             if (tt_min >= toi || uu_min + vv_min >= T(1) + tol) {
                 continue;
             }
 
+            if (carried_level != i) {
+                lower_face = axis_face_bounds<SplitDim, T>(sample_min, free_lo, free_hi, eval_vf);
+            }
+
+            const FaceBounds<T> upper_face = axis_face_bounds<SplitDim, T>(sample_max, free_lo, free_hi, eval_vf);
+
             T fmin[3];
             T fmax[3];
-            init_codomain_bounds<T>(fmin, fmax);
-
-            for (int mask = 0; mask < 8; ++mask) {
-                const T ct = (mask & 1) ? tt_max : tt_min;
-                const T cu = (mask & 2) ? uu_max : uu_min;
-                const T cv = (mask & 4) ? vv_max : vv_min;
-                T F[3];
-                diff_vf<T>(sv, s1, s2, s3, ev, e1, e2, e3, ct, cu, cv, F);
-                update_codomain_bounds<T>(F, fmin, fmax);
+            for (int d = 0; d < 3; ++d) {
+                fmin[d] = sccd::min<T>(lower_face.fmin[d], upper_face.fmin[d]);
+                fmax[d] = sccd::max<T>(lower_face.fmax[d], upper_face.fmax[d]);
             }
+            lower_face = upper_face;
+            carried_level = i + 1;
 
             bool accepted = false;
             if (!codomain_acceptance<T>(fmin, fmax, tol, tols, numerical_error, accepted)) {
@@ -1532,33 +1612,39 @@ namespace sccd {
             samples[i + 1] = splitters[i];
         }
 
+        const T free_lo[3] = {domain.tuv[0].lower, domain.tuv[1].lower, domain.tuv[2].lower};
+        const T free_hi[3] = {domain.tuv[0].upper, domain.tuv[1].upper, domain.tuv[2].upper};
+        const auto eval_ee = [&](const T ct, const T cu, const T cv, T F[3]) {
+            diff_ee<T>(s1, s2, s3, s4, e1, e2, e3, e4, ct, cu, cv, F);
+        };
+
+        FaceBounds<T> lower_face;
+        int carried_level = -1;
+
         bool found = false;
         for (int i = 0; i < N + 1; ++i) {
             const T sample_min = samples[i];
             const T sample_max = samples[i + 1];
             const T tt_min = SplitDim == 0 ? sample_min : domain.tuv[0].lower;
-            const T tt_max = SplitDim == 0 ? sample_max : domain.tuv[0].upper;
-            const T uu_min = SplitDim == 1 ? sample_min : domain.tuv[1].lower;
-            const T uu_max = SplitDim == 1 ? sample_max : domain.tuv[1].upper;
-            const T vv_min = SplitDim == 2 ? sample_min : domain.tuv[2].lower;
-            const T vv_max = SplitDim == 2 ? sample_max : domain.tuv[2].upper;
 
             if (tt_min >= toi) {
                 continue;
             }
 
+            if (carried_level != i) {
+                lower_face = axis_face_bounds<SplitDim, T>(sample_min, free_lo, free_hi, eval_ee);
+            }
+
+            const FaceBounds<T> upper_face = axis_face_bounds<SplitDim, T>(sample_max, free_lo, free_hi, eval_ee);
+
             T fmin[3];
             T fmax[3];
-            init_codomain_bounds<T>(fmin, fmax);
-
-            for (int mask = 0; mask < 8; ++mask) {
-                const T ct = (mask & 1) ? tt_max : tt_min;
-                const T cu = (mask & 2) ? uu_max : uu_min;
-                const T cv = (mask & 4) ? vv_max : vv_min;
-                T F[3];
-                diff_ee<T>(s1, s2, s3, s4, e1, e2, e3, e4, ct, cu, cv, F);
-                update_codomain_bounds<T>(F, fmin, fmax);
+            for (int d = 0; d < 3; ++d) {
+                fmin[d] = sccd::min<T>(lower_face.fmin[d], upper_face.fmin[d]);
+                fmax[d] = sccd::max<T>(lower_face.fmax[d], upper_face.fmax[d]);
             }
+            lower_face = upper_face;
+            carried_level = i + 1;
 
             bool accepted = false;
             if (!codomain_acceptance<T>(fmin, fmax, tol, tols, numerical_error, accepted)) {

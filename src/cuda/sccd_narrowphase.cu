@@ -620,6 +620,59 @@ namespace sccd {
             if (i < toi_n) toi[i] = max_toi;
         }
 
+        /**
+         * \brief DFS stack buffers that persist between narrow-phase calls.
+         *
+         * cudaMalloc and cudaFree synchronize the whole device. Allocating and
+         * releasing the eight stack arrays plus the two counters on every
+         * invocation put twenty such stalls into each CCD step, and because the
+         * capacity was a local it always restarted from zero and re-grew.
+         * Keeping them alive across calls also preserves the capacity the
+         * previous step converged on, so steady state does no allocation at all.
+         *
+         * One instance per scalar type; like the rest of the device pipeline it
+         * assumes a single host thread drives it.
+         */
+        template <typename T>
+        struct PersistentDfsStack {
+            T* tlower{nullptr};
+            T* tupper{nullptr};
+            T* ulower{nullptr};
+            T* uupper{nullptr};
+            T* vlower{nullptr};
+            T* vupper{nullptr};
+            int* level{nullptr};
+            int* qid{nullptr};
+            int* counters{nullptr};       // device, [0] = g_top, [1] = g_request
+            int* host_counters{nullptr};  // pinned staging for reading them back
+            int cap{0};
+
+            ~PersistentDfsStack() { release(); }
+
+            void release() {
+                cudaFree(tlower);
+                cudaFree(tupper);
+                cudaFree(ulower);
+                cudaFree(uupper);
+                cudaFree(vlower);
+                cudaFree(vupper);
+                cudaFree(level);
+                cudaFree(qid);
+                cudaFree(counters);
+                cudaFreeHost(host_counters);
+                tlower = tupper = ulower = uupper = vlower = vupper = nullptr;
+                level = qid = counters = nullptr;
+                host_counters = nullptr;
+                cap = 0;
+            }
+        };
+
+        template <typename T>
+        static PersistentDfsStack<T>& persistent_dfs_stack() {
+            static PersistentDfsStack<T> stack;
+            return stack;
+        }
+
         __global__ void reset_batch_narrow_phase_kernel(int* SCCD_RESTRICT g_top, int* SCCD_RESTRICT g_request) {
             *g_top = 0;
             *g_request = 0;
@@ -1770,18 +1823,27 @@ namespace sccd {
             int SCCD_GSTACK_CAP_MAX = INT_MAX;
             SCCD_READ_ENV(SCCD_GSTACK_CAP_MAX, atoi);
 
-            T* g_tlower = nullptr;
-            T* g_tupper = nullptr;
-            T* g_ulower = nullptr;
-            T* g_uupper = nullptr;
-            T* g_vlower = nullptr;
-            T* g_vupper = nullptr;
-            int* g_level = nullptr;
-            int* g_qid = nullptr;
-            int* g_top = nullptr;
-            int* g_request = nullptr;
-            cudaMalloc(&g_top, sizeof(int));
-            cudaMalloc(&g_request, sizeof(int));
+            PersistentDfsStack<T>& gstack = persistent_dfs_stack<T>();
+
+            if (!gstack.counters) {
+                SCCD_CHECK_CUDA(cudaMalloc(&gstack.counters, 2 * sizeof(int)));
+                // Pinned staging: these two words are read back once per drain
+                // iteration, and a pageable destination forces the driver
+                // through an extra bounce buffer each time.
+                SCCD_CHECK_CUDA(cudaHostAlloc(&gstack.host_counters, 2 * sizeof(int), cudaHostAllocDefault));
+            }
+            int* const g_top = gstack.counters;
+            int* const g_request = gstack.counters + 1;
+
+            T* g_tlower = gstack.tlower;
+            T* g_tupper = gstack.tupper;
+            T* g_ulower = gstack.ulower;
+            T* g_uupper = gstack.uupper;
+            T* g_vlower = gstack.vlower;
+            T* g_vupper = gstack.vupper;
+            int* g_level = gstack.level;
+            int* g_qid = gstack.qid;
+            gstack_cap = gstack.cap;
 
             auto grow_stack = [&](int new_cap) {
                 if (new_cap <= gstack_cap) return;
@@ -1815,7 +1877,12 @@ namespace sccd {
                 gstack_cap = new_cap;
             };
 
-            if (gstack_cap > 0) grow_stack(gstack_cap);
+            // A stack carried over from a previous call still holds that call's
+            // slot ids, so restore the empty marker the freshly allocated buffer
+            // used to arrive with.
+            if (gstack_cap > 0 && g_qid) {
+                SCCD_CHECK_CUDA(cudaMemsetAsync(g_qid, 0xFF, (size_t)gstack_cap * sizeof(int)));
+            }
 
             // One-time toi init.  Stack arrays are sized on demand below.
             {
@@ -1839,8 +1906,9 @@ namespace sccd {
                 const int this_batch = (int)(end - begin);
 
                 while (true) {
-                    reset_batch_narrow_phase_kernel<<<1, 1>>>(g_top, g_request);
-                    SCCD_CUDA_LAST_ERROR();
+                    // g_top and g_request are adjacent ints, so one memset
+                    // replaces what was a full kernel launch to zero two words.
+                    SCCD_CHECK_CUDA(cudaMemsetAsync(gstack.counters, 0, 2 * sizeof(int)));
 
                     Stack<T> g_stack = {g_tlower,
                                         g_tupper,
@@ -1891,8 +1959,9 @@ namespace sccd {
                     }
                     SCCD_CUDA_LAST_ERROR();
 
-                    int h_g_top = 0;
-                    SCCD_CHECK_CUDA(cudaMemcpy(&h_g_top, g_top, sizeof(int), cudaMemcpyDeviceToHost));
+                    SCCD_CHECK_CUDA(
+                        cudaMemcpy(gstack.host_counters, g_top, sizeof(int), cudaMemcpyDeviceToHost));
+                    int h_g_top = gstack.host_counters[0];
 
                     // Pass 2: drain whatever made it onto g_stack.  Each
                     // launch consumes up to base_grid_blocks worth of
@@ -1925,15 +1994,18 @@ namespace sccd {
                         }
                         SCCD_CUDA_LAST_ERROR();
 
-                        cudaMemcpy(&h_g_top, g_top, sizeof(int), cudaMemcpyDeviceToHost);
+                        SCCD_CHECK_CUDA(
+                            cudaMemcpy(gstack.host_counters, g_top, sizeof(int), cudaMemcpyDeviceToHost));
+                        h_g_top = gstack.host_counters[0];
                     }
 
                     // Did anything overflow during Pass 1 or Pass 2?
                     // Grow and retry the entire batch from seeds; the
                     // tighter TOIs from this attempt cut the work tree
                     // on the next pass.
-                    int h_g_request = 0;
-                    cudaMemcpy(&h_g_request, g_request, sizeof(int), cudaMemcpyDeviceToHost);
+                    SCCD_CHECK_CUDA(
+                        cudaMemcpy(gstack.host_counters + 1, g_request, sizeof(int), cudaMemcpyDeviceToHost));
+                    const int h_g_request = gstack.host_counters[1];
                     if (h_g_request <= 0) break;
 
                     // printf("Overflowed: %d\n", h_g_request);
@@ -1946,16 +2018,16 @@ namespace sccd {
                 }
             }
 
-            cudaFree(g_tlower);
-            cudaFree(g_tupper);
-            cudaFree(g_ulower);
-            cudaFree(g_uupper);
-            cudaFree(g_vlower);
-            cudaFree(g_vupper);
-            cudaFree(g_level);
-            cudaFree(g_qid);
-            cudaFree(g_top);
-            cudaFree(g_request);
+            // Hand the (possibly grown) buffers back for the next call.
+            gstack.tlower = g_tlower;
+            gstack.tupper = g_tupper;
+            gstack.ulower = g_ulower;
+            gstack.uupper = g_uupper;
+            gstack.vlower = g_vlower;
+            gstack.vupper = g_vupper;
+            gstack.level = g_level;
+            gstack.qid = g_qid;
+            gstack.cap = gstack_cap;
 
             SCCD_CUDA_LAST_ERROR();
             return 0;
