@@ -15,10 +15,33 @@ Useful optional CMake flags:
 ```sh
 -DSCCD_ENABLE_TBB=ON|OFF
 -DSCCD_ENABLE_OPENMP=ON|OFF
+-DSCCD_ENABLE_NATIVE_ARCH=ON|OFF
 -DSCCD_ENABLE_TIGHT_INCLUSION=ON|OFF
+-DSCCD_USE_VNARROW_PHASE_DEFAULT=ON|OFF
+-DSCCD_VNARROWPHASE_TI_COMPAT_DEFAULT=ON|OFF
 -DSCCD_ENABLE_SMESH=ON|OFF
 -DSCCD_ENABLE_CUDA=ON|OFF
 ```
+
+The vectorized vertex-face narrow phase can also be selected at runtime:
+
+```sh
+SCCD_USE_VNARROW_PHASE=1
+SCCD_VNARROWPHASE_TI_COMPAT=1
+```
+
+`SCCD_ENABLE_NATIVE_ARCH` (on by default) adds `-march=native`. SCCD is mostly
+header-only and its AABB overlap kernels are guarded on `__AVX2__`,
+`__AVX512F__` and `__ARM_NEON`, so without a host-architecture flag the hottest
+broadphase kernel silently falls back to scalar code -- in your translation
+units as well as ours. Turn it off only for a portable binary, and then pass an
+explicit `-mavx2` (or similar) in `CMAKE_CXX_FLAGS`.
+
+`SCCD_VNARROWPHASE_TI_COMPAT` requires a build with
+`SCCD_ENABLE_TIGHT_INCLUSION=ON`. It runs the normal vector kernel and then
+corrects its predicate and time-of-impact outputs with TightInclusion's DFS.
+This strict comparison mode reproduces TightInclusion results; it is not the
+performance path.
 
 ## Approaches
 

@@ -12,6 +12,7 @@
 #include "sccd_base.hpp"
 #include "sccd_cuda_base.cuh"
 
+#include "sccd_device_workspace.cuh"
 #include "sccd_reduce.cuh"
 
 #define SCCD_BP_N_WARPS_PER_BLOCK 8
@@ -91,13 +92,12 @@ namespace sccd {
             dim3 block(SCCD_BP_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
             dim3 grid((n + block.x - 1) / block.x);
 
-            T* mean = nullptr;
-            cudaMalloc(&mean, dim * sizeof(T));
-            T* var = nullptr;
-            cudaMalloc(&var, dim * sizeof(T));
+            // One cached allocation holding [mean | var]; these used to be two
+            // cudaMalloc/cudaFree pairs on every call.
+            T* const mean = workspace(WorkspaceSlot::TempStorage).get_as<T>(2 * dim);
+            T* const var = mean + dim;
 
-            cudaMemset(mean, 0, dim * sizeof(T));
-            cudaMemset(var, 0, dim * sizeof(T));
+            cudaMemset(mean, 0, 2 * dim * sizeof(T));
 
             choose_axis_mean_kernel<T><<<grid, block>>>(dim, n, aabbs, mean);
             choose_axis_var_kernel<T><<<grid, block>>>(dim, n, aabbs, mean, var);
@@ -117,8 +117,6 @@ namespace sccd {
                 }
             }
 
-            cudaFree(mean);
-            cudaFree(var);
             free(hvar);
 
             if (error != cudaSuccess) {
@@ -211,21 +209,23 @@ namespace sccd {
 
             const T* const SCCD_RESTRICT x = host_arrays[sort_axis];
 
-            I* tmp_idx = nullptr;
-            void* tmp_storage = nullptr;
-            size_t tmp_storage_bytes = 0;
-
-            SCCD_CHECK_CUDA(cudaMalloc(&tmp_idx, n * sizeof(I)));
+            I* const tmp_idx = workspace(WorkspaceSlot::SortIndex).get_as<I>(n);
             enumerate<I>(0, n, tmp_idx);
             SCCD_CUDA_LAST_ERROR();
 
+            size_t tmp_storage_bytes = 0;
             SCCD_CHECK_CUDA(cub::DeviceRadixSort::SortPairs(nullptr, tmp_storage_bytes, x, scratch, tmp_idx, idx, n));
-            SCCD_CHECK_CUDA(cudaMalloc(&tmp_storage, tmp_storage_bytes));
+            void* const tmp_storage = workspace(WorkspaceSlot::TempStorage).get(tmp_storage_bytes);
             SCCD_CHECK_CUDA(
                 cub::DeviceRadixSort::SortPairs(tmp_storage, tmp_storage_bytes, x, scratch, tmp_idx, idx, n));
 
             SCCD_CHECK_CUDA(cudaMemcpy(host_arrays[sort_axis], scratch, n * sizeof(T), cudaMemcpyDeviceToDevice));
 
+            // NOTE: the permuted rows have to end up in the caller's own
+            // buffers, so the copy back out of `scratch` cannot be avoided by
+            // swapping pointers here -- `host_arrays` is only a local copy of
+            // them. Removing these copies would require the permutation to be
+            // done against caller-owned double buffers.
             dim3 block(SCCD_BP_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
             dim3 grid((n + block.x - 1) / block.x);
             for (int d = 0; d < 2 * dim; d++) {
@@ -234,9 +234,6 @@ namespace sccd {
                 SCCD_CUDA_LAST_ERROR();
                 SCCD_CHECK_CUDA(cudaMemcpy(host_arrays[d], scratch, n * sizeof(T), cudaMemcpyDeviceToDevice));
             }
-
-            SCCD_CHECK_CUDA(cudaFree(tmp_storage));
-            SCCD_CHECK_CUDA(cudaFree(tmp_idx));
 
             SCCD_CUDA_LAST_ERROR();
         }
@@ -392,14 +389,12 @@ namespace sccd {
                 <<<grid, block>>>(sort_axis, element_count, aabbs, idx, stride, elements, ccdptr);
             SCCD_CUDA_LAST_ERROR();
 
-            void* tmp_storage = nullptr;
             size_t tmp_storage_bytes = 0;
             SCCD_CHECK_CUDA(
                 cub::DeviceScan::InclusiveSum(nullptr, tmp_storage_bytes, ccdptr, ccdptr, element_count + 1));
-            SCCD_CHECK_CUDA(cudaMalloc(&tmp_storage, tmp_storage_bytes));
+            void* const tmp_storage = workspace(WorkspaceSlot::TempStorage).get(tmp_storage_bytes);
             SCCD_CHECK_CUDA(
                 cub::DeviceScan::InclusiveSum(tmp_storage, tmp_storage_bytes, ccdptr, ccdptr, element_count + 1));
-            SCCD_CHECK_CUDA(cudaFree(tmp_storage));
 
             SCCD_CUDA_LAST_ERROR();
         }
@@ -505,14 +500,12 @@ namespace sccd {
             if (n <= 0) return;
             SCCD_CUDA_LAST_ERROR();
 
-            void* tmp_storage = nullptr;
             size_t tmp_storage_bytes = 0;
 
             SCCD_CHECK_CUDA(cub::DeviceScan::InclusiveScan(nullptr, tmp_storage_bytes, in, out, device_max_op<T>(), n));
-            SCCD_CHECK_CUDA(cudaMalloc(&tmp_storage, tmp_storage_bytes));
+            void* const tmp_storage = workspace(WorkspaceSlot::TempStorage).get(tmp_storage_bytes);
             SCCD_CHECK_CUDA(
                 cub::DeviceScan::InclusiveScan(tmp_storage, tmp_storage_bytes, in, out, device_max_op<T>(), n));
-            SCCD_CHECK_CUDA(cudaFree(tmp_storage));
 
             SCCD_CUDA_LAST_ERROR();
         }
@@ -679,13 +672,11 @@ namespace sccd {
 
             SCCD_CUDA_LAST_ERROR();
 
-            void* tmp_storage = nullptr;
             size_t tmp_storage_bytes = 0;
             SCCD_CHECK_CUDA(cub::DeviceScan::InclusiveSum(nullptr, tmp_storage_bytes, ccdptr, ccdptr, first_count + 1));
-            SCCD_CHECK_CUDA(cudaMalloc(&tmp_storage, tmp_storage_bytes));
+            void* const tmp_storage = workspace(WorkspaceSlot::TempStorage).get(tmp_storage_bytes);
             SCCD_CHECK_CUDA(
                 cub::DeviceScan::InclusiveSum(tmp_storage, tmp_storage_bytes, ccdptr, ccdptr, first_count + 1));
-            SCCD_CHECK_CUDA(cudaFree(tmp_storage));
 
             SCCD_CUDA_LAST_ERROR();
         }
@@ -942,13 +933,11 @@ namespace sccd {
 
             SCCD_CUDA_LAST_ERROR();
 
-            void* tmp_storage = nullptr;
             size_t tmp_storage_bytes = 0;
             SCCD_CHECK_CUDA(cub::DeviceScan::InclusiveSum(nullptr, tmp_storage_bytes, ccdptr, ccdptr, first_count + 1));
-            SCCD_CHECK_CUDA(cudaMalloc(&tmp_storage, tmp_storage_bytes));
+            void* const tmp_storage = workspace(WorkspaceSlot::TempStorage).get(tmp_storage_bytes);
             SCCD_CHECK_CUDA(
                 cub::DeviceScan::InclusiveSum(tmp_storage, tmp_storage_bytes, ccdptr, ccdptr, first_count + 1));
-            SCCD_CHECK_CUDA(cudaFree(tmp_storage));
 
             SCCD_CUDA_LAST_ERROR();
         }
