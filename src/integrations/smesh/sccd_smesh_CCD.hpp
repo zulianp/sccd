@@ -17,6 +17,7 @@
 #if defined(SCCD_ENABLE_CUDA)
 #include "sccd_broadphase.cuh"
 #include "sccd_narrowphase.cuh"
+#include "sccd_narrowphase_vq.cuh"
 #include "sccd_vaabb.cuh"
 
 #include <cuda_runtime_api.h>
@@ -947,7 +948,27 @@ namespace sccd {
             vf_tois_ = smesh::create_buffer<scalar_t>(toi_storage_size(v_overlap_->size()), execution_space_);
             const auto element_type = face_element_type_;
             if (element_type == smesh::QUADSHELL4) {
-                SMESH_ERROR("CUDA QUADSHELL4 narrow phase is not implemented\n");
+                // Quads have their own device kernel: the triangle one is built
+                // around a four-point query on a barycentric domain, and a
+                // vertex-quad query is five points on a domain where u and v range
+                // independently. See src/cuda/sccd_narrowphase_vq.cuh.
+                sccd::device::narrow_phase_vq<scalar_t, smesh::idx_t>(v_overlap_->size(),
+                                                                      v_overlap_->data(),
+                                                                      f_overlap_->data(),
+                                                                      points_t0_->data(),
+                                                                      points_t1_->data(),
+                                                                      1,
+                                                                      faces_->data(),
+                                                                      max_toi,
+                                                                      vf_tois_->data(),
+                                                                      max_depth,
+                                                                      tol,
+                                                                      (int)toi_stride);
+                if (toi_stride == 0) {
+                    auto host_toi = smesh::to_host(vf_tois_);
+                    max_toi = host_toi->data()[0];
+                }
+                return SCCD_SUCCESS;
             }
             if (element_type != smesh::TRISHELL3) {
                 SMESH_ERROR("Unsupported CCD face element type: %s\n", smesh::type_to_string(element_type));
