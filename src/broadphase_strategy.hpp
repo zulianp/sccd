@@ -4,6 +4,7 @@
 #include "sccd_base.hpp"
 #include "smath.hpp"
 
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 
@@ -58,28 +59,30 @@
  *    (cloth-ball, where the sweep is 1.36x faster) and the middle one
  *    (armadillo-rollers, 1.59x). See `benchmark/ASSESSMENT.md`.
  *
- * ## So: default to the cell list, for now
+ * ## So: Auto measures, it does not guess
  *
- * **This default is under review.** The asymmetry argument below is drawn from
- * synthetic box-list benchmarks, and the end-to-end assessment does not support
- * it: on real scenes the sweep wins two of three, by 1.36x and 1.59x, which is
- * far more than the "1.8 ms" the argument assumes the cell list can cost. What
- * keeps the default here for now is that the measured downside of guessing wrong
- * the other way is 54 seconds rather than 13 ms. Four heuristics have been
- * refuted, so the remaining principled option is for `Auto` to measure both on
- * the first step and keep the winner -- the pair sets are identical, so that is
- * a fair race -- rather than to keep asserting an answer.
-
+ * Four heuristics are refuted above, and the end-to-end assessment refuted the
+ * constant that stood in for them. `Auto` used to resolve to the cell list
+ * unconditionally, on the strength of synthetic box-list benchmarks where it
+ * wins by 4-7x and where the worst case for choosing it is 1.8 ms on a broad
+ * phase costing 1.3 ms. On real scenes that argument does not hold: the sweep
+ * wins two of three, by 1.36x on cloth-ball and 1.59x on armadillo-rollers,
+ * which is 13 ms and 78 ms rather than 1.8 ms (`benchmark/ASSESSMENT.md`).
  *
- * Not for want of a heuristic, but because the payoff is asymmetric and the
- * measurements bound both sides. The worst observed loss is 1.8 ms on a broad
- * phase that costs 1.3 ms; the best observed gain is 54 seconds. A selector that
- * could read the geometry would be worth having, but guessing wrong in the cheap
- * direction costs milliseconds and guessing wrong in the expensive direction
- * costs minutes.
+ * Neither constant is right and no cheap statistic has separated the cases. But
+ * the two produce **identical pair sets**, so they can simply be raced: run one
+ * on a step, the other on the next, then keep the winner. A broad phase runs
+ * every step of a simulation, so the cost is two probe steps out of thousands,
+ * and unlike a heuristic it cannot be wrong about a scene nobody tested.
  *
- * `SCCD_BROADPHASE=sweep` forces the old path, and `broadphase_stats` is exposed
- * so a caller with a scene the defaults suit badly can measure and decide.
+ * `BroadPhaseAutoTuner` does that. It re-probes periodically, because a
+ * simulation's geometry changes -- cloth that starts flat and ends crumpled is
+ * not one workload -- and a verdict reached on frame one should not bind frame
+ * ten thousand.
+ *
+ * `SCCD_BROADPHASE=sweep` or `=cell2d` forces one and skips the race entirely,
+ * and `broadphase_stats` is still exposed for a caller who wants to look at the
+ * geometry itself.
  */
 
 namespace sccd {
@@ -149,12 +152,18 @@ namespace sccd {
     }
 
     /**
-     * \brief Resolve Auto; a forced setting passes through.
+     * \brief Resolve Auto without a race; a forced setting passes through.
      *
-     * Auto is the cell list, for the reasons in the file comment. \p out_stats is
-     * filled when asked so a caller can log or override on its own evidence;
-     * computing it costs one pass over the AABBs, so it is skipped when nobody
-     * wants it and the strategy is already decided.
+     * The stateless fallback, for a caller with nowhere to keep a measurement.
+     * `BroadPhaseAutoTuner` is what the CCD object uses and what should be
+     * preferred: it decides from timings rather than asserting an answer.
+     *
+     * This returns the cell list, which is the same choice the tuner makes on its
+     * first probe and for the same reason -- with only one shot, take the option
+     * whose worst case is bounded. See the file comment.
+     *
+     * \p out_stats is filled when asked so a caller can log or override on its own
+     * evidence; computing it costs one pass over the AABBs.
      */
     template <typename T>
     static BroadPhaseStrategy choose_broadphase_strategy(const ptrdiff_t n,
@@ -165,6 +174,118 @@ namespace sccd {
         if (forced != BroadPhaseStrategy::Auto) return forced;
         return BroadPhaseStrategy::Cell2D;
     }
+
+    /** \brief Wall clock in milliseconds, for the race below. */
+    static inline double broadphase_now_ms() {
+        return std::chrono::duration<double, std::milli>(
+                   std::chrono::steady_clock::now().time_since_epoch())
+            .count();
+    }
+
+    /**
+     * \brief Picks a broad phase by racing the two, not by predicting a winner.
+     *
+     * The two implementations return identical pair sets, so whichever is faster
+     * on this geometry is simply the right one, and measuring that is cheaper and
+     * more honest than any statistic tried so far -- see the file comment for the
+     * four that failed and the constant that failed after them.
+     *
+     * One probe per strategy, on consecutive steps, then the winner until the
+     * next re-probe. Consecutive frames of a simulation are similar enough for
+     * that to be a fair race; frames far apart are not, which is why it re-probes
+     * rather than deciding once and for all.
+     *
+     * A forced `SCCD_BROADPHASE` short-circuits it.
+     */
+    class BroadPhaseAutoTuner {
+    public:
+        /** \brief The strategy to use for the next broad phase. */
+        BroadPhaseStrategy next() {
+            const BroadPhaseStrategy forced = broadphase_strategy_setting();
+            if (forced != BroadPhaseStrategy::Auto) return forced;
+
+            if (reprobe_now_) {
+                // Start a fresh race rather than defending the old verdict, so a
+                // scene that has changed character can change the answer. The
+                // warm-up is not repeated: by now everything is allocated.
+                sweep_ms_ = -1.0;
+                cell2d_ms_ = -1.0;
+                reprobe_now_ = false;
+            }
+
+            // Each strategy runs once unmeasured before the race, because
+            // otherwise it is not a race. A strategy's first execution pays for
+            // allocating its own scratch -- the cell list's grid, the sweep's sort
+            // buffers -- and for first touch of everything the two share. Measured
+            // cold on a small mesh that showed up as 1.195 ms against 0.152 ms,
+            // an eight-fold difference that was entirely allocation and would flip
+            // any close race.
+            //
+            // Four steps before a verdict rather than two. Out of a simulation
+            // that is nothing, and a caller with fewer steps than that has nothing
+            // to gain from racing anyway.
+            if (warmups_done_ < 2) {
+                warmup_pending_ = true;
+                return warmups_done_ == 0 ? BroadPhaseStrategy::Cell2D : BroadPhaseStrategy::Sweep;
+            }
+            // Cell2D is probed first, and which one goes first matters more than it
+            // looks. A caller that runs a single broad phase on a CCD object -- one
+            // query, or a driver that rebuilds the object per frame -- never
+            // completes the race and only ever gets the first probe. So the first
+            // probe has to be the choice that bounds the worst case, and that is
+            // the cell list: the sweep's bad case on dense synthetic input was
+            // measured at 54 seconds against 9, while the cell list's bad case on a
+            // real scene is 78 ms against 22. Racing improves the steady state; it
+            // must not make the one-shot case worse than the constant it replaced.
+            if (cell2d_ms_ < 0.0) return BroadPhaseStrategy::Cell2D;
+            if (sweep_ms_ < 0.0) return BroadPhaseStrategy::Sweep;
+            return sweep_ms_ <= cell2d_ms_ ? BroadPhaseStrategy::Sweep : BroadPhaseStrategy::Cell2D;
+        }
+
+        /** \brief Report what the strategy `next()` handed out actually cost. */
+        void record(const BroadPhaseStrategy used, const double elapsed_ms) {
+            if (warmup_pending_) {
+                warmup_pending_ = false;
+                ++warmups_done_;
+                return;
+            }
+            if (used == BroadPhaseStrategy::Sweep && sweep_ms_ < 0.0) {
+                sweep_ms_ = elapsed_ms;
+                return;
+            }
+            if (used == BroadPhaseStrategy::Cell2D && cell2d_ms_ < 0.0) {
+                cell2d_ms_ = elapsed_ms;
+                return;
+            }
+            // Both timed: this was a step running the winner. Count it down to the
+            // next race.
+            if (++steps_since_race_ >= kReprobeInterval) {
+                steps_since_race_ = 0;
+                reprobe_now_ = true;
+            }
+        }
+
+        /** \brief The verdict, or Auto while a race is still in progress. */
+        BroadPhaseStrategy decided() const {
+            if (sweep_ms_ < 0.0 || cell2d_ms_ < 0.0) return BroadPhaseStrategy::Auto;
+            return sweep_ms_ <= cell2d_ms_ ? BroadPhaseStrategy::Sweep : BroadPhaseStrategy::Cell2D;
+        }
+
+        double sweep_ms() const { return sweep_ms_; }
+        double cell2d_ms() const { return cell2d_ms_; }
+
+    private:
+        // Long enough that two probe steps disappear into the noise, short enough
+        // to follow a scene whose character changes over a run.
+        static constexpr int kReprobeInterval = 64;
+
+        double sweep_ms_ = -1.0;
+        double cell2d_ms_ = -1.0;
+        int steps_since_race_ = 0;
+        bool reprobe_now_ = false;
+        int warmups_done_ = 0;
+        bool warmup_pending_ = false;
+    };
 
     static inline const char* broadphase_strategy_name(const BroadPhaseStrategy s) {
         switch (s) {

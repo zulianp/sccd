@@ -211,6 +211,61 @@ namespace {
         return SMESH_TEST_SUCCESS;
     }
 
+    // The broad-phase auto-tuner races the sweep against the cell list over
+    // consecutive steps and keeps the winner, so a long-lived CCD object changes
+    // strategy underneath the caller. That is only acceptable if the answer does
+    // not change with it -- the two produce identical pair sets, which is the
+    // whole premise of racing them.
+    //
+    // Driving one object over enough steps exercises both strategies and the
+    // switch between them. Fixed geometry, so anything that moves is the tuner.
+    int test_tuner_does_not_change_the_answer() {
+        auto ccd = sccd::CCD<T>::create(two_triangles(), smesh::EXECUTION_SPACE_HOST);
+        auto p0 = points_soa<T, 6>(frame(1.0));
+        auto p1 = points_soa<T, 6>(frame(-1.0));
+
+        std::size_t first_vf = 0, first_ee = 0;
+        double first_toi = 0.0;
+
+        for (int step = 0; step < 10; ++step) {
+            smesh::SharedBuffer<smesh::idx_t> v_overlap, f_overlap, e0_overlap, e1_overlap;
+            smesh::SharedBuffer<T> vf_tois, ee_tois;
+            const int err = ccd->find_impact_times(
+                p0, p1, v_overlap, f_overlap, vf_tois, e0_overlap, e1_overlap, ee_tois, 40, 1e-8);
+            SMESH_TEST_EQ(err, SCCD_SUCCESS);
+
+            double toi = 1.0;
+            for (ptrdiff_t i = 0; i < (ptrdiff_t)vf_tois->size(); ++i) {
+                toi = std::min(toi, (double)vf_tois->data()[i]);
+            }
+            for (ptrdiff_t i = 0; i < (ptrdiff_t)ee_tois->size(); ++i) {
+                toi = std::min(toi, (double)ee_tois->data()[i]);
+            }
+
+            if (step == 0) {
+                first_vf = v_overlap->size();
+                first_ee = e0_overlap->size();
+                first_toi = toi;
+                std::printf("  step 0: vf=%ld ee=%ld toi=%.9f\n",
+                            (long)first_vf, (long)first_ee, first_toi);
+                continue;
+            }
+
+            if (v_overlap->size() != first_vf || e0_overlap->size() != first_ee) {
+                std::printf("  FAIL step %d: pair counts moved, vf %ld->%ld ee %ld->%ld\n",
+                            step, (long)first_vf, (long)v_overlap->size(),
+                            (long)first_ee, (long)e0_overlap->size());
+                return SMESH_TEST_FAILURE;
+            }
+            if (std::fabs(toi - first_toi) > 1e-12) {
+                std::printf("  FAIL step %d: toi moved %.12f -> %.12f\n", step, first_toi, toi);
+                return SMESH_TEST_FAILURE;
+            }
+        }
+        std::printf("  %-38s 10 steps, pair sets and toi identical throughout\n", "tuner");
+        return SMESH_TEST_SUCCESS;
+    }
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -219,6 +274,7 @@ int main(int argc, char** argv) {
         SMESH_RUN_TEST(test_find_earliest_impact_time);
         SMESH_RUN_TEST(test_find_impact_times);
         SMESH_RUN_TEST(test_staged_matches_oneshot);
+        SMESH_RUN_TEST(test_tuner_does_not_change_the_answer);
     }
     SMESH_UNIT_TEST_FINALIZE();
     return SMESH_UNIT_TEST_ERR();
