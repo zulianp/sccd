@@ -121,6 +121,19 @@ namespace sccd {
          */
         using TC = double;
 
+        // Corner-evaluation counter, for answering "is the gap work or cost?".
+        //
+        // Compiled out unless SCCD_NP_COUNT_BOXES is defined, so the shipped
+        // kernel is untouched -- it is a diagnostic, and one that changes what it
+        // measures: a global atomicAdd on every evaluation serialises the kernel,
+        // so an instrumented build's *timings* mean nothing. Only the counts do.
+#ifdef SCCD_NP_COUNT_BOXES
+        __device__ unsigned long long g_np_evals = 0;
+#define SCCD_NP_EVAL_TICK() atomicAdd(&g_np_evals, 1ull)
+#else
+#define SCCD_NP_EVAL_TICK() ((void)0)
+#endif
+
         // Shared-stack capacity for scalar type T.
         //
         // Measured on sm_90 with CUDA 12.6, not assumed: at 1024 entries the
@@ -130,12 +143,19 @@ namespace sccd {
         // memory without a cudaFuncSetAttribute opt-in; the ptxas ceiling for
         // static __shared__ on sm_90 is 0x29000 = 164 KB.
         //
-        // What the size does cost is occupancy. 57,376 bytes caps the block-per-
-        // query kernel at 4 blocks/SM out of the 228 KB an SM has, while the
-        // register budget (96 registers x 128 threads) would allow 5. Halving the
-        // capacity for double would recover that block, at the price of spilling
-        // to the global stack sooner. Which way that trade lands has not been
-        // measured, so the capacity is left alone and the knob stays available.
+        // What the size does cost is occupancy, though not as much as it used to:
+        // registers, not shared memory, are what bind here now. Measured with
+        // -Xptxas=-v on CUDA 12.6 for sm_90, the double zero-stride kernel uses
+        // 224 registers at conservative=false and 238 at conservative=true, with
+        // no spills. At 128 threads that is 30,464 registers per block against the
+        // SM's 65,536, so **two** blocks fit, where 57,376 bytes of shared memory
+        // out of 228 KB would have allowed three. Halving the capacity therefore
+        // buys nothing on its own -- the register budget would still cap it at two
+        // -- so the capacity is left alone and the knob stays available.
+        //
+        // (An earlier version of this comment said 96 registers and 4-5 blocks per
+        // SM. That figure no longer holds and is corrected here rather than left
+        // to be trusted.)
         template <typename T>
         struct SharedStackCap {
             static constexpr int value = SCCD_NP_SHARED_STACK_CAP;
@@ -1460,6 +1480,7 @@ namespace sccd {
                                                               const T* const SCCD_RESTRICT aerr,
                                                               int& contains_origin,
                                                               int& accept) {
+            SCCD_NP_EVAL_TICK();
             if constexpr (conservative) {
                 evaluate_cell_3d_ti<is_vf, T, Vec4>(
                     cell, sx, sy, sz, ex, ey, ez, atol, aerr, contains_origin, accept);
@@ -1567,6 +1588,13 @@ namespace sccd {
             }
 
             while (true) {
+                // Refreshed every iteration, deliberately. Every resident block
+                // hits this one word atomically, which looks like the kind of
+                // contention worth batching away, and is not: refreshing every
+                // 4th, 16th, 64th and 256th iteration instead was measured
+                // monotonically worse on all three scenes -- 638 -> 3377 ms on
+                // cloth-funnel at 256 -- because the pruning a fresh bound buys is
+                // worth more than the atomic costs. See benchmark/ASSESSMENT.md.
                 if (tid == 0) {
                     const TC g = atomic_min_toi<T>(&toi[0], s_toi);
                     if (g < s_toi) s_toi = g;
@@ -2298,6 +2326,7 @@ namespace sccd {
             SCCD_READ_ENV(SCCD_NP_ALPHA, atof);
             const T np_alpha = (T)SCCD_NP_ALPHA;
 
+
             // ----------------------------------------------------------------
             // Auto-sized hyperparameters.
             //
@@ -2412,6 +2441,13 @@ namespace sccd {
             if (gstack_cap > 0 && g_qid) {
                 SCCD_CHECK_CUDA(cudaMemsetAsync(g_qid, 0xFF, (size_t)gstack_cap * sizeof(int)));
             }
+
+#ifdef SCCD_NP_COUNT_BOXES
+            {
+                const unsigned long long zero = 0;
+                SCCD_CHECK_CUDA(cudaMemcpyToSymbol(g_np_evals, &zero, sizeof(zero)));
+            }
+#endif
 
             // One-time toi init.  Stack arrays are sized on demand below.
             {
@@ -2590,6 +2626,21 @@ namespace sccd {
             gstack.cap = gstack_cap;
 
             SCCD_CUDA_LAST_ERROR();
+
+#ifdef SCCD_NP_COUNT_BOXES
+            {
+                unsigned long long evals = 0;
+                SCCD_CHECK_CUDA(cudaDeviceSynchronize());
+                SCCD_CHECK_CUDA(cudaMemcpyFromSymbol(&evals, g_np_evals, sizeof(evals)));
+                fprintf(stderr,
+                        "sccd-np-count %s %s queries=%zu corner_evals=%llu per_query=%.1f\n",
+                        is_vf ? "vf" : "ee",
+                        conservative ? "conservative" : "mode0",
+                        noverlaps,
+                        evals,
+                        noverlaps ? (double)evals / (double)noverlaps : 0.0);
+            }
+#endif
             return 0;
         }
 

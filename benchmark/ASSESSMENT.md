@@ -238,6 +238,102 @@ Cause 1 is worth roughly 4× and is a contained change. It does not close 26× o
 its own, so the tree-size difference between the two device kernels should be
 counted before more is claimed.
 
+### Counted. It is not the arithmetic, and cause 1 is not implementable
+
+The counting turned both of those claims over, so they are corrected here rather
+than left standing.
+
+`SCCD_NP_COUNT_BOXES` compiles a counter into both the device kernel and the host
+TightInclusion kernel that ticks once per box classified — the same unit on both
+sides, which is what makes them comparable. It is off by default and a global
+atomic when on, so an instrumented build's *timings* are meaningless; only the
+counts are. On cloth-funnel, 16 cases, 843,140 queries:
+
+| | boxes classified | per query |
+|---|---:|---:|
+| host conservative (mode 2) | 1,488,233 | **1.8** |
+| device conservative (mode 2) | 796,343,700 | **944** |
+| device mode 0 | 3,035,988 | 3.6 |
+
+**The device conservative search does 535× the host's work on identical queries.**
+Both use the same three acceptance conditions — origin containment padded by the
+certified bound, whole range inside the error box, domain widths within the
+domain tolerances — and the same `compute_face_vertex_tolerance`. The host decides
+under two boxes per query, which is to say it classifies the root and stops. The
+device classifies 944.
+
+Two consequences:
+
+- **The 26× time gap is work, not per-box cost.** Mode 2 does 259× more corner
+  evaluations than mode 0 and takes 26× longer, so per evaluation it is about ten
+  times *cheaper* — mode 0's time is dominated by fixed per-query setup, not by
+  search. The conservative kernel is genuinely evaluation-bound.
+- **Corner reuse cannot be built.** Measured with `-Xptxas=-v` on CUDA 12.6 for
+  sm_90, the zero-stride kernel uses **238 of the 255 available registers** at
+  `conservative=true` (224 at `conservative=false`), with no spills. Carrying
+  eight corner values for three components is 24 doubles, 48 more registers, into
+  a budget with 17 left. The shared stack cannot take them either: at 57,376 bytes
+  per block it is already the second binding constraint. So the item is not "worth
+  4×, contained" — it is not available at all in this kernel's shape.
+
+Both modes sit at about 12.5% occupancy (238 registers × 128 threads leaves room
+for two blocks per SM out of the 65,536 registers an SM has), so occupancy is not
+what separates them either.
+
+### Three things that looked like the cause and are not
+
+Recorded so they are not retried.
+
+**Sequential batching, to recover the host's collapsing time of impact.** The host
+processes queries with a running global minimum, so later queries start against a
+tiny `t` interval; the device launches everything at once against `max_toi`.
+`SCCD_BATCH_SIZE` makes the device process candidates in sequential batches that
+inherit the previous batch's bound, which should reproduce it. It does not
+reproduce it, and it is not usable as a default:
+
+| scene | mode 2, one batch | batch=1024 | |
+|---|---:|---:|---|
+| cloth-funnel | 611.6 ms | **48.0 ms** | 12.7× better |
+| armadillo-rollers | 328.9 ms | 8699.2 ms | 26× worse |
+| cloth-ball | 115.1 ms | 1899.8 ms | 16.5× worse |
+
+The batch loop pays two blocking device-to-host copies per batch, and cloth-ball
+runs two million queries per case, so batch=1024 is thirty-two thousand launches.
+Worse, the 12.7× on cloth-funnel is **not** pruning: counted, batching moves the
+work from 720,588,918 boxes to 671,597,526, a 7% reduction against a 12.7× time
+change. Whatever earns that speedup, it is not the mechanism the knob was reached
+for, and it does not generalise.
+
+*(An earlier commit in this branch recorded "SCCD_BATCH_SIZE is monotonically
+worse, 4211 ms at batch=256 on cloth-ball" as a general refutation. That
+measurement was taken at the default mode 0, which averages 3.6 boxes per query
+and so has no tree to prune. It is right about mode 0 and wrong as a general
+statement, and the table above supersedes it.)*
+
+**Contention on the shared time of impact.** Every resident block hits the single
+word `toi[0]` with an atomic on every loop iteration, which at a few hundred
+blocks and 944 boxes per query looks like an obvious serialisation. Refreshing
+less often instead is monotonically worse everywhere:
+
+| refresh every | cloth-funnel | armadillo-rollers | cloth-ball |
+|---|---:|---:|---:|
+| 1 iteration (shipped) | **638.7 ms** | **361.5 ms** | **134.4 ms** |
+| 4 | 669.6 | 357.4 | 144.2 |
+| 16 | 938.4 | 434.0 | 161.8 |
+| 64 | 967.2 | 687.4 | 166.9 |
+| 256 | 3377.5 | 1539.3 | 181.7 |
+
+The pruning a fresh bound buys is worth more than the atomic costs, on every
+scene. The knob was removed rather than shipped; `fn=0` throughout, as expected,
+since a stale bound only ever prunes less.
+
+**What remains.** The question is now sharp, and it is not the one the item
+started as: **why does the device classify 944 boxes per query where the host
+classifies 1.8, given the same acceptance test, the same tolerances and the same
+queries?** A 535× work difference is not a tuning gap and not the price of the
+guarantee — the host is conservative too, on the same inputs, for 1.8 boxes. That
+is where the next effort belongs.
+
 ## Fixed on the way past: an unsound rejection in the device's mode-0 kernel
 
 Looking at mode 0 closely enough to explain the gap turned up a real defect in

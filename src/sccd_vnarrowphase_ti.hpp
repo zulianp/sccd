@@ -93,7 +93,23 @@
 #define SCCD_VNARROWPHASE_TI_VSIZE_EE SCCD_VNARROWPHASE_TI_VSIZE
 #endif
 
+#include <cstdio>
+
 namespace sccd {
+
+#ifdef SCCD_NP_COUNT_BOXES
+    // Boxes classified by the host TightInclusion search, for comparison against
+    // the device counter of the same name in src/cuda/sccd_narrowphase.cu. Both
+    // count the same unit -- one box whose inclusion function was evaluated and
+    // whose fate was decided -- so the two numbers are directly comparable, which
+    // is the whole point of counting them. Not thread-safe by design: a relaxed
+    // atomic on the hot path of a parallel loop would change what it measures, and
+    // an approximate count is enough to tell 10 million from 800 million.
+    extern unsigned long long g_np_host_boxes;
+#define SCCD_NP_HOST_BOX_TICK() (++::sccd::g_np_host_boxes)
+#else
+#define SCCD_NP_HOST_BOX_TICK() ((void)0)
+#endif
 
     SCCD_FP_STRICT_BEGIN
 
@@ -677,6 +693,7 @@ namespace sccd {
                         active[l] = 0;  // this box is consumed either way
 
                         bool accept = false;
+                        SCCD_NP_HOST_BOX_TICK();
                         if (!ti_detail::ti_classify<T_HP, VSIZE>(
                                 fmin, fmax, box_lo, box_hi, lane, l, accept)) {
                             continue;  // no root in this box
@@ -825,8 +842,18 @@ namespace sccd {
                              const T tol,
                              const int toi_stride) {
         static_assert(nxe == 3, "the TightInclusion-equivalent kernel handles triangles");
+#ifdef SCCD_NP_COUNT_BOXES
+        const unsigned long long before_ = g_np_host_boxes;
+        const int rc_ = v_narrow_phase_ti_impl<true, T, I>(
+            noverlaps, voverlap, foverlap, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_stride);
+        fprintf(stderr, "sccd-np-count vf host-conservative queries=%zu boxes=%llu per_query=%.1f\n",
+                noverlaps, g_np_host_boxes - before_,
+                noverlaps ? (double)(g_np_host_boxes - before_) / (double)noverlaps : 0.0);
+        return rc_;
+#else
         return v_narrow_phase_ti_impl<true, T, I>(
             noverlaps, voverlap, foverlap, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_stride);
+#endif
     }
 
     template <typename T, typename I>
@@ -842,8 +869,18 @@ namespace sccd {
                              const int max_depth,
                              const T tol,
                              const int toi_stride) {
+#ifdef SCCD_NP_COUNT_BOXES
+        const unsigned long long before_ = g_np_host_boxes;
+        const int rc_ = v_narrow_phase_ti_impl<false, T, I>(
+            noverlaps, e0overlap, e1overlap, v0, v1, edge_stride, edges, max_toi, toi, max_depth, tol, toi_stride);
+        fprintf(stderr, "sccd-np-count ee host-conservative queries=%zu boxes=%llu per_query=%.1f\n",
+                noverlaps, g_np_host_boxes - before_,
+                noverlaps ? (double)(g_np_host_boxes - before_) / (double)noverlaps : 0.0);
+        return rc_;
+#else
         return v_narrow_phase_ti_impl<false, T, I>(
             noverlaps, e0overlap, e1overlap, v0, v1, edge_stride, edges, max_toi, toi, max_depth, tol, toi_stride);
+#endif
     }
 
     SCCD_FP_STRICT_END

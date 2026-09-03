@@ -87,13 +87,20 @@ fetches them and a user who wants the library does not.
 
 ## Lower
 
-- **The conservative device kernel costs 26× what mode 0 costs, where on the host
-  the same step costs 1.15×.** Measured, and written up under "The gap that is
-  real" in `benchmark/ASSESSMENT.md`. The contained part is corner reuse: the
-  host carries `TiBox::corner[3][8]` and evaluates only the four mid-face corners
-  per split (12 evaluations), while the device's `Domain` is six bounds so it
-  re-evaluates all eight corners of both children on all three axes (48). Worth
-  roughly 4×; the rest is tree size and should be counted before more is claimed.
+- **The device conservative search classifies 944 boxes per query where the host
+  classifies 1.8.** Same acceptance test, same tolerances, same queries: 796.3M
+  boxes against 1.49M on cloth-funnel, a **535×** work difference. That is the
+  whole of the 26× time gap and then some, and it is not the price of the
+  guarantee — the host is conservative too, on the same inputs, in under two boxes
+  per query. Counted with `SCCD_NP_COUNT_BOXES` (off by default); the numbers and
+  the method are under "Counted" in `benchmark/ASSESSMENT.md`.
+
+  Corner reuse, which this item used to propose, is **not available**: the kernel
+  uses 238 of 255 registers with no spills, and carrying eight corners for three
+  components needs 48 more. Three other explanations were measured and refuted —
+  sequential batching, atomic contention on the shared time of impact, and
+  per-box arithmetic — and are recorded so they are not retried. Start from the
+  535×, not from the arithmetic.
 
 - **`SCCD_NARROWPHASE_MODE` does not reach the quad path.** There is one quad
   root-finder variant, so the enum has nothing to select between. It now says so
