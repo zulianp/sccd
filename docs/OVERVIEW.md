@@ -76,11 +76,23 @@ select between.
 
 The device broad phase is a clear win, 1.3× to 4.8× over 72 Grace cores — it is
 the phase whose shape suits a GPU, being count, prefix sum and scatter with no
-sequential window walk. The device **narrow** phase is not: it loses to the host
-on every scene measured, by 21× and 87× on two of them. That is too large to be
-a tuning gap, and the configuration worth supporting is likely device broad phase
-feeding host narrow phase. It is measured in `benchmark/ASSESSMENT.md` rather
-than presented as the device story.
+sequential window walk.
+
+The device **narrow** phase depends entirely on which kernel you ask for, and an
+earlier reading of the assessment got this wrong. Mode for mode against 72 Grace
+cores, the default kernel is 2.0× *ahead* on cloth-ball and 2.2–3.6× behind on
+the two smaller scenes; end to end, the whole pipeline on the GPU beats the whole
+pipeline on the host by 3.2× on cloth-ball and is within 35% on the others. The
+retracted claim — that it loses on every scene by up to 87× — came from a sweep
+that set `SCCD_NARROWPHASE_MODE=2` on both sides, which is not the same kernel on
+both sides: mode 2 is the host's *fastest* path and the device's *slowest* one.
+
+What the numbers do show is a device-internal gap. Being conservative costs the
+host 1.15× and the device 26×, on the same scene with the same tolerances. Part
+of that is the price of the guarantee, which the host pays too; part of it is
+that the device re-evaluates all eight corners of both children at every split
+where the host inherits four of them from the parent. `benchmark/ASSESSMENT.md`
+has the measurement and the decomposition.
 
 Root finding computes in double regardless of the storage type: in single
 precision the certified error bound and the tolerances that terminate the search

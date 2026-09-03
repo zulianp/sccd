@@ -116,21 +116,137 @@ number is context creation, not broad-phase cost, and must not be read as one.
 **The device broad phase is a clear win** — 1.3× to 4.8×, and it is the phase
 whose shape suits a GPU (count, prefix sum, scatter, no sequential window walk).
 
-**The device narrow phase is not.** It loses to 72 Grace cores on every scene,
-by 21× and 87× on two of them. That is far too large to be a tuning gap and
-points at the branch-and-bound structure rather than at constants: divergent
-per-query stack depth, the global-stack overflow path, or occupancy. The plan
-ships it as "the only conservative device path", which is still true, but these
-numbers say a user is better served running the narrow phase on the host even
-when the broad phase ran on the GPU. **The obvious configuration to support is
-device broad phase feeding host narrow phase**, and it should be measured before
-the CUDA narrow phase is presented as the device story.
+**The device narrow phase is not** — but the two rows above do not say what
+they were read as saying, and the section below retracts that reading.
+
+## Retracted: "the device narrow phase loses on every scene"
+
+The narrow rows above were run with `SCCD_NARROWPHASE_MODE=2` on both sides,
+which looks like the fair comparison and is not one. **The mode enum names a
+different kernel on each side.** On the host, mode 2 is the vectorised
+TightInclusion-exact kernel in `src/sccd_vnarrowphase_ti.hpp` — the *fast* one,
+which wins cloth-ball. On the device, mode 2 selects
+`narrow_phase_generic<..., conservative=true>`, a scalar per-thread branch and
+bound that is the device's *slowest* path. The sweep therefore raced the host's
+best kernel against the device's worst and reported the difference as a hardware
+verdict. Mode 0 — the default, and what a user gets without setting anything —
+was never measured on the device at all.
+
+Crossing the two factors, three repeats in one allocation on a GH200 node,
+`OMP_NUM_THREADS=72`, 16 cases per scene, medians in milliseconds:
+
+| scene | phase | host m0 | device m0 | | host m2 | device m2 | |
+|---|---|---:|---:|---|---:|---:|---|
+| cloth-funnel | narrow | **6.2** | 22.6 | 3.6× host | **7.2** | 592.2 | 83× host |
+| armadillo-rollers | narrow | **17.9** | 40.1 | 2.2× host | **17.4** | 366.5 | 21× host |
+| cloth-ball | narrow | 185.5 | **91.1** | 2.0× device | **115.4** | 121.1 | 1.05× host |
+
+Spread 0–9%, and the mode-2 device column reproduces the original rows
+(366.5 against 371.0, 121.1 against 145.3, 592.2 against 637.3), which is what
+identifies the confound rather than a code change since the sweep.
+
+**What actually holds.** With the default kernel the device narrow phase is
+competitive: 2.0× *ahead* on the largest scene and 2.2–3.6× behind on the two
+small ones. End to end, broad plus narrow at mode 0:
+
+| scene | Grace host | Hopper CUDA | |
+|---|---:|---:|---|
+| cloth-funnel | **29.0** | 39.0 | 1.34× host |
+| armadillo-rollers | **48.1** | 56.0 | 1.16× host |
+| cloth-ball | 478.6 | **150.8** | 3.2× device |
+
+So "a user is better served running the narrow phase on the host even when the
+broad phase ran on the GPU" is not supported. On the largest scene the whole
+pipeline on the GPU is 3.2× faster than the whole pipeline on 72 Grace cores,
+and on the other two the device is within 35%. The recommendation to build and
+measure a device-broad/host-narrow configuration stands on its own merits, but
+not as a consequence of these numbers.
+
+## The gap that is real: the conservative device kernel
+
+Note what survives the retraction. Mode 0 is fast on both machines and mode 2 is
+fast only on the host, so the cost of being conservative is:
+
+| | mode 0 | mode 2 | conservative costs |
+|---|---:|---:|---|
+| host, cloth-funnel | 6.2 | 7.2 | **1.15×** |
+| device, cloth-funnel | 22.6 | 592.2 | **26×** |
+
+Same algorithm, same inputs, same tolerances — `compute_face_vertex_tolerance`
+and the `(vf ? 30 : 28) * eps * min(max_coord, 1)^3` bound are transcribed on
+both sides. A conservative search that costs 15% on one machine and 26× on the
+other is a defect in one of the two implementations, not a property of
+conservativeness. This is the device narrow phase's actual problem, and it is
+device-internal rather than host-versus-device.
+
+Two structural causes, both visible in the source:
+
+1. **The device recomputes every corner it already has.** The host carries the
+   eight corner values with each box (`TiBox::corner[3][8]`), and on a split
+   evaluates only the four mid-face corners, inheriting the other four from the
+   parent: 12 corner evaluations per split. The device's `Domain` is six bounds
+   and nothing else, so `evaluate_cell_3d_policy` re-evaluates all eight corners
+   of both children on all three axes: 48 per split, 4× the arithmetic for the
+   same tree.
+2. **Mode 0 accepts far earlier, so it never builds the tree.** Its acceptance
+   conditions compare a *codomain* width against a *domain* tolerance, which
+   fires long before TightInclusion's certified conditions do. Accepting a box is
+   always safe however loose the test — it reports the box's `t` lower bound —
+   so this is an accuracy difference, not a soundness one, and it is the price
+   the conservative kernel pays for a tighter answer. The host pays it too.
+
+Cause 1 is worth roughly 4× and is a contained change. It does not close 26× on
+its own, so the tree-size difference between the two device kernels should be
+counted before more is claimed.
+
+## Fixed on the way past: an unsound rejection in the device's mode-0 kernel
+
+Looking at mode 0 closely enough to explain the gap turned up a real defect in
+it, and this is the third time this project has found the same one.
+
+Rejecting a box is the only operation in the search that can lose a root, and it
+is sound only when the origin-containment test is padded by at least the
+certified numerical error bound, `(vf ? 30 : 28) * eps * min(max_coord, 1)^3`.
+The device's `evaluate_cell_3d` padded it with the caller's distance tolerance
+instead. The host's mode 0 does not — `srootfinder.hpp:525` pads by
+`numerical_error[d]` — and neither does the device's quad kernel, whose comment
+names this exact substitution as "the unsound rejection this project has already
+found once". The triangle device kernel was the one still carrying it.
+
+**Severity: latent, not firing.** The kernel computes in double, so the bound is
+at most `30 * 2.22e-16 = 6.7e-15`, and every measurement here passes
+`tol = 3e-8`, four hundred thousand times wider. The pad was therefore too wide
+rather than too narrow on every scene in this document, which is why nothing
+showed it. It fires for any caller who asks for a tolerance below the bound, and
+it fired historically when the kernel computed in single precision, where the
+bound is `3.6e-6` and a 3e-8 tolerance is *narrower* than the error in the corner
+values.
+
+**Fix.** The pad is now `max(tol, aerr[d])`, with `aerr` computed for both
+device paths instead of only the conservative one. The acceptance conditions
+keep using `tol`, since accepting is safe at any looseness.
+
+**Verified.** Rebuilt on GH200 and re-run: false positives and false negatives
+are identical on all three scenes (274/0, 5642/0, 95424/0) and the timings are
+unchanged within the 0–9% spread, which is what a pad that was already wider than
+the new floor should do.
+
+**One consequence for how the mode-0 rows are read.** Even with the rejection
+fixed, mode 0's *acceptance* is looser than TightInclusion's, so the device's
+mode-0 win on cloth-ball is a win by the less accurate kernel. Every
+configuration here reports `fn=0` against the datasets' ground truth, but the
+invariant this project holds is signed — a time of impact later than the true one
+is the same failure as a miss — and `fn` cannot see that. The
+conservative-to-conservative comparison is the mode-2 pair, which the device
+loses everywhere.
 
 ## Quads
 
-**Quads have no device narrow phase at all.** The three `hopper/refine-quad`
-rows are `FAILED rc=134` — `sccd_smesh_CCD.hpp` raises `SMESH_ERROR` and aborts.
-Recorded as explicit rows so the gap is in the data rather than an absence.
+**Quads had no device narrow phase when this ran.** The three `hopper/refine-quad`
+rows are `FAILED rc=134` — `sccd_smesh_CCD.hpp` raised `SMESH_ERROR` and aborted.
+Recorded as explicit rows so the gap is in the data rather than an absence. It has
+since been implemented (`src/cuda/sccd_narrowphase_vq.cu`) and these rows are kept
+as the before picture; they have not been re-measured.
 
 Host scaling, `SCCD_TOPOLOGY=quad` (hex cube skinned to QUADSHELL4) against the
 tetrahedral cube skinned to TRISHELL3:
@@ -244,5 +360,6 @@ the timings stand.
 | cell2d broad phase | keep | wins cloth-funnel; wins micro-benchmarks 4–7× |
 | `Auto` → Cell2D default | **revisit** | sweep wins 2 of 3 real scenes |
 | device broad phase | keep, and wire into the CCD path | 1.3–4.8× over Grace |
-| device narrow phase | keep, but do not present as the device story | loses by up to 87× |
-| quads | ship; gaps are scheduled work | device path aborts today |
+| device narrow phase | keep; the "loses by up to 87×" reading is retracted | mode for mode: 2.0× ahead on cloth-ball, 2.2–3.6× behind on the others |
+| device conservative kernel | **optimise** | being conservative costs the host 1.15× and the device 26× |
+| quads | ship; gaps are scheduled work | device path aborted at the time of this run |
