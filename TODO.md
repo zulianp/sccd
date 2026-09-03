@@ -78,14 +78,14 @@ fetches them and a user who wants the library does not.
 
 ---
 
-## Lower
+## Done
 
-- **The armadillo edge-edge blowup is unconfirmed.** `benchmark/ASSESSMENT.md`
-  carried "mode 2 is about 100× slower on armadillo edge-edge" from the plan, and
-  a 16-case trajectory sample did not reproduce it — mode 2 was *faster* there.
-  That neither confirms nor refutes it: the pathological case may not be in the
-  sample, and the original measurement was of the edge-edge phase alone. Needs a
-  targeted run against the specific case, not a trajectory average.
+- ~~The armadillo edge-edge blowup~~ — **withdrawn**. All 396 edge-edge cases,
+  twice: the worst is 9.4×, none exceeds 10×, and mode 2 is 10% faster over the
+  trajectory. Written up under "Withdrawn: mode 2 is about 100× slower on
+  armadillo edge-edge" in `benchmark/ASSESSMENT.md`.
+
+## Lower
 
 - **The conservative device kernel costs 26× what mode 0 costs, where on the host
   the same step costs 1.15×.** Measured, and written up under "The gap that is

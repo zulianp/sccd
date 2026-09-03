@@ -38,16 +38,55 @@ gap against 6–10% spread, so that is a real win and not noise. Two kernels tha
 each win a third of the real scenes are not duplicates in the sense the keep bar
 means, and mode 0 stays as the fallback.
 
-**One prior claim is not reproduced.** The plan carried "mode 2 is about 100×
-slower on armadillo edge-edge" as the reason mode 0 had to survive. On this
-sample mode 2 is *faster* on armadillo-rollers (17.5 vs 19.4). That does not
-refute the blowup: this is 16 cases sampled across 1600, so the pathological
-case may simply not be in the sample, and the earlier measurement was of the
-edge-edge phase alone rather than of a mixed sample. **The armadillo edge-edge
-blowup needs a targeted run against the specific case, not a trajectory
-average.** Until then, treat the 100× figure as unconfirmed rather than as
-either established or withdrawn — and note that the conclusion it supported
-(keep mode 0) is independently supported by cloth-funnel above.
+**One prior claim is not reproduced**, and is now withdrawn — see the section
+below. The plan carried "mode 2 is about 100× slower on armadillo edge-edge" as
+the reason mode 0 had to survive. On this 16-case sample mode 2 is *faster* on
+armadillo-rollers (17.5 vs 19.4), which at the time settled nothing: 16 cases
+sampled across the trajectory can miss a pathological one, and the earlier
+measurement was of the edge-edge phase alone rather than of a mixed sample.
+
+## Withdrawn: "mode 2 is about 100× slower on armadillo edge-edge"
+
+The way to settle this was never a trajectory average, so this is the targeted
+run the section above asked for: **every** armadillo-rollers case, not a
+subsample — 396 edge-edge and 385 vertex-face — for mode 0 and mode 2, on Grace
+at `OMP_NUM_THREADS=72`, at the shipped defaults (`max_depth=69`, `tol=3e-8`).
+Two repeats. Per-case rows, because the question is whether *one* case blows up
+and a sum cannot see that.
+
+**There is no 100× case. There is no 10× case.**
+
+| | repeat 1 | repeat 2 |
+|---|---:|---:|
+| total edge-edge narrow, mode 0 | 526.8 ms | 485.0 ms |
+| total edge-edge narrow, mode 2 | 473.2 ms | 438.6 ms |
+| ratio | 0.90× | 0.90× |
+| worst single case | 9.46× | 9.37× |
+| cases above 10× | **0 of 396** | **0 of 396** |
+| cases above 100× | **0 of 396** | **0 of 396** |
+
+Summed over the whole trajectory mode 2 is 10% *faster* at edge-edge, the same
+figure in both repeats. The distribution: median ratio 0.79, p95 2.71, p99 5.78.
+Mode 2 is slower at all on 144 of 396 cases, slower by more than 2× on 46, by
+more than 5× on 7, and by more than 10× on none.
+
+**The tail is real, it is just an order of magnitude smaller than the claim.**
+The worst case reproduces — `389ee` at 9.46× and 9.37× across the two repeats,
+0.52 ms against 4.94 ms — as do `153ee` (5.27×, 5.60×) and `181ee` (5.09×,
+4.95×). Others in the worst-ten do not: `3ee` reads 8.01× in one repeat and
+0.16× in the other, which is what a sub-millisecond case measured once looks
+like, and is the reason for running it twice. So there genuinely are edge-edge
+configurations where the TightInclusion-exact kernel costs several times the
+scalar reference; none of them costs a hundred times it, and all of them are
+half-millisecond cases whose absolute cost is negligible against the 28 ms
+`326ee` — where mode 2 is *faster* (17.1 ms against 28.1 ms).
+
+`fn=0` for both modes on all 781 cases.
+
+**Effect on the keep decision: none.** Mode 0 stays, on the evidence that already
+supported it — cloth-funnel by 1.27×, outside the spread. What changes is that
+the reason cited for it in the plan was wrong, and anyone reaching for "mode 2
+explodes on edge-edge" as a design constraint should stop.
 
 ## Split rule
 
@@ -366,6 +405,7 @@ the timings stand.
 |---|---|---|
 | narrow-phase mode 1 | demote | loses all three scenes, 5.2× on armadillo |
 | narrow-phase mode 0 | **keep** | wins cloth-funnel by 1.27×, outside spread |
+| "mode 2 is 100× slower on armadillo edge-edge" | **withdrawn** | all 396 ee cases, twice: worst is 9.4×, none above 10×, mode 2 10% faster overall |
 | narrow-phase mode 2 | keep | wins cloth-ball by 1.62× |
 | uniform split | demote | never wins; adaptive takes all three |
 | sweep broad phase | keep | wins armadillo 1.59×, cloth-ball 1.36× |
