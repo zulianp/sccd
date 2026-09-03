@@ -101,7 +101,8 @@ endif()
 set(SCCD_STANDALONE_TESTS
   cell2d_broadphase_test
   vertex_quad_root_test
-  vnarrowphase_ti_compat_test)
+  vnarrowphase_ti_compat_test
+  c_abi_test)
 foreach(SCCD_TEST IN LISTS SCCD_STANDALONE_TESTS)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/${SCCD_TEST}.exe.cpp")
     add_executable(${SCCD_TEST} "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/${SCCD_TEST}.exe.cpp")

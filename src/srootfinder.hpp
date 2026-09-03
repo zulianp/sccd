@@ -779,7 +779,31 @@ namespace sccd {
                     continue;
                 }
 
-                if (box.depth > max_iter) continue;
+                // Exhausting the depth cap must ACCEPT, not drop.
+                //
+                // Control only reaches here when contains_origin has already said
+                // this box may hold a root, so discarding it is an unsound
+                // rejection -- the one way this algorithm can lose a collision.
+                // Every other exhaustion path in this loop accepts (the tolerance
+                // conditions, is_terminal, and a bisection that cannot split
+                // further); the depth cap was the exception, and it cost a real
+                // collision: sccd_find_root_bisection_vf_d missed a vertex
+                // dropping straight through a stationary triangle, while its own
+                // float counterpart found it. In float the box meets a tolerance
+                // condition before depth 69; in double it keeps subdividing until
+                // the cap fires.
+                //
+                // Accepting reports the box's t lower bound, which is at or
+                // before any root inside it, so this is safe in the direction
+                // that matters.
+                if (box.depth > max_iter) {
+                    t = box.tuv[0].lower;
+                    u = box.tuv[1].lower;
+                    v = box.tuv[2].lower;
+                    toi = sccd::min(toi, min_t);
+                    found_root = true;
+                    continue;
+                }
 
                 // Split the box along the widest dimension
                 int split_dim = box.widest_dimension();
