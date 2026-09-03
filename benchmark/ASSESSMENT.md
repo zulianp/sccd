@@ -162,36 +162,63 @@ phase, `SCCD_NARROWPHASE_MODE` silently ignored (one root-finder variant, so the
 conservative kernel is unreachable for quads), no oracle coverage, and no
 optimised root finder of their own.
 
-## Open problem: host and device disagree on the pair set
+## Resolved: the sweep dropped touching pairs
 
-On the synthetic refinement geometry, and only there, the two find different
-numbers of pairs:
+The pair-count disagreement this run surfaced was **not** host versus device. It
+was cell2d versus sweep, and the sweep was wrong.
 
-| level | Grace | Hopper | missing |
+The device runs the sweep (the device cell list is not wired into the CCD path),
+while the host defaults to Cell2D, so the comparison labelled the two
+implementations as two machines. Forcing `SCCD_BROADPHASE` on the host
+reproduces it in one command, and isolates it to the edge-edge step:
+
+| level | cell2d ee | sweep ee | vf (both) |
 |---:|---:|---:|---:|
-| 0 | 3,324 | 3,304 | 20 |
-| 1 | 58,152 | 58,048 | 104 |
-| 2 | 951,384 | 950,920 | 464 |
+| 0 | 2,220 | 2,200 | 1,104 |
+| 1 | 39,912 | 39,808 | 18,240 |
 
-About 0.05–0.6%, consistently with the **device finding fewer**. The three real
-scenes agree exactly, and every scene row reports `fn=0`, so nothing here shows a
-missed collision yet.
+Exactly the 20 and 104 seen between Grace and Hopper.
 
-It still has to be explained before these rows are used, and it is the dangerous
-direction: a pair the device does not report is a collision its narrow phase
-never gets the chance to find, and the conservativeness invariant makes that a
-defect rather than a tolerance. The leading candidate is precision — smesh's
-`geom_t` is `float`, so device and host AABBs can straddle a boundary
-differently — which would be benign only if the device rounds outward. Worth
-noting that the geometry showing it is the degenerate all-pairs case, where
-nearly every box touches nearly every other and borderline overlaps are
-therefore everywhere.
+**The defect.** The AABB predicate treats touching as overlapping — it rejects
+only on a strict `amin > bmax` — but the sweep's candidate window advanced past
+any box with `xmax <= fimin`:
 
-Next step: compare the pair sets themselves rather than their counts, on the
-smallest level, and check whether the missing pairs are boxes that touch within
-a float ulp.
+```c
+for (; begin < second_count; ++begin) {
+    if (fimin < second_xmax[begin]) break;   // strict: skips xmax == fimin
+}
+```
 
----
+So the window discarded pairs the predicate it feeds would have accepted. Boxes
+are sorted by `xmin`, so for `j > fi` we always have
+`xmax[j] >= xmin[j] >= fimin`, and the strict test can only fail on equality —
+`xmin[j] == xmax[j] == fimin`, a **zero-extent box sitting exactly at another
+box's lower bound on the sort axis**. That is what an axis-aligned face produces
+when its swept AABB is flat, which is why a refined cube triggers it and the
+three real scenes did not.
+
+**Severity.** Missed pairs, not extra ones: a collision the narrow phase never
+gets the chance to see. That is a false negative, which the conservativeness
+invariant does not permit at any cost. It is also worse than the 0.6% headline
+suggests — when the *sort axis* is the degenerate one, the loss is total. A
+regression case of 2,000 flat coincident boxes finds 64,922 pairs with the cell
+list and **zero** with the unfixed sweep. On the refined cube it showed up as
+0.6% only because `choose_axis` picked a non-degenerate axis; nothing guarantees
+that.
+
+**Fix.** The window comparison is now inclusive (`fimin <= second_xmax[begin]`),
+in `broadphase.hpp` and in both CUDA sweeps. cell2d and sweep now agree exactly
+at every refinement level.
+
+**Regression test.** `cell2d_broadphase_test` gained flat-coincident-box cases
+that run the sweep on each of the three axes explicitly. Forcing the axis is
+what makes the test work: `choose_axis` avoids the degenerate axis, so the
+original random cases passed against the buggy sweep and would have kept
+passing. Verified to fail before the fix and pass after.
+
+**Effect on the numbers above.** None. The three real scenes had identical pair
+counts for both broad phases before the fix, so the bug never fired there and
+the timings stand.
 
 ## Summary of decisions
 
