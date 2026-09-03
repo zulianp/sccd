@@ -432,6 +432,52 @@ namespace sccd {
             return SCCD_SUCCESS;
         }
 
+        /**
+         * \brief The cell-list face-vertex step, for a face with \p nxe vertices.
+         *
+         * Split out only so the element type picks an instantiation, the way the
+         * sweep does below. The cell list itself is over vertices, so nothing here
+         * depends on the face topology beyond the vertex count the pair collector
+         * needs in order to skip a face's own vertices.
+         */
+        template <int nxe>
+        int cell2d_fv_step_host_(const ptrdiff_t n_faces) {
+            sccd::cell2d_count_overlaps<nxe, 1, scalar_t, smesh::idx_t>(n_faces,
+                                                                        faabb_->data(),
+                                                                        fidx_->data(),
+                                                                        1,
+                                                                        faces_->data(),
+                                                                        vaabb_->data(),
+                                                                        vidx_->data(),
+                                                                        0,
+                                                                        nullptr,
+                                                                        v_grid_,
+                                                                        v_cellptr_.data(),
+                                                                        v_cellidx_.data(),
+                                                                        ccdptr_->data());
+
+            const ptrdiff_t n_pairs = ccdptr_->data()[n_faces];
+            f_overlap_ = smesh::create_buffer<smesh::idx_t>(n_pairs, execution_space_);
+            v_overlap_ = smesh::create_buffer<smesh::idx_t>(n_pairs, execution_space_);
+
+            sccd::cell2d_fill_overlaps<nxe, 1, scalar_t, smesh::idx_t>(n_faces,
+                                                                       faabb_->data(),
+                                                                       fidx_->data(),
+                                                                       1,
+                                                                       faces_->data(),
+                                                                       vaabb_->data(),
+                                                                       vidx_->data(),
+                                                                       0,
+                                                                       nullptr,
+                                                                       v_grid_,
+                                                                       v_cellptr_.data(),
+                                                                       v_cellidx_.data(),
+                                                                       ccdptr_->data(),
+                                                                       f_overlap_->data(),
+                                                                       v_overlap_->data());
+            return SCCD_SUCCESS;
+        }
+
         int broad_phase_fv_step_host_() {
             SMESH_TRACE_SCOPE("Broad_phase: F2V");
 
@@ -442,45 +488,14 @@ namespace sccd {
 
             if (use_cell2d_) {
                 SMESH_TRACE_SCOPE("cell2d f2v");
-                if (element_type != smesh::TRISHELL3) {
-                    SMESH_ERROR("cell2d broad phase currently supports TRISHELL3 only\n");
+                if (element_type == smesh::TRISHELL3) {
+                    return cell2d_fv_step_host_<3>(n_faces);
+                } else if (element_type == smesh::QUADSHELL4) {
+                    return cell2d_fv_step_host_<4>(n_faces);
+                } else {
+                    SMESH_ERROR("Unsupported CCD face element type: %s\n", smesh::type_to_string(element_type));
                     return SCCD_FAILURE;
                 }
-
-                sccd::cell2d_count_overlaps<3, 1, scalar_t, smesh::idx_t>(n_faces,
-                                                                          faabb_->data(),
-                                                                          fidx_->data(),
-                                                                          1,
-                                                                          faces_->data(),
-                                                                          vaabb_->data(),
-                                                                          vidx_->data(),
-                                                                          0,
-                                                                          nullptr,
-                                                                          v_grid_,
-                                                                          v_cellptr_.data(),
-                                                                          v_cellidx_.data(),
-                                                                          ccdptr_->data());
-
-                const ptrdiff_t n_pairs = ccdptr_->data()[n_faces];
-                f_overlap_ = smesh::create_buffer<smesh::idx_t>(n_pairs, execution_space_);
-                v_overlap_ = smesh::create_buffer<smesh::idx_t>(n_pairs, execution_space_);
-
-                sccd::cell2d_fill_overlaps<3, 1, scalar_t, smesh::idx_t>(n_faces,
-                                                                         faabb_->data(),
-                                                                         fidx_->data(),
-                                                                         1,
-                                                                         faces_->data(),
-                                                                         vaabb_->data(),
-                                                                         vidx_->data(),
-                                                                         0,
-                                                                         nullptr,
-                                                                         v_grid_,
-                                                                         v_cellptr_.data(),
-                                                                         v_cellidx_.data(),
-                                                                         ccdptr_->data(),
-                                                                         f_overlap_->data(),
-                                                                         v_overlap_->data());
-                return SCCD_SUCCESS;
             }
 
             {
