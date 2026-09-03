@@ -28,19 +28,21 @@ namespace {
     struct Boxes {
         std::vector<scalar_t> data[6];
         std::vector<idx_t> idx;
-        std::vector<idx_t> elem[3];
+        std::vector<idx_t> elem[4];
         scalar_t* ptr[6];
-        idx_t* elem_ptr[3];
+        idx_t* elem_ptr[4];
         ptrdiff_t n = 0;
 
         void bind() {
             for (int d = 0; d < 6; ++d) ptr[d] = data[d].data();
-            for (int d = 0; d < 3; ++d) elem_ptr[d] = elem[d].data();
+            for (int d = 0; d < 4; ++d) elem_ptr[d] = elem[d].data();
         }
     };
 
     // nxe == 1 means the "element" is a single node (the vertex list); nxe == 3 a
-    // triangle. Both shapes appear in the real broad phase.
+    // triangle and nxe == 4 a quad. All three shapes appear in the real broad
+    // phase, and the vertex count is what the pair collector uses to skip a
+    // face's own vertices -- so it has to be exercised at each width.
     Boxes make_boxes(std::mt19937& rng, const ptrdiff_t n, const int nxe, const double spread, const double size) {
         std::uniform_real_distribution<double> pos(0.0, spread);
         std::uniform_real_distribution<double> ext(0.0, size);
@@ -67,7 +69,8 @@ namespace {
 
     using PairSet = std::set<std::pair<idx_t, idx_t>>;
 
-    PairSet sweep_pairs(Boxes& first, Boxes& second, const int first_nxe) {
+    template <int first_nxe>
+    PairSet sweep_pairs(Boxes& first, Boxes& second) {
         // The sweep needs both lists sorted along a common axis; the cell list
         // does not, which is the point of it.
         std::vector<scalar_t> scratch(std::max(first.n, second.n) * 2);
@@ -79,27 +82,24 @@ namespace {
         sccd::cummax(second.n, second.ptr[3 + axis], cummax.data());
 
         std::vector<ptrdiff_t> ccdptr(first.n + 1, 0);
-        bool any = false;
-        if (first_nxe == 3) {
-            any = sccd::count_overlaps<3, 1, scalar_t, idx_t>(axis,
-                                                              first.n,
-                                                              first.ptr,
-                                                              first.idx.data(),
-                                                              1,
-                                                              first.elem_ptr,
-                                                              second.n,
-                                                              second.ptr,
-                                                              second.idx.data(),
-                                                              0,
-                                                              nullptr,
-                                                              ccdptr.data(),
-                                                              cummax.data());
-        }
+        const bool any = sccd::count_overlaps<first_nxe, 1, scalar_t, idx_t>(axis,
+                                                                             first.n,
+                                                                             first.ptr,
+                                                                             first.idx.data(),
+                                                                             1,
+                                                                             first.elem_ptr,
+                                                                             second.n,
+                                                                             second.ptr,
+                                                                             second.idx.data(),
+                                                                             0,
+                                                                             nullptr,
+                                                                             ccdptr.data(),
+                                                                             cummax.data());
         PairSet out;
         if (!any) return out;
 
         std::vector<idx_t> a(ccdptr[first.n]), b(ccdptr[first.n]);
-        sccd::collect_overlaps<3, 1, scalar_t, idx_t>(axis,
+        sccd::collect_overlaps<first_nxe, 1, scalar_t, idx_t>(axis,
                                                       first.n,
                                                       first.ptr,
                                                       first.idx.data(),
@@ -118,6 +118,7 @@ namespace {
         return out;
     }
 
+    template <int first_nxe>
     PairSet cell2d_pairs(Boxes& first, Boxes& second) {
         sccd::Cell2DGrid<scalar_t> grid;
         sccd::cell2d_setup<scalar_t>(second.n, second.ptr, grid);
@@ -131,7 +132,7 @@ namespace {
             second.n, second.ptr, grid, cellptr.data(), cellidx.data(), cursor.data());
 
         std::vector<ptrdiff_t> ccdptr(first.n + 1, 0);
-        const bool any = sccd::cell2d_count_overlaps<3, 1, scalar_t, idx_t>(first.n,
+        const bool any = sccd::cell2d_count_overlaps<first_nxe, 1, scalar_t, idx_t>(first.n,
                                                                             first.ptr,
                                                                             first.idx.data(),
                                                                             1,
@@ -148,7 +149,7 @@ namespace {
         if (!any) return out;
 
         std::vector<idx_t> a(ccdptr[first.n]), b(ccdptr[first.n]);
-        sccd::cell2d_fill_overlaps<3, 1, scalar_t, idx_t>(first.n,
+        sccd::cell2d_fill_overlaps<first_nxe, 1, scalar_t, idx_t>(first.n,
                                                           first.ptr,
                                                           first.idx.data(),
                                                           1,
@@ -236,9 +237,10 @@ namespace {
         return ok ? 0 : 1;
     }
 
+    template <int nxe>
     int run_case(const char* name, const ptrdiff_t nf, const ptrdiff_t nv, const double spread, const double size) {
         std::mt19937 rng(12345);
-        Boxes faces = make_boxes(rng, nf, 3, spread, size);
+        Boxes faces = make_boxes(rng, nf, nxe, spread, size);
         Boxes verts = make_boxes(rng, nv, 1, spread, size * 0.1);
 
         // Both take sorted input for the sweep, so copy before it reorders them.
@@ -246,16 +248,17 @@ namespace {
         faces_c.bind();
         verts_c.bind();
 
-        const PairSet cell = cell2d_pairs(faces_c, verts_c);
-        const PairSet sweep = sweep_pairs(faces, verts, 3);
+        const PairSet cell = cell2d_pairs<nxe>(faces_c, verts_c);
+        const PairSet sweep = sweep_pairs<nxe>(faces, verts);
 
         std::vector<std::pair<idx_t, idx_t>> only_sweep, only_cell;
         std::set_difference(sweep.begin(), sweep.end(), cell.begin(), cell.end(), std::back_inserter(only_sweep));
         std::set_difference(cell.begin(), cell.end(), sweep.begin(), sweep.end(), std::back_inserter(only_cell));
 
         const bool ok = only_sweep.empty() && only_cell.empty();
-        std::printf("%-28s faces=%-7ld verts=%-7ld sweep=%-8zu cell=%-8zu  %s\n",
+        std::printf("%-20s nxe=%d faces=%-7ld verts=%-7ld sweep=%-8zu cell=%-8zu  %s\n",
                     name,
+                    nxe,
                     (long)nf,
                     (long)nv,
                     sweep.size(),
@@ -279,16 +282,28 @@ namespace {
 
 int main() {
     int bad = 0;
-    // Ordinary: small boxes, most spanning one cell.
-    bad |= run_case("small boxes", 2000, 4000, 100.0, 1.0);
-    // Boxes spanning many cells: the duplicate-suppression case.
-    bad |= run_case("boxes spanning many cells", 1500, 3000, 100.0, 25.0);
-    // One box covering the whole domain.
-    bad |= run_case("very large boxes", 800, 1500, 10.0, 10.0);
-    // Dense: everything overlaps everything.
-    bad |= run_case("dense overlap", 600, 1200, 1.0, 1.0);
-    // Degenerate: zero-extent boxes, all coincident on two axes.
-    bad |= run_case("tiny spread", 500, 1000, 0.0001, 0.00001);
+    // Every case runs at both face widths. Triangles and quads differ only in how
+    // many of a face's own vertices the collector must skip, but that is exactly
+    // the step where the cell list and the sweep could disagree, and quads are a
+    // supported topology -- so they are checked, not assumed.
+    for (int pass = 0; pass < 2; ++pass) {
+        const bool quad = (pass == 1);
+        // Ordinary: small boxes, most spanning one cell.
+        bad |= quad ? run_case<4>("small boxes", 2000, 4000, 100.0, 1.0)
+                    : run_case<3>("small boxes", 2000, 4000, 100.0, 1.0);
+        // Boxes spanning many cells: the duplicate-suppression case.
+        bad |= quad ? run_case<4>("spanning many cells", 1500, 3000, 100.0, 25.0)
+                    : run_case<3>("spanning many cells", 1500, 3000, 100.0, 25.0);
+        // One box covering the whole domain.
+        bad |= quad ? run_case<4>("very large boxes", 800, 1500, 10.0, 10.0)
+                    : run_case<3>("very large boxes", 800, 1500, 10.0, 10.0);
+        // Dense: everything overlaps everything.
+        bad |= quad ? run_case<4>("dense overlap", 600, 1200, 1.0, 1.0)
+                    : run_case<3>("dense overlap", 600, 1200, 1.0, 1.0);
+        // Degenerate: zero-extent boxes, all coincident on two axes.
+        bad |= quad ? run_case<4>("tiny spread", 500, 1000, 0.0001, 0.00001)
+                    : run_case<3>("tiny spread", 500, 1000, 0.0001, 0.00001);
+    }
 
     // Self-overlap: edge-edge, where each unordered pair must appear once.
     bad |= run_self_case("self: small boxes", 3000, 100.0, 1.0);
