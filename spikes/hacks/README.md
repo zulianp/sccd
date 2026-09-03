@@ -2,7 +2,7 @@ Modify the  scalable_ccd CMakeLists.txt
 
 ```cmake
 
-set(SCCD_ENABLE_HACKS ON)
+set(SCCD_ENABLE_SPIKES ON)
 add_subdirectory(${PROJECT_SOURCE_DIR}/src/sccd)
 
 target_compile_definitions(sccd PUBLIC "-DSCCD_ENABLE_TIGHT_INCLUSION=1")

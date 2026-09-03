@@ -51,7 +51,25 @@
  *    1.217M) and then underestimates a real cloth by four orders of magnitude,
  *    because the uniform assumption is exactly what a surface violates.
  *
- * ## So: default to the cell list
+ *  - **Mesh size.** The cell list's large wins were measured on refined meshes,
+ *    which suggested a crossover in element count. The end-to-end assessment
+ *    refutes that too, and in the wrong direction: across three real scenes the
+ *    cell list wins the *smallest* (cloth-funnel) and loses the *largest*
+ *    (cloth-ball, where the sweep is 1.36x faster) and the middle one
+ *    (armadillo-rollers, 1.59x). See `benchmark/ASSESSMENT.md`.
+ *
+ * ## So: default to the cell list, for now
+ *
+ * **This default is under review.** The asymmetry argument below is drawn from
+ * synthetic box-list benchmarks, and the end-to-end assessment does not support
+ * it: on real scenes the sweep wins two of three, by 1.36x and 1.59x, which is
+ * far more than the "1.8 ms" the argument assumes the cell list can cost. What
+ * keeps the default here for now is that the measured downside of guessing wrong
+ * the other way is 54 seconds rather than 13 ms. Four heuristics have been
+ * refuted, so the remaining principled option is for `Auto` to measure both on
+ * the first step and keep the winner -- the pair sets are identical, so that is
+ * a fair race -- rather than to keep asserting an answer.
+
  *
  * Not for want of a heuristic, but because the payoff is asymmetric and the
  * measurements bound both sides. The worst observed loss is 1.8 ms on a broad

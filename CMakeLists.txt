@@ -118,12 +118,12 @@ if(SCCD_ENABLE_CUDA)
   endif()
 endif()
 
-if(SCCD_ENABLE_HACKS)
-  add_subdirectory(hacks)
-  # file(GLOB_RECURSE SCCD_HACKS_HEADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/hacks/*.hpp")
-  # file(GLOB_RECURSE SCCD_HACKS_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/hacks/*.cpp")
-  # target_sources(sccd PUBLIC ${SCCD_HACKS_SOURCES};${SCCD_HACKS_HEADERS})
-  # target_include_directories(sccd PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/hacks>)
+# Demoted code. Off by default, never installed, never in the correctness gate;
+# spikes/README.md states the rules and what is in there and why. hacks/ moved
+# under it -- SCCD_ENABLE_HACKS is gone, since hacks/ cannot configure on its own
+# and the spike switch is now the one knob for all of this.
+if(SCCD_ENABLE_SPIKES)
+  add_subdirectory(spikes)
 endif()
 
 if(SCCD_ENABLE_SMESH)
@@ -168,7 +168,63 @@ install(TARGETS sccd
   INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 
-install(FILES ${SCCD_HEADERS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+# The installed header set is listed, not globbed.
+#
+# A flat `install(FILES ${SCCD_HEADERS})` made every header under src/ public API
+# by accident -- that is how broadphase_lb.hpp, which had no caller outside
+# hacks/, came to be installed next to narrowphase.hpp. Listing them means adding
+# a header is a decision someone makes rather than something that happens.
+#
+# Everything here is header-only templates, so the support headers are installed
+# too: a consumer of narrowphase.hpp needs everything it includes.
+set(SCCD_PUBLIC_HEADERS
+  # Entry points.
+  src/narrowphase.hpp
+  src/narrowphase_vertex_quad.hpp
+  src/broadphase.hpp
+  src/cell2d_broadphase.hpp
+  src/broadphase_strategy.hpp
+  # Configuration and shared vocabulary.
+  src/sccd_base.hpp
+  src/sccd_narrowphase_mode.hpp
+  # Implementation headers, public because the entry points include them.
+  src/roots.hpp
+  src/srootfinder.hpp
+  src/srootfinder_vertex_quad.hpp
+  src/sccd_vnarrowphase.hpp
+  src/sccd_vnarrowphase_ti.hpp
+  src/vaabb.hpp
+  src/smath.hpp
+  src/snumtol.hpp
+  src/snumerical_error.hpp
+  src/sparallel.hpp
+)
+if(SCCD_ENABLE_SMESH)
+  list(APPEND SCCD_PUBLIC_HEADERS src/integrations/smesh/sccd_smesh_CCD.hpp)
+endif()
+
+# Fail configure if a header exists that nobody has classified. Without this the
+# list silently drifts from the tree and we are back to guessing.
+file(GLOB_RECURSE _sccd_all_headers RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}"
+     CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp")
+list(FILTER _sccd_all_headers EXCLUDE REGEX "^src/tests/")
+if(NOT SCCD_ENABLE_SMESH)
+  list(FILTER _sccd_all_headers EXCLUDE REGEX "^src/integrations/smesh/")
+endif()
+foreach(_hdr IN LISTS _sccd_all_headers)
+  if(NOT _hdr IN_LIST SCCD_PUBLIC_HEADERS)
+    message(FATAL_ERROR
+      "SCCD: ${_hdr} is not in SCCD_PUBLIC_HEADERS. Add it there if it is part of "
+      "the public surface, or move it to spikes/ if it is not. See spikes/README.md.")
+  endif()
+endforeach()
+
+foreach(_hdr IN LISTS SCCD_PUBLIC_HEADERS)
+  get_filename_component(_hdr_dir "${_hdr}" DIRECTORY)
+  string(REGEX REPLACE "^src/?" "" _hdr_dir "${_hdr_dir}")
+  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/${_hdr}"
+          DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${_hdr_dir}")
+endforeach()
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/python/sccd_py.py" DESTINATION python)
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/sccd_config.hpp" DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
