@@ -213,18 +213,30 @@ instead. The host's mode 0 does not — `srootfinder.hpp:525` pads by
 names this exact substitution as "the unsound rejection this project has already
 found once". The triangle device kernel was the one still carrying it.
 
-**Severity: latent, not firing.** The kernel computes in double, so the bound is
-at most `30 * 2.22e-16 = 6.7e-15`, and every measurement here passes
-`tol = 3e-8`, four hundred thousand times wider. The pad was therefore too wide
-rather than too narrow on every scene in this document, which is why nothing
-showed it. It fires for any caller who asks for a tolerance below the bound, and
-it fired historically when the kernel computed in single precision, where the
-bound is `3.6e-6` and a 3e-8 tolerance is *narrower* than the error in the corner
-values.
+**Severity: latent, and no case was found that trips it.** The kernel computes in
+double, so the bound is at most `30 * 2.22e-16 = 6.7e-15`, and every measurement
+here passes `tol = 3e-8`, four hundred thousand times wider. The pad was
+therefore too wide rather than too narrow on every scene in this document.
 
-**Fix.** The pad is now `max(tol, aerr[d])`, with `aerr` computed for both
-device paths instead of only the conservative one. The acceptance conditions
-keep using `tol`, since accepting is safe at any looseness.
+It was not reachable at `tol = 1e-16` either. `narrowphase_cuda_test` was written
+partly to gate this, running 1,400 constructed queries -- full-mantissa
+coordinates, a quarter of them grazing contacts where the root is
+ill-conditioned -- at a tolerance below the bound, and the pre-fix kernel passes
+it. The reason looks structural rather than a matter of not trying hard enough:
+losing a root needs the *computed* fmin to land above the pad while the true one
+is at or below zero, which needs the box to have shrunk until F is within
+rounding error of zero across it, and by then the acceptance conditions have
+long since fired. So the honest statement is that the pad was narrower than the
+bound the guarantee is stated in terms of, not that a collision was being
+dropped. It did fire historically in single precision, where the bound is
+`3.6e-6` and a 3e-8 tolerance is *narrower* than the error in the corner values.
+
+**Fix anyway.** The pad is now `max(tol, aerr[d])`, with `aerr` computed for both
+device paths instead of only the conservative one. The acceptance conditions keep
+using `tol`, since accepting is safe at any looseness. Soundness here should rest
+on the certified bound rather than on the caller happening to pass a tolerance
+wider than it, and the change costs nothing: at any realistic tolerance the max
+selects `tol` and the kernel behaves exactly as before.
 
 **Verified.** Rebuilt on GH200 and re-run: false positives and false negatives
 are identical on all three scenes (274/0, 5642/0, 95424/0) and the timings are

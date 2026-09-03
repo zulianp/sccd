@@ -551,13 +551,27 @@ namespace sccd {
             const int block = 128;
             const int grid = (int)((noverlaps + block - 1) / block);
 
+            // v0, v1 and quads are *device* arrays of device pointers -- the same
+            // convention narrow_phase_vf and narrow_phase_ee take, and what the
+            // CCD integration hands all three. The kernel wants the rows as
+            // separate arguments, so the pointers have to be brought back to the
+            // host first: indexing v0[0] here would dereference device memory on
+            // the host, which faults. It had gone unnoticed because no test
+            // reached this entry point and the quad device path is new.
+            T* h_v0[3];
+            T* h_v1[3];
+            I* h_quads[4];
+            SCCD_CHECK_CUDA(cudaMemcpy(h_v0, v0, sizeof(T*) * 3, cudaMemcpyDeviceToHost));
+            SCCD_CHECK_CUDA(cudaMemcpy(h_v1, v1, sizeof(T*) * 3, cudaMemcpyDeviceToHost));
+            SCCD_CHECK_CUDA(cudaMemcpy(h_quads, quads, sizeof(I*) * 4, cudaMemcpyDeviceToHost));
+
             narrow_phase_vq_kernel<T, I><<<grid, block>>>(noverlaps,
                                                           voverlap,
                                                           qoverlap,
-                                                          v0[0], v0[1], v0[2],
-                                                          v1[0], v1[1], v1[2],
+                                                          h_v0[0], h_v0[1], h_v0[2],
+                                                          h_v1[0], h_v1[1], h_v1[2],
                                                           quad_stride,
-                                                          quads[0], quads[1], quads[2], quads[3],
+                                                          h_quads[0], h_quads[1], h_quads[2], h_quads[3],
                                                           (TC)max_toi,
                                                           d_shared,
                                                           toi,
