@@ -371,13 +371,72 @@ and its bound is a single global minimum. Whether that is enough to explain a
 distribution with a millionfold tail is the next thing to establish, and it wants
 a single hard query traced box by box, not another aggregate.
 
-*(A note on the instruments, since one of them nearly produced a wrong number.
-The per-query counter initially covered only the zero-stride body, while the
-global counter also saw the block-per-query kernel the benchmark's separate
-per-query path uses. The two disagreed by 7×, which is what caught it. With every
-evaluation site instrumented they agree — 820,651,600 against a bucket range of
-600M–1,200M on the same run — and the 516× here is consistent with the 535×
-measured before, so that figure stands.)*
+### Split by code path: 94× on the interface, 1397× on a 274-query path
+
+Neither the depth cap nor the split rule survives contact with the level
+distribution, so the next cut was by code path — and it is the one that should
+have been made first. The two device kernels are separate: `find_earliest_impact_time`
+runs the zero-stride kernel, one thread per query; `find_impact_times` runs the
+block-per-query kernel, which seeds with a uniform 128-way dice. `sccd_bench`
+exercises both, and the aggregate had been silently summing them.
+
+| path | queries | host boxes | device boxes | ratio |
+|---|---:|---:|---:|---:|
+| earliest impact (`toi_stride=0`) | 881,420 | 1,038,395 | 97,757,836 | **94×** |
+| per-query (`toi_stride=1`) | **274** | 505,243 | 705,986,614 | **1397×** |
+| total | 881,694 | 1,543,638 | 803,744,450 | 520× |
+
+**Two hundred and seventy-four queries account for 88% of the device's boxes.**
+That path costs 2.58 million boxes per query on the device against 1,844 on the
+host. The 520× headline was an average over two populations that differ by an
+order of magnitude, and it is the wrong number to optimise against.
+
+The number that matters for the headline interface is **94×** — 111 boxes per
+query against the host's 1.2. Still far too large to be a tuning gap, still the
+thing to fix, but a different size of problem than the aggregate advertised.
+
+The other path is worth a separate look, and there is a specific thing to look
+at: its 128-way seeding dice evaluates 128 subboxes per query before the search
+starts. The comment above it records that replacing the dice with a single root
+seed was measured *worse* on armadillo edge-edge (803 → 871 ms). Against 2.58
+million boxes per query, that measurement deserves re-running.
+
+### What the level distribution says, and what it rules out
+
+Boxes by DFS level, cloth-funnel, zero-stride path only:
+
+| level | host | device |
+|---:|---:|---:|
+| 0 | 531,777 | 288,962 |
+| 5 | 64,072 | 331,378 |
+| 10 | 14,334 | 3,697,397 |
+| 16 | 6,992 | 4,195,073 |
+| 25 | 11,727 | 1,228,312 |
+| 40 | 23,552 | 38,286 |
+| 60 | 604 | 41 |
+
+**Neither side ever accepts at the depth cap** — zero out of 2.3M host boxes and
+zero out of 50M device boxes — so the cap is not involved, and both reach
+comparable maximum depths (62 and 60). What differs is the shape. The host decays
+monotonically from level 0 and then carries a thin steady tail; the device's tree
+*broadens*, peaking at 4.2 million boxes at level 16 where the host has 7,000.
+
+In branching terms the host averages roughly 0.7 surviving children per box
+through the middle depths and the device roughly 1.8 — the host is discarding
+most of what it produces and the device is keeping nearly all of it. Since the
+rejection test is transcribed (`fmin > err || fmax < -err` on the host,
+`co &= (fmin <= aerr) & (fmax >= -aerr)` on the device) and the split rule is the
+same, what the two kernels disagree about is which boxes they are testing — which
+points at the `t` bound each query searches under and the order boxes leave the
+stack, not at the predicate.
+
+*(Three revisions of this number in one session, which is worth recording as a
+method note. The first, 535×, came from a global counter that summed both code
+paths. The second, 516×, reproduced it after the per-query counter was corrected
+to cover both bodies too — agreeing with the first because both were making the
+same mistake. Only splitting by `toi_stride` showed that the average was over two
+populations differing by 15×. An aggregate that two independent instruments agree
+on can still be the wrong quantity.)*
 
 ## Fixed on the way past: an unsound rejection in the device's mode-0 kernel
 

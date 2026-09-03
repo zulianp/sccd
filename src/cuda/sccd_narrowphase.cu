@@ -133,6 +133,12 @@ namespace sccd {
         // Per-query counts, so the mean can be taken apart. Null unless the
         // driver allocated it for this call.
         __device__ unsigned long long* g_np_perq = nullptr;
+        // Boxes by DFS level, and how many were accepted only because the depth
+        // cap forced it. Together these say whether the search converges: a
+        // converging search empties out well before the cap and almost never
+        // accepts at it.
+        __device__ unsigned long long g_np_level[80] = {0};
+        __device__ unsigned long long g_np_depth_accept = 0;
 #define SCCD_NP_EVAL_TICK() atomicAdd(&g_np_evals, 1ull)
 #define SCCD_NP_PERQ_TICK(qid, n)                                             \
     do {                                                                      \
@@ -1614,7 +1620,14 @@ namespace sccd {
 
                 if (active && cur.tlower >= s_toi) active = 0;
 
+#ifdef SCCD_NP_COUNT_BOXES
+                if (active) atomicAdd(&g_np_level[level < 80 ? level : 79], 1ull);
+#endif
+
                 if (active && level >= max_depth) {
+#ifdef SCCD_NP_COUNT_BOXES
+                    atomicAdd(&g_np_depth_accept, 1ull);
+#endif
                     // Same guard as the block-per-query body: a box outside the
                     // barycentric simplex holds no contact, so accepting it would
                     // report a time of impact for a point that is not on the
@@ -2462,6 +2475,9 @@ namespace sccd {
             {
                 const unsigned long long zero = 0;
                 SCCD_CHECK_CUDA(cudaMemcpyToSymbol(g_np_evals, &zero, sizeof(zero)));
+                SCCD_CHECK_CUDA(cudaMemcpyToSymbol(g_np_depth_accept, &zero, sizeof(zero)));
+                unsigned long long lvl_zero[80] = {0};
+                SCCD_CHECK_CUDA(cudaMemcpyToSymbol(g_np_level, lvl_zero, sizeof(lvl_zero)));
                 SCCD_CHECK_CUDA(cudaMalloc(&d_perq, noverlaps * sizeof(unsigned long long)));
                 SCCD_CHECK_CUDA(cudaMemset(d_perq, 0, noverlaps * sizeof(unsigned long long)));
                 SCCD_CHECK_CUDA(cudaMemcpyToSymbol(g_np_perq, &d_perq, sizeof(d_perq)));
@@ -2652,9 +2668,10 @@ namespace sccd {
                 SCCD_CHECK_CUDA(cudaDeviceSynchronize());
                 SCCD_CHECK_CUDA(cudaMemcpyFromSymbol(&evals, g_np_evals, sizeof(evals)));
                 fprintf(stderr,
-                        "sccd-np-count %s %s queries=%zu corner_evals=%llu per_query=%.1f\n",
+                        "sccd-np-count %s %s stride=%d queries=%zu corner_evals=%llu per_query=%.1f\n",
                         is_vf ? "vf" : "ee",
                         conservative ? "conservative" : "mode0",
+                        toi_stride,
                         noverlaps,
                         evals,
                         noverlaps ? (double)evals / (double)noverlaps : 0.0);
@@ -2680,11 +2697,18 @@ namespace sccd {
                     ++hist[b];
                 }
                 fprintf(stderr,
-                        "sccd-np-hist device queries=%zu worst=%llu at=%zu hist=",
+                        "sccd-np-hist device stride=%d queries=%zu worst=%llu at=%zu hist=",
+                        toi_stride,
                         noverlaps,
                         worst,
                         worst_q);
                 for (int b = 0; b < 24; ++b) fprintf(stderr, "%llu%s", hist[b], b == 23 ? "\n" : ",");
+
+                unsigned long long lvl[80] = {0}, depth_acc = 0;
+                SCCD_CHECK_CUDA(cudaMemcpyFromSymbol(lvl, g_np_level, sizeof(lvl)));
+                SCCD_CHECK_CUDA(cudaMemcpyFromSymbol(&depth_acc, g_np_depth_accept, sizeof(depth_acc)));
+                fprintf(stderr, "sccd-np-level device depth_accept=%llu levels=", depth_acc);
+                for (int b = 0; b < 80; ++b) fprintf(stderr, "%llu%s", lvl[b], b == 79 ? "\n" : ",");
 
                 const unsigned long long* np = nullptr;
                 SCCD_CHECK_CUDA(cudaMemcpyToSymbol(g_np_perq, &np, sizeof(np)));
