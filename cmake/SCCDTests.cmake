@@ -164,6 +164,17 @@ endif()
 # meant a CUDA build without smesh failed to compile them.
 set(SCCD_CUDA_SMESH_TESTS mesh_sccd_cuda_test)
 
+# CUDA tests that take arguments, and so must not be registered bare.
+#
+# mesh_sccd_cuda_test needs two mesh paths and aborts with its usage message
+# without them. It is registered properly further down by sccd_add_raw_mesh_test,
+# which supplies the meshes and skips when the data is absent -- so the bare
+# registration below could only ever abort, and did: a CUDA build without the
+# n-body dataset failed ctest on it every time. Neither local configuration
+# showed it, because the machine with the data has no CUDA and the machine with
+# CUDA has no data.
+set(SCCD_CUDA_ARG_TESTS mesh_sccd_cuda_test)
+
 file(GLOB_RECURSE SCCD_CUDA_TESTS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/cuda/*.exe.cpp")
 foreach(SCCD_CUDA_TEST IN LISTS SCCD_CUDA_TESTS)
   get_filename_component(SCCD_CUDA_TEST_TARGET "${SCCD_CUDA_TEST}" NAME_WE)
@@ -174,7 +185,10 @@ foreach(SCCD_CUDA_TEST IN LISTS SCCD_CUDA_TESTS)
   endif()
   add_executable(${SCCD_CUDA_TEST_TARGET} "${SCCD_CUDA_TEST}")
   target_link_libraries(${SCCD_CUDA_TEST_TARGET} PRIVATE sccd)
-  add_test(NAME ${SCCD_CUDA_TEST_TARGET} COMMAND $<TARGET_FILE:${SCCD_CUDA_TEST_TARGET}>)
+  # Built either way; only registered here if it can run without arguments.
+  if(NOT SCCD_CUDA_TEST_TARGET IN_LIST SCCD_CUDA_ARG_TESTS)
+    add_test(NAME ${SCCD_CUDA_TEST_TARGET} COMMAND $<TARGET_FILE:${SCCD_CUDA_TEST_TARGET}>)
+  endif()
 endforeach()
 
 if(TARGET mesh_sccd_cuda_test)
