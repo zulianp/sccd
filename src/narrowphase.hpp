@@ -111,8 +111,6 @@ namespace sccd {
         int SCCD_REFINE = 0;
         SCCD_READ_ENV(SCCD_REFINE, atoi);
 
-        int SCCD_ADAPTIVE_SPLIT = 1;
-        SCCD_READ_ENV(SCCD_ADAPTIVE_SPLIT, atoi);
 
         std::atomic<T> min_t = max_toi;
 
@@ -240,48 +238,25 @@ namespace sccd {
 
                     box.tuv[0].upper = sccd::min<T_HP>(box.tuv[0].upper, t);
 
-                    bool found = false;
-                    if (SCCD_ADAPTIVE_SPLIT) {
-                        found = find_root_grid_adaptive_split_vf<T_HP>(max_depth,
-                                                                       tol,
-                                                                       tols,
-                                                                       numerical_error,
-                                                                       codomain_widths,
-                                                                       sv,
-                                                                       s1,
-                                                                       s2,
-                                                                       s3,
-                                                                       ev,
-                                                                       e1,
-                                                                       e2,
-                                                                       e3,
-                                                                       box,
-                                                                       t,
-                                                                       u,
-                                                                       v,
-                                                                       stack,
-                                                                       SCCD_REFINE);
-                    } else {
-                        found = find_root_grid_uniform_split_vf<T_HP>(max_depth,
-                                                                      tol,
-                                                                      tols,
-                                                                      numerical_error,
-                                                                      codomain_widths,
-                                                                      sv,
-                                                                      s1,
-                                                                      s2,
-                                                                      s3,
-                                                                      ev,
-                                                                      e1,
-                                                                      e2,
-                                                                      e3,
-                                                                      box,
-                                                                      t,
-                                                                      u,
-                                                                      v,
-                                                                      stack,
-                                                                      SCCD_REFINE);
-                    }
+                    const bool found = find_root_grid_adaptive_split_vf<T_HP>(max_depth,
+                                                                   tol,
+                                                                   tols,
+                                                                   numerical_error,
+                                                                   codomain_widths,
+                                                                   sv,
+                                                                   s1,
+                                                                   s2,
+                                                                   s3,
+                                                                   ev,
+                                                                   e1,
+                                                                   e2,
+                                                                   e3,
+                                                                   box,
+                                                                   t,
+                                                                   u,
+                                                                   v,
+                                                                   stack,
+                                                                   SCCD_REFINE);
 
                     if (found) {
                         if (toi_stride == 0) {
@@ -400,8 +375,6 @@ namespace sccd {
         int SCCD_REFINE = 0;
         SCCD_READ_ENV(SCCD_REFINE, atoi);
 
-        int SCCD_ADAPTIVE_SPLIT = 1;
-        SCCD_READ_ENV(SCCD_ADAPTIVE_SPLIT, atoi);
 
         std::atomic<T> min_t = max_toi;
         if (toi_stride == 0) toi[0] = max_toi;
@@ -513,48 +486,25 @@ namespace sccd {
 
                     box.tuv[0].upper = sccd::min<T_HP>(box.tuv[0].upper, t);
 
-                    bool found = false;
-                    if (SCCD_ADAPTIVE_SPLIT) {
-                        found = find_root_grid_adaptive_split_ee<T_HP>(max_depth,
-                                                                       tol,
-                                                                       tols,
-                                                                       numerical_error,
-                                                                       codomain_widths,
-                                                                       s1,
-                                                                       s2,
-                                                                       s3,
-                                                                       s4,
-                                                                       e1,
-                                                                       e2,
-                                                                       e3,
-                                                                       e4,
-                                                                       box,
-                                                                       t,
-                                                                       u,
-                                                                       v,
-                                                                       stack,
-                                                                       SCCD_REFINE);
-                    } else {
-                        found = find_root_grid_uniform_split_ee<T_HP>(max_depth,
-                                                                      tol,
-                                                                      tols,
-                                                                      numerical_error,
-                                                                      codomain_widths,
-                                                                      s1,
-                                                                      s2,
-                                                                      s3,
-                                                                      s4,
-                                                                      e1,
-                                                                      e2,
-                                                                      e3,
-                                                                      e4,
-                                                                      box,
-                                                                      t,
-                                                                      u,
-                                                                      v,
-                                                                      stack,
-                                                                      SCCD_REFINE);
-                    }
+                    const bool found = find_root_grid_adaptive_split_ee<T_HP>(max_depth,
+                                                                   tol,
+                                                                   tols,
+                                                                   numerical_error,
+                                                                   codomain_widths,
+                                                                   s1,
+                                                                   s2,
+                                                                   s3,
+                                                                   s4,
+                                                                   e1,
+                                                                   e2,
+                                                                   e3,
+                                                                   e4,
+                                                                   box,
+                                                                   t,
+                                                                   u,
+                                                                   v,
+                                                                   stack,
+                                                                   SCCD_REFINE);
 
                     if (found) {
                         if (toi_stride == 0) {

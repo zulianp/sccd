@@ -204,12 +204,10 @@ for rep in $(seq 1 "$ASSESS_REPEATS"); do
                 SCCD_BROADPHASE="$bp" SCCD_NARROWPHASE_MODE=2
         done
 
-        # Split rule. Uniform is a duplicate of adaptive reachable only through an
-        # undocumented env var; it ships or it goes on these rows.
-        for split in 0 1; do
-            run_bench grace "$scene" split "adaptive$split" "$rep" \
-                SCCD_ADAPTIVE_SPLIT="$split" SCCD_NARROWPHASE_MODE=2
-        done
+        # The split-rule rows are gone: they decided that question, uniform lost
+        # on all three scenes, and it has since been demoted to a spike. The rows
+        # are kept in benchmark/assessment/assessment.csv as the evidence for
+        # that call; SCCD_ADAPTIVE_SPLIT no longer exists to reproduce them.
 
         # Host versus device, same scene and same cases.
         run_bench hopper "$scene" device "cuda" "$rep" \

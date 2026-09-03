@@ -35,6 +35,23 @@ if(SCCD_ENABLE_CUDA)
   endif()
 endif()
 
+# Header-only spikes are compiled by a translation unit that does nothing but
+# include them. Without this they would never be compiled at all, and a header
+# nobody compiles is a header that quietly stops building.
+file(GLOB SCCD_SPIKE_HEADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp")
+if(SCCD_SPIKE_HEADERS)
+  set(_spike_tu "${CMAKE_CURRENT_BINARY_DIR}/spike_headers.cpp")
+  set(_spike_tu_content "// Generated. Compiles every header-only spike so it cannot rot.\n")
+  foreach(_spike_header IN LISTS SCCD_SPIKE_HEADERS)
+    get_filename_component(_spike_header_name "${_spike_header}" NAME)
+    string(APPEND _spike_tu_content "#include \"${_spike_header_name}\"\n")
+  endforeach()
+  file(GENERATE OUTPUT "${_spike_tu}" CONTENT "${_spike_tu_content}")
+  add_library(sccd_spikes_headers OBJECT "${_spike_tu}")
+  target_include_directories(sccd_spikes_headers PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+  target_link_libraries(sccd_spikes_headers PRIVATE sccd)
+endif()
+
 # hacks/ is not added here. It cannot configure -- it references a tests/
 # directory that does not exist and needs scalable_ccd, Catch2 and libigl -- and
 # wiring it up would mean either fetching those or letting the spike build fail,

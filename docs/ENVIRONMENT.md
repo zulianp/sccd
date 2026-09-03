@@ -15,7 +15,6 @@ supported configuration.
 |---|---|---|---|
 | `SCCD_NARROWPHASE_MODE` | `0`, `1`, `2`, `3` | `0` | Narrow-phase kernel: `0` scalar, `1` fast-vector, `2` TightInclusion-exact, `3` TightInclusion-compat. Modes `1` and `3` are **validation-only** and fall back to `0` unless the build has TightInclusion — see below. **Ignored for quads**, which have one root-finder variant. |
 | `SCCD_BROADPHASE` | `sweep`, `cell2d` | auto | Forces a broad phase instead of letting `choose_broadphase_strategy` decide. Both produce identical pair sets, so this only changes speed. |
-| `SCCD_ADAPTIVE_SPLIT` | `0`, `1` | `1` | `0` splits each interval uniformly; `1` places splitters from a Gauss–Newton step. The assessment measured adaptive ahead on all three scenes, so `0` exists to reproduce that comparison. |
 | `SCCD_USE_VNARROW_PHASE` | `0`, `1` | build option | Older, narrower switch for the vectorised vertex-face kernel. `SCCD_NARROWPHASE_MODE` supersedes it. |
 | `SCCD_VNARROWPHASE_TI_COMPAT` | `0`, `1` | build option | Corrects vectorised vertex-face output against TightInclusion. Requires a TightInclusion build. |
 | `SCCD_USE_TI` | `0`, `1` | `0` | Calls TightInclusion directly. Requires a TightInclusion build. Oracle use only. |
@@ -34,6 +33,11 @@ reproducing that comparison, which needs TightInclusion in the build anyway.
 Asking for either in a build without TightInclusion gets mode 0 rather than an
 error: the caller wants a time of impact, and the scalar path is the supported
 way to get one.
+
+`SCCD_ADAPTIVE_SPLIT` is gone. It selected uniform interval splitting instead of
+the Gauss–Newton splitters, which was a complete second implementation of the
+splitting job and never won on any real scene, so it was demoted to
+`spikes/src/uniform_split.hpp`. Setting it now does nothing.
 
 ## Search parameters
 
