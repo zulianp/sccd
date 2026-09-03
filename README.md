@@ -119,6 +119,7 @@ an error.
 | [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md) | Every environment variable SCCD reads. None is needed to use the library. |
 | [`benchmark/ASSESSMENT.md`](benchmark/ASSESSMENT.md) | The measurements behind the keep-or-demote decisions, including the ones that were retracted. |
 | [`spikes/README.md`](spikes/README.md) | Demoted code, and why each piece is there. |
+| [`TODO.md`](TODO.md) | Known open work, with the evidence for each. |
 
 ## A note on the numbers
 
