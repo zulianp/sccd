@@ -116,8 +116,15 @@ toward negative infinity.
 non-zero on a missed collision or a late time of impact. It runs as part of
 `ctest` when TightInclusion and the datasets are present.
 
-Eleven test executables. Test counts by configuration: 5 default, 7 with smesh,
-9 with TightInclusion, 8 with CUDA. The default build needs no options and no
+`narrowphase_cuda_test` is the device narrow phase's gate. It builds queries
+whose time of impact is known -- the primitive stays in a plane and the vertex
+descends through it, so the contact time is one division, solved in `long double`
+and rounded up -- then requires every kernel, host and device, triangle and quad,
+to report a contact at or before it. It found that the device quad entry point
+dereferenced device pointers on the host, which had never been called.
+
+Twelve test executables. Test counts by configuration: 5 default, 7 with smesh,
+9 with TightInclusion, 9 with CUDA. The default build needs no options and no
 network.
 
 ## Building
