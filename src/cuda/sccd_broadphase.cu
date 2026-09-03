@@ -1167,6 +1167,19 @@ INSTANTIATE_COLLECT_OVERLAPS(3, 1, float, int64_t);
 INSTANTIATE_COLLECT_OVERLAPS(3, 1, double, int32_t);
 INSTANTIATE_COLLECT_OVERLAPS(3, 1, double, int64_t);
 
+// Quads. broad_phase_fv_step_device_ dispatches QUADSHELL4 to <4, 1>, so
+// without these the CUDA build does not link at all once a quad mesh is
+// reachable -- which it always is, the dispatch being on a runtime element type.
+INSTANTIATE_COUNT_OVERLAPS(4, 1, float, int32_t);
+INSTANTIATE_COUNT_OVERLAPS(4, 1, float, int64_t);
+INSTANTIATE_COUNT_OVERLAPS(4, 1, double, int32_t);
+INSTANTIATE_COUNT_OVERLAPS(4, 1, double, int64_t);
+
+INSTANTIATE_COLLECT_OVERLAPS(4, 1, float, int32_t);
+INSTANTIATE_COLLECT_OVERLAPS(4, 1, float, int64_t);
+INSTANTIATE_COLLECT_OVERLAPS(4, 1, double, int32_t);
+INSTANTIATE_COLLECT_OVERLAPS(4, 1, double, int64_t);
+
 INSTANTIATE_COUNT_OVERLAPS_WITH_STARTS(3, 1, float, int32_t);
 INSTANTIATE_COUNT_OVERLAPS_WITH_STARTS(3, 1, float, int64_t);
 INSTANTIATE_COUNT_OVERLAPS_WITH_STARTS(3, 1, double, int32_t);
