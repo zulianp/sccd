@@ -2263,23 +2263,25 @@ namespace sccd {
             //             noverlaps when stride==1 (one toi per candidate).
             const size_t toi_n = (toi_stride == 0) ? 1 : noverlaps;
 
-            T SCCD_NP_ALPHA = T(0.5);
-            {
-                double alpha = (double)SCCD_NP_ALPHA;
-                SCCD_READ_ENV(alpha, atof);
-                SCCD_NP_ALPHA = (T)alpha;
-            }
+            // SCCD_READ_ENV stringifies the variable name, so this used to read a
+            // bare lowercase `alpha` from the environment -- an unprefixed name in
+            // a library's process, which is a collision waiting to happen. Read
+            // the prefixed name instead.
+            double SCCD_NP_ALPHA = 0.5;
+            SCCD_READ_ENV(SCCD_NP_ALPHA, atof);
+            const T np_alpha = (T)SCCD_NP_ALPHA;
 
             // ----------------------------------------------------------------
             // Auto-sized hyperparameters.
             //
             //   SCCD_BLOCKS_PER_SM    -> from CUDA occupancy API
-            //   SCCD_GSTACK_CAP_INIT  -> initial global-stack capacity
-            //                            (default 0; grown on demand from
-            //                            kernel-reported deficit)
             //   SCCD_GSTACK_CAP_MAX   -> soft cap on a single grow step
             //   SCCD_BATCH_SIZE       -> candidates per outer iteration
             //                            (default: noverlaps)
+            //
+            // The global stack starts empty and is grown on demand from the
+            // deficit the kernel reports. There is no SCCD_GSTACK_CAP_INIT: it
+            // was documented here for a while but never read anywhere.
             //
             // Any of these can be overridden via the matching env var.
             // ----------------------------------------------------------------
@@ -2454,7 +2456,7 @@ namespace sccd {
                                                           d_toi,
                                                           toi_stride,
                                                           g_stack,
-                                                          SCCD_NP_ALPHA,
+                                                          np_alpha,
                                                           (int)begin,
                                                           (int)end);
                     }
