@@ -247,7 +247,17 @@ namespace sccd {
                                                                            ptrdiff_t& begin,
                                                                            ptrdiff_t& end) {
             for (; begin < second_count; ++begin) {
-                if (fimin < second_xmax[begin]) {
+                // Inclusive: the overlap predicate counts touching boxes as
+                // overlapping (it rejects only on a strict `amin > bmax`), so the
+                // window that feeds it has to keep a box whose xmax equals fimin.
+                // With a strict `<` here the two disagreed, and the sweep dropped
+                // real pairs -- a false negative, which the conservativeness
+                // invariant does not allow. Boxes are sorted by xmin, so this can
+                // only bite when xmin == xmax == fimin, i.e. a zero-extent box
+                // sitting exactly at another box's lower bound on the sort axis.
+                // That is what an axis-aligned face produces, and it cost 20 of
+                // 2220 edge-edge pairs on a refined cube.
+                if (fimin <= second_xmax[begin]) {
                     break;
                 }
             }

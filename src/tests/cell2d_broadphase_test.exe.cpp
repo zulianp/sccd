@@ -168,9 +168,14 @@ namespace {
         return out;
     }
 
-    PairSet sweep_self_pairs(Boxes& e) {
+    // force_axis pins the sort axis instead of letting choose_axis pick. The
+    // sweep must return the same pair set whichever axis it sorts on, and that
+    // invariant is what exposes a candidate window inconsistent with the overlap
+    // predicate: the disagreement only appears when the degenerate axis is the
+    // one being swept, which choose_axis will normally avoid.
+    PairSet sweep_self_pairs(Boxes& e, const int force_axis = -1) {
         std::vector<scalar_t> scratch(e.n * 2);
-        const int axis = sccd::choose_axis<scalar_t>(e.n, e.ptr);
+        const int axis = force_axis >= 0 ? force_axis : sccd::choose_axis<scalar_t>(e.n, e.ptr);
         sccd::sort_along_axis(e.n, axis, e.ptr, e.idx.data(), scratch.data());
 
         std::vector<ptrdiff_t> ccdptr(e.n + 1, 0);
@@ -216,6 +221,76 @@ namespace {
                                                             b.data());
         for (size_t i = 0; i < a.size(); ++i) out.insert({a[i], b[i]});
         return out;
+    }
+
+    // Boxes that are flat on one axis and sit at a handful of repeated
+    // coordinates, so that one box's xmax lands exactly on another's xmin.
+    //
+    // This is the case the random generator above will essentially never
+    // produce and that real geometry produces constantly: an axis-aligned face
+    // sweeps to a zero-extent AABB. The overlap predicate counts touching boxes
+    // as overlapping, and the sweep's candidate window used a strict comparison
+    // that skipped them, so it silently dropped real pairs -- 20 of 2220 on a
+    // refined cube. A missed pair is a collision the narrow phase never sees,
+    // which the conservativeness invariant does not allow.
+    Boxes make_flat_boxes(std::mt19937& rng, const ptrdiff_t n, const int nxe, const int planes) {
+        std::uniform_int_distribution<int> plane(0, planes - 1);
+        std::uniform_real_distribution<double> pos(0.0, 10.0);
+        std::uniform_int_distribution<int> node(0, (int)(n * nxe));
+
+        Boxes b;
+        for (int d = 0; d < 6; ++d) b.data[d].resize(n);
+        b.idx.resize(n);
+        for (int v = 0; v < nxe; ++v) b.elem[v].resize(n);
+        b.n = n;
+
+        for (ptrdiff_t i = 0; i < n; ++i) {
+            // Flat on x, at one of a few shared planes: coincidence by design.
+            const scalar_t x = (scalar_t)plane(rng);
+            b.data[0][i] = x;
+            b.data[3][i] = x;
+            for (int d = 1; d < 3; ++d) {
+                const scalar_t lo = (scalar_t)pos(rng);
+                b.data[d][i] = lo;
+                b.data[3 + d][i] = lo + (scalar_t)2.0;
+            }
+            b.idx[i] = (idx_t)i;
+            for (int v = 0; v < nxe; ++v) b.elem[v][i] = (idx_t)node(rng);
+        }
+        b.bind();
+        return b;
+    }
+
+    int run_flat_self_case(const char* name, const ptrdiff_t n, const int planes) {
+        std::mt19937 rng(4242);
+        Boxes e = make_flat_boxes(rng, n, 2, planes);
+        Boxes e_c = e;
+        e_c.bind();
+
+        const PairSet cell = cell2d_self_pairs(e_c);
+
+        int bad = 0;
+        for (int axis = 0; axis < 3; ++axis) {
+            Boxes e_axis = e;
+            e_axis.bind();
+            const PairSet sweep = sweep_self_pairs(e_axis, axis);
+
+            std::vector<std::pair<idx_t, idx_t>> only_cell;
+            std::set_difference(cell.begin(), cell.end(), sweep.begin(), sweep.end(),
+                                std::back_inserter(only_cell));
+
+            const bool ok = (cell == sweep);
+            std::printf("%-24s axis=%d boxes=%-6ld planes=%-3d sweep=%-8zu cell=%-8zu  %s\n",
+                        name, axis, (long)n, planes, sweep.size(), cell.size(),
+                        ok ? "ok" : "MISMATCH");
+            if (!only_cell.empty()) {
+                std::printf("    the sweep MISSED %zu pairs the cell list found -- "
+                            "a missed pair is a collision the narrow phase never sees\n",
+                            only_cell.size());
+            }
+            bad |= ok ? 0 : 1;
+        }
+        return bad;
     }
 
     int run_self_case(const char* name, const ptrdiff_t n, const double spread, const double size) {
@@ -309,6 +384,11 @@ int main() {
     bad |= run_self_case("self: small boxes", 3000, 100.0, 1.0);
     bad |= run_self_case("self: many cells", 2000, 100.0, 25.0);
     bad |= run_self_case("self: dense", 900, 1.0, 1.0);
+
+    // Degenerate: flat boxes sharing exact coordinates, where one box's xmax is
+    // another's xmin. Regression for a sweep that dropped touching pairs.
+    bad |= run_flat_self_case("self: flat, coincident", 2000, 4);
+    bad |= run_flat_self_case("self: flat, one plane", 500, 1);
 
     std::printf("%s\n", bad ? "FAIL" : "OK: cell list and sweep agree on every case");
     return bad;

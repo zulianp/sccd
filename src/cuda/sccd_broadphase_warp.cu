@@ -197,7 +197,7 @@ namespace sccd {
                     }
 
                     ptrdiff_t begin = lower_bound_device(cummax, cummax + second_count, fimin) - cummax;
-                    while (begin < second_count && !(fimin < second_xmax[begin])) {
+                    while (begin < second_count && !(fimin <= second_xmax[begin])) {
                         ++begin;
                     }
                     const ptrdiff_t end = upper_bound_device(second_xmin, second_xmin + second_count, fimax) - second_xmin;
