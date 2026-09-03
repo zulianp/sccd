@@ -216,6 +216,18 @@ what makes the test work: `choose_axis` avoids the degenerate axis, so the
 original random cases passed against the buggy sweep and would have kept
 passing. Verified to fail before the fix and pass after.
 
+**Verified on the hardware that showed it.** Rebuilt for Grace and Hopper and
+re-run on a GH200 node, the two now agree at every refinement level:
+
+| level | Grace host (vf / ee) | Hopper device (vf / ee) |
+|---:|---|---|
+| 0 | 1,104 / 2,220 | 1,104 / 2,220 |
+| 1 | 18,240 / 39,912 | 18,240 / 39,912 |
+| 2 | 294,144 / 657,240 | 294,144 / 657,240 |
+
+`cell2d_broadphase_cuda_test` also passes, so the device cell list and the device
+sweep agree as well.
+
 **Effect on the numbers above.** None. The three real scenes had identical pair
 counts for both broad phases before the fix, so the bug never fired there and
 the timings stand.
