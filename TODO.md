@@ -99,8 +99,14 @@ fetches them and a user who wants the library does not.
   uses 238 of 255 registers with no spills, and carrying eight corners for three
   components needs 48 more. Three other explanations were measured and refuted —
   sequential batching, atomic contention on the shared time of impact, and
-  per-box arithmetic — and are recorded so they are not retried. Start from the
-  535×, not from the arithmetic.
+  per-box arithmetic — and are recorded so they are not retried.
+
+  Counted per query, the gap **scales with query difficulty**: the two are within
+  a few percent on queries needing 0–1 boxes, 2× apart at 8, 32× at 64, 462× at
+  16,384, and the device has 208 queries costing over a million boxes where the
+  host has none and its worst costs 48,561. So the device is not starting wrong,
+  it is failing to converge on hard queries. Next step is to trace **one** such
+  query box by box — the aggregates have said all they can.
 
 - **`SCCD_NARROWPHASE_MODE` does not reach the quad path.** There is one quad
   root-finder variant, so the enum has nothing to select between. It now says so
