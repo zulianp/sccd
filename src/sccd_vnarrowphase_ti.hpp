@@ -107,6 +107,21 @@ namespace sccd {
     // an approximate count is enough to tell 10 million from 800 million.
     extern unsigned long long g_np_host_boxes;
 #define SCCD_NP_HOST_BOX_TICK() (++::sccd::g_np_host_boxes)
+
+    // Per-query counts, bucketed by log2 on the way out. 843k queries is too many
+    // to print and the mean is the statistic that hides the answer: a mean of 944
+    // is a different defect depending on whether every query costs 944 boxes or
+    // three queries cost a quarter of a billion each.
+    extern unsigned long long g_np_host_hist[24];
+    inline void np_hist_add(unsigned long long* hist, unsigned long long n) {
+        int b = 0;
+        while (n > 1 && b < 23) {
+            n >>= 1;
+            ++b;
+        }
+        ++hist[b];
+    }
+#define SCCD_NP_HOST_PERQ_TICK(q) (++perq_[(q)])
 #else
 #define SCCD_NP_HOST_BOX_TICK() ((void)0)
 #endif
@@ -490,6 +505,11 @@ namespace sccd {
         const ptrdiff_t nblocks = static_cast<ptrdiff_t>((noverlaps + VSIZE - 1) / VSIZE);
         std::atomic<T_HP> global_min{domain_toi};
 
+#ifdef SCCD_NP_COUNT_BOXES
+        // Each block owns VSIZE consecutive queries and no two blocks share one,
+        // so the counters are disjoint per thread and need no synchronisation.
+        std::vector<unsigned long long> perq_(noverlaps, 0ull);
+#endif
         sccd::parallel_for_br_dynamic(0, nblocks, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
             // Deliberately a plain local, not thread_local. The per-chunk
             // reserve looks like allocation churn, but measured on NEON over
@@ -503,6 +523,7 @@ namespace sccd {
 
             for (ptrdiff_t ib = rbegin; ib < rend; ++ib) {
                 const ptrdiff_t block_begin = ib * VSIZE;
+                (void)block_begin;
                 const int block_size =
                     static_cast<int>(sccd::min<ptrdiff_t>(VSIZE, static_cast<ptrdiff_t>(noverlaps) - block_begin));
 
@@ -694,6 +715,9 @@ namespace sccd {
 
                         bool accept = false;
                         SCCD_NP_HOST_BOX_TICK();
+#ifdef SCCD_NP_COUNT_BOXES
+                        SCCD_NP_HOST_PERQ_TICK(block_begin + lane_query[l]);
+#endif
                         if (!ti_detail::ti_classify<T_HP, VSIZE>(
                                 fmin, fmax, box_lo, box_hi, lane, l, accept)) {
                             continue;  // no root in this box
@@ -825,6 +849,22 @@ namespace sccd {
         if (toi_stride == 0) {
             toi[0] = static_cast<T>(global_min.load(std::memory_order_relaxed));
         }
+#ifdef SCCD_NP_COUNT_BOXES
+        {
+            unsigned long long hist[24] = {0};
+            unsigned long long worst = 0;
+            size_t worst_q = 0;
+            for (size_t q = 0; q < noverlaps; ++q) {
+                np_hist_add(hist, perq_[q]);
+                if (perq_[q] > worst) {
+                    worst = perq_[q];
+                    worst_q = q;
+                }
+            }
+            fprintf(stderr, "sccd-np-hist host queries=%zu worst=%llu at=%zu hist=", noverlaps, worst, worst_q);
+            for (int b = 0; b < 24; ++b) fprintf(stderr, "%llu%s", hist[b], b == 23 ? "\n" : ",");
+        }
+#endif
         return 0;
     }
 

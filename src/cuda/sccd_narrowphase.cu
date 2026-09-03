@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <climits>
 #include <limits>
+#include <vector>
 
 #include <thrust/device_ptr.h>
 #include <thrust/extrema.h>
@@ -129,9 +130,19 @@ namespace sccd {
         // so an instrumented build's *timings* mean nothing. Only the counts do.
 #ifdef SCCD_NP_COUNT_BOXES
         __device__ unsigned long long g_np_evals = 0;
+        // Per-query counts, so the mean can be taken apart. Null unless the
+        // driver allocated it for this call.
+        __device__ unsigned long long* g_np_perq = nullptr;
 #define SCCD_NP_EVAL_TICK() atomicAdd(&g_np_evals, 1ull)
+#define SCCD_NP_PERQ_TICK(qid, n)                                             \
+    do {                                                                      \
+        if (g_np_perq != nullptr && (qid) >= 0) {                             \
+            atomicAdd(&g_np_perq[(qid)], (unsigned long long)(n));            \
+        }                                                                     \
+    } while (0)
 #else
 #define SCCD_NP_EVAL_TICK() ((void)0)
+#define SCCD_NP_PERQ_TICK(qid, n) ((void)0)
 #endif
 
         // Shared-stack capacity for scalar type T.
@@ -1633,6 +1644,7 @@ namespace sccd {
 
                 if (active) {
                     Domain<TC> left, right;
+                    SCCD_NP_PERQ_TICK(qid, 2);
                     cur.tupper = device::min<TC>(cur.tupper, s_toi);
 
                     // Guarded by the ti_can_split check above, so this cannot fail.
@@ -1805,6 +1817,7 @@ namespace sccd {
                 Domain<TC> root = {TC(0), TC(1), TC(0), TC(1), TC(0), TC(1)};
                 int contains = 0;
                 int accept = 0;
+                SCCD_NP_PERQ_TICK(qid, 1);
                 evaluate_cell_3d_policy<is_vf, conservative, TC, Vec4>(
                     root, sx, sy, sz, ex, ey, ez, tol, atol, aerr, contains, accept);
 
@@ -1963,6 +1976,7 @@ namespace sccd {
             Domain<TC> cur;
             int contains = 0;
             int accept = 0;
+            SCCD_NP_PERQ_TICK(qid, 1);
             sample_cell_3d<is_vf, conservative, TC, Vec4>(ti,
                                                           ui,
                                                           vi,
@@ -2074,6 +2088,7 @@ namespace sccd {
                     split_cell_policy<is_vf, conservative, TC, Vec4>(
                         cur, sx, sy, sz, ex, ey, ez, atol, left, right);
 
+                    SCCD_NP_PERQ_TICK(qid, 2);
                     int cl = 0, cr = 0, al = 0, ar = 0;
                     evaluate_cell_3d_policy<is_vf, conservative, TC, Vec4>(
                         left, sx, sy, sz, ex, ey, ez, tol, atol, aerr, cl, al);
@@ -2443,9 +2458,13 @@ namespace sccd {
             }
 
 #ifdef SCCD_NP_COUNT_BOXES
+            unsigned long long* d_perq = nullptr;
             {
                 const unsigned long long zero = 0;
                 SCCD_CHECK_CUDA(cudaMemcpyToSymbol(g_np_evals, &zero, sizeof(zero)));
+                SCCD_CHECK_CUDA(cudaMalloc(&d_perq, noverlaps * sizeof(unsigned long long)));
+                SCCD_CHECK_CUDA(cudaMemset(d_perq, 0, noverlaps * sizeof(unsigned long long)));
+                SCCD_CHECK_CUDA(cudaMemcpyToSymbol(g_np_perq, &d_perq, sizeof(d_perq)));
             }
 #endif
 
@@ -2639,6 +2658,37 @@ namespace sccd {
                         noverlaps,
                         evals,
                         noverlaps ? (double)evals / (double)noverlaps : 0.0);
+
+                std::vector<unsigned long long> perq(noverlaps, 0ull);
+                SCCD_CHECK_CUDA(cudaMemcpy(perq.data(),
+                                           d_perq,
+                                           noverlaps * sizeof(unsigned long long),
+                                           cudaMemcpyDeviceToHost));
+                unsigned long long hist[24] = {0}, worst = 0;
+                size_t worst_q = 0;
+                for (size_t q = 0; q < noverlaps; ++q) {
+                    unsigned long long n = perq[q];
+                    if (n > worst) {
+                        worst = n;
+                        worst_q = q;
+                    }
+                    int b = 0;
+                    while (n > 1 && b < 23) {
+                        n >>= 1;
+                        ++b;
+                    }
+                    ++hist[b];
+                }
+                fprintf(stderr,
+                        "sccd-np-hist device queries=%zu worst=%llu at=%zu hist=",
+                        noverlaps,
+                        worst,
+                        worst_q);
+                for (int b = 0; b < 24; ++b) fprintf(stderr, "%llu%s", hist[b], b == 23 ? "\n" : ",");
+
+                const unsigned long long* np = nullptr;
+                SCCD_CHECK_CUDA(cudaMemcpyToSymbol(g_np_perq, &np, sizeof(np)));
+                SCCD_CHECK_CUDA(cudaFree(d_perq));
             }
 #endif
             return 0;

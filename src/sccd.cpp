@@ -6,6 +6,7 @@
 #ifdef SCCD_NP_COUNT_BOXES
 namespace sccd {
     unsigned long long g_np_host_boxes = 0;
+    unsigned long long g_np_host_hist[24] = {0};
 }
 #endif
 

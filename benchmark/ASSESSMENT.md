@@ -327,12 +327,57 @@ The pruning a fresh bound buys is worth more than the atomic costs, on every
 scene. The knob was removed rather than shipped; `fn=0` throughout, as expected,
 since a stale bound only ever prunes less.
 
-**What remains.** The question is now sharp, and it is not the one the item
-started as: **why does the device classify 944 boxes per query where the host
-classifies 1.8, given the same acceptance test, the same tolerances and the same
-queries?** A 535× work difference is not a tuning gap and not the price of the
-guarantee — the host is conservative too, on the same inputs, for 1.8 boxes. That
-is where the next effort belongs.
+### Where the 516× sits: the gap scales with query difficulty
+
+The mean hides the shape, and the shape is the finding. Counting per query rather
+than in total, cloth-funnel, 881,694 queries, host and device on the same set:
+
+| | queries | boxes | per query | worst single query |
+|---|---:|---:|---:|---:|
+| host conservative | 881,694 | 1,545,887 | 1.8 | 48,561 |
+| device conservative | 881,694 | 797,257,768 | 904.2 | **19,737,992** |
+
+It is not a handful of queries exploding, and it is not a uniform slowdown.
+**The two agree on the easy queries and diverge further the harder the query
+gets.**
+
+| boxes needed | host queries | device queries | ratio |
+|---|---:|---:|---:|
+| 0–1 | 617,471 | 587,953 | 1.0× |
+| ≥ 8 | 42,406 | 103,502 | 2× |
+| ≥ 64 | 1,073 | 33,902 | 32× |
+| ≥ 1,024 | 164 | 11,581 | 71× |
+| ≥ 16,384 | 3 | 1,386 | 462× |
+| ≥ 1,048,576 | **0** | **208** | — |
+
+The host's hardest query in the scene costs 48,561 boxes. The device has 208
+queries costing over a million, and its worst costs 19.7 million — 406× the
+host's worst. Below eight boxes the two distributions are the same to within a
+few percent, so the device is not starting wrong: it is failing to *converge* on
+the queries that need real search, while the host converges on all of them.
+
+That rules out several things at once. It is not the seeding, which would show up
+on the easy queries too. It is not the acceptance test or the tolerances, which
+are transcribed and would shift the whole distribution rather than stretch its
+tail. And it is not the split rule in the obvious sense: `bisect_ti_axis` picks
+the axis with the largest width/tolerance ratio, the same rule as the host's
+`ti_split_axis`.
+
+What is left is what happens to a box once the search is deep — the interaction
+between the depth cap, the `t` bound each query searches under, and the order in
+which boxes come off the stack. The host pops in an order that lets `toi_q[q]`
+tighten as it goes; the device's DFS pops from a shared stack that mixes queries,
+and its bound is a single global minimum. Whether that is enough to explain a
+distribution with a millionfold tail is the next thing to establish, and it wants
+a single hard query traced box by box, not another aggregate.
+
+*(A note on the instruments, since one of them nearly produced a wrong number.
+The per-query counter initially covered only the zero-stride body, while the
+global counter also saw the block-per-query kernel the benchmark's separate
+per-query path uses. The two disagreed by 7×, which is what caught it. With every
+evaluation site instrumented they agree — 820,651,600 against a bucket range of
+600M–1,200M on the same run — and the 516× here is consistent with the 535×
+measured before, so that figure stands.)*
 
 ## Fixed on the way past: an unsound rejection in the device's mode-0 kernel
 
