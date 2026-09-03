@@ -4,6 +4,8 @@
 #include "sccd_config.hpp"
 
 #include "broadphase.hpp"
+#include "broadphase_strategy.hpp"
+#include "cell2d_broadphase.hpp"
 #include "narrowphase.hpp"
 #include "narrowphase_vertex_quad.hpp"
 #include "smesh_device_buffer.hpp"
@@ -183,6 +185,23 @@ namespace sccd {
         // Separating axis chosen from the vertex AABBs and reused across the
         // F2V and E2E sorts/scans within the same broad_phase invocation.
         int sort_axis_{0};
+
+        // Which broad phase this call is using. Both are first class: the choice
+        // is made per call from the geometry, because neither wins everywhere and
+        // the same mesh can change character between frames. SCCD_BROADPHASE
+        // forces it to sweep or cell2d for measurement.
+        bool use_cell2d_{false};
+        sccd::Cell2DGrid<scalar_t> v_grid_;
+        std::vector<ptrdiff_t> v_cellptr_;
+        std::vector<ptrdiff_t> v_cursor_;
+        std::vector<smesh::idx_t> v_cellidx_;
+
+        sccd::Cell2DGrid<scalar_t> e_grid_;
+        std::vector<ptrdiff_t> e_cellptr_;
+        std::vector<ptrdiff_t> e_cursor_;
+        std::vector<smesh::idx_t> e_cellidx_;
+
+
         bool safe_inflate_{false};
 
     public:
@@ -342,10 +361,68 @@ namespace sccd {
                                     safe_inflate_);
             }
 
-            {
-                SMESH_TRACE_SCOPE("Sorting AABBs (host)");
+            sort_axis_ = sccd::choose_axis(n_nodes, vaabb_->data());
 
-                sort_axis_ = sccd::choose_axis(n_nodes, vaabb_->data());
+            {
+                // Decided on the vertex boxes and used for all three lists: they
+                // come from the same geometry, so their anisotropy agrees, and one
+                // decision keeps the passes consistent with each other.
+                sccd::BroadPhaseStats<scalar_t> stats;
+                const sccd::BroadPhaseStrategy chosen =
+                    sccd::choose_broadphase_strategy<scalar_t>(n_nodes, vaabb_->data(), &stats);
+                use_cell2d_ = (chosen == sccd::BroadPhaseStrategy::Cell2D);
+
+                if (getenv("SCCD_BROADPHASE_VERBOSE")) {
+                    fprintf(stderr,
+                            "sccd broad phase: %s (lambda %.1f/%.1f/%.1f, anisotropy %.2f, n %ld)\n",
+                            sccd::broadphase_strategy_name(chosen),
+                            (double)stats.lambda[0],
+                            (double)stats.lambda[1],
+                            (double)stats.lambda[2],
+                            stats.anisotropy(),
+                            (long)n_nodes);
+                }
+            }
+
+            if (use_cell2d_) {
+                // No sorting at all on this path: vertices, faces and edges are
+                // all binned. Removing the sort is most of the reason to prefer a
+                // cell list, so a variant that kept one would have given up the
+                // point of it.
+                SMESH_TRACE_SCOPE("Cell list (host)");
+
+                for (ptrdiff_t i = 0; i < n_nodes; ++i) vidx_->data()[i] = (smesh::idx_t)i;
+                for (ptrdiff_t i = 0; i < n_faces; ++i) fidx_->data()[i] = (smesh::idx_t)i;
+
+                sccd::cell2d_setup<scalar_t>(n_nodes, vaabb_->data(), v_grid_);
+                v_cellptr_.assign((size_t)v_grid_.ncells() + 1, 0);
+                sccd::cell2d_count<scalar_t, smesh::idx_t>(
+                    n_nodes, vaabb_->data(), v_grid_, v_cellptr_.data());
+                v_cellidx_.resize((size_t)v_cellptr_[v_grid_.ncells()]);
+                v_cursor_.resize((size_t)v_grid_.ncells());
+                sccd::cell2d_fill<scalar_t, smesh::idx_t>(n_nodes,
+                                                          vaabb_->data(),
+                                                          v_grid_,
+                                                          v_cellptr_.data(),
+                                                          v_cellidx_.data(),
+                                                          v_cursor_.data());
+
+                for (ptrdiff_t i = 0; i < n_edges; ++i) eidx_->data()[i] = (smesh::idx_t)i;
+
+                sccd::cell2d_setup<scalar_t>(n_edges, eaabb_->data(), e_grid_);
+                e_cellptr_.assign((size_t)e_grid_.ncells() + 1, 0);
+                sccd::cell2d_count<scalar_t, smesh::idx_t>(
+                    n_edges, eaabb_->data(), e_grid_, e_cellptr_.data());
+                e_cellidx_.resize((size_t)e_cellptr_[e_grid_.ncells()]);
+                e_cursor_.resize((size_t)e_grid_.ncells());
+                sccd::cell2d_fill<scalar_t, smesh::idx_t>(n_edges,
+                                                          eaabb_->data(),
+                                                          e_grid_,
+                                                          e_cellptr_.data(),
+                                                          e_cellidx_.data(),
+                                                          e_cursor_.data());
+            } else {
+                SMESH_TRACE_SCOPE("Sorting AABBs (host)");
 
                 sccd::sort_along_axis(n_nodes, sort_axis_, vaabb_->data(), vidx_->data(), scratch_->data());
                 sccd::sort_along_axis(n_faces, sort_axis_, faabb_->data(), fidx_->data(), scratch_->data());
@@ -362,6 +439,49 @@ namespace sccd {
             const ptrdiff_t n_nodes = mesh_->n_nodes();
             const ptrdiff_t n_faces = mesh_->block(0)->n_elements();
             const auto element_type = face_element_type_;
+
+            if (use_cell2d_) {
+                SMESH_TRACE_SCOPE("cell2d f2v");
+                if (element_type != smesh::TRISHELL3) {
+                    SMESH_ERROR("cell2d broad phase currently supports TRISHELL3 only\n");
+                    return SCCD_FAILURE;
+                }
+
+                sccd::cell2d_count_overlaps<3, 1, scalar_t, smesh::idx_t>(n_faces,
+                                                                          faabb_->data(),
+                                                                          fidx_->data(),
+                                                                          1,
+                                                                          faces_->data(),
+                                                                          vaabb_->data(),
+                                                                          vidx_->data(),
+                                                                          0,
+                                                                          nullptr,
+                                                                          v_grid_,
+                                                                          v_cellptr_.data(),
+                                                                          v_cellidx_.data(),
+                                                                          ccdptr_->data());
+
+                const ptrdiff_t n_pairs = ccdptr_->data()[n_faces];
+                f_overlap_ = smesh::create_buffer<smesh::idx_t>(n_pairs, execution_space_);
+                v_overlap_ = smesh::create_buffer<smesh::idx_t>(n_pairs, execution_space_);
+
+                sccd::cell2d_fill_overlaps<3, 1, scalar_t, smesh::idx_t>(n_faces,
+                                                                         faabb_->data(),
+                                                                         fidx_->data(),
+                                                                         1,
+                                                                         faces_->data(),
+                                                                         vaabb_->data(),
+                                                                         vidx_->data(),
+                                                                         0,
+                                                                         nullptr,
+                                                                         v_grid_,
+                                                                         v_cellptr_.data(),
+                                                                         v_cellidx_.data(),
+                                                                         ccdptr_->data(),
+                                                                         f_overlap_->data(),
+                                                                         v_overlap_->data());
+                return SCCD_SUCCESS;
+            }
 
             {
                 SMESH_TRACE_SCOPE("cummax");
@@ -455,6 +575,37 @@ namespace sccd {
             SMESH_TRACE_SCOPE("Broad_phase: E2E");
 
             const ptrdiff_t n_edges = e0_->size();
+
+            if (use_cell2d_) {
+                SMESH_TRACE_SCOPE("cell2d e2e");
+
+                sccd::cell2d_count_self_overlaps<2, scalar_t, smesh::idx_t>(n_edges,
+                                                                            eaabb_->data(),
+                                                                            eidx_->data(),
+                                                                            1,
+                                                                            edges_->data(),
+                                                                            e_grid_,
+                                                                            e_cellptr_.data(),
+                                                                            e_cellidx_.data(),
+                                                                            ccdptr_->data());
+
+                const ptrdiff_t n_pairs = ccdptr_->data()[n_edges];
+                e0_overlap_ = smesh::create_buffer<smesh::idx_t>(n_pairs, execution_space_);
+                e1_overlap_ = smesh::create_buffer<smesh::idx_t>(n_pairs, execution_space_);
+
+                sccd::cell2d_fill_self_overlaps<2, scalar_t, smesh::idx_t>(n_edges,
+                                                                           eaabb_->data(),
+                                                                           eidx_->data(),
+                                                                           1,
+                                                                           edges_->data(),
+                                                                           e_grid_,
+                                                                           e_cellptr_.data(),
+                                                                           e_cellidx_.data(),
+                                                                           ccdptr_->data(),
+                                                                           e0_overlap_->data(),
+                                                                           e1_overlap_->data());
+                return SCCD_SUCCESS;
+            }
 
             {
                 SMESH_TRACE_SCOPE("count_self_overlaps");
