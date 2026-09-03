@@ -191,7 +191,6 @@ set(SCCD_PUBLIC_HEADERS
   src/roots.hpp
   src/srootfinder.hpp
   src/srootfinder_vertex_quad.hpp
-  src/sccd_vnarrowphase.hpp
   src/sccd_vnarrowphase_ti.hpp
   src/vaabb.hpp
   src/smath.hpp
@@ -202,6 +201,11 @@ set(SCCD_PUBLIC_HEADERS
 if(SCCD_ENABLE_SMESH)
   list(APPEND SCCD_PUBLIC_HEADERS src/integrations/smesh/sccd_smesh_CCD.hpp)
 endif()
+if(SCCD_ENABLE_TIGHT_INCLUSION)
+  # The vectorised kernel is validation-only: narrowphase.hpp only includes it,
+  # and narrow_phase_mode() only selects it, when TightInclusion is built in.
+  list(APPEND SCCD_PUBLIC_HEADERS src/sccd_vnarrowphase.hpp)
+endif()
 
 # Fail configure if a header exists that nobody has classified. Without this the
 # list silently drifts from the tree and we are back to guessing.
@@ -210,6 +214,9 @@ file(GLOB_RECURSE _sccd_all_headers RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}"
 list(FILTER _sccd_all_headers EXCLUDE REGEX "^src/tests/")
 if(NOT SCCD_ENABLE_SMESH)
   list(FILTER _sccd_all_headers EXCLUDE REGEX "^src/integrations/smesh/")
+endif()
+if(NOT SCCD_ENABLE_TIGHT_INCLUSION)
+  list(FILTER _sccd_all_headers EXCLUDE REGEX "^src/sccd_vnarrowphase\\.hpp$")
 endif()
 foreach(_hdr IN LISTS _sccd_all_headers)
   if(NOT _hdr IN_LIST SCCD_PUBLIC_HEADERS)

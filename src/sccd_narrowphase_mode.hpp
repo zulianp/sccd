@@ -85,18 +85,52 @@ namespace sccd {
      * and SCCD_VNARROWPHASE_TI_COMPAT still work and are consulted when it is
      * unset, so existing scripts keep behaving as they did.
      */
+    /**
+     * \brief Modes that exist to be compared against TightInclusion.
+     *
+     * `FastVector` and `TightInclusionCompat` are the two entries into the
+     * vectorised kernel, and neither is a mode to ship:
+     *
+     *  - `TightInclusionCompat` says so itself -- it runs the vectorised kernel
+     *    and then corrects its answers with TightInclusion, which is an oracle
+     *    and not a code path. Without TightInclusion it returned -1 at the point
+     *    of use, so it was already unavailable, just later and less clearly.
+     *  - `FastVector` is a duplicate that loses. The assessment measured it
+     *    behind the scalar reference on all three real scenes and behind it by
+     *    5.2x on armadillo-rollers, and it is vertex-face only. What it is still
+     *    good for is reproducing that comparison, which needs TightInclusion in
+     *    the build anyway.
+     *
+     * So the vectorised kernel is validation-only: available when the build has
+     * TightInclusion, and otherwise not selectable at all. Asking for one of
+     * these in a build without TightInclusion gets the scalar reference rather
+     * than an error, because the caller asked for a time of impact and the
+     * scalar path is the supported way to get one.
+     */
+    static inline bool narrow_phase_mode_is_validation_only(const NarrowPhaseMode mode) {
+        return mode == NarrowPhaseMode::FastVector || mode == NarrowPhaseMode::TightInclusionCompat;
+    }
+
+    static inline NarrowPhaseMode narrow_phase_mode_available(const NarrowPhaseMode mode) {
+#ifdef SCCD_ENABLE_TIGHT_INCLUSION
+        return mode;
+#else
+        return narrow_phase_mode_is_validation_only(mode) ? NarrowPhaseMode::ScalarReference : mode;
+#endif
+    }
+
     static inline NarrowPhaseMode narrow_phase_mode() {
         if (const char* explicit_mode = getenv("SCCD_NARROWPHASE_MODE")) {
             const int value = atoi(explicit_mode);
             if (value >= 0 && value <= 3) {
-                return static_cast<NarrowPhaseMode>(value);
+                return narrow_phase_mode_available(static_cast<NarrowPhaseMode>(value));
             }
         }
 
         int SCCD_VNARROWPHASE_TI_COMPAT = SCCD_VNARROWPHASE_TI_COMPAT_DEFAULT;
         SCCD_READ_ENV(SCCD_VNARROWPHASE_TI_COMPAT, atoi);
         if (SCCD_VNARROWPHASE_TI_COMPAT) {
-            return NarrowPhaseMode::TightInclusionCompat;
+            return narrow_phase_mode_available(NarrowPhaseMode::TightInclusionCompat);
         }
 
         int SCCD_USE_VNARROW_PHASE = SCCD_USE_VNARROW_PHASE_DEFAULT;
@@ -104,7 +138,8 @@ namespace sccd {
         if (SCCD_USE_VNARROW_PHASE == 2) {
             return NarrowPhaseMode::TightInclusionExact;
         }
-        return SCCD_USE_VNARROW_PHASE ? NarrowPhaseMode::FastVector : NarrowPhaseMode::ScalarReference;
+        return SCCD_USE_VNARROW_PHASE ? narrow_phase_mode_available(NarrowPhaseMode::FastVector)
+                                      : NarrowPhaseMode::ScalarReference;
     }
 
 }  // namespace sccd
