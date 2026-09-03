@@ -221,7 +221,7 @@ int main(int argc, char** argv) {
            SCCD_SCALE,
            space == smesh::EXECUTION_SPACE_DEVICE ? "device" : "host",
            smesh::type_to_string(base->block(0)->element_type()));
-    printf("%5s %10s %12s %12s %9s %9s %9s %9s %10s %10s\n",
+    printf("%5s %10s %12s %12s %9s %9s %9s %9s %10s %10s %14s\n",
            "level",
            "faces",
            "vf_pairs",
@@ -231,7 +231,8 @@ int main(int argc, char** argv) {
            "bp_ee_ms",
            "broad_ms",
            "narrow_ms",
-           "ns/pair");
+           "ns/pair",
+           "toi");
 
     for (int level = 0; level <= levels; ++level) {
         std::shared_ptr<smesh::Mesh> refined = (level == 0) ? base : smesh::refine(base, level);
@@ -282,7 +283,11 @@ int main(int argc, char** argv) {
         const ptrdiff_t n_ee = e0_overlap ? e0_overlap->size() : 0;
         const ptrdiff_t n_pairs = n_vf + n_ee;
 
-        printf("%5d %10ld %12ld %12ld %9.2f %9.2f %9.2f %9.2f %10.2f %10.1f\n",
+        // The time of impact, not just the timings. Without it the table cannot
+        // answer the only question that matters when comparing two execution
+        // spaces: do they agree on the answer? Printed at full precision because
+        // the interesting differences are in the last digits.
+        printf("%5d %10ld %12ld %12ld %9.2f %9.2f %9.2f %9.2f %10.2f %10.1f %14.10f\n",
                level,
                (long)mesh->block(0)->n_elements(),
                (long)n_vf,
@@ -292,7 +297,8 @@ int main(int argc, char** argv) {
                ee_ms,
                broad_ms,
                narrow_ms,
-               n_pairs > 0 ? (narrow_ms * 1e6 / (double)n_pairs) : 0.0);
+               n_pairs > 0 ? (narrow_ms * 1e6 / (double)n_pairs) : 0.0,
+               (double)toi);
         fflush(stdout);
     }
 
