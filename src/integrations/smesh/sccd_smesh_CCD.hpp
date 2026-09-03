@@ -192,6 +192,24 @@ namespace sccd {
         // the same mesh can change character between frames. SCCD_BROADPHASE
         // forces it to sweep or cell2d for measurement.
         bool use_cell2d_{false};
+
+        // Broad-phase strategy race. The tuner decides; these carry the pending
+        // measurement from the steps back to the next prep, which is where it is
+        // reported. See stamp_broad_phase_elapsed_ and broadphase_strategy.hpp.
+        sccd::BroadPhaseAutoTuner tuner_;
+        sccd::BroadPhaseStrategy timed_strategy_{sccd::BroadPhaseStrategy::Auto};
+        double broad_phase_t0_{0.0};
+        double broad_phase_pending_ms_{0.0};
+        bool broad_phase_pending_{false};
+
+        // Elapsed from the start of prep to the end of whichever step just ran.
+        // Called after every step, so the value that survives to the next prep
+        // covers the whole broad phase however the caller staged it.
+        void stamp_broad_phase_elapsed_() {
+            if (broad_phase_t0_ <= 0.0) return;
+            broad_phase_pending_ms_ = sccd::broadphase_now_ms() - broad_phase_t0_;
+            broad_phase_pending_ = true;
+        }
         sccd::Cell2DGrid<scalar_t> v_grid_;
         std::vector<ptrdiff_t> v_cellptr_;
         std::vector<ptrdiff_t> v_cursor_;
@@ -259,6 +277,7 @@ namespace sccd {
                 SMESH_TRACE_SCOPE("Broad_phase (FV)");
                 err |= broad_phase_fv_step_device_();
             }
+            stamp_broad_phase_elapsed_();
             v_overlap = v_overlap_;
             f_overlap = f_overlap_;
             return err;
@@ -279,6 +298,7 @@ namespace sccd {
                 err |= broad_phase_ee_step_device_();
             }
 
+            stamp_broad_phase_elapsed_();
             e0_overlap = e0_overlap_;
             e1_overlap = e1_overlap_;
             return err;
@@ -368,21 +388,47 @@ namespace sccd {
                 // Decided on the vertex boxes and used for all three lists: they
                 // come from the same geometry, so their anisotropy agrees, and one
                 // decision keeps the passes consistent with each other.
-                sccd::BroadPhaseStats<scalar_t> stats;
-                const sccd::BroadPhaseStrategy chosen =
-                    sccd::choose_broadphase_strategy<scalar_t>(n_nodes, vaabb_->data(), &stats);
+                // The tuner races the two rather than predicting a winner; see
+                // broadphase_strategy.hpp for the four heuristics that failed and
+                // the constant that failed after them. The clock starts here and
+                // stops when the last of the two steps has run, so what is timed
+                // is a whole broad phase and not just the part that differs.
+                // A measurement is reported here rather than at the end of a step,
+                // because the steps are separately callable: a caller may run
+                // face-vertex only, edge-edge only, or both in either order, and
+                // there is no step that is reliably "last". Reporting the previous
+                // broad phase when the next one starts covers every case, and the
+                // only measurement lost is the final one of a run.
+                if (broad_phase_pending_) {
+                    tuner_.record(timed_strategy_, broad_phase_pending_ms_);
+                    broad_phase_pending_ = false;
+                }
+
+                const sccd::BroadPhaseStrategy chosen = tuner_.next();
                 use_cell2d_ = (chosen == sccd::BroadPhaseStrategy::Cell2D);
+                timed_strategy_ = chosen;
 
                 if (getenv("SCCD_BROADPHASE_VERBOSE")) {
+                    sccd::BroadPhaseStats<scalar_t> stats =
+                        sccd::broadphase_stats<scalar_t>(n_nodes, vaabb_->data());
                     fprintf(stderr,
-                            "sccd broad phase: %s (lambda %.1f/%.1f/%.1f, anisotropy %.2f, n %ld)\n",
+                            "sccd broad phase: %s (lambda %.1f/%.1f/%.1f, anisotropy %.2f, n %ld; "
+                            "sweep %.3f ms, cell2d %.3f ms)\n",
                             sccd::broadphase_strategy_name(chosen),
                             (double)stats.lambda[0],
                             (double)stats.lambda[1],
                             (double)stats.lambda[2],
                             stats.anisotropy(),
-                            (long)n_nodes);
+                            (long)n_nodes,
+                            tuner_.sweep_ms(),
+                            tuner_.cell2d_ms());
                 }
+
+                // The clock starts after the logging, not before it. Computing the
+                // statistics and writing an unbuffered line to stderr took about a
+                // millisecond, which on a small mesh was most of the "measurement"
+                // -- a diagnostic that changes the number it is diagnosing.
+                broad_phase_t0_ = sccd::broadphase_now_ms();
             }
 
             if (use_cell2d_) {
@@ -1052,6 +1098,10 @@ namespace sccd {
             err |= broad_phase_prep_host_();
             err |= broad_phase_fv_step_host_();
             err |= broad_phase_ee_step_host_();
+            // The one-shot path calls the private steps directly, so it needs its
+            // own stamp; the public staged wrappers stamp themselves. Putting it in
+            // the private steps instead would mean covering several early returns.
+            stamp_broad_phase_elapsed_();
             return err;
         }
 
