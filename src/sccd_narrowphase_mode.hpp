@@ -3,6 +3,7 @@
 
 #include "sccd_base.hpp"
 
+#include <cstdio>
 #include <cstdlib>
 
 namespace sccd {
@@ -119,11 +120,56 @@ namespace sccd {
 #endif
     }
 
+    /**
+     * \brief Resolve the requested narrow-phase kernel, saying so when it cannot
+     *        be honoured.
+     *
+     * The mode is read from the environment on **every call** rather than cached,
+     * because callers switch it between calls -- `sccd_bench` and
+     * `narrowphase_cuda_test` both do -- so the warnings below are one-shot flags
+     * rather than a resolved-once result.
+     *
+     * Two requests used to be swallowed in silence, which is the thing worth
+     * fixing here. A value that is not 0-3, or not a number at all, fell straight
+     * through to the legacy variables, so `SCCD_NARROWPHASE_MODE=banana` selected
+     * a kernel via `atoi` returning 0 and a typo'd `SCCD_NARROWPHASE_MODE=20` ran
+     * whatever the legacy path decided. And asking for a validation-only mode in a
+     * build without TightInclusion silently downgraded to the scalar reference.
+     * Both are still handled the same way -- the caller asked for a time of impact
+     * and gets one -- but they now say so once on stderr, because a caller who
+     * measures the wrong kernel and concludes something about it is a worse
+     * outcome than a line of output.
+     */
     static inline NarrowPhaseMode narrow_phase_mode() {
         if (const char* explicit_mode = getenv("SCCD_NARROWPHASE_MODE")) {
-            const int value = atoi(explicit_mode);
-            if (value >= 0 && value <= 3) {
-                return narrow_phase_mode_available(static_cast<NarrowPhaseMode>(value));
+            char* end = nullptr;
+            const long value = strtol(explicit_mode, &end, 10);
+            const bool parsed = (end != explicit_mode) && (end != nullptr) && (*end == '\0');
+
+            if (parsed && value >= 0 && value <= 3) {
+                const NarrowPhaseMode asked = static_cast<NarrowPhaseMode>(value);
+                const NarrowPhaseMode got = narrow_phase_mode_available(asked);
+                if (got != asked) {
+                    static bool warned_unavailable = false;
+                    if (!warned_unavailable) {
+                        warned_unavailable = true;
+                        fprintf(stderr,
+                                "SCCD: SCCD_NARROWPHASE_MODE=%ld is validation-only and needs a "
+                                "build with SCCD_ENABLE_TIGHT_INCLUSION=ON; running mode 0 "
+                                "(scalar reference) instead.\n",
+                                value);
+                    }
+                }
+                return got;
+            }
+
+            static bool warned_invalid = false;
+            if (!warned_invalid) {
+                warned_invalid = true;
+                fprintf(stderr,
+                        "SCCD: ignoring SCCD_NARROWPHASE_MODE=\"%s\" -- expected 0 (scalar "
+                        "reference), 1, 2 (TightInclusion-exact) or 3.\n",
+                        explicit_mode);
             }
         }
 
@@ -140,6 +186,37 @@ namespace sccd {
         }
         return SCCD_USE_VNARROW_PHASE ? narrow_phase_mode_available(NarrowPhaseMode::FastVector)
                                       : NarrowPhaseMode::ScalarReference;
+    }
+
+    /**
+     * \brief Say once that a requested mode does not reach the quad path.
+     *
+     * The quad root finder has one variant and never consults the mode enum, so
+     * `SCCD_NARROWPHASE_MODE` is ignored there. That is a defensible state -- there
+     * is nothing for the enum to select between -- but it was silent, and a caller
+     * comparing modes on a quad mesh would have measured the same kernel twice and
+     * concluded the modes were equivalent.
+     *
+     * Only a request for a non-default mode is worth a line: asking for mode 0 and
+     * getting the one kernel there is is not a surprise. A malformed value is left
+     * alone here, since `narrow_phase_mode` has already reported it.
+     */
+    static inline void narrow_phase_mode_note_quads_ignore() {
+        const char* explicit_mode = getenv("SCCD_NARROWPHASE_MODE");
+        if (explicit_mode == nullptr) return;
+
+        char* end = nullptr;
+        const long value = strtol(explicit_mode, &end, 10);
+        if (end == explicit_mode || end == nullptr || *end != '\0') return;
+        if (value <= 0 || value > 3) return;
+
+        static bool warned = false;
+        if (warned) return;
+        warned = true;
+        fprintf(stderr,
+                "SCCD: SCCD_NARROWPHASE_MODE=%ld does not apply to quads -- the vertex-quad "
+                "root finder has one variant and does not consult the mode.\n",
+                value);
     }
 
 }  // namespace sccd

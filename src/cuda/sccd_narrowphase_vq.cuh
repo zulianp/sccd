@@ -13,6 +13,21 @@
  * `SMESH_ERROR("CUDA QUADSHELL4 narrow phase is not implemented")`, so a quad
  * mesh could be broad-phased on the GPU and then not finished there.
  *
+ * ## Node order: lexicographic, not cyclic
+ *
+ * `quads[0..3]` are the corners `(0,0)`, `(1,0)`, `(0,1)`, `(1,1)` of the
+ * parameter square, in that order -- the bilinear weights are `(1-u)(1-v)`,
+ * `u(1-v)`, `(1-u)v`, `uv`. A cyclic winding swaps the last two, and the failure
+ * is silent: the solver searches a bilinear patch through the nodes as given,
+ * finds no contact against the quad the caller meant, and reports no error. Same
+ * convention as the host `narrow_phase_vq`.
+ *
+ * ## Pointer convention
+ *
+ * `v0`, `v1` and `quads` are **device** arrays of device pointers, the same as
+ * `narrow_phase_vf` and `narrow_phase_ee` take. They are not dereferenceable on
+ * the host.
+ *
  * ## Why this is a separate kernel
  *
  * The triangle kernel in `sccd_narrowphase.cu` is built end to end around a

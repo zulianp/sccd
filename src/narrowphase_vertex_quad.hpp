@@ -1,7 +1,31 @@
 #ifndef NARROWPHASE_VERTEX_QUAD_HPP
 #define NARROWPHASE_VERTEX_QUAD_HPP
 
+/**
+ * \file
+ * \brief Vertex-quad narrow phase.
+ *
+ * ## Node order: lexicographic, not cyclic
+ *
+ * The four quad nodes handed to every entry point here -- `quads[0..3][qi]` --
+ * are in **lexicographic** order over the parameter square, not wound around the
+ * quad. The bilinear form weights node k by
+ *
+ *     w1 = (1-u)(1-v)   w2 = u(1-v)   w3 = (1-u)v   w4 = uv
+ *
+ * so the nodes are the corners `(0,0)`, `(1,0)`, `(0,1)`, `(1,1)` in that order.
+ * A cyclic winding swaps the last two.
+ *
+ * This is worth stating loudly because getting it wrong is silent. The solver
+ * does not validate the quad; it simply searches a bilinear patch through the
+ * nodes in the order given, which for a cyclic winding is a saddle stretched
+ * across the diagonal rather than the quad the caller meant. Contacts against
+ * the real quad are then not found, and nothing reports an error -- the answer
+ * is a correct time of impact for the wrong surface.
+ */
+
 #include "sccd_base.hpp"
+#include "sccd_narrowphase_mode.hpp"
 #include "srootfinder_vertex_quad.hpp"
 
 #include <atomic>
@@ -44,6 +68,8 @@ namespace sccd {
                         const int toi_stride = 0) {
         (void)nxe;
         using T_HP = double;
+
+        narrow_phase_mode_note_quads_ignore();
 
         assert(toi_stride == 0 || toi_stride == 1);
         if (noverlaps == 0) {

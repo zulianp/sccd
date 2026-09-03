@@ -34,6 +34,24 @@ Asking for either in a build without TightInclusion gets mode 0 rather than an
 error: the caller wants a time of impact, and the scalar path is the supported
 way to get one.
 
+### The three cases that used to be silent
+
+Falling back is fine; doing it without saying so is not, because a caller who
+measures a kernel they did not ask for draws a conclusion about the wrong thing.
+Each of these now prints one line to stderr, once per process, and changes
+nothing else:
+
+| What you set | What runs | What it says |
+|---|---|---|
+| `SCCD_NARROWPHASE_MODE=1` or `3`, no TightInclusion | mode 0 | that the mode is validation-only and needs `SCCD_ENABLE_TIGHT_INCLUSION=ON` |
+| `SCCD_NARROWPHASE_MODE=20`, or any non-number | the build's default | that the value was ignored, and what the valid ones are |
+| `SCCD_NARROWPHASE_MODE=1`, `2` or `3` on a quad mesh | the one quad kernel | that the mode does not reach the quad path |
+
+An unset variable, or `SCCD_NARROWPHASE_MODE=0`, says nothing: there is no
+surprise to report. The mode is re-read from the environment on every call, so a
+caller that switches it between calls keeps working -- the warnings are one-shot
+flags rather than a resolved-once decision.
+
 `SCCD_ADAPTIVE_SPLIT` is gone. It selected uniform interval splitting instead of
 the Gauss–Newton splitters, which was a complete second implementation of the
 splitting job and never won on any real scene, so it was demoted to
