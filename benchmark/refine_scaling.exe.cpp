@@ -27,6 +27,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <string>
 #include <cstdlib>
 #include <cmath>
 #include <limits>
@@ -144,7 +145,9 @@ int main(int argc, char** argv) {
                 "solver would see.\n"
                 "\n"
                 "Env: SCCD_NARROWPHASE_MODE, SCCD_MAX_DEPTH, SCCD_TOL,\n"
-                "     SCCD_BENCH_EXECUTION_SPACE=device, SCCD_SCALE.\n",
+                "     SCCD_BENCH_EXECUTION_SPACE=device, SCCD_SCALE,\n"
+                "     SCCD_TOPOLOGY=quad (generate a hex cube, so the skin is\n"
+                "     QUADSHELL4 rather than TRISHELL3).\n",
                 argv[0]);
         return 1;
     }
@@ -173,10 +176,21 @@ int main(int argc, char** argv) {
         }
     }
 
+    // SCCD_TOPOLOGY=quad generates a hexahedral cube instead of a tetrahedral
+    // one. Skinning a hex mesh yields QUADSHELL4 where skinning a tet mesh
+    // yields TRISHELL3, so this is the whole of what it takes to run the same
+    // scaling study against the quad narrow phase -- which needs its own
+    // measurements, not triangle numbers assumed to carry over. Ignored when a
+    // mesh is supplied, since the file then fixes the topology.
+    const char* topology_env = getenv("SCCD_TOPOLOGY");
+    const bool want_quad = topology_env && std::string(topology_env) == "quad";
+
     std::shared_ptr<smesh::Mesh> base;
     std::shared_ptr<smesh::Mesh> base_t1;
     if (argc >= 3) {
         base = smesh::Mesh::create_from_file(comm, smesh::Path(argv[2]));
+    } else if (want_quad) {
+        base = smesh::Mesh::create_hex8_cube(comm, 2, 2, 2, 0, 0, 0, 1, 1, 1);
     } else {
         base = smesh::Mesh::create_tet4_cube(comm, 2, 2, 2, 0, 0, 0, 1, 1, 1);
     }
@@ -200,12 +214,13 @@ int main(int argc, char** argv) {
 
     const bool base_is_surface = is_surface_mesh(base->block(0)->element_type());
 
-    printf("# mode=%s max_depth=%d tol=%g scale=%g space=%s\n",
+    printf("# mode=%s max_depth=%d tol=%g scale=%g space=%s base_topology=%s\n",
            sccd::narrow_phase_mode_name(sccd::narrow_phase_mode()),
            SCCD_MAX_DEPTH,
            (double)SCCD_TOL,
            SCCD_SCALE,
-           space == smesh::EXECUTION_SPACE_DEVICE ? "device" : "host");
+           space == smesh::EXECUTION_SPACE_DEVICE ? "device" : "host",
+           smesh::type_to_string(base->block(0)->element_type()));
     printf("%5s %10s %12s %12s %9s %9s %9s %9s %10s %10s\n",
            "level",
            "faces",

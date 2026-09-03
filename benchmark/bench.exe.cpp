@@ -202,6 +202,23 @@ namespace {
         }
 
         std::sort(cases.begin(), cases.end(), [](const CaseFile& a, const CaseFile& b) { return a.key < b.key; });
+
+        // A full dataset is 372 to 1996 cases, which is the right thing when the
+        // question is accuracy over the whole trajectory. A variant sweep asks a
+        // different question -- is A faster than B -- and has to run every variant
+        // on the same cases within one allocation, so it needs a bounded, evenly
+        // spread subsample rather than a prefix. SCCD_BENCH_MAX_CASES picks that
+        // many cases spread across the trajectory; unset, everything runs.
+        int SCCD_BENCH_MAX_CASES = 0;
+        SCCD_READ_ENV(SCCD_BENCH_MAX_CASES, atoi);
+        if (SCCD_BENCH_MAX_CASES > 0 && (int)cases.size() > SCCD_BENCH_MAX_CASES) {
+            std::vector<CaseFile> subset;
+            subset.reserve(SCCD_BENCH_MAX_CASES);
+            for (int k = 0; k < SCCD_BENCH_MAX_CASES; ++k) {
+                subset.push_back(cases[(std::size_t)((double)k * cases.size() / SCCD_BENCH_MAX_CASES)]);
+            }
+            cases.swap(subset);
+        }
         return cases;
     }
 
