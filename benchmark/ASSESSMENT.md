@@ -460,6 +460,52 @@ work distributor needs the protocol changed, not the capacity tuned:
   whatever the shared stack costs, so dropping 57,376 bytes to 4,096 does not add
   a block.
 
+### Fixed: the queue is double-buffered, and the conservative kernel is 17× faster
+
+The queue was rewritten rather than tuned. A launch now reads one buffer and
+writes the other, swapping each drain round, so producers and consumers never
+touch the same buffer and neither the writer's `atomicCAS` spin nor the reader's
+commit spin exists any more. A push is a bump allocation into a slot nobody else
+can see until the launch ends; a pop is a claim on a cursor over entries a
+previous launch committed. Both are wait-free.
+
+With the interaction gone the shared stack can be small, which is the point:
+spilling early is what hands a heavy query's subtree to the queue for the next
+round to spread across every block. `SCCD_NP_SHARED_STACK_CAP` drops from 1024 to
+**64**, and 57,376 bytes of shared memory per block become 3,584.
+
+Mode 2 on the device, 16 cases, GH200, narrow-phase milliseconds:
+
+| scene | before | after | |
+|---|---:|---:|---|
+| cloth-funnel | 634 | **37.4** | 17× |
+| armadillo-rollers | 329 | **64.3** | 5.1× |
+| cloth-ball | 121 | **106.7** | 1.1× |
+
+Against the host's conservative kernel, which is what the 26× gap was measured
+from, the device goes from 83×, 21× and 1.05× behind to 5.1×, 3.4× and **ahead**:
+
+| scene | host mode 2 | device mode 2 | |
+|---|---:|---:|---|
+| cloth-funnel | 7.4 | 37.4 | 5.1× host |
+| armadillo-rollers | 19.1 | 64.3 | 3.4× host |
+| cloth-ball | 115.8 | **106.7** | 1.09× device |
+
+False positives and negatives are identical to the old kernel at every
+configuration measured, `fn=0` throughout, and mode 0 is unaffected — it averages
+under four boxes per query and never filled even a small stack. `ctest` 9/9 with
+CUDA, 5/5 default.
+
+Two things this does not claim. The 4.2-million-box level-16 peak and the 94×
+box-count gap on the earliest-impact path are *not* addressed: this is the same
+search, balanced better across the machine, not a smaller search. And one result
+is unexplained — under the new queue, capacity 1024 measures 4,059 ms on
+cloth-funnel against 634 ms for the old queue at the same capacity, a 6.4×
+regression at a setting that is no longer the default. Every capacity at or below
+256 is faster than the old code on every scene, so the shipped configuration is
+strictly better, but the 1024 anomaly is recorded rather than smoothed over
+because it suggests something about the new drain loop is not understood yet.
+
 ### What the level distribution says, and what it rules out
 
 Boxes by DFS level, cloth-funnel, zero-stride path only:
