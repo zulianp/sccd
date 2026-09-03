@@ -37,8 +37,11 @@ function(sccd_add_raw_mesh_test SCCD_TEST_NAME SCCD_TEST_TARGET SCCD_RAW_TARGET 
     return()
   endif()
 
+  # Missing data used to mean this test quietly did not exist, which on a fresh
+  # clone is always. Say so instead.
   foreach(SCCD_MESH IN LISTS SCCD_MESHES)
     if(NOT EXISTS "${SCCD_MESH}")
+      message(STATUS "SCCD: not registering ${SCCD_TEST_NAME} -- missing ${SCCD_MESH}")
       return()
     endif()
   endforeach()
@@ -89,7 +92,16 @@ if(SCCD_ENABLE_TIGHT_INCLUSION)
 endif()
 
 # Tests that need neither smesh nor TightInclusion, so they run in any build.
-set(SCCD_STANDALONE_TESTS cell2d_broadphase_test vertex_quad_root_test)
+#
+# vnarrowphase_ti_compat_test is here despite the name: it guards its body with
+# #ifndef SCCD_ENABLE_TIGHT_INCLUSION and returns success without it, and it
+# never touches smesh. It used to be registered by the smesh glob below, so a
+# TightInclusion build without smesh silently did not run the one test that
+# checks the vectorised kernel against TightInclusion.
+set(SCCD_STANDALONE_TESTS
+  cell2d_broadphase_test
+  vertex_quad_root_test
+  vnarrowphase_ti_compat_test)
 foreach(SCCD_TEST IN LISTS SCCD_STANDALONE_TESTS)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/${SCCD_TEST}.exe.cpp")
     add_executable(${SCCD_TEST} "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/${SCCD_TEST}.exe.cpp")
@@ -117,10 +129,18 @@ if(NOT SCCD_ENABLE_CUDA)
   return()
 endif()
 
+# CUDA tests that also need smesh. Registering these on SCCD_ENABLE_CUDA alone
+# meant a CUDA build without smesh failed to compile them.
+set(SCCD_CUDA_SMESH_TESTS mesh_sccd_cuda_test)
+
 file(GLOB_RECURSE SCCD_CUDA_TESTS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/cuda/*.exe.cpp")
 foreach(SCCD_CUDA_TEST IN LISTS SCCD_CUDA_TESTS)
   get_filename_component(SCCD_CUDA_TEST_TARGET "${SCCD_CUDA_TEST}" NAME_WE)
   string(REGEX REPLACE "\\.exe$" "" SCCD_CUDA_TEST_TARGET "${SCCD_CUDA_TEST_TARGET}")
+  if(SCCD_CUDA_TEST_TARGET IN_LIST SCCD_CUDA_SMESH_TESTS AND NOT SCCD_ENABLE_SMESH)
+    message(STATUS "SCCD: skipping ${SCCD_CUDA_TEST_TARGET} (needs SCCD_ENABLE_SMESH)")
+    continue()
+  endif()
   add_executable(${SCCD_CUDA_TEST_TARGET} "${SCCD_CUDA_TEST}")
   target_link_libraries(${SCCD_CUDA_TEST_TARGET} PRIVATE sccd)
   add_test(NAME ${SCCD_CUDA_TEST_TARGET} COMMAND $<TARGET_FILE:${SCCD_CUDA_TEST_TARGET}>)
