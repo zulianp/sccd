@@ -23,8 +23,12 @@
 #include "tight_inclusion/interval_root_finder.hpp"
 #endif
 
+#ifndef ADAPTIVE_NUM_SPLITS
 #define ADAPTIVE_NUM_SPLITS 2
+#endif
+#ifndef UNIFORM_NUM_SPLITS
 #define UNIFORM_NUM_SPLITS 4
+#endif
 
 namespace sccd {
 
@@ -530,24 +534,38 @@ namespace sccd {
         return contains_zero;
     }
 
+    /**
+     * \brief Acceptance for the vertex-quad search.
+     *
+     * `numerical_error` is the certified bound, and it is what makes the
+     * rejection sound. This used to pad the origin-containment test with
+     * std::numeric_limits<T>::epsilon() instead -- about 30x smaller than the
+     * bound for unit-scale geometry -- which is an *unsound rejection*: it can
+     * discard a box that contains a root, and a discarded box is a missed
+     * collision. Every other acceptance condition here is free to be as loose as
+     * it likes, because accepting early only reports an earlier time of impact;
+     * only this one test can lose a root.
+     */
     template <typename T>
     inline bool codomain_acceptance_vq(const T fmin[3],
                                        const T fmax[3],
                                        const T tol,
                                        const T tols[3],
+                                       const T numerical_error[3],
                                        bool &accept) {
         bool contains_zero = true;
         bool smaller_than_axis_tol = true;
         bool inside_epsilon_box = true;
         bool smaller_than_scalar_tol = true;
         bool degenerate_interval = true;
-        const T eps = std::numeric_limits<T>::epsilon();
 
         for (int d = 0; d < 3; ++d) {
             const T interval_width = fmax[d] - fmin[d];
-            contains_zero = contains_zero && (fmin[d] <= eps) && (fmax[d] >= -eps);
+            contains_zero =
+                contains_zero && (fmin[d] <= numerical_error[d]) && (fmax[d] >= -numerical_error[d]);
             smaller_than_axis_tol = smaller_than_axis_tol && (interval_width <= tols[d]);
-            inside_epsilon_box = inside_epsilon_box && (fmin[d] >= -tol) && (fmax[d] <= tol);
+            inside_epsilon_box =
+                inside_epsilon_box && (fmin[d] >= -numerical_error[d]) && (fmax[d] <= numerical_error[d]);
             smaller_than_scalar_tol = smaller_than_scalar_tol && (interval_width < tol);
             degenerate_interval = degenerate_interval && (fmin[d] >= fmax[d]);
         }
@@ -866,6 +884,65 @@ namespace sccd {
         return out;
     }
 
+    // ---------------------------------------------------------------------
+    // On the adaptive splitter below, from a measured study of it:
+    //
+    //  * It earns its keep. Against a uniform grid it is ~1.6x faster in the
+    //    scalar search, using three sub-intervals where uniform uses five.
+    //
+    //  * It is not, however, adapting much. The x0 term cancels exactly:
+    //
+    //        x_new = x0 - Jt(F + x0 J)/(JtJ) = -JtF/(JtJ)
+    //
+    //    (confirmed numerically to 4e-15 over 200k boxes, on the H_axis > eps
+    //    branch; the degenerate fallback does not cancel). So the loop below
+    //    does not nudge each grid point toward a nearby root -- every iteration
+    //    solves for the *same* least-squares point, and the N splitters differ
+    //    only in which window each is then clamped into. That is why the clamp
+    //    saturates: 95.9% of splitters are pinned at it here (N = 2), and 97.6%
+    //    in the vectorized kernel's copy of this function (N = 4), whose
+    //    narrower windows pin it harder still.
+    //
+    //    A consequence worth taking: the loop recomputes one quantity N times
+    //    and could hoist -JtF/(JtJ) out, bit-for-bit unchanged.
+    //
+    //  * The clamp is load-bearing, not cosmetic. It is what guarantees each
+    //    child is a bounded fraction of its parent. A splitter free to place a
+    //    cut anywhere has no guaranteed progress; tried directly, the search
+    //    failed to terminate.
+    //
+    //  * Placement cannot affect correctness. The sub-intervals tile the parent
+    //    (verified: no monotonicity or range violations in 600k boxes, which the
+    //    damping < 0.5 guarantees) and every child is still tested exactly. The
+    //    splitter is purely a performance knob.
+    //
+    //  * Placing the cuts analytically was tried properly and lost. A chord
+    //    across the split axis's two faces locates 68.3% of the 68.4% that is
+    //    genuinely root-free, soundly (min-of-affine is concave, max-of-affine
+    //    convex, so a chord can only understate it -- 0 over-claims in 4002
+    //    boxes). A splitter built on that, cutting at the dead prefix and suffix
+    //    and reserving one cut to subdivide what survives, ran 2.7x SLOWER than
+    //    this one on cloth-funnel (137 ms against 51 ms) and isolated LESS dead
+    //    volume: 56.7% against 61.1% at N = 2, and 58.4% against 64.5% at N = 4.
+    //
+    //    The reason is worth keeping, because it is easy to get wrong: that
+    //    68.4% is dead *pointwise*, as a union over the three dimensions -- one
+    //    dimension rules out one stretch of the axis and another dimension a
+    //    different stretch. Rejecting a child box needs a single dimension to
+    //    rule out the whole child. So a cut derived from the union cannot
+    //    harvest it, and only about 58% of the axis is rejectable by one
+    //    dimension over one contiguous stretch. A multi-way split does better
+    //    precisely because each child may then die by a different dimension --
+    //    which is what this splitter, crude as it is, already gets.
+    //
+    //    Two cheaper variants also lost: a bare crossing cut has no progress
+    //    guarantee and failed to terminate, and a fixed asymmetric cut is a
+    //    workload-dependent speed-versus-precision dial (0.05 ran 3x faster than
+    //    bisection on cloth-funnel and did not finish on armadillo-rollers).
+    //
+    // The conservative kernel therefore bisects, which is the only variant that
+    // is uniformly well behaved. See benchmark/oracle/README.md.
+    // ---------------------------------------------------------------------
     template <int SplitDim, int N, typename T>
     inline static void normal_equation_axis_splitters_vf(const Box<T> &domain,
                                                          const T sv[3],

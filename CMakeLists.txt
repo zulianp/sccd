@@ -27,6 +27,9 @@ endif()
 if(SCCD_ENABLE_CUDA)
   file(GLOB_RECURSE SCCD_CUDA_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cu")
   file(GLOB_RECURSE SCCD_CUDA_HEADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cuh")
+  # A backup kept next to the translation unit it was copied from still ends in
+  # .cu, so the glob compiles both and the linker sees every symbol twice.
+  list(FILTER SCCD_CUDA_SOURCES EXCLUDE REGEX "\\.bkp\\.cu$")
   list(APPEND SCCD_SOURCES ${SCCD_CUDA_SOURCES})
   list(APPEND SCCD_HEADERS ${SCCD_CUDA_HEADERS})
 
@@ -103,6 +106,16 @@ endif()
 
 if(SCCD_ENABLE_CUDA)
   target_compile_definitions(sccd PUBLIC SCCD_ENABLE_CUDA)
+
+  # The narrow-phase DFS kernels are register-bound: they carry a box, a set of
+  # corner values and the per-query geometry live across the whole loop, and the
+  # double instantiations sit near the point where nvcc starts spilling to local
+  # memory. Spills there are invisible in a timing run but cost several times the
+  # kernel's runtime, so make the register and spill counts printable.
+  option(SCCD_CUDA_VERBOSE_PTXAS "Print per-kernel register and spill counts" OFF)
+  if(SCCD_CUDA_VERBOSE_PTXAS)
+    target_compile_options(sccd PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xptxas=-v,-warn-spills>)
+  endif()
 endif()
 
 if(SCCD_ENABLE_HACKS)
@@ -196,6 +209,11 @@ if(SCCD_ENABLE_SMESH)
 
   add_executable(sccd_bench "${CMAKE_CURRENT_SOURCE_DIR}/benchmark/bench.exe.cpp")
   target_link_libraries(sccd_bench PRIVATE sccd)
+
+  # Scaling study over surface refinement. Needs smesh for the mesh, refine and
+  # skin operations, so it lives with the other smesh-gated targets.
+  add_executable(sccd_refine_scaling "${CMAKE_CURRENT_SOURCE_DIR}/benchmark/refine_scaling.exe.cpp")
+  target_link_libraries(sccd_refine_scaling PRIVATE sccd)
 endif()
 
 # Accuracy oracle: compares every narrow-phase mode against TightInclusion on the
@@ -204,6 +222,12 @@ endif()
 if(SCCD_ENABLE_TIGHT_INCLUSION)
   add_executable(ti_oracle "${CMAKE_CURRENT_SOURCE_DIR}/benchmark/ti_oracle.exe.cpp")
   target_link_libraries(ti_oracle PRIVATE sccd)
+  if(SCCD_ENABLE_CUDA)
+    # The oracle stays a plain C++ translation unit -- it only calls the host-side
+    # narrow_phase_* entry points -- but it needs cuda_runtime.h for the buffer
+    # management and libcudart to link.
+    target_link_libraries(ti_oracle PRIVATE CUDA::cudart)
+  endif()
 endif()
 
 include(SCCDTests)

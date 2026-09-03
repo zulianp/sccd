@@ -44,11 +44,58 @@
 #include <limits>
 #include <vector>
 
+// How many boxes are carried in lanes at once.
+//
+// Not simply "as wide as possible": half of this kernel's time goes on the
+// per-lane scalar bookkeeping between vector sweeps (classify, choose a split
+// axis, assemble two children), and that cost is linear in the lane count while
+// the vector work is not. Measured on NEON, where a vector holds 2 doubles, 4
+// lanes beat 8 by 19% on vertex-face and 27% on edge-edge; 16 and 32 were worse
+// still. The rule below is "two vector operations per corner evaluation".
+//
+// The x86 values are the prior, not a measurement -- re-run
+// benchmark/ti_oracle and the cloth-funnel probe there before trusting them.
 #ifndef SCCD_VNARROWPHASE_TI_VSIZE
+#if defined(__AVX512F__) || defined(__AVX2__)
 #define SCCD_VNARROWPHASE_TI_VSIZE 8
+#else
+#define SCCD_VNARROWPHASE_TI_VSIZE 4
+#endif
+#endif
+
+// Vertex-face and edge-edge do not want the same width. A vertex-face corner is
+// the more expensive of the two (an extra multiply-add and one more subtraction
+// per corner), so its vector sweeps take longer to amortize the per-lane scalar
+// bookkeeping, and it peaks narrower.
+//
+// Measured on NEON over armadillo-rollers (20k queries), each phase timed in
+// its own process: vertex-face runs 297.7 -> 246.0 ms going from 4 lanes to 2
+// (17% faster), while edge-edge runs 599.9 -> 494.6 ms going from 2 to 4 (18%
+// faster). 8 and 16 were far worse for both.
+//
+// Time each phase separately when redoing this. Running both in one process
+// makes the numbers useless: the edge-edge time tracks the *vertex-face*
+// instantiation's lane width by around 20% even under --phase ee, which never
+// executes vertex-face code at all. That is code layout, not work, and it is
+// large enough to invent or hide a result of this size.
+//
+// x86 is left on the single value: it has never been measured, and guessing a
+// split there would repeat the mistake this comment block already warns about.
+#ifndef SCCD_VNARROWPHASE_TI_VSIZE_VF
+#if defined(__ARM_NEON) && SCCD_VNARROWPHASE_TI_VSIZE > 2
+#define SCCD_VNARROWPHASE_TI_VSIZE_VF (SCCD_VNARROWPHASE_TI_VSIZE / 2)
+#else
+#define SCCD_VNARROWPHASE_TI_VSIZE_VF SCCD_VNARROWPHASE_TI_VSIZE
+#endif
+#endif
+
+#ifndef SCCD_VNARROWPHASE_TI_VSIZE_EE
+#define SCCD_VNARROWPHASE_TI_VSIZE_EE SCCD_VNARROWPHASE_TI_VSIZE
 #endif
 
 namespace sccd {
+
+    SCCD_FP_STRICT_BEGIN
 
     /**
      * \brief One corner evaluation, in TightInclusion's expression form.
@@ -63,6 +110,28 @@ namespace sccd {
      * but differently rounded form would invalidate the certificate and can lose
      * a root, which is a missed collision.
      */
+    /**
+     * \brief The (u, v) half of a corner evaluation, given the four points at t.
+     *
+     * Split out so a caller evaluating several corners that share a t value can
+     * compute the points once. The expressions are the ones ti_corner always
+     * used, in the same order, so the values are bit-identical either way and
+     * the error certificate is unaffected.
+     */
+    template <bool IsVertexFace, typename T>
+    static SCCD_ALWAYS_INLINE T ti_corner_at(const T p0, const T p1, const T p2, const T p3, const T u, const T v) {
+        if constexpr (IsVertexFace) {
+            // vertex minus the point (u, v) of the triangle
+            const T face = (p2 - p1) * u + (p3 - p1) * v + p1;
+            return p0 - face;
+        } else {
+            // point u of edge a minus point v of edge b
+            const T va = (p1 - p0) * u + p0;
+            const T vb = (p3 - p2) * v + p2;
+            return va - vb;
+        }
+    }
+
     template <bool IsVertexFace, typename T>
     static SCCD_ALWAYS_INLINE T ti_corner(const T a0,
                                           const T a1,
@@ -83,16 +152,7 @@ namespace sccd {
         const T p2 = d2 * t + a2;
         const T p3 = d3 * t + a3;
 
-        if constexpr (IsVertexFace) {
-            // vertex minus the point (u, v) of the triangle
-            const T face = (p2 - p1) * u + (p3 - p1) * v + p1;
-            return p0 - face;
-        } else {
-            // point u of edge a minus point v of edge b
-            const T va = (p1 - p0) * u + p0;
-            const T vb = (p3 - p2) * v + p2;
-            return va - vb;
-        }
+        return ti_corner_at<IsVertexFace, T>(p0, p1, p2, p3, u, v);
     }
 
     /**
@@ -209,16 +269,19 @@ namespace sccd {
                                            T (&fmin)[3][VSIZE],
                                            T (&fmax)[3][VSIZE]) {
             for (int d = 0; d < 3; ++d) {
-#pragma omp simd
+                T* const SCCD_RESTRICT lo_out = fmin[d];
+                T* const SCCD_RESTRICT hi_out = fmax[d];
+                SCCD_VECTORIZE_LOOP
                 for (int l = 0; l < VSIZE; ++l) {
                     T lo = corner[d][0][l];
                     T hi = corner[d][0][l];
                     for (int c = 1; c < 8; ++c) {
-                        lo = sccd::min<T>(lo, corner[d][c][l]);
-                        hi = sccd::max<T>(hi, corner[d][c][l]);
+                        const T v = corner[d][c][l];
+                        lo = sccd::min<T>(lo, v);
+                        hi = sccd::max<T>(hi, v);
                     }
-                    fmin[d][l] = lo;
-                    fmax[d][l] = hi;
+                    lo_out[l] = lo;
+                    hi_out[l] = hi;
                 }
             }
         }
@@ -235,22 +298,63 @@ namespace sccd {
                                      const T (&mt)[4][VSIZE],
                                      const T (&mu)[4][VSIZE],
                                      const T (&mv)[4][VSIZE],
+                                     const uint8_t* const SCCD_RESTRICT wanted,
                                      T (&out)[3][4][VSIZE]) {
             for (int d = 0; d < 3; ++d) {
-                for (int k = 0; k < 4; ++k) {
-#pragma omp simd
+                // Hoisted into restrict-qualified locals. Without this the
+                // compiler cannot prove `out` does not alias the geometry it
+                // reads, and it emits the whole loop scalar -- which it did:
+                // this kernel's hottest loop had no vector instructions in it at
+                // all. #pragma omp simd does not help, since it is inert unless
+                // the consumer happens to compile with OpenMP enabled, and the
+                // kernel must not depend on that.
+                const T* const SCCD_RESTRICT a0 = lane.start[0][d];
+                const T* const SCCD_RESTRICT a1 = lane.start[1][d];
+                const T* const SCCD_RESTRICT a2 = lane.start[2][d];
+                const T* const SCCD_RESTRICT a3 = lane.start[3][d];
+                const T* const SCCD_RESTRICT d0 = lane.delta[0][d];
+                const T* const SCCD_RESTRICT d1 = lane.delta[1][d];
+                const T* const SCCD_RESTRICT d2 = lane.delta[2][d];
+                const T* const SCCD_RESTRICT d3 = lane.delta[3][d];
+
+                // Corners k and k+2 of a mid face always share a t value, for
+                // every split axis: ti_mid_corner's four entries pair up as
+                // (lo, hi, lo, hi) in the t bit, and a t-split pins all four to
+                // the midpoint. So the four points at t are computed twice per
+                // lane rather than four times, halving the FMA count of this
+                // loop. The corner expressions themselves are untouched, so the
+                // results stay bit-identical -- see ti_corner_at.
+                for (int g = 0; g < 2; ++g) {
+                    const int k0 = g;
+                    const int k1 = g + 2;
+                    const T* const SCCD_RESTRICT tk = mt[k0];
+                    const T* const SCCD_RESTRICT u0 = mu[k0];
+                    const T* const SCCD_RESTRICT v0 = mv[k0];
+                    const T* const SCCD_RESTRICT u1 = mu[k1];
+                    const T* const SCCD_RESTRICT v1 = mv[k1];
+                    T* const SCCD_RESTRICT o0 = out[d][k0];
+                    T* const SCCD_RESTRICT o1 = out[d][k1];
+                    // Only about half the lanes split on any given pass -- the rest
+                    // were accepted or rejected and their mid face is never read.
+                    // Measured at 51%, so skipping them removes roughly a quarter
+                    // of this kernel's total work.
+                    //
+                    // The test is per lane rather than a compaction because the
+                    // geometry is indexed by lane: compacting would trade these
+                    // branches for a gather of the same width. On a target where
+                    // the loop below does vectorize, prefer predication here.
                     for (int l = 0; l < VSIZE; ++l) {
-                        out[d][k][l] = ti_corner<IsVertexFace, T>(lane.start[0][d][l],
-                                                                  lane.start[1][d][l],
-                                                                  lane.start[2][d][l],
-                                                                  lane.start[3][d][l],
-                                                                  lane.delta[0][d][l],
-                                                                  lane.delta[1][d][l],
-                                                                  lane.delta[2][d][l],
-                                                                  lane.delta[3][d][l],
-                                                                  mt[k][l],
-                                                                  mu[k][l],
-                                                                  mv[k][l]);
+                        if (!wanted[l]) {
+                            continue;
+                        }
+                        const T t = tk[l];
+                        assert(t == mt[k1][l] && "mid-face corners k and k+2 must share a t value");
+                        const T p0 = d0[l] * t + a0[l];
+                        const T p1 = d1[l] * t + a1[l];
+                        const T p2 = d2[l] * t + a2[l];
+                        const T p3 = d3[l] * t + a3[l];
+                        o0[l] = ti_corner_at<IsVertexFace, T>(p0, p1, p2, p3, u0[l], v0[l]);
+                        o1[l] = ti_corner_at<IsVertexFace, T>(p0, p1, p2, p3, u1[l], v1[l]);
                     }
                 }
             }
@@ -354,7 +458,8 @@ namespace sccd {
                                       const T tol,
                                       const int toi_stride) {
         using T_HP = double;
-        constexpr int VSIZE = SCCD_VNARROWPHASE_TI_VSIZE;
+        constexpr int VSIZE =
+            IsVertexFace ? SCCD_VNARROWPHASE_TI_VSIZE_VF : SCCD_VNARROWPHASE_TI_VSIZE_EE;
 
         assert(toi_stride == 0 || toi_stride == 1);
         if (noverlaps == 0) {
@@ -370,6 +475,13 @@ namespace sccd {
         std::atomic<T_HP> global_min{domain_toi};
 
         sccd::parallel_for_br_dynamic(0, nblocks, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+            // Deliberately a plain local, not thread_local. The per-chunk
+            // reserve looks like allocation churn, but measured on NEON over
+            // armadillo-rollers it is worth nothing at all (-1.5% VF, -0.2% EE,
+            // i.e. inside the noise): the scheduler's chunks are large enough to
+            // amortize it and the allocator reuses the block. thread_local would
+            // trade that for a permanent ~250 KB per thread and an indirection
+            // on every access.
             std::vector<TiBox<int>> stack;
             stack.reserve(1024);
 
@@ -597,6 +709,9 @@ namespace sccd {
                     // splitting ride along; discarding their result is cheaper
                     // than branching inside the SIMD loop.
                     for (int l = 0; l < VSIZE; ++l) {
+                        if (!will_split[l]) {
+                            continue;
+                        }
                         const int axis = split_axis[l];
                         const T_HP mid = split_mid[l];
                         for (int k = 0; k < 4; ++k) {
@@ -607,7 +722,8 @@ namespace sccd {
                         }
                     }
 
-                    ti_detail::ti_eval_mid_face<IsVertexFace, T_HP, VSIZE>(lane, mt, mu, mv, mid_face);
+                    ti_detail::ti_eval_mid_face<IsVertexFace, T_HP, VSIZE>(
+                        lane, mt, mu, mv, will_split, mid_face);
 
                     // Phase 3: assemble both children from the parent's corners
                     // plus the shared mid face, and push them.
@@ -729,6 +845,8 @@ namespace sccd {
         return v_narrow_phase_ti_impl<false, T, I>(
             noverlaps, e0overlap, e1overlap, v0, v1, edge_stride, edges, max_toi, toi, max_depth, tol, toi_stride);
     }
+
+    SCCD_FP_STRICT_END
 
 }  // namespace sccd
 

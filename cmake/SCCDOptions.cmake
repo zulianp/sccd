@@ -1,6 +1,12 @@
 option(SCCD_ENABLE_TBB "Use TBB for parallelization" OFF)
 option(SCCD_ENABLE_OPENMP "Use OpenMP for parallelization" ON)
 option(SCCD_ENABLE_CUDA "Enable CUDA" OFF)
+# Left unset, CMake picks a default architecture for the detected toolkit,
+# which on a recent toolkit is well below the target hardware. Register file
+# size, shared-memory limits and DFMA scheduling all differ by architecture,
+# so a kernel tuned against the default is tuned against the wrong machine.
+# 90 is GH200 (Alps), the benchmark target.
+set(SCCD_CUDA_ARCHITECTURES "90" CACHE STRING "CUDA architectures to build for")
 option(SCCD_BUILD_SHARED_LIBS "Build SCCD as a shared library" ON)
 option(SCCD_ENABLE_NATIVE_ARCH "Build for the host CPU (-march=native); required for the AVX2/AVX-512 kernels" ON)
 option(SCCD_ENABLE_HACKS "Do not use without Scalable-CCD library" OFF)

@@ -819,7 +819,10 @@ namespace {
             if (i < mma.size()) {
                 expected = mma[i] != 0;
             } else if (i < root_toi.size()) {
-                expected = std::isfinite(root_toi[i]);
+                // Bitwise, not std::isfinite: the roots file encodes "no
+                // collision" as NaN, and -ffast-math folds isfinite to true,
+                // which would turn every correct miss into a reported fn.
+                expected = sccd::is_finite_bits(root_toi[i]);
             }
 
             const bool found = sccd_toi[i] < scalar_t(1);

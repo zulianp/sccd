@@ -2,6 +2,9 @@
 #define SCCD_MATH_HPP
 
 #include <stdint.h>
+#include <string.h>
+
+#include <type_traits>
 
 #ifdef _MSC_VER
 #include <intrin.h>
@@ -60,6 +63,37 @@ template <typename T> static inline T array_max(const int n, const T* arr) {
   }
   return max;
 }
+/**
+ * \brief NaN test that survives -ffast-math.
+ *
+ * std::isnan compiles to a constant false under -ffinite-math-only, because the
+ * flag promises the value cannot be NaN. Anything that *validates* a result must
+ * not rest on that promise: the benchmark datasets encode "this query has no
+ * collision" as a NaN root, so a folded isnan silently turns every correct
+ * no-collision answer into a reported missed collision, and inverts the meaning
+ * of the acceptance gate. Reading the bits cannot be folded away.
+ */
+template <typename T> static inline bool is_nan_bits(const T v) {
+  static_assert(std::is_floating_point<T>::value, "is_nan_bits expects a floating-point type");
+  typedef typename std::conditional<sizeof(T) == 4, uint32_t, uint64_t>::type U;
+  static_assert(sizeof(U) == sizeof(T), "unsupported floating-point width");
+  U bits;
+  memcpy(&bits, &v, sizeof(T));
+  const U exponent = (sizeof(T) == 4) ? (U)0x7F800000u : (U)0x7FF0000000000000ull;
+  const U mantissa = (sizeof(T) == 4) ? (U)0x007FFFFFu : (U)0x000FFFFFFFFFFFFFull;
+  return (bits & exponent) == exponent && (bits & mantissa) != 0;
+}
+
+/** \brief std::isfinite without the -ffast-math folding. See is_nan_bits. */
+template <typename T> static inline bool is_finite_bits(const T v) {
+  static_assert(std::is_floating_point<T>::value, "is_finite_bits expects a floating-point type");
+  typedef typename std::conditional<sizeof(T) == 4, uint32_t, uint64_t>::type U;
+  U bits;
+  memcpy(&bits, &v, sizeof(T));
+  const U exponent = (sizeof(T) == 4) ? (U)0x7F800000u : (U)0x7FF0000000000000ull;
+  return (bits & exponent) != exponent;
+}
+
 } // namespace sccd
 
 #endif // SCCD_MATH_HPP
