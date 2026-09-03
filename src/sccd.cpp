@@ -7,6 +7,8 @@
 namespace sccd {
     unsigned long long g_np_host_boxes = 0;
     unsigned long long g_np_host_hist[24] = {0};
+    unsigned long long g_np_host_level[80] = {0};
+    unsigned long long g_np_host_depth_accept = 0;
 }
 #endif
 

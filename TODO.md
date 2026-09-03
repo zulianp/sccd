@@ -87,13 +87,24 @@ fetches them and a user who wants the library does not.
 
 ## Lower
 
-- **The device conservative search classifies 944 boxes per query where the host
-  classifies 1.8.** Same acceptance test, same tolerances, same queries: 796.3M
-  boxes against 1.49M on cloth-funnel, a **535×** work difference. That is the
-  whole of the 26× time gap and then some, and it is not the price of the
-  guarantee — the host is conservative too, on the same inputs, in under two boxes
-  per query. Counted with `SCCD_NP_COUNT_BOXES` (off by default); the numbers and
-  the method are under "Counted" in `benchmark/ASSESSMENT.md`.
+- **The device conservative search classifies 111 boxes per query where the host
+  classifies 1.2**, on the path `find_earliest_impact_time` uses: 97.8M boxes
+  against 1.04M on cloth-funnel, **94×**. Same acceptance test, same tolerances,
+  same queries, and not the price of the guarantee — the host is conservative too.
+  Counted with `SCCD_NP_COUNT_BOXES` (off by default).
+
+  A **separate and larger** defect sits on the `find_impact_times` path, which
+  runs the block-per-query kernel: 274 queries there cost 706M boxes, 2.58 million
+  each against the host's 1,844, a ratio of **1397×**. Start with its 128-way
+  seeding dice, and re-run the measurement that kept the dice (single-root seeding
+  was recorded as worse, 803 → 871 ms on armadillo edge-edge, which is hard to
+  credit against 2.58M boxes per query).
+
+  Ruled out along the way: the depth cap (neither side ever accepts at it), the
+  split rule (both take the largest width/tolerance ratio), the acceptance test
+  and the tolerances (transcribed). What is left is the `t` bound each query
+  searches under and the order boxes leave a stack that mixes queries — the device
+  tree *broadens* to 4.2M boxes at level 16 where the host has 7,000.
 
   Corner reuse, which this item used to propose, is **not available**: the kernel
   uses 238 of 255 registers with no spills, and carrying eight corners for three
@@ -102,11 +113,9 @@ fetches them and a user who wants the library does not.
   per-box arithmetic — and are recorded so they are not retried.
 
   Counted per query, the gap **scales with query difficulty**: the two are within
-  a few percent on queries needing 0–1 boxes, 2× apart at 8, 32× at 64, 462× at
-  16,384, and the device has 208 queries costing over a million boxes where the
-  host has none and its worst costs 48,561. So the device is not starting wrong,
-  it is failing to converge on hard queries. Next step is to trace **one** such
-  query box by box — the aggregates have said all they can.
+  a few percent on queries needing 0–1 boxes, 2× apart at 8, 32× at 64 and 462× at
+  16,384. So the device is not starting wrong, it is failing to converge on the
+  queries that need real search.
 
 - **`SCCD_NARROWPHASE_MODE` does not reach the quad path.** There is one quad
   root-finder variant, so the enum has nothing to select between. It now says so

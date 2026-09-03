@@ -122,6 +122,10 @@ namespace sccd {
         ++hist[b];
     }
 #define SCCD_NP_HOST_PERQ_TICK(q) (++perq_[(q)])
+    // Matching the device's g_np_level / g_np_depth_accept, same units, so the two
+    // level distributions can be laid side by side.
+    extern unsigned long long g_np_host_level[80];
+    extern unsigned long long g_np_host_depth_accept;
 #else
 #define SCCD_NP_HOST_BOX_TICK() ((void)0)
 #endif
@@ -717,12 +721,19 @@ namespace sccd {
                         SCCD_NP_HOST_BOX_TICK();
 #ifdef SCCD_NP_COUNT_BOXES
                         SCCD_NP_HOST_PERQ_TICK(block_begin + lane_query[l]);
+                        {
+                            const int lv = lane_depth[l];
+                            ++g_np_host_level[lv < 80 ? lv : 79];
+                        }
 #endif
                         if (!ti_detail::ti_classify<T_HP, VSIZE>(
                                 fmin, fmax, box_lo, box_hi, lane, l, accept)) {
                             continue;  // no root in this box
                         }
 
+#ifdef SCCD_NP_COUNT_BOXES
+                        if (!accept && lane_depth[l] >= max_depth) ++g_np_host_depth_accept;
+#endif
                         if (accept || lane_depth[l] >= max_depth) {
                             if (box_lo[0][l] < toi_q[q]) {
                                 toi_q[q] = box_lo[0][l];
@@ -861,8 +872,13 @@ namespace sccd {
                     worst_q = q;
                 }
             }
-            fprintf(stderr, "sccd-np-hist host queries=%zu worst=%llu at=%zu hist=", noverlaps, worst, worst_q);
+            fprintf(stderr, "sccd-np-hist host stride=%d queries=%zu worst=%llu at=%zu hist=",
+                    toi_stride, noverlaps, worst, worst_q);
             for (int b = 0; b < 24; ++b) fprintf(stderr, "%llu%s", hist[b], b == 23 ? "\n" : ",");
+            fprintf(stderr, "sccd-np-level host depth_accept=%llu levels=", g_np_host_depth_accept);
+            for (int b = 0; b < 80; ++b) fprintf(stderr, "%llu%s", g_np_host_level[b], b == 79 ? "\n" : ",");
+            for (int b = 0; b < 80; ++b) g_np_host_level[b] = 0;
+            g_np_host_depth_accept = 0;
         }
 #endif
         return 0;
@@ -886,8 +902,8 @@ namespace sccd {
         const unsigned long long before_ = g_np_host_boxes;
         const int rc_ = v_narrow_phase_ti_impl<true, T, I>(
             noverlaps, voverlap, foverlap, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_stride);
-        fprintf(stderr, "sccd-np-count vf host-conservative queries=%zu boxes=%llu per_query=%.1f\n",
-                noverlaps, g_np_host_boxes - before_,
+        fprintf(stderr, "sccd-np-count vf host-conservative stride=%d queries=%zu boxes=%llu per_query=%.1f\n",
+                toi_stride, noverlaps, g_np_host_boxes - before_,
                 noverlaps ? (double)(g_np_host_boxes - before_) / (double)noverlaps : 0.0);
         return rc_;
 #else
@@ -913,8 +929,8 @@ namespace sccd {
         const unsigned long long before_ = g_np_host_boxes;
         const int rc_ = v_narrow_phase_ti_impl<false, T, I>(
             noverlaps, e0overlap, e1overlap, v0, v1, edge_stride, edges, max_toi, toi, max_depth, tol, toi_stride);
-        fprintf(stderr, "sccd-np-count ee host-conservative queries=%zu boxes=%llu per_query=%.1f\n",
-                noverlaps, g_np_host_boxes - before_,
+        fprintf(stderr, "sccd-np-count ee host-conservative stride=%d queries=%zu boxes=%llu per_query=%.1f\n",
+                toi_stride, noverlaps, g_np_host_boxes - before_,
                 noverlaps ? (double)(g_np_host_boxes - before_) / (double)noverlaps : 0.0);
         return rc_;
 #else
