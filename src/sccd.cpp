@@ -3,6 +3,12 @@
 
 #include "srootfinder.hpp"
 
+#ifdef SCCD_NP_COUNT_BOXES
+namespace sccd {
+    unsigned long long g_np_host_boxes = 0;
+}
+#endif
+
 extern "C" {
 
 int sccd_find_root_bisection_vf_f(int max_iter,

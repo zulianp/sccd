@@ -83,6 +83,15 @@ and never read anywhere.
 
 ## Diagnostics
 
+`SCCD_NP_COUNT_BOXES` is a **compile-time** define, not an environment variable:
+`-DSCCD_NP_COUNT_BOXES` in `CMAKE_CUDA_FLAGS` and `CMAKE_CXX_FLAGS` makes the
+device narrow phase and the host TightInclusion kernel each count the boxes they
+classify and print one line per call to stderr. Both count the same unit, so the
+two numbers are directly comparable — which is what showed that the device
+conservative search does 535× the host's work on identical queries. It is a
+global atomic on the hot path, so an instrumented build's *timings* mean nothing;
+only the counts do.
+
 | Variable | Type | Effect |
 |---|---|---|
 | `SCCD_BROADPHASE_VERBOSE` | set | Logs the chosen broad phase and the shape statistics behind the choice. |
