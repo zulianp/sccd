@@ -125,6 +125,35 @@ if(SCCD_ENABLE_SMESH)
   endforeach()
 endif()
 
+# The accuracy gate, as an actual test.
+#
+# ti_oracle is what decides whether a narrow-phase kernel is conservative -- it
+# exits non-zero when a mode misses a collision or reports a time of impact later
+# than the dataset's exact root -- and it was not a ctest, so the gate only ran
+# when somebody remembered to run it.
+#
+# It needs the benchmark datasets, which are several gigabytes and not in the
+# repository, so each scene registers only if its queries are actually present.
+# --max-files bounds the runtime: the gate is meant to run with the suite, and a
+# full trajectory per scene does not belong there. Run ti_oracle by hand for the
+# exhaustive pass.
+if(TARGET ti_oracle)
+  set(SCCD_ORACLE_SCENES cloth-ball armadillo-rollers cloth-funnel)
+  set(SCCD_ORACLE_MAX_FILES 8 CACHE STRING "Query files per scene in the ti_oracle ctest")
+  foreach(SCCD_ORACLE_SCENE IN LISTS SCCD_ORACLE_SCENES)
+    set(SCCD_ORACLE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/data/${SCCD_ORACLE_SCENE}")
+    if(IS_DIRECTORY "${SCCD_ORACLE_DIR}/queries")
+      add_test(
+        NAME oracle_${SCCD_ORACLE_SCENE}
+        COMMAND $<TARGET_FILE:ti_oracle> "${SCCD_ORACLE_DIR}"
+                --max-files ${SCCD_ORACLE_MAX_FILES})
+    else()
+      message(STATUS
+        "SCCD: not registering oracle_${SCCD_ORACLE_SCENE} -- no queries under ${SCCD_ORACLE_DIR}")
+    endif()
+  endforeach()
+endif()
+
 if(NOT SCCD_ENABLE_CUDA)
   return()
 endif()
