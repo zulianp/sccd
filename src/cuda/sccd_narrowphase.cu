@@ -498,6 +498,24 @@ namespace sccd {
             return cond_mask;
         }
 
+        /**
+         * \brief Mode-0 acceptance test.
+         *
+         * The origin-containment test -- the only test here whose failure
+         * *rejects* a box -- is padded by `max(tol, aerr[d])`. It used to be
+         * padded by `tol` alone, and that is unsound whenever the caller asks for
+         * a distance tolerance below the certified numerical error bound: the pad
+         * is then narrower than the error in the corner values, and a box holding
+         * a root can be discarded. In double, with the bound at
+         * `(vf ? 30 : 28) * eps * min(max_coord, 1)^3 <= 6.7e-15`, a typical
+         * tolerance of 3e-8 is far wider and nothing changes -- which is why the
+         * scenes measured never saw it. Taking the max makes that structural
+         * instead of a property of the tolerance the caller happened to pass.
+         *
+         * The acceptance conditions keep using `tol`. Accepting a box is always
+         * safe however loose the test, so those are an accuracy question, not a
+         * soundness one.
+         */
         template <bool is_vf, typename T, typename Vec4>
         static inline __device__ void evaluate_cell_3d(const Domain<T>& cell,
                                                        const Vec4 sx,
@@ -508,6 +526,7 @@ namespace sccd {
                                                        const Vec4 ez,
                                                        const T tol,
                                                        const T* const SCCD_RESTRICT adaptive_tol,
+                                                       const T* const SCCD_RESTRICT aerr,
                                                        int& contains_origin,
                                                        int& accept) {
             const T tl = cell.tlower, tu = cell.tupper;
@@ -522,21 +541,24 @@ namespace sccd {
             fminmax<T>(f, fmin, fmax);
             const T x_width = fmax - fmin;
             const uint8_t x_mask = cond_mask<T>(fmin, fmax, tol, adaptive_tol[0]);
-            int co = (fmin <= tol) & (fmax >= -tol);
+            const T x_pad = device::max<T>(tol, aerr[0]);
+            int co = (fmin <= x_pad) & (fmax >= -x_pad);
 
             sample_f<is_vf, T, Vec4>(tl, tu, ul, uu, vl, vu, sy, ey, f);
 
             fminmax<T>(f, fmin, fmax);
             const T y_width = fmax - fmin;
             const uint8_t y_mask = cond_mask<T>(fmin, fmax, tol, adaptive_tol[1]);
-            co &= (fmin <= tol) & (fmax >= -tol);
+            const T y_pad = device::max<T>(tol, aerr[1]);
+            co &= (fmin <= y_pad) & (fmax >= -y_pad);
 
             sample_f<is_vf, T, Vec4>(tl, tu, ul, uu, vl, vu, sz, ez, f);
 
             fminmax<T>(f, fmin, fmax);
             const T z_width = fmax - fmin;
             const uint8_t z_mask = cond_mask<T>(fmin, fmax, tol, adaptive_tol[2]);
-            co &= (fmin <= tol) & (fmax >= -tol);
+            const T z_pad = device::max<T>(tol, aerr[2]);
+            co &= (fmin <= z_pad) & (fmax >= -z_pad);
 
             const uint8_t and_mask = (x_mask & y_mask & z_mask);
             const T true_tol = device::max<T>(x_width, device::max<T>(y_width, z_width));
@@ -553,12 +575,14 @@ namespace sccd {
         // ---------------------------------------------------------------------
         // TightInclusion-equivalent predicate and split.
         //
-        // The kernels above implement the host's mode-0 acceptance test, which is
-        // not conservative: it compares a *codomain* width against a *domain*
-        // tolerance, and it pads the origin-containment test with the user's
-        // distance tolerance instead of TightInclusion's certified numerical
-        // error bound. Measured on GH200, that costs late times of impact in
-        // single precision (benchmark/oracle/README.md).
+        // The kernels above implement the host's mode-0 acceptance test. It is
+        // looser than TightInclusion's -- it compares a *codomain* width against a
+        // *domain* tolerance -- but looseness is on the accepting side and costs
+        // accuracy, not safety. Its rejection is now padded by the same certified
+        // error bound as the kernels below (see evaluate_cell_3d); it used to be
+        // padded by the caller's distance tolerance alone, which is the unsound
+        // rejection that cost late times of impact in single precision on GH200
+        // (benchmark/oracle/README.md).
         //
         // What follows is the device twin of src/sccd_vnarrowphase_ti.hpp, which
         // reproduces TightInclusion exactly and is the host's mode 2.
@@ -931,11 +955,13 @@ namespace sccd {
                 compute_edge_edge_tolerance<TC, Vec4>(tol, sx, sy, sz, ex, ey, ez, &atol[0], &atol[1], &atol[2]);
             }
 
-            if constexpr (conservative) {
-                aerr[0] = numerical_error_bound_component<is_vf, TC, Vec4>(sx, ex);
-                aerr[1] = numerical_error_bound_component<is_vf, TC, Vec4>(sy, ey);
-                aerr[2] = numerical_error_bound_component<is_vf, TC, Vec4>(sz, ez);
-            }
+            // Both paths need this, not just the conservative one. Mode 0's
+            // origin-containment test pads with the caller's distance tolerance,
+            // which is only wide enough when that tolerance happens to exceed the
+            // certified bound; see evaluate_cell_3d.
+            aerr[0] = numerical_error_bound_component<is_vf, TC, Vec4>(sx, ex);
+            aerr[1] = numerical_error_bound_component<is_vf, TC, Vec4>(sy, ey);
+            aerr[2] = numerical_error_bound_component<is_vf, TC, Vec4>(sz, ez);
         }
 
         // Per-slot validity tag stored in the qid array.  Three states:
@@ -1439,7 +1465,7 @@ namespace sccd {
                     cell, sx, sy, sz, ex, ey, ez, atol, aerr, contains_origin, accept);
             } else {
                 evaluate_cell_3d<is_vf, T, Vec4>(
-                    cell, sx, sy, sz, ex, ey, ez, tol, atol, contains_origin, accept);
+                    cell, sx, sy, sz, ex, ey, ez, tol, atol, aerr, contains_origin, accept);
             }
         }
 
@@ -1530,8 +1556,9 @@ namespace sccd {
             int active = active_in;
             Vec4 sx, sy, sz, ex, ey, ez;
             TC atol[3] = {TC(0), TC(0), TC(0)};
-            // Only written when `conservative`; unread otherwise, and the
-            // compiler drops it along with the code that would fill it.
+            // The certified error bound, per axis. Both acceptance policies read
+            // it now: the conservative one for all three of its conditions, mode 0
+            // as the floor under its rejection pad.
             TC aerr[3] = {TC(0), TC(0), TC(0)};
 
             if (active) {
