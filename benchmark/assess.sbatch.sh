@@ -54,6 +54,11 @@ set -uo pipefail
 : "${ASSESS_CASES:=16}"
 : "${ASSESS_SCENES:=cloth-ball armadillo-rollers cloth-funnel}"
 : "${ASSESS_REFINE_LEVELS:=2}"
+# No single driver invocation may consume the whole job. A variant that exceeds
+# this is recorded as a timeout row rather than silently starving the rest --
+# "this configuration does not finish" is itself a result, and it is the one the
+# armadillo edge-edge blowup produces.
+: "${ASSESS_TIMEOUT:=600}"
 
 mkdir -p "$ASSESS_OUT"
 CSV="$ASSESS_OUT/assessment.csv"
@@ -88,8 +93,17 @@ run_bench() { # hardware scene component variant repeat  [env assignments...]
     # job's uenv view without a nested uenv run.
     local out
     out=$( export "$@" SCCD_BENCH_MAX_CASES="$ASSESS_CASES"
-           "$build/sccd_bench" "$ASSESS_DATA" "$scene" 2>>"$LOG" )
+           timeout "$ASSESS_TIMEOUT" "$build/sccd_bench" "$ASSESS_DATA" "$scene" 2>>"$LOG" )
+    local rc=$?
     echo "$out" >> "$LOG"
+    if [ "$rc" -ne 0 ]; then
+        local why="FAILED rc=$rc"
+        [ "$rc" -eq 124 ] && why="TIMEOUT after ${ASSESS_TIMEOUT}s"
+        echo "$hw,$scene,-,$comp,$var,broad,$rep,,,$why" >> "$CSV"
+        echo "$hw,$scene,-,$comp,$var,narrow,$rep,,,$why" >> "$CSV"
+        log "$why  $hw/$scene/$comp/$var rep $rep"
+        return
+    fi
 
     echo "$out" | awk -F, -v hw="$hw" -v scene="$scene" -v comp="$comp" \
                         -v var="$var" -v rep="$rep" '
@@ -112,8 +126,21 @@ run_refine() { # hardware topology component variant repeat  [env assignments...
 
     local out
     out=$( export "$@"
-           "$build/sccd_refine_scaling" "$ASSESS_REFINE_LEVELS" 2>>"$LOG" )
+           timeout "$ASSESS_TIMEOUT" "$build/sccd_refine_scaling" "$ASSESS_REFINE_LEVELS" 2>>"$LOG" )
+    local rc=$?
     echo "$out" >> "$LOG"
+    # A failure here is a result, not an accident to be swallowed. The device
+    # narrow phase raises SMESH_ERROR for QUADSHELL4 -- it is simply not
+    # implemented -- so the hopper quad rows are expected to land here, and an
+    # explicit row is what puts that gap in the data instead of leaving it as an
+    # unexplained absence.
+    if [ "$rc" -ne 0 ]; then
+        local why="FAILED rc=$rc"
+        [ "$rc" -eq 124 ] && why="TIMEOUT after ${ASSESS_TIMEOUT}s"
+        echo "$hw,refine-$topo,-,$comp,$var,narrow,$rep,,,$why" >> "$CSV"
+        log "$why  $hw/refine-$topo/$comp/$var rep $rep"
+        return
+    fi
 
     echo "$out" | awk -v hw="$hw" -v topo="$topo" -v comp="$comp" \
                       -v var="$var" -v rep="$rep" '
@@ -137,6 +164,20 @@ nvidia-smi --query-gpu=name,memory.total --format=csv,noheader >> "$LOG" 2>&1
 for build in "$BUILD_GRACE" "$BUILD_HOPPER"; do
     [ -x "$build/sccd_bench" ] || echo "warning: $build/sccd_bench missing" | tee -a "$LOG"
 done
+
+# ---------------------------------------------------------------------------
+# Warmup. Creating the CUDA context costs hundreds of milliseconds and lands on
+# whichever device run happens to go first: a smoke run measured 584 ms for a
+# broad phase that takes 0.95 ms once warm. Burning it here keeps it out of
+# repeat 1 rather than leaving a 600x outlier for the median to hide.
+# ---------------------------------------------------------------------------
+log "warmup"
+( export SCCD_BENCH_MAX_CASES=1 SCCD_BENCH_EXECUTION_SPACE=device
+  timeout "$ASSESS_TIMEOUT" "$BUILD_HOPPER/sccd_bench" "$ASSESS_DATA" \
+      "${ASSESS_SCENES%% *}" ) >> "$LOG" 2>&1
+( export SCCD_BENCH_MAX_CASES=1
+  timeout "$ASSESS_TIMEOUT" "$BUILD_GRACE/sccd_bench" "$ASSESS_DATA" \
+      "${ASSESS_SCENES%% *}" ) >> "$LOG" 2>&1
 
 # ---------------------------------------------------------------------------
 # The sweep. Repeat is the OUTER loop -- see the note at the top on why.
@@ -181,15 +222,29 @@ for rep in $(seq 1 "$ASSESS_REPEATS"); do
     # need their own path to optimality in the root finder, so they are measured
     # here rather than assumed to track the triangle numbers. These rows are the
     # baseline that quad root-finder work is judged against.
+    # Only mode 0 here, for two independent reasons.
+    #
+    # The narrow-phase mode comparison belongs on the scene rows above, which use
+    # real frames. refine_scaling synthesizes its motion by reflecting the mesh
+    # through its centre, which is violent enough that every swept box overlaps
+    # every other -- its own usage text says so -- and mode 2 on that all-pairs
+    # geometry does not finish in any useful time. A smoke run stalled there for
+    # minutes on a two-level cube.
+    #
+    # And for the quad rows it would be measuring the same code twice: the quad
+    # path has exactly one root-finder variant and never consults the mode enum,
+    # so SCCD_NARROWPHASE_MODE is silently ignored for quads. Recording that as
+    # two variants would manufacture a comparison that does not exist.
+    #
+    # What these rows are for is scaling with element count, and the quad
+    # baseline that quad root-finder work gets judged against.
     for topo in tri quad; do
         topo_env=""
         [ "$topo" = "quad" ] && topo_env="quad"
-        for mode in 0 2; do
-            run_refine grace "$topo" refine "mode$mode" "$rep" \
-                SCCD_TOPOLOGY="$topo_env" SCCD_NARROWPHASE_MODE="$mode"
-        done
+        run_refine grace "$topo" refine "host" "$rep" \
+            SCCD_TOPOLOGY="$topo_env" SCCD_NARROWPHASE_MODE=0
         run_refine hopper "$topo" refine "cuda" "$rep" \
-            SCCD_TOPOLOGY="$topo_env" SCCD_BENCH_EXECUTION_SPACE=device SCCD_NARROWPHASE_MODE=2
+            SCCD_TOPOLOGY="$topo_env" SCCD_BENCH_EXECUTION_SPACE=device SCCD_NARROWPHASE_MODE=0
     done
 done
 

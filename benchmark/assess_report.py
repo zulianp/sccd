@@ -143,6 +143,27 @@ def main(argv):
                       f"({medians[best]:.2f} vs {medians[worst]:.2f} ms; "
                       f"spread {noise * 100:.0f}%).\n")
 
+    # Pair counts must also agree ACROSS hardware for the same scene and phase.
+    # Grouping above puts host and device in different buckets, so a device broad
+    # phase that finds fewer pairs than the host would never be compared with it
+    # -- and that is the direction that matters, because a pair the device does
+    # not report is a collision the narrow phase never gets the chance to find.
+    cross = defaultdict(lambda: defaultdict(set))
+    for r in rows:
+        cross[(r["scene"], r["level"], r["phase"])][r["hardware"]].add(r["pairs"])
+    for (scene, level, phase), by_hw in sorted(cross.items()):
+        counts = {hw: sorted(v) for hw, v in by_hw.items() if v}
+        if len(counts) < 2:
+            continue
+        flat = {c for v in counts.values() for c in v}
+        if len(flat) > 1:
+            problems.append(
+                f"PAIR COUNT DIFFERS ACROSS HARDWARE: {scene} level {level} "
+                f"{phase}: " + ", ".join(f"{hw}={v}" for hw, v in sorted(counts.items()))
+                + " -- a pair one side does not report is a collision its narrow "
+                  "phase never sees, so this needs explaining before any timing "
+                  "on these rows is used")
+
     # Missed collisions are illegal; report them regardless of any timing.
     for r in rows:
         notes = r.get("notes", "")
