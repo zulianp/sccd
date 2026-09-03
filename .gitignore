@@ -59,6 +59,7 @@ figures/
 # Two exceptions: CSVs that are inputs or evidence rather than output -- the
 # oracle's query sets, and the measurement tables their write-ups cite.
 !benchmark/oracle/*.csv
+!benchmark/assessment/*.csv
 !notebook/**/*.csv
 *.pdf
 *.aux
