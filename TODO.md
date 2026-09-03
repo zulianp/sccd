@@ -78,39 +78,19 @@ fetches them and a user who wants the library does not.
 
 ---
 
-### The device global queue deadlocks under sustained overflow
-
-Found while testing whether the existing multipass machinery could rebalance the
-narrow phase. It can't, and the reason is a liveness bug rather than a tuning
-problem.
-
-A producer that claims a full global-queue slot spins on
-`atomicCAS(&g_stack.qid[g_slot], SCCD_QID_EMPTY, SCCD_QID_WRITING)` in
-`src/cuda/sccd_narrowphase.cu`, waiting for the slot to be freed. Slots are freed
-only by `try_pop`, which runs only in `narrow_phase_dfs_*_from_stack_kernel` — a
-*later kernel launch*, which cannot start while the current kernel is spinning.
-
-**Reproducer**: build with `-DSCCD_NP_SHARED_STACK_CAP=256` (or 64, or 16) in
-`CMAKE_CUDA_FLAGS` and run four cases of cloth-funnel at
-`SCCD_NARROWPHASE_MODE=2`. The shipped capacity of 1024 finishes in 5.1 s; 256,
-64 and 16 all fail to finish in 150 s.
-
-**Why it does not fire today**: the 1024-entry shared stack absorbs 99% of pushes,
-so the queue is nearly unused. That makes the shipped capacity load-bearing for
-liveness and not only for speed. armadillo-rollers already loses 303,275 pushes
-at that capacity, so the margin is thinner than it looks, and any input that
-overflows harder can hang instead of running slowly.
-
-**Fix shape**: double-buffer the queue so a pass drains A and fills B, which
-removes the cross-launch slot dependency entirely; and stop dropping boxes and
-rerunning the whole batch on overflow. Both are needed before the shared stack
-can be shrunk to let heavy queries be redistributed — which is the point of doing
-it at all. Capacity buys balance, not occupancy: at 238 registers the kernel is
-capped at two blocks per SM whatever the shared stack costs.
-
 ---
 
 ## Done
+
+- ~~The device global queue deadlocks under sustained overflow~~ — **fixed**. The
+  queue is double-buffered: a launch reads one buffer and writes the other, so
+  neither the writer's `atomicCAS` spin nor the reader's commit spin exists any
+  more and both operations are wait-free. That let the shared stack shrink from
+  1024 entries to 64, which is what actually redistributes heavy queries, and the
+  conservative device kernel got 17× faster on cloth-funnel and 5.1× on
+  armadillo-rollers. Written up under "Fixed: the queue is double-buffered" in
+  `benchmark/ASSESSMENT.md`, including one unexplained regression at the old
+  capacity.
 
 - ~~The armadillo edge-edge blowup~~ — **withdrawn**. All 396 edge-edge cases,
   twice: the worst is 9.4×, none exceeds 10×, and mode 2 is 10% faster over the
@@ -120,7 +100,10 @@ capped at two blocks per SM whatever the shared stack costs.
 ## Lower
 
 - **The device conservative search classifies 111 boxes per query where the host
-  classifies 1.2**, on the path `find_earliest_impact_time` uses: 97.8M boxes
+  classifies 1.2.** Note this is a count of *work*, not of time: double-buffering
+  the queue cut the time gap to 5.1×, 3.4× and better-than-host across the three
+  scenes without changing the search at all. The remaining item is to make the
+  search smaller, not better balanced. On the path `find_earliest_impact_time` uses: 97.8M boxes
   against 1.04M on cloth-funnel, **94×**. Same acceptance test, same tolerances,
   same queries, and not the price of the guarantee — the host is conservative too.
   Counted with `SCCD_NP_COUNT_BOXES` (off by default).

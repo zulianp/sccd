@@ -23,7 +23,7 @@
 // so 1024 entries is 32,800 bytes of static __shared__ for float and 57,376 for
 // double. See SharedStackCap below for why that is legal and what it costs.
 #ifndef SCCD_NP_SHARED_STACK_CAP
-#define SCCD_NP_SHARED_STACK_CAP 1024
+#define SCCD_NP_SHARED_STACK_CAP 64
 #endif
 
 #ifndef SCCD_NP_THREADS_PER_BLOCK
@@ -159,26 +159,34 @@ namespace sccd {
 
         // Shared-stack capacity for scalar type T.
         //
-        // Measured on sm_90 with CUDA 12.6, not assumed: at 1024 entries the
-        // double instantiations declare 57,376 bytes of static __shared__ and
-        // both compile and launch correctly. The often-quoted 48 KB is the
-        // pre-Volta static limit and the default ceiling for *dynamic* shared
-        // memory without a cudaFuncSetAttribute opt-in; the ptxas ceiling for
-        // static __shared__ on sm_90 is 0x29000 = 164 KB.
+        // Small on purpose. The block-local stack is where a query's subtree
+        // lives, so a large one keeps a heavy query inside the block that seeded
+        // it: measured per query on cloth-funnel, the conservative search needs
+        // one box for most queries and over a million for 208 of them, and at
+        // 1024 entries per block 99% of pushes never reach the global queue at
+        // all. One block then grinds through a 19.7-million-box query while its
+        // neighbours finish and idle.
         //
-        // What the size does cost is occupancy, though not as much as it used to:
-        // registers, not shared memory, are what bind here now. Measured with
-        // -Xptxas=-v on CUDA 12.6 for sm_90, the double zero-stride kernel uses
-        // 224 registers at conservative=false and 238 at conservative=true, with
-        // no spills. At 128 threads that is 30,464 registers per block against the
-        // SM's 65,536, so **two** blocks fit, where 57,376 bytes of shared memory
-        // out of 228 KB would have allowed three. Halving the capacity therefore
-        // buys nothing on its own -- the register budget would still cap it at two
-        // -- so the capacity is left alone and the knob stays available.
+        // Spilling early hands those boxes to the global queue, which the next
+        // drain round redistributes across every block. Measured on GH200, mode 2,
+        // 16 cases (narrow-phase milliseconds):
         //
-        // (An earlier version of this comment said 96 registers and 4-5 blocks per
-        // SM. That figure no longer holds and is corrected here rather than left
-        // to be trusted.)
+        //                        cap 1024   cap 256   cap 64
+        //   cloth-funnel           4059.2     198.2     37.2
+        //   armadillo-rollers      3133.7     277.2     75.8
+        //   cloth-ball              129.8     110.2    105.9
+        //
+        // False positives and negatives are identical at every capacity, and mode
+        // 0 -- which averages under four boxes per query and so never fills even a
+        // small stack -- is unaffected.
+        //
+        // This only became available once the global queue stopped deadlocking
+        // under sustained use; see the Stack comment above. Before that, shrinking
+        // this number hung the kernel, which is why it was 1024.
+        //
+        // 64 entries is 3,584 bytes for double against 57,376 at 1024. That does
+        // not buy occupancy -- at 238 registers per thread the kernel is capped at
+        // two blocks per SM either way -- it buys balance.
         template <typename T>
         struct SharedStackCap {
             static constexpr int value = SCCD_NP_SHARED_STACK_CAP;
@@ -195,6 +203,23 @@ namespace sccd {
             T vupper;
         };
 
+        /**
+         * \brief One half of the double-buffered global work queue.
+         *
+         * A launch reads from one buffer and writes to the other, never both, so
+         * there is no producer/consumer handshake here and no spinning. Reading
+         * uses `top` as a claim cursor over the `count` entries a previous launch
+         * left; writing uses `top` as a bump allocator and `count` is unused.
+         *
+         * This replaces a single shared buffer in which producers and consumers
+         * ran concurrently and coordinated through the `qid` array: a writer
+         * spun on `atomicCAS(&qid[slot], EMPTY, WRITING)` until a reader released
+         * the slot, and a reader spun until the writer committed. With the queue
+         * lightly used that handshake was invisible; driven hard -- which is
+         * exactly what using it to balance the load requires -- it hung the
+         * kernel. Separating the buffers removes the interaction rather than
+         * tuning around it.
+         */
         template <typename T>
         struct Stack {
             T* tlower;
@@ -205,10 +230,66 @@ namespace sccd {
             T* vupper;
             int* level;
             int* qid;
-            int* top;
-            int* request;
+            int* top;      // write cursor when writing, claim cursor when reading
+            int* request;  // boxes that did not fit, for the host to size the retry
             int capacity;
+            int count;     // entries available to readers; 0 for a write buffer
         };
+
+        /**
+         * \brief Claim one slot and write a box to it. No waiting, ever.
+         *
+         * The index comes from a bump allocator, so it belongs to this thread
+         * alone and nobody reads the buffer until the launch ends. A box that does
+         * not fit is counted in `request` and dropped, which is safe -- dropping
+         * can only leave the time of impact earlier than the truth, never later --
+         * and the host grows the queue and retries.
+         */
+        template <typename T>
+        static inline __device__ void push_global(const Stack<T>& out,
+                                                  const Domain<T>& box,
+                                                  const int level,
+                                                  const int qid) {
+            const int slot = atomicAdd(out.top, 1);
+            if (slot >= out.capacity) {
+                atomicAdd(out.request, 1);
+                return;
+            }
+            out.tlower[slot] = box.tlower;
+            out.tupper[slot] = box.tupper;
+            out.ulower[slot] = box.ulower;
+            out.uupper[slot] = box.uupper;
+            out.vlower[slot] = box.vlower;
+            out.vupper[slot] = box.vupper;
+            out.level[slot] = level;
+            out.qid[slot] = qid;
+        }
+
+        /**
+         * \brief Take the next box from the read buffer, or return 0 when empty.
+         *
+         * A plain claim on a cursor over entries a previous launch committed, so
+         * the loads need no ordering against a concurrent writer -- there is none.
+         */
+        template <typename T>
+        static inline __device__ int pop_global(const Stack<T>& in,
+                                                Domain<T>& d,
+                                                int& level,
+                                                int& qid) {
+            if (in.count <= 0) return 0;
+            const int slot = atomicAdd(in.top, 1);
+            if (slot >= in.count) return 0;
+
+            d.tlower = in.tlower[slot];
+            d.tupper = in.tupper[slot];
+            d.ulower = in.ulower[slot];
+            d.uupper = in.uupper[slot];
+            d.vlower = in.vlower[slot];
+            d.vupper = in.vupper[slot];
+            level = in.level[slot];
+            qid = in.qid[slot];
+            return 1;
+        }
 
         template <bool is_vf, typename T>
         static inline __device__ bool is_domain_valid(const Domain<T>& domain,
@@ -1043,7 +1124,8 @@ namespace sccd {
             T* vupper{nullptr};
             int* level{nullptr};
             int* qid{nullptr};
-            int* counters{nullptr};       // device, [0] = g_top, [1] = g_request
+            int* counters{nullptr};       // device, [0]/[1] = write cursors for the
+                                          // two buffers, [2] = g_request
             int* host_counters{nullptr};  // pinned staging for reading them back
             int cap{0};
 
@@ -1098,33 +1180,6 @@ namespace sccd {
             }
         }
 
-        template <bool Shared, typename T>
-        static inline __device__ int try_pop(const Stack<T>& stk, Domain<T>& d, int& level, int& qid) {
-            const int slot = release_slot(stk.top);
-            if (slot < 0) return 0;
-
-            int q;
-            do {
-                q = atomicAdd(&stk.qid[slot], 0);
-            } while (q < 0);
-            if (Shared) {
-                __threadfence_block();
-            } else {
-                __threadfence();
-            }
-
-            d.tlower = stk.tlower[slot];
-            d.tupper = stk.tupper[slot];
-            d.ulower = stk.ulower[slot];
-            d.uupper = stk.uupper[slot];
-            d.vlower = stk.vlower[slot];
-            d.vupper = stk.vupper[slot];
-            level = stk.level[slot];
-            qid = q;
-
-            atomicExch(&stk.qid[slot], SCCD_QID_EMPTY);
-            return 1;
-        }
 
         template <int N>
         struct DfsSplit;
@@ -1553,7 +1608,7 @@ namespace sccd {
                                                                  const T tol,
                                                                  const int max_depth,
                                                                  T* SCCD_RESTRICT toi,
-                                                                 Stack<TC> g_stack,
+                                                                 Stack<TC> g_out,
                                                                  int qid_in,
                                                                  Domain<TC> cur_in,
                                                                  int level_in,
@@ -1726,27 +1781,7 @@ namespace sccd {
                         s_stack.level[slot] = push_level;
                         s_stack.qid[slot] = qid;
                     } else {
-                        const int g_slot = reserve_slots(g_stack.top, 1, g_stack.capacity);
-                        if (g_slot < 0) {
-                            atomicAdd(g_stack.request, 1);
-#ifdef SCCD_NP_COUNT_BOXES
-                            atomicAdd(&g_np_push_lost, 1ull);
-#endif
-                        } else {
-                            while (atomicCAS(&g_stack.qid[g_slot], SCCD_QID_EMPTY, SCCD_QID_WRITING) !=
-                                   SCCD_QID_EMPTY) {
-                                // busy-wait
-                            }
-                            g_stack.tlower[g_slot] = push_box.tlower;
-                            g_stack.tupper[g_slot] = push_box.tupper;
-                            g_stack.ulower[g_slot] = push_box.ulower;
-                            g_stack.uupper[g_slot] = push_box.uupper;
-                            g_stack.vlower[g_slot] = push_box.vlower;
-                            g_stack.vupper[g_slot] = push_box.vupper;
-                            g_stack.level[g_slot] = push_level;
-                            __threadfence();
-                            atomicExch(&g_stack.qid[g_slot], qid);
-                        }
+                        push_global<TC>(g_out, push_box, push_level, qid);
                     }
                 }
 
@@ -1817,7 +1852,7 @@ namespace sccd {
                                                  const T tol,
                                                  const int max_depth,
                                                  T* SCCD_RESTRICT toi,
-                                                 Stack<TC> g_stack,
+                                                 Stack<TC> g_out,
                                                  const int seed_begin,
                                                  const int seed_end) {
             using Vec4 = typename device::Vec4Type<TC>::type;
@@ -1862,7 +1897,7 @@ namespace sccd {
                                                               tol,
                                                               max_depth,
                                                               toi,
-                                                              g_stack,
+                                                              g_out,
                                                               qid,
                                                               cur,
                                                               level,
@@ -1880,13 +1915,14 @@ namespace sccd {
                                                             const T tol,
                                                             const int max_depth,
                                                             T* SCCD_RESTRICT toi,
-                                                            Stack<TC> g_stack) {
+                                                            Stack<TC> g_in,
+                                                            Stack<TC> g_out) {
             int qid = -1;
             Domain<TC> cur = {TC(0), TC(0), TC(0), TC(0), TC(0), TC(0)};
             int level = 0;
             int active = 0;
 
-            if (try_pop<false, TC>(g_stack, cur, level, qid)) {
+            if (pop_global<TC>(g_in, cur, level, qid)) {
                 active = 1;
             }
 
@@ -1899,7 +1935,7 @@ namespace sccd {
                                                               tol,
                                                               max_depth,
                                                               toi,
-                                                              g_stack,
+                                                              g_out,
                                                               qid,
                                                               cur,
                                                               level,
@@ -1917,7 +1953,7 @@ namespace sccd {
                                                      const int max_depth,
                                                      T* SCCD_RESTRICT toi,
                                                      const int toi_stride,
-                                                     Stack<TC> g_stack,
+                                                     Stack<TC> g_out,
                                                      const T alpha,
                                                      const int qid,
                                                      Domain<TC> sampling_root,
@@ -2038,10 +2074,10 @@ namespace sccd {
             if (do_hard_defer && tid == 0) {
                 if ((T)co_count > alpha * (T)N) {
                     s_hard = 1;
-                    const int base = reserve_slots(g_stack.top, co_count, g_stack.capacity);
-                    if (base < 0) {
+                    const int base = atomicAdd(g_out.top, co_count);
+                    if (base + co_count > g_out.capacity) {
                         // Deficit will be allocated on the host's retry pass.
-                        atomicAdd(g_stack.request, co_count);
+                        atomicAdd(g_out.request, co_count);
                     }
                     s_defer_base = base;
                     s_defer_cursor = 0;
@@ -2053,16 +2089,15 @@ namespace sccd {
                 if (active_seed && s_defer_base >= 0) {
                     const int rank = atomicAdd(&s_defer_cursor, 1);
                     const int slot = s_defer_base + rank;
-                    if (slot >= 0 && slot < g_stack.capacity) {
-                        g_stack.tlower[slot] = cur.tlower;
-                        g_stack.tupper[slot] = device::min<TC>(cur.tupper, s_toi);
-                        g_stack.ulower[slot] = cur.ulower;
-                        g_stack.uupper[slot] = cur.uupper;
-                        g_stack.vlower[slot] = cur.vlower;
-                        g_stack.vupper[slot] = cur.vupper;
-                        g_stack.level[slot] = initial_level;
-                        __threadfence();
-                        atomicExch(&g_stack.qid[slot], qid);
+                    if (slot >= 0 && slot < g_out.capacity) {
+                        g_out.tlower[slot] = cur.tlower;
+                        g_out.tupper[slot] = device::min<TC>(cur.tupper, s_toi);
+                        g_out.ulower[slot] = cur.ulower;
+                        g_out.uupper[slot] = cur.uupper;
+                        g_out.vlower[slot] = cur.vlower;
+                        g_out.vupper[slot] = cur.vupper;
+                        g_out.level[slot] = initial_level;
+                        g_out.qid[slot] = qid;
                     }
                 }
                 if (tid == 0) atomic_min_toi<T>(&toi[toi_idx], s_toi);
@@ -2168,24 +2203,7 @@ namespace sccd {
                         s_stack.level[slot] = push_level;
                         s_stack.qid[slot] = qid;
                     } else {
-                        const int g_slot = reserve_slots(g_stack.top, 1, g_stack.capacity);
-                        if (g_slot < 0) {
-                            atomicAdd(g_stack.request, 1);
-                        } else {
-                            while (atomicCAS(&g_stack.qid[g_slot], SCCD_QID_EMPTY, SCCD_QID_WRITING) !=
-                                   SCCD_QID_EMPTY) {
-                                // busy-wait
-                            }
-                            g_stack.tlower[g_slot] = push_box.tlower;
-                            g_stack.tupper[g_slot] = push_box.tupper;
-                            g_stack.ulower[g_slot] = push_box.ulower;
-                            g_stack.uupper[g_slot] = push_box.uupper;
-                            g_stack.vlower[g_slot] = push_box.vlower;
-                            g_stack.vupper[g_slot] = push_box.vupper;
-                            g_stack.level[g_slot] = push_level;
-                            __threadfence();
-                            atomicExch(&g_stack.qid[g_slot], qid);
-                        }
+                        push_global<TC>(g_out, push_box, push_level, qid);
                     }
                 }
 
@@ -2234,7 +2252,7 @@ namespace sccd {
                                      const int max_depth,
                                      T* SCCD_RESTRICT toi,
                                      const int toi_stride,
-                                     Stack<TC> g_stack,
+                                     Stack<TC> g_out,
                                      const T alpha,
                                      const int seed_begin,
                                      const int seed_end) {
@@ -2252,7 +2270,7 @@ namespace sccd {
                                                   max_depth,
                                                   toi,
                                                   toi_stride,
-                                                  g_stack,
+                                                  g_out,
                                                   alpha,
                                                   qid,
                                                   root,
@@ -2272,7 +2290,8 @@ namespace sccd {
                                                 const int max_depth,
                                                 T* SCCD_RESTRICT toi,
                                                 const int toi_stride,
-                                                Stack<TC> g_stack) {
+                                                Stack<TC> g_in,
+                                                Stack<TC> g_out) {
             __shared__ int b_qid;
             __shared__ int b_level;
             __shared__ int b_have_work;
@@ -2298,7 +2317,7 @@ namespace sccd {
                     Domain<TC> popped_cur;
                     int popped_level = 0;
                     int popped_qid = -1;
-                    if (try_pop<false, TC>(g_stack, popped_cur, popped_level, popped_qid)) {
+                    if (pop_global<TC>(g_in, popped_cur, popped_level, popped_qid)) {
                         b_qid = popped_qid;
                         b_level = popped_level;
                         b_cur = popped_cur;
@@ -2321,7 +2340,7 @@ namespace sccd {
                                                       max_depth,
                                                       toi,
                                                       toi_stride,
-                                                      g_stack,
+                                                      g_out,
                                                       TC(0),
                                                       b_qid,
                                                       b_cur,
@@ -2428,14 +2447,15 @@ namespace sccd {
             PersistentDfsStack<TC>& gstack = persistent_dfs_stack<TC>();
 
             if (!gstack.counters) {
-                SCCD_CHECK_CUDA(cudaMalloc(&gstack.counters, 2 * sizeof(int)));
+                SCCD_CHECK_CUDA(cudaMalloc(&gstack.counters, 4 * sizeof(int)));
                 // Pinned staging: these two words are read back once per drain
                 // iteration, and a pageable destination forces the driver
                 // through an extra bounce buffer each time.
-                SCCD_CHECK_CUDA(cudaHostAlloc(&gstack.host_counters, 2 * sizeof(int), cudaHostAllocDefault));
+                SCCD_CHECK_CUDA(cudaHostAlloc(&gstack.host_counters, 4 * sizeof(int), cudaHostAllocDefault));
             }
-            int* const g_top = gstack.counters;
-            int* const g_request = gstack.counters + 1;
+            // Two write cursors, one per buffer, and one deficit counter.
+            int* const g_cursor[2] = {gstack.counters, gstack.counters + 1};
+            int* const g_request = gstack.counters + 2;
 
             TC* g_tlower = gstack.tlower;
             TC* g_tupper = gstack.tupper;
@@ -2465,26 +2485,16 @@ namespace sccd {
                 g_vupper = nullptr;
                 g_level = nullptr;
                 g_qid = nullptr;
-                cudaMalloc(&g_tlower, new_cap * sizeof(TC));
-                cudaMalloc(&g_tupper, new_cap * sizeof(TC));
-                cudaMalloc(&g_ulower, new_cap * sizeof(TC));
-                cudaMalloc(&g_uupper, new_cap * sizeof(TC));
-                cudaMalloc(&g_vlower, new_cap * sizeof(TC));
-                cudaMalloc(&g_vupper, new_cap * sizeof(TC));
-                cudaMalloc(&g_level, new_cap * sizeof(int));
-                cudaMalloc(&g_qid, new_cap * sizeof(int));
-                // SCCD_QID_EMPTY == -1, so 0xFF byte pattern initialises
-                // every int to -1 without launching the init kernel.
-                cudaMemsetAsync(g_qid, 0xFF, new_cap * sizeof(int));
+                cudaMalloc(&g_tlower, 2 * (size_t)new_cap * sizeof(TC));
+                cudaMalloc(&g_tupper, 2 * (size_t)new_cap * sizeof(TC));
+                cudaMalloc(&g_ulower, 2 * (size_t)new_cap * sizeof(TC));
+                cudaMalloc(&g_uupper, 2 * (size_t)new_cap * sizeof(TC));
+                cudaMalloc(&g_vlower, 2 * (size_t)new_cap * sizeof(TC));
+                cudaMalloc(&g_vupper, 2 * (size_t)new_cap * sizeof(TC));
+                cudaMalloc(&g_level, 2 * (size_t)new_cap * sizeof(int));
+                cudaMalloc(&g_qid, 2 * (size_t)new_cap * sizeof(int));
                 gstack_cap = new_cap;
             };
-
-            // A stack carried over from a previous call still holds that call's
-            // slot ids, so restore the empty marker the freshly allocated buffer
-            // used to arrive with.
-            if (gstack_cap > 0 && g_qid) {
-                SCCD_CHECK_CUDA(cudaMemsetAsync(g_qid, 0xFF, (size_t)gstack_cap * sizeof(int)));
-            }
 
 #ifdef SCCD_NP_COUNT_BOXES
             unsigned long long* d_perq = nullptr;
@@ -2515,7 +2525,7 @@ namespace sccd {
             dim3 block_pass1(SCCD_NP_THREADS_PER_BLOCK, 1, 1);
 
             // Batch loop.  Each batch runs Pass 1 (seed-driven) then a
-            // Pass 2 drain loop on whatever spilled to g_stack.  If any
+            // Pass 2 drain loop on whatever spilled to g_out.  If any
             // push overflowed (g_request > 0) the entire batch is
             // retried after growing the stack -- TOIs are preserved
             // across retries, so subsequent attempts prune more
@@ -2528,19 +2538,39 @@ namespace sccd {
                 while (true) {
                     // g_top and g_request are adjacent ints, so one memset
                     // replaces what was a full kernel launch to zero two words.
-                    SCCD_CHECK_CUDA(cudaMemsetAsync(gstack.counters, 0, 2 * sizeof(int)));
+                    SCCD_CHECK_CUDA(cudaMemsetAsync(gstack.counters, 0, 3 * sizeof(int)));
+#ifdef SCCD_NP_COUNT_BOXES
+                    fprintf(stderr,
+                            "sccd-np-retry batch=[%zu,%zu) attempt=%d gstack_cap=%d\n",
+                            begin,
+                            end,
+                            retry_rounds,
+                            gstack_cap);
+#endif
 
-                    Stack<TC> g_stack = {g_tlower,
-                                        g_tupper,
-                                        g_ulower,
-                                        g_uupper,
-                                        g_vlower,
-                                        g_vupper,
-                                        g_level,
-                                        g_qid,
-                                        g_top,
-                                        g_request,
-                                        gstack_cap};
+                    // The two halves of the queue. A launch reads one and writes
+                    // the other, so `make_buf(w)` is the write buffer for round w
+                    // and `make_buf(w ^ 1)` the read buffer, with the roles
+                    // swapping each drain round.
+                    const auto make_buf = [&](const int half, const int count) {
+                        const size_t off = (size_t)half * (size_t)gstack_cap;
+                        Stack<TC> b = {g_tlower + off,
+                                       g_tupper + off,
+                                       g_ulower + off,
+                                       g_uupper + off,
+                                       g_vlower + off,
+                                       g_vupper + off,
+                                       g_level + off,
+                                       g_qid + off,
+                                       g_cursor[half],
+                                       g_request,
+                                       gstack_cap,
+                                       count};
+                        return b;
+                    };
+
+                    int write_half = 0;
+                    Stack<TC> g_out = make_buf(write_half, 0);
 
                     // Pass 1: seed-driven.
                     if (toi_stride == 0) {
@@ -2556,7 +2586,7 @@ namespace sccd {
                                                              tol,
                                                              max_depth,
                                                              d_toi,
-                                                             g_stack,
+                                                             g_out,
                                                              (int)begin,
                                                              (int)end);
                     } else {
@@ -2572,35 +2602,59 @@ namespace sccd {
                                                           max_depth,
                                                           d_toi,
                                                           toi_stride,
-                                                          g_stack,
+                                                          g_out,
                                                           np_alpha,
                                                           (int)begin,
                                                           (int)end);
                     }
                     SCCD_CUDA_LAST_ERROR();
 
-                    SCCD_CHECK_CUDA(
-                        cudaMemcpy(gstack.host_counters, g_top, sizeof(int), cudaMemcpyDeviceToHost));
-                    int h_g_top = gstack.host_counters[0];
+                    auto read_cursor = [&](const int half) {
+                        SCCD_CHECK_CUDA(cudaMemcpy(
+                            gstack.host_counters, g_cursor[half], sizeof(int), cudaMemcpyDeviceToHost));
+                        const int n = gstack.host_counters[0];
+                        return n > gstack_cap ? gstack_cap : n;
+                    };
 
-                    // Pass 2: drain whatever made it onto g_stack.  Each
-                    // launch consumes up to base_grid_blocks worth of
-                    // entries; relaunch until empty.  Spillover during
-                    // drain is recorded in g_request and handled by the
-                    // outer retry below.
+                    int h_g_top = read_cursor(write_half);
+
+                    // Pass 2: drain what Pass 1 wrote. Each round reads the buffer
+                    // the previous round filled and writes the other one, so a
+                    // launch never touches a buffer anyone else is touching and
+                    // neither side has to wait for the other. Relaunch until the
+                    // round produces nothing.
                     while (h_g_top > 0) {
 #ifdef SCCD_NP_COUNT_BOXES
                         ++drain_rounds_total;
 #endif
-                        // printf("Draining g_stack with from-stack kernel (%d)\n", h_g_top);
-                        int grid_blocks = (toi_stride == 0) ? (h_g_top + N - 1) / N : h_g_top;
-                        if (grid_blocks > base_grid_blocks) grid_blocks = base_grid_blocks;
-                        if (grid_blocks < 1) grid_blocks = 1;
-                        dim3 grid_pass2(grid_blocks, 1, 1);
+                        const Stack<TC> g_in = make_buf(write_half, h_g_top);
+                        write_half ^= 1;
+                        // The write cursor for the buffer we are about to fill has
+                        // to start at zero, and the read cursor for g_in is the
+                        // same word we just read the count from -- reset it so the
+                        // claims in pop_global start from the first entry.
+                        SCCD_CHECK_CUDA(cudaMemsetAsync(g_cursor[write_half], 0, sizeof(int)));
+                        SCCD_CHECK_CUDA(cudaMemsetAsync(g_cursor[write_half ^ 1], 0, sizeof(int)));
+                        g_out = make_buf(write_half, 0);
+
+                        // The grid must cover every entry in the read buffer. It
+                        // used to be capped at base_grid_blocks and the loop
+                        // relaunched against the same stack until it emptied; with
+                        // two buffers the unread remainder would be discarded at
+                        // the swap instead, so the cap has to go. One thread per
+                        // entry for the zero-stride kernel; the block-per-query
+                        // kernel claims up to SCCD_NP_DRAIN_PER_BLOCK each.
+                        long long need = (toi_stride == 0)
+                                             ? ((long long)h_g_top + N - 1) / N
+                                             : ((long long)h_g_top + SCCD_NP_DRAIN_PER_BLOCK - 1) /
+                                                   SCCD_NP_DRAIN_PER_BLOCK;
+                        if (need < 1) need = 1;
+                        if (need > 2147483647LL) need = 2147483647LL;
+                        dim3 grid_pass2((unsigned)need, 1, 1);
 
                         if (toi_stride == 0) {
                             narrow_phase_dfs_zero_stride_from_stack_kernel<is_vf, conservative, N, T, I><<<grid_pass2, block_pass1>>>(
-                                overlap0, overlap1, v0, v1, element_stride, elements, tol, max_depth, d_toi, g_stack);
+                                overlap0, overlap1, v0, v1, element_stride, elements, tol, max_depth, d_toi, g_in, g_out);
                         } else {
                             narrow_phase_dfs_from_stack_kernel<is_vf, conservative, N, T, I>
                                 <<<grid_pass2, block_pass1>>>(overlap0,
@@ -2613,13 +2667,12 @@ namespace sccd {
                                                               max_depth,
                                                               d_toi,
                                                               toi_stride,
-                                                              g_stack);
+                                                              g_in,
+                                                              g_out);
                         }
                         SCCD_CUDA_LAST_ERROR();
 
-                        SCCD_CHECK_CUDA(
-                            cudaMemcpy(gstack.host_counters, g_top, sizeof(int), cudaMemcpyDeviceToHost));
-                        h_g_top = gstack.host_counters[0];
+                        h_g_top = read_cursor(write_half);
                     }
 
                     // Did anything overflow during Pass 1 or Pass 2?
