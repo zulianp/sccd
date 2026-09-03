@@ -401,6 +401,65 @@ starts. The comment above it records that replacing the dice with a single root
 seed was measured *worse* on armadillo edge-edge (803 → 871 ms). Against 2.58
 million boxes per query, that measurement deserves re-running.
 
+### The global queue exists, is dormant, and cannot currently carry the flow
+
+The imbalance the per-query counts expose — 208 queries needing over a million
+boxes, one needing 19.7 million, while most need one — is a load-balancing
+problem, and the kernel already contains the machinery to fix it. A block pushes
+to its shared stack, falls through to a shared **global queue** when that is full,
+and `narrow_phase_dfs_*_from_stack_kernel` is relaunched until the queue drains.
+The pop path re-loads geometry when it picks up another query's box, so both
+within-block and cross-block work stealing are already implemented.
+
+**It is dormant.** With `SCCD_NP_SHARED_STACK_CAP = 1024` entries per block, the
+shared stack absorbs essentially everything:
+
+| scene | shared pushes | reached the queue | lost (queue full) | drain rounds |
+|---|---:|---:|---:|---:|
+| cloth-funnel | 23,779,241 | 18,329 | 10,456 | 13 |
+| armadillo-rollers | 30,298,577 | 21,558 | 303,275 | 8 |
+
+0.1% and 1.1% of pushes reach the queue, so no redistribution happens: a block
+holding a 19.7-million-box query grinds through it alone while its neighbours
+finish and idle.
+
+**Shrinking the shared stack to force spilling hangs the kernel.** Four cases of
+cloth-funnel, mode 2:
+
+| `SCCD_NP_SHARED_STACK_CAP` | result |
+|---|---|
+| 1024 (shipped) | 161.7 ms narrow, 5.1 s wall |
+| 256 | **did not finish in 150 s** |
+| 64 | **did not finish in 150 s** |
+| 16 | **did not finish in 150 s** |
+
+The cause is a deadlock, not slowness. A producer that claims a global slot spins
+on `atomicCAS(&g_stack.qid[g_slot], SCCD_QID_EMPTY, SCCD_QID_WRITING)` waiting for
+that slot to be released — but slots are released only by `try_pop`, which runs
+only in the *from-stack* kernel, a later launch that cannot start until the
+current kernel exits. Rare overflow never hits it; sustained overflow deadlocks
+immediately.
+
+**So the shipped 1024 is load-bearing for liveness, not just for speed**, and
+that is worth stating plainly: any input that overflows the global queue hard
+enough can hang rather than run slowly. armadillo-rollers already loses 303,275
+pushes at the shipped capacity, which is closer to that edge than is comfortable.
+
+The multipass idea is right and the plumbing is not. Making the queue the primary
+work distributor needs the protocol changed, not the capacity tuned:
+
+- **No in-kernel wait on slot reuse.** Producers and consumers must not share a
+  slot lifetime across launches. Double-buffering the queue — pass *n* drains
+  queue A and fills queue B — removes the dependency entirely.
+- **Overflow must not drop boxes or rerun the batch.** Today a full queue costs a
+  dropped box (safe, but an earlier time of impact) and a full-batch retry, up to
+  32 rounds. A box that will not fit should stay where it is and be processed
+  locally.
+- Only then is the capacity a free parameter. Note it buys balance, not
+  occupancy: at 238 registers per thread the kernel is capped at two blocks per SM
+  whatever the shared stack costs, so dropping 57,376 bytes to 4,096 does not add
+  a block.
+
 ### What the level distribution says, and what it rules out
 
 Boxes by DFS level, cloth-funnel, zero-stride path only:

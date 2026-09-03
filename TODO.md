@@ -78,6 +78,38 @@ fetches them and a user who wants the library does not.
 
 ---
 
+### The device global queue deadlocks under sustained overflow
+
+Found while testing whether the existing multipass machinery could rebalance the
+narrow phase. It can't, and the reason is a liveness bug rather than a tuning
+problem.
+
+A producer that claims a full global-queue slot spins on
+`atomicCAS(&g_stack.qid[g_slot], SCCD_QID_EMPTY, SCCD_QID_WRITING)` in
+`src/cuda/sccd_narrowphase.cu`, waiting for the slot to be freed. Slots are freed
+only by `try_pop`, which runs only in `narrow_phase_dfs_*_from_stack_kernel` — a
+*later kernel launch*, which cannot start while the current kernel is spinning.
+
+**Reproducer**: build with `-DSCCD_NP_SHARED_STACK_CAP=256` (or 64, or 16) in
+`CMAKE_CUDA_FLAGS` and run four cases of cloth-funnel at
+`SCCD_NARROWPHASE_MODE=2`. The shipped capacity of 1024 finishes in 5.1 s; 256,
+64 and 16 all fail to finish in 150 s.
+
+**Why it does not fire today**: the 1024-entry shared stack absorbs 99% of pushes,
+so the queue is nearly unused. That makes the shipped capacity load-bearing for
+liveness and not only for speed. armadillo-rollers already loses 303,275 pushes
+at that capacity, so the margin is thinner than it looks, and any input that
+overflows harder can hang instead of running slowly.
+
+**Fix shape**: double-buffer the queue so a pass drains A and fills B, which
+removes the cross-launch slot dependency entirely; and stop dropping boxes and
+rerunning the whole batch on overflow. Both are needed before the shared stack
+can be shrunk to let heavy queries be redistributed — which is the point of doing
+it at all. Capacity buys balance, not occupancy: at 238 registers the kernel is
+capped at two blocks per SM whatever the shared stack costs.
+
+---
+
 ## Done
 
 - ~~The armadillo edge-edge blowup~~ — **withdrawn**. All 396 edge-edge cases,
