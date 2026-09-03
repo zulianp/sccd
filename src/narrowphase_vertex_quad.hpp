@@ -128,6 +128,11 @@ namespace sccd {
                 T_HP tols[3];
                 compute_vertex_quad_tolerance<T_HP>(tol, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, tols);
 
+                // Per query, not per box. The bound depends only on the query's
+                // coordinates, and the search pops many boxes per query.
+                T_HP numerical_error[3];
+                vq_numerical_error<T_HP>(sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, numerical_error);
+
                 stack.clear();
                 stack.push_back(initial_domain);
 
@@ -144,6 +149,7 @@ namespace sccd {
                     const bool found = find_root_grid_adaptive_split_vq<T_HP>(max_depth,
                                                                               tol,
                                                                               tols,
+                                                                              numerical_error,
                                                                               codomain_widths,
                                                                               sv,
                                                                               s1,

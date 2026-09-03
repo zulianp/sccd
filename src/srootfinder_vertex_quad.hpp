@@ -36,6 +36,87 @@ namespace sccd {
         }
     }
 
+    /**
+     * \brief The vertex-quad inclusion function, factored over the quad's own
+     *        parameter domain.
+     *
+     * `diff_vq` above is the reference form and stays that way: it is what the
+     * equivalence test checks against. This is the same function regrouped so
+     * that the work which does not depend on (u, v) can be hoisted out of the
+     * corner loop.
+     *
+     * Write the quad's bilinear blend with weights w1..w4 summing to one. The
+     * reference evaluates
+     *
+     *     F = V(t) - [ (1-t) * SUM_k w_k s_k  +  t * SUM_k w_k e_k ]
+     *
+     * blending in (u, v) first and in t second. Since the weights do not depend
+     * on t, that equals
+     *
+     *     F = V(t) - SUM_k w_k * [ (1-t) s_k + t e_k ]  =  V(t) - SUM_k w_k P_k(t)
+     *
+     * which blends in t first. The point of the second form is that P_k(t) and
+     * V(t) depend on nothing but t: a box has two t bounds, and a split along u
+     * or v holds both of them fixed across every corner it evaluates. So the
+     * frame is computed twice for the whole split instead of once per corner.
+     *
+     * The two forms are equal in exact arithmetic but not bit-for-bit in
+     * floating point, since the multiplications associate differently. Both are
+     * trilinear evaluations of the same depth -- each term is a product of three
+     * rounded factors summed with the others -- so the certified bound that makes
+     * the rejection sound covers this form as it covers the reference. That is an
+     * argument, not a proof, which is why `vertex_quad_root_test` checks the two
+     * against each other and against a densely sampled reference root rather than
+     * taking it on trust.
+     */
+    template <typename T>
+    struct VQFrame {
+        T V[3];
+        T P[4][3];
+    };
+
+    /** \brief Evaluate the t-dependent part of the inclusion function. */
+    template <typename T>
+    inline void vq_frame_at(const T sv[3],
+                            const T s1[3],
+                            const T s2[3],
+                            const T s3[3],
+                            const T s4[3],
+                            const T ev[3],
+                            const T e1[3],
+                            const T e2[3],
+                            const T e3[3],
+                            const T e4[3],
+                            const T t,
+                            VQFrame<T> &frame) {
+        const T omt = T(1) - t;
+        const T *const sk[4] = {s1, s2, s3, s4};
+        const T *const ek[4] = {e1, e2, e3, e4};
+        for (int d = 0; d < 3; ++d) {
+            frame.V[d] = omt * sv[d] + t * ev[d];
+        }
+        for (int k = 0; k < 4; ++k) {
+            for (int d = 0; d < 3; ++d) {
+                frame.P[k][d] = omt * sk[k][d] + t * ek[k][d];
+            }
+        }
+    }
+
+    /** \brief Blend a frame at one (u, v) corner. */
+    template <typename T>
+    inline void vq_eval_frame(const VQFrame<T> &frame, const T u, const T v, T *const SCCD_RESTRICT F) {
+        const T omu = T(1) - u;
+        const T omv = T(1) - v;
+        const T w1 = omu * omv;
+        const T w2 = u * omv;
+        const T w3 = omu * v;
+        const T w4 = u * v;
+        for (int d = 0; d < 3; ++d) {
+            F[d] = frame.V[d] -
+                   (w1 * frame.P[0][d] + w2 * frame.P[1][d] + w3 * frame.P[2][d] + w4 * frame.P[3][d]);
+        }
+    }
+
     template <typename T>
     inline void compute_vertex_quad_tolerance(const T codomain_tol,
                                               const T sv[3],
@@ -191,6 +272,40 @@ namespace sccd {
         *errz = sccd::pow3<T>(maxz) * kFilter;
     }
 
+    /**
+     * \brief The certified numerical error bound for one vertex-quad query.
+     *
+     * A thin array-taking wrapper over the 30-scalar form above, so that callers
+     * can compute it once per query and hand the same three numbers to every
+     * box. It depends only on the query's coordinates, so recomputing it per box
+     * -- which is what the search used to do -- is pure waste.
+     */
+    template <typename T>
+    inline void vq_numerical_error(const T sv[3],
+                                   const T s1[3],
+                                   const T s2[3],
+                                   const T s3[3],
+                                   const T s4[3],
+                                   const T ev[3],
+                                   const T e1[3],
+                                   const T e2[3],
+                                   const T e3[3],
+                                   const T e4[3],
+                                   T out[3]) {
+        sccd_get_numerical_error_vq_soa<T>(/*use_ms=*/0,
+                                           sv[0], sv[1], sv[2],
+                                           s1[0], s1[1], s1[2],
+                                           s2[0], s2[1], s2[2],
+                                           s3[0], s3[1], s3[2],
+                                           s4[0], s4[1], s4[2],
+                                           ev[0], ev[1], ev[2],
+                                           e1[0], e1[1], e1[2],
+                                           e2[0], e2[1], e2[2],
+                                           e3[0], e3[1], e3[2],
+                                           e4[0], e4[1], e4[2],
+                                           &out[0], &out[1], &out[2]);
+    }
+
     template <typename T>
     inline bool accept_grid_root_vq(const Box<T> &box, T &toi, T &u, T &v) {
         const T t_approx = box.tuv[0].lower;
@@ -287,6 +402,7 @@ namespace sccd {
                                                    const int max_iter,
                                                    const T tol,
                                                    const T tols[3],
+                                                   const T numerical_error[3],
                                                    const T sv[3],
                                                    const T s1[3],
                                                    const T s2[3],
@@ -302,26 +418,16 @@ namespace sccd {
                                                    T &v,
                                                    std::vector<sccd::Box<T>> &stack,
                                                    const bool refine) {
-        // The certified numerical error bound, which is what makes the rejection
-        // below sound. sccd_get_numerical_error_vq_soa already existed in this
-        // file but was never called: the acceptance test padded with machine
-        // epsilon instead, roughly 30x too small for unit-scale geometry, which
-        // let it discard boxes that contained a root.
-        T numerical_error[3];
-        sccd_get_numerical_error_vq_soa<T>(/*use_ms=*/0,
-                                           sv[0], sv[1], sv[2],
-                                           s1[0], s1[1], s1[2],
-                                           s2[0], s2[1], s2[2],
-                                           s3[0], s3[1], s3[2],
-                                           s4[0], s4[1], s4[2],
-                                           ev[0], ev[1], ev[2],
-                                           e1[0], e1[1], e1[2],
-                                           e2[0], e2[1], e2[2],
-                                           e3[0], e3[1], e3[2],
-                                           e4[0], e4[1], e4[2],
-                                           &numerical_error[0],
-                                           &numerical_error[1],
-                                           &numerical_error[2]);
+        // The certified numerical error bound is what makes the rejection below
+        // sound, and it depends only on the query's coordinates -- not on the
+        // box. It used to be recomputed here, on every box popped from the
+        // stack: 30 absolute values, 30 maxima and three cubes per split, to
+        // arrive at the same three numbers every time. It is now computed once
+        // per query and passed in.
+        //
+        // (It also used to not be called at all. The acceptance test padded with
+        // machine epsilon instead, roughly 30x too small for unit-scale
+        // geometry, which let it discard boxes that contained a root.)
 
         (void)refine;
 
@@ -340,33 +446,100 @@ namespace sccd {
             samples[i + 1] = splitters[i];
         }
 
+        // Evaluate each sample plane at most once, and only when a sub-box that
+        // reads it survives the cutoff.
+        //
+        // Two separate savings, and they pull against each other if done naively.
+        //
+        // The first is sharing. Splitting into N+1 sub-boxes along one axis, the
+        // naive loop evaluates eight corners each, 8(N+1) in total; but
+        // consecutive sub-boxes share a face, so only 4(N+2) distinct corner
+        // values exist. Carrying the previous plane forward gets that for free.
+        //
+        // The second is the frame. A corner costs a blend rather than a full
+        // interpolation once the t-dependent part is precomputed, and a split
+        // along u or v holds t at the domain's two bounds for every corner in the
+        // split, so two frames serve all of them.
+        //
+        // The trap is that both invite hoisting the evaluation out of the
+        // sub-box loop, and that loses more than it gains. A sub-box whose t
+        // lower bound has reached the running time of impact is discarded
+        // unlooked at, and the running value gets sharper *during* this loop
+        // whenever a sub-box accepts. Evaluating all the planes up front measured
+        // 1.3x faster per isolated query and 1.35x SLOWER end to end, where a
+        // shared global minimum prunes hard; computing the cutoff once on entry
+        // instead of re-reading it each iteration still left it slower than the
+        // naive loop. So the planes are produced lazily, one per iteration, and
+        // the cutoff is re-read exactly where the naive loop read it.
+        T plane_a[4][3];
+        T plane_b[4][3];
+        bool have_a = false;
+
+        const T dom_lo[3] = {domain.tuv[0].lower, domain.tuv[1].lower, domain.tuv[2].lower};
+        const T dom_hi[3] = {domain.tuv[0].upper, domain.tuv[1].upper, domain.tuv[2].upper};
+
+        // The two axes held fixed while SplitDim sweeps.
+        constexpr int A = (SplitDim == 0) ? 1 : 0;
+        constexpr int B = (SplitDim == 2) ? 1 : 2;
+
+        VQFrame<T> frame_lo;
+        VQFrame<T> frame_hi;
+        if constexpr (SplitDim != 0) {
+            vq_frame_at<T>(sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, dom_lo[0], frame_lo);
+            vq_frame_at<T>(sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, dom_hi[0], frame_hi);
+        }
+
+        const auto eval_plane = [&](const int j, T dst[4][3]) {
+            if constexpr (SplitDim == 0) {
+                VQFrame<T> frame;
+                vq_frame_at<T>(sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, samples[j], frame);
+                for (int c = 0; c < 4; ++c) {
+                    vq_eval_frame<T>(frame,
+                                     (c & 1) ? dom_hi[A] : dom_lo[A],
+                                     (c & 2) ? dom_hi[B] : dom_lo[B],
+                                     dst[c]);
+                }
+            } else {
+                for (int c = 0; c < 4; ++c) {
+                    // Bit 0 selects the t bound, bit 1 the remaining fixed axis.
+                    const VQFrame<T> &frame = (c & 1) ? frame_hi : frame_lo;
+                    const T other = (c & 2) ? dom_hi[B] : dom_lo[B];
+                    const T uu = (SplitDim == 1) ? samples[j] : other;
+                    const T vv = (SplitDim == 1) ? other : samples[j];
+                    vq_eval_frame<T>(frame, uu, vv, dst[c]);
+                }
+            }
+        };
+
         const auto stack_size = stack.size();
         bool found = false;
         for (int i = 0; i < N + 1; ++i) {
             const T sample_min = samples[i];
             const T sample_max = samples[i + 1];
             const T tt_min = SplitDim == 0 ? sample_min : domain.tuv[0].lower;
-            const T tt_max = SplitDim == 0 ? sample_max : domain.tuv[0].upper;
-            const T uu_min = SplitDim == 1 ? sample_min : domain.tuv[1].lower;
-            const T uu_max = SplitDim == 1 ? sample_max : domain.tuv[1].upper;
-            const T vv_min = SplitDim == 2 ? sample_min : domain.tuv[2].lower;
-            const T vv_max = SplitDim == 2 ? sample_max : domain.tuv[2].upper;
 
             if (tt_min >= toi) {
+                have_a = false;
                 continue;
             }
+
+            if (!have_a) {
+                eval_plane(i, plane_a);
+                have_a = true;
+            }
+            eval_plane(i + 1, plane_b);
 
             T fmin[3];
             T fmax[3];
             init_codomain_bounds<T>(fmin, fmax);
+            for (int c = 0; c < 4; ++c) {
+                update_codomain_bounds<T>(plane_a[c], fmin, fmax);
+                update_codomain_bounds<T>(plane_b[c], fmin, fmax);
+            }
 
-            for (int mask = 0; mask < 8; ++mask) {
-                const T ct = (mask & 1) ? tt_max : tt_min;
-                const T cu = (mask & 2) ? uu_max : uu_min;
-                const T cv = (mask & 4) ? vv_max : vv_min;
-                T F[3];
-                diff_vq<T>(sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, ct, cu, cv, F);
-                update_codomain_bounds<T>(F, fmin, fmax);
+            // The upper face of this sub-box is the lower face of the next.
+            for (int c = 0; c < 4; ++c) {
+                for (int d = 0; d < 3; ++d) plane_a[c][d] = plane_b[c][d];
             }
 
             bool accepted = false;
@@ -407,6 +580,7 @@ namespace sccd {
                                               const int max_iter,
                                               const T tol,
                                               const T tols[3],
+                                              const T numerical_error[3],
                                               const T codomain_widths[3],
                                               const T sv[3],
                                               const T s1[3],
@@ -426,14 +600,14 @@ namespace sccd {
         const int split_dim = domain.widest_dimension(codomain_widths);
         if (split_dim == 0) {
             return grid_search_adaptive_split_vq_axis<0, N, T>(
-                domain, max_iter, tol, tols, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, toi, u, v, stack, refine);
+                domain, max_iter, tol, tols, numerical_error, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, toi, u, v, stack, refine);
         }
         if (split_dim == 1) {
             return grid_search_adaptive_split_vq_axis<1, N, T>(
-                domain, max_iter, tol, tols, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, toi, u, v, stack, refine);
+                domain, max_iter, tol, tols, numerical_error, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, toi, u, v, stack, refine);
         }
         return grid_search_adaptive_split_vq_axis<2, N, T>(
-            domain, max_iter, tol, tols, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, toi, u, v, stack, refine);
+            domain, max_iter, tol, tols, numerical_error, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, toi, u, v, stack, refine);
     }
 
     template <int N, typename T>
@@ -457,14 +631,17 @@ namespace sccd {
                                               std::vector<sccd::Box<T>> &stack,
                                               const bool refine) {
         const T codomain_widths[3] = {T(1), T(1), T(1)};
+        T numerical_error[3];
+        vq_numerical_error<T>(sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, numerical_error);
         return grid_search_adaptive_split_vq<N, T>(
-            domain, max_iter, tol, tols, codomain_widths, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, toi, u, v, stack, refine);
+            domain, max_iter, tol, tols, numerical_error, codomain_widths, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, toi, u, v, stack, refine);
     }
 
     template <typename T>
     bool find_root_grid_adaptive_split_vq(const int max_iter,
                                           const T tol,
                                           const T tols[3],
+                                          const T numerical_error[3],
                                           const T codomain_widths[3],
                                           const T sv[3],
                                           const T s1[3],
@@ -487,7 +664,7 @@ namespace sccd {
         }
 
         return grid_search_adaptive_split_vq<ADAPTIVE_NUM_SPLITS, T>(
-            initial_domain, max_iter, tol, tols, codomain_widths, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, t, u, v, stack, refine);
+            initial_domain, max_iter, tol, tols, numerical_error, codomain_widths, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, t, u, v, stack, refine);
     }
 
     template <typename T>
@@ -511,8 +688,10 @@ namespace sccd {
                                           std::vector<Box<T>> &stack,
                                           const bool refine = false) {
         const T codomain_widths[3] = {T(1), T(1), T(1)};
+        T numerical_error[3];
+        vq_numerical_error<T>(sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, numerical_error);
         return find_root_grid_adaptive_split_vq<T>(
-            max_iter, tol, tols, codomain_widths, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, initial_domain, t, u, v, stack, refine);
+            max_iter, tol, tols, numerical_error, codomain_widths, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, initial_domain, t, u, v, stack, refine);
     }
 
     template <typename T>
@@ -539,8 +718,10 @@ namespace sccd {
         compute_vertex_quad_tolerance<T>(tol, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, tols);
         compute_vertex_quad_codomain_widths<T>(sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, codomain_widths);
         normalize_vertex_quad_codomain_widths<T>(codomain_widths);
+        T numerical_error[3];
+        vq_numerical_error<T>(sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, numerical_error);
         return find_root_grid_adaptive_split_vq<T>(
-            max_iter, tol, tols, codomain_widths, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, initial_domain, t, u, v, stack, refine);
+            max_iter, tol, tols, numerical_error, codomain_widths, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, initial_domain, t, u, v, stack, refine);
     }
 
     template <typename T>
