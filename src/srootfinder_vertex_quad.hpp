@@ -302,6 +302,27 @@ namespace sccd {
                                                    T &v,
                                                    std::vector<sccd::Box<T>> &stack,
                                                    const bool refine) {
+        // The certified numerical error bound, which is what makes the rejection
+        // below sound. sccd_get_numerical_error_vq_soa already existed in this
+        // file but was never called: the acceptance test padded with machine
+        // epsilon instead, roughly 30x too small for unit-scale geometry, which
+        // let it discard boxes that contained a root.
+        T numerical_error[3];
+        sccd_get_numerical_error_vq_soa<T>(/*use_ms=*/0,
+                                           sv[0], sv[1], sv[2],
+                                           s1[0], s1[1], s1[2],
+                                           s2[0], s2[1], s2[2],
+                                           s3[0], s3[1], s3[2],
+                                           s4[0], s4[1], s4[2],
+                                           ev[0], ev[1], ev[2],
+                                           e1[0], e1[1], e1[2],
+                                           e2[0], e2[1], e2[2],
+                                           e3[0], e3[1], e3[2],
+                                           e4[0], e4[1], e4[2],
+                                           &numerical_error[0],
+                                           &numerical_error[1],
+                                           &numerical_error[2]);
+
         (void)refine;
 
         const T lo = domain.tuv[SplitDim].lower;
@@ -349,7 +370,7 @@ namespace sccd {
             }
 
             bool accepted = false;
-            if (!codomain_acceptance_vq<T>(fmin, fmax, tol, tols, accepted)) {
+            if (!codomain_acceptance_vq<T>(fmin, fmax, tol, tols, numerical_error, accepted)) {
                 continue;
             }
 

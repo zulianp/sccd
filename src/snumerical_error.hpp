@@ -1,12 +1,15 @@
 #ifndef SCCD_SNUMERICAL_ERROR_HPP
 #define SCCD_SNUMERICAL_ERROR_HPP
 
+#include "sccd_base.hpp"
 #include "smath.hpp"
 
 #include <cmath>
 #include <limits>
 
 namespace sccd {
+
+    SCCD_FP_STRICT_BEGIN
 
     template <bool is_vertex_face, typename T>
     static inline T numerical_error_bound_component(const T s0,
@@ -42,6 +45,8 @@ namespace sccd {
                 s0[d], s1[d], s2[d], s3[d], e0[d], e1[d], e2[d], e3[d]);
         }
     }
+
+    SCCD_FP_STRICT_END
 
 }  // namespace sccd
 

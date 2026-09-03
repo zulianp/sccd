@@ -33,6 +33,11 @@
 #define SCCD_VNARROWPHASE_ADAPTIVE_SPLIT 1
 #endif
 
+// Lanes carried at once by the fast vertex-face kernel. See the note at its use.
+#ifndef SCCD_VNARROWPHASE_VSIZE
+#define SCCD_VNARROWPHASE_VSIZE 8
+#endif
+
 namespace sccd {
 
     template <typename T>
@@ -619,6 +624,41 @@ namespace sccd {
         return vsetq_lane_f64(a[q1], vdupq_n_f64(a[q0]), 1);
     }
 
+    /**
+     * \brief The arithmetic half of a vertex-face corner, given the geometry
+     *        already in registers.
+     *
+     * Split out so the caller can hoist the loads: the eight geometry values do
+     * not depend on which corner is being evaluated, but they used to be gathered
+     * inside the loop over the eight corners, so every box paid for them eight
+     * times over. The expressions below are unchanged and in the same order, so
+     * the result is bit-identical.
+     */
+    static inline float64x2_t diff_vf_component_neon_loaded(const float64x2_t vs0,
+                                                            const float64x2_t vs1,
+                                                            const float64x2_t vs2,
+                                                            const float64x2_t vs3,
+                                                            const float64x2_t ve0,
+                                                            const float64x2_t ve1,
+                                                            const float64x2_t ve2,
+                                                            const float64x2_t ve3,
+                                                            const float64x2_t t,
+                                                            const float64x2_t u,
+                                                            const float64x2_t v) {
+        const float64x2_t one = vdupq_n_f64(1.0);
+        const float64x2_t omt = vsubq_f64(one, t);
+        const float64x2_t o = vsubq_f64(vsubq_f64(one, u), v);
+
+        const float64x2_t vertex = vfmaq_f64(vmulq_f64(omt, vs0), t, ve0);
+        float64x2_t sface = vmulq_f64(o, vs1);
+        sface = vfmaq_f64(sface, u, vs2);
+        sface = vfmaq_f64(sface, v, vs3);
+        float64x2_t eface = vmulq_f64(o, ve1);
+        eface = vfmaq_f64(eface, u, ve2);
+        eface = vfmaq_f64(eface, v, ve3);
+        return vsubq_f64(vertex, vfmaq_f64(vmulq_f64(omt, sface), t, eface));
+    }
+
     static inline float64x2_t diff_vf_component_neon_indexed(const double* const SCCD_RESTRICT s0,
                                                              const double* const SCCD_RESTRICT s1,
                                                              const double* const SCCD_RESTRICT s2,
@@ -660,72 +700,85 @@ namespace sccd {
                                       const VQuery<double, VSIZE>& query,
                                       VCodomain<double, VSIZE>& codomain) {
         static_assert((VSIZE % 2) == 0, "double NEON codomain kernel expects an even vector size");
-        for (int d = 0; d < 3; ++d) {
-            for (int i = 0; i < VSIZE; i += 2) {
-                vst1q_f64(codomain.xyz[d].lower + i, vdupq_n_f64(std::numeric_limits<double>::max()));
-                vst1q_f64(codomain.xyz[d].upper + i, vdupq_n_f64(std::numeric_limits<double>::lowest()));
-            }
-        }
 
-        for (int mask = 0; mask < 8; ++mask) {
-            const double* const tptr = (mask & 1) ? domain.tuv[0].upper : domain.tuv[0].lower;
-            const double* const uptr = (mask & 2) ? domain.tuv[1].upper : domain.tuv[1].lower;
-            const double* const vptr = (mask & 4) ? domain.tuv[2].upper : domain.tuv[2].lower;
-            for (int i = 0; i < VSIZE; i += 2) {
+        // Lane pair outside, corner inside -- the reverse of the obvious nesting,
+        // and worth a large constant factor.
+        //
+        // The eight geometry values a corner needs depend on the lane's query, not
+        // on which of the eight corners is being evaluated. Nested the other way
+        // they were gathered inside the corner loop: 8 two-element gathers per
+        // component per corner, 192 per box, for values that never changed. The
+        // running min/max was likewise loaded from and stored back to `codomain`
+        // once per corner instead of being kept in registers.
+        //
+        // Both are hoisted here. The corner expressions and the order in which
+        // corners fold into the min/max are untouched, so results are
+        // bit-identical -- this is the same kernel, not a different one.
+        for (int i = 0; i < VSIZE; i += 2) {
+            const int q0 = static_cast<int>(domain.query_index[i]);
+            const int q1 = static_cast<int>(domain.query_index[i + 1]);
+
+            const float64x2_t s0x = load2_indexed_f64(query.s0.x, q0, q1);
+            const float64x2_t s1x = load2_indexed_f64(query.s1.x, q0, q1);
+            const float64x2_t s2x = load2_indexed_f64(query.s2.x, q0, q1);
+            const float64x2_t s3x = load2_indexed_f64(query.s3.x, q0, q1);
+            const float64x2_t e0x = load2_indexed_f64(query.e0.x, q0, q1);
+            const float64x2_t e1x = load2_indexed_f64(query.e1.x, q0, q1);
+            const float64x2_t e2x = load2_indexed_f64(query.e2.x, q0, q1);
+            const float64x2_t e3x = load2_indexed_f64(query.e3.x, q0, q1);
+
+            const float64x2_t s0y = load2_indexed_f64(query.s0.y, q0, q1);
+            const float64x2_t s1y = load2_indexed_f64(query.s1.y, q0, q1);
+            const float64x2_t s2y = load2_indexed_f64(query.s2.y, q0, q1);
+            const float64x2_t s3y = load2_indexed_f64(query.s3.y, q0, q1);
+            const float64x2_t e0y = load2_indexed_f64(query.e0.y, q0, q1);
+            const float64x2_t e1y = load2_indexed_f64(query.e1.y, q0, q1);
+            const float64x2_t e2y = load2_indexed_f64(query.e2.y, q0, q1);
+            const float64x2_t e3y = load2_indexed_f64(query.e3.y, q0, q1);
+
+            const float64x2_t s0z = load2_indexed_f64(query.s0.z, q0, q1);
+            const float64x2_t s1z = load2_indexed_f64(query.s1.z, q0, q1);
+            const float64x2_t s2z = load2_indexed_f64(query.s2.z, q0, q1);
+            const float64x2_t s3z = load2_indexed_f64(query.s3.z, q0, q1);
+            const float64x2_t e0z = load2_indexed_f64(query.e0.z, q0, q1);
+            const float64x2_t e1z = load2_indexed_f64(query.e1.z, q0, q1);
+            const float64x2_t e2z = load2_indexed_f64(query.e2.z, q0, q1);
+            const float64x2_t e3z = load2_indexed_f64(query.e3.z, q0, q1);
+
+            float64x2_t lo0 = vdupq_n_f64(std::numeric_limits<double>::max());
+            float64x2_t lo1 = lo0;
+            float64x2_t lo2 = lo0;
+            float64x2_t hi0 = vdupq_n_f64(std::numeric_limits<double>::lowest());
+            float64x2_t hi1 = hi0;
+            float64x2_t hi2 = hi0;
+
+            for (int mask = 0; mask < 8; ++mask) {
+                const double* const tptr = (mask & 1) ? domain.tuv[0].upper : domain.tuv[0].lower;
+                const double* const uptr = (mask & 2) ? domain.tuv[1].upper : domain.tuv[1].lower;
+                const double* const vptr = (mask & 4) ? domain.tuv[2].upper : domain.tuv[2].lower;
                 const float64x2_t t = vld1q_f64(tptr + i);
                 const float64x2_t u = vld1q_f64(uptr + i);
                 const float64x2_t v = vld1q_f64(vptr + i);
-                const int q0 = static_cast<int>(domain.query_index[i]);
-                const int q1 = static_cast<int>(domain.query_index[i + 1]);
 
-                float64x2_t f = diff_vf_component_neon_indexed(query.s0.x,
-                                                               query.s1.x,
-                                                               query.s2.x,
-                                                               query.s3.x,
-                                                               query.e0.x,
-                                                               query.e1.x,
-                                                               query.e2.x,
-                                                               query.e3.x,
-                                                               q0,
-                                                               q1,
-                                                               t,
-                                                               u,
-                                                               v);
-                vst1q_f64(codomain.xyz[0].lower + i, vminq_f64(vld1q_f64(codomain.xyz[0].lower + i), f));
-                vst1q_f64(codomain.xyz[0].upper + i, vmaxq_f64(vld1q_f64(codomain.xyz[0].upper + i), f));
+                float64x2_t f = diff_vf_component_neon_loaded(s0x, s1x, s2x, s3x, e0x, e1x, e2x, e3x, t, u, v);
+                lo0 = vminq_f64(lo0, f);
+                hi0 = vmaxq_f64(hi0, f);
 
-                f = diff_vf_component_neon_indexed(query.s0.y,
-                                                   query.s1.y,
-                                                   query.s2.y,
-                                                   query.s3.y,
-                                                   query.e0.y,
-                                                   query.e1.y,
-                                                   query.e2.y,
-                                                   query.e3.y,
-                                                   q0,
-                                                   q1,
-                                                   t,
-                                                   u,
-                                                   v);
-                vst1q_f64(codomain.xyz[1].lower + i, vminq_f64(vld1q_f64(codomain.xyz[1].lower + i), f));
-                vst1q_f64(codomain.xyz[1].upper + i, vmaxq_f64(vld1q_f64(codomain.xyz[1].upper + i), f));
+                f = diff_vf_component_neon_loaded(s0y, s1y, s2y, s3y, e0y, e1y, e2y, e3y, t, u, v);
+                lo1 = vminq_f64(lo1, f);
+                hi1 = vmaxq_f64(hi1, f);
 
-                f = diff_vf_component_neon_indexed(query.s0.z,
-                                                   query.s1.z,
-                                                   query.s2.z,
-                                                   query.s3.z,
-                                                   query.e0.z,
-                                                   query.e1.z,
-                                                   query.e2.z,
-                                                   query.e3.z,
-                                                   q0,
-                                                   q1,
-                                                   t,
-                                                   u,
-                                                   v);
-                vst1q_f64(codomain.xyz[2].lower + i, vminq_f64(vld1q_f64(codomain.xyz[2].lower + i), f));
-                vst1q_f64(codomain.xyz[2].upper + i, vmaxq_f64(vld1q_f64(codomain.xyz[2].upper + i), f));
+                f = diff_vf_component_neon_loaded(s0z, s1z, s2z, s3z, e0z, e1z, e2z, e3z, t, u, v);
+                lo2 = vminq_f64(lo2, f);
+                hi2 = vmaxq_f64(hi2, f);
             }
+
+            vst1q_f64(codomain.xyz[0].lower + i, lo0);
+            vst1q_f64(codomain.xyz[0].upper + i, hi0);
+            vst1q_f64(codomain.xyz[1].lower + i, lo1);
+            vst1q_f64(codomain.xyz[1].upper + i, hi1);
+            vst1q_f64(codomain.xyz[2].lower + i, lo2);
+            vst1q_f64(codomain.xyz[2].upper + i, hi2);
         }
     }
 #endif
@@ -897,6 +950,11 @@ namespace sccd {
                domain.tuv[1].lower[i] + domain.tuv[2].lower[i] <= T(1);
     }
 
+    // The same normal-equation splitter as srootfinder.hpp's, with N = 4 rather
+    // than 2 and without its N == 1 damping case. See the analysis recorded
+    // above that function: the x0 term cancels, so all N splitters solve for one
+    // point and differ only by their clamp window -- which pins 97.6% of them at
+    // this N.
     template <int SplitDim, int N, typename T, int VSIZE>
     static inline void normal_equation_axis_splitters_vf_lane(const VQuery<T, VSIZE>& query,
                                                               const int q,
@@ -1543,7 +1601,15 @@ namespace sccd {
 
         const T_HP max_domain_toi = sccd::min<T_HP>(T_HP(1), T_HP(max_toi));
 
-        int constexpr VSIZE = 8;
+        // Lane count. Made tunable so it could be measured, which it never had
+        // been -- 8 was hardcoded here.
+        //
+        // Measured on NEON over armadillo-rollers vertex-face: 2, 4 and 8 lanes
+        // come in at 301, 327 and 297 ms, i.e. all the same. That is worth
+        // recording because the conservative kernel next door is *not* like this
+        // -- there the same sweep moves vertex-face by 17% and the width is
+        // load-bearing. Whatever dominates this kernel is not the vector width.
+        int constexpr VSIZE = SCCD_VNARROWPHASE_VSIZE;
         using VQueryT = VQuery<T_HP, VSIZE>;
         using VDomainT = VDomain<T_HP, I, VSIZE>;
         using VCodomainT = VCodomain<T_HP, VSIZE>;

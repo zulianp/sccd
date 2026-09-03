@@ -32,6 +32,8 @@
 #define SCCD_MAX_COORD_TOL 1e-2
 #endif
 
+SCCD_FP_STRICT_BEGIN
+
 namespace sccd {
     /**
      * \brief Cap a domain tolerance, mirroring TightInclusion's clamp_div.
@@ -44,6 +46,7 @@ namespace sccd {
     static inline T clamp_domain_tol(const T value, const T cap) {
         return (value < cap) ? value : cap;
     }
+
 }  // namespace sccd
 
 template <typename T>
@@ -275,5 +278,7 @@ static inline void compute_edge_edge_tolerance(const T codomain_tol,
                                        &tol[1],
                                        &tol[2]);
 }
+
+SCCD_FP_STRICT_END
 
 #endif

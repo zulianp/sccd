@@ -13,9 +13,21 @@
 //
 //   ti_oracle <dataset-dir> [--phase vf|ee|both] [--max-files N]
 //             [--tol T] [--max-depth N] [--csv out.csv]
+//
+// Built with SCCD_ENABLE_CUDA it also runs the device narrow phase as a fourth
+// mode, over the same queries and through the same gate, so the GPU is held to
+// the invariant the CPU modes are. Without CUDA that mode is absent and nothing
+// else changes.
 
 #include "narrowphase.hpp"
+#include "smath.hpp"
 #include "srootfinder.hpp"
+
+#ifdef SCCD_ENABLE_CUDA
+#include "sccd_narrowphase.cuh"
+
+#include <cuda_runtime.h>
+#endif
 
 #include <algorithm>
 #include <chrono>
@@ -52,6 +64,21 @@ namespace {
         // be conservative, so gating CI on mode 2 alone is the useful default
         // once it is the mode being shipped.
         std::string gate = "all";
+        // Run the device narrow phase in single precision. The device kernel is
+        // instantiated for both, and the two differ in more than speed: the
+        // origin-containment test is padded by the user tolerance rather than by
+        // TightInclusion's numerical error bound, and which of the two is larger
+        // flips between float and double.
+        bool device_float = false;
+        // Round the loaded geometry through float once, for *every* mode
+        // including the TightInclusion reference. The exact roots in the dataset
+        // belong to the original rational geometry, so narrowing the input moves
+        // the true root; this makes that effect visible on the host rows too,
+        // which is the only way to tell it apart from a kernel defect.
+        bool float_geometry = false;
+        // > 0 selects throughput mode: merge every query file into one batch and
+        // time the device kernels with CUDA events instead of scoring accuracy.
+        int bench_repeats = 0;
     };
 
     // One file's worth of queries, as the flat SoA the narrow phase expects.
@@ -76,6 +103,228 @@ namespace {
         }
     };
 
+#ifdef SCCD_ENABLE_CUDA
+#define ORACLE_CUDA_CHECK(call)                                                                   \
+    do {                                                                                          \
+        const cudaError_t _err = (call);                                                          \
+        if (_err != cudaSuccess) {                                                                \
+            std::fprintf(stderr,                                                                  \
+                         "ti_oracle: CUDA error at %s:%d: %s\n",                                  \
+                         __FILE__,                                                                \
+                         __LINE__,                                                                \
+                         cudaGetErrorString(_err));                                               \
+            /* 3, not 2: 2 is the conservativeness gate's failure code, and CI has */              \
+            /* to be able to tell "the GPU broke the invariant" from "the GPU was  */              \
+            /* not there". */                                                                      \
+            std::exit(3);                                                                          \
+        }                                                                                         \
+    } while (0)
+
+    template <typename T>
+    T* device_dup(const T* host, const std::size_t n) {
+        if (n == 0) return nullptr;
+        T* dev = nullptr;
+        ORACLE_CUDA_CHECK(cudaMalloc(&dev, n * sizeof(T)));
+        ORACLE_CUDA_CHECK(cudaMemcpy(dev, host, n * sizeof(T), cudaMemcpyHostToDevice));
+        return dev;
+    }
+
+    /**
+     * \brief A QuerySet mirrored into device memory, in the layout the kernels want.
+     *
+     * The device narrow phase takes the coordinate and connectivity arrays as
+     * pointer-to-pointer and dereferences the outer level *on the device*
+     * (sp[0][idx] inside load_query_vf), so the array of three pointers has to
+     * live in device memory too, not just the arrays it points at. Passing a host
+     * array of device pointers compiles and then faults, which is why this is
+     * spelled out rather than left to the caller.
+     */
+    template <typename T>
+    struct DeviceQuerySet {
+        T* p0[3] = {nullptr, nullptr, nullptr};
+        T* p1[3] = {nullptr, nullptr, nullptr};
+        idx_t* prim[3] = {nullptr, nullptr, nullptr};
+        T** d_p0 = nullptr;
+        T** d_p1 = nullptr;
+        idx_t** d_prim = nullptr;
+        idx_t* d_q0 = nullptr;
+        idx_t* d_q1 = nullptr;
+        T* d_toi = nullptr;
+        std::size_t n_queries = 0;
+
+        explicit DeviceQuerySet(const QuerySet& qs) : n_queries(qs.n_queries) {
+            // Narrowed here when T is float. That rounding is part of what a float
+            // pipeline does, so a violation found this way is a property of the
+            // pipeline, not an artefact of the harness -- but it does mean a float
+            // run cannot separate "the kernel rejected a box it should have kept"
+            // from "the rounded geometry genuinely moved the root".
+            std::vector<T> tmp;
+            auto upload = [&](const std::vector<scalar_t>& src) {
+                tmp.assign(src.begin(), src.end());
+                return device_dup(tmp.data(), tmp.size());
+            };
+            for (int d = 0; d < 3; ++d) {
+                p0[d] = upload(qs.p0[d]);
+                p1[d] = upload(qs.p1[d]);
+                // Edge-edge leaves the third slot empty; it is never read, but the
+                // outer array still has to be three wide.
+                prim[d] = qs.prim[d].empty() ? nullptr : device_dup(qs.prim[d].data(), qs.prim[d].size());
+            }
+            d_p0 = device_dup(p0, 3);
+            d_p1 = device_dup(p1, 3);
+            d_prim = device_dup(prim, 3);
+            d_q0 = device_dup(qs.q0.data(), qs.q0.size());
+            d_q1 = device_dup(qs.q1.data(), qs.q1.size());
+            ORACLE_CUDA_CHECK(cudaMalloc(&d_toi, sccd::max<std::size_t>(n_queries, 1) * sizeof(T)));
+        }
+
+        ~DeviceQuerySet() {
+            for (int d = 0; d < 3; ++d) {
+                cudaFree(p0[d]);
+                cudaFree(p1[d]);
+                cudaFree(prim[d]);
+            }
+            cudaFree(d_p0);
+            cudaFree(d_p1);
+            cudaFree(d_prim);
+            cudaFree(d_q0);
+            cudaFree(d_q1);
+            cudaFree(d_toi);
+        }
+
+        DeviceQuerySet(const DeviceQuerySet&) = delete;
+        DeviceQuerySet& operator=(const DeviceQuerySet&) = delete;
+
+        void download(std::vector<scalar_t>& out) const {
+            if (n_queries == 0) return;
+            std::vector<T> tmp(n_queries);
+            ORACLE_CUDA_CHECK(cudaMemcpy(tmp.data(), d_toi, n_queries * sizeof(T), cudaMemcpyDeviceToHost));
+            // Widening a float toi is exact, so scoring stays in double throughout.
+            out.assign(tmp.begin(), tmp.end());
+        }
+    };
+
+    /** \brief Run the device narrow phase over one query set, in T precision. */
+    template <typename T>
+    void run_device_narrow_phase(const QuerySet& qs,
+                                 const bool is_vf,
+                                 const int max_depth,
+                                 const scalar_t tol,
+                                 std::vector<scalar_t>& toi_out) {
+        if (qs.n_queries == 0) return;
+        DeviceQuerySet<T> dev(qs);
+        if (is_vf) {
+            sccd::device::narrow_phase_vf<3, T, idx_t>(qs.n_queries,
+                                                              dev.d_q0,
+                                                              dev.d_q1,
+                                                              dev.d_p0,
+                                                              dev.d_p1,
+                                                              /*face_stride=*/1,
+                                                              dev.d_prim,
+                                                              T(1),
+                                                              dev.d_toi,
+                                                              max_depth,
+                                                              T(tol),
+                                                              /*toi_stride=*/1);
+        } else {
+            sccd::device::narrow_phase_ee<T, idx_t>(qs.n_queries,
+                                                           dev.d_q0,
+                                                           dev.d_q1,
+                                                           dev.d_p0,
+                                                           dev.d_p1,
+                                                           /*edge_stride=*/1,
+                                                           dev.d_prim,
+                                                           T(1),
+                                                           dev.d_toi,
+                                                           max_depth,
+                                                           T(tol),
+                                                           /*toi_stride=*/1);
+        }
+        ORACLE_CUDA_CHECK(cudaDeviceSynchronize());
+        dev.download(toi_out);
+    }
+#endif  // SCCD_ENABLE_CUDA
+
+    /**
+     * \brief Concatenate one query set onto another, re-basing its indices.
+     *
+     * Each file owns four consecutive nodes per query, so merging means shifting
+     * node ids by the running node count and primitive ids by the running
+     * primitive count. Needed because a per-file batch is a few hundred queries,
+     * where launch overhead dominates and the measurement says nothing about the
+     * kernel -- which is what the "Caveat on the ms column" in
+     * benchmark/oracle/README.md is about.
+     */
+    void append_query_set(QuerySet& dst, const QuerySet& src, const bool is_vf) {
+        const idx_t node_offset = static_cast<idx_t>(dst.p0[0].size());
+        const idx_t prim_offset = static_cast<idx_t>(dst.prim[0].size());
+
+        for (int d = 0; d < 3; ++d) {
+            dst.p0[d].insert(dst.p0[d].end(), src.p0[d].begin(), src.p0[d].end());
+            dst.p1[d].insert(dst.p1[d].end(), src.p1[d].begin(), src.p1[d].end());
+            for (const idx_t v : src.prim[d]) {
+                dst.prim[d].push_back(v + node_offset);
+            }
+        }
+        for (const idx_t v : src.q0) {
+            dst.q0.push_back(v + (is_vf ? node_offset : prim_offset));
+        }
+        for (const idx_t v : src.q1) {
+            dst.q1.push_back(v + prim_offset);
+        }
+        dst.n_queries += src.n_queries;
+    }
+
+#ifdef SCCD_ENABLE_CUDA
+    /**
+     * \brief Time one device mode on a single large batch, uploading once.
+     *
+     * CUDA events rather than a host clock, and the transfer is outside the timed
+     * region: the question is what the kernel costs, not what PCIe costs.
+     */
+    template <typename T>
+    double bench_device(const QuerySet& qs,
+                        const bool is_vf,
+                        const int max_depth,
+                        const scalar_t tol,
+                        const int repeats,
+                        const int toi_stride) {
+        DeviceQuerySet<T> dev(qs);
+        cudaEvent_t beg, end;
+        ORACLE_CUDA_CHECK(cudaEventCreate(&beg));
+        ORACLE_CUDA_CHECK(cudaEventCreate(&end));
+
+        auto once = [&]() {
+            if (is_vf) {
+                sccd::device::narrow_phase_vf<3, T, idx_t>(qs.n_queries, dev.d_q0, dev.d_q1, dev.d_p0, dev.d_p1, 1,
+                                                           dev.d_prim, T(1), dev.d_toi, max_depth, T(tol),
+                                                           toi_stride);
+            } else {
+                sccd::device::narrow_phase_ee<T, idx_t>(qs.n_queries, dev.d_q0, dev.d_q1, dev.d_p0, dev.d_p1, 1,
+                                                        dev.d_prim, T(1), dev.d_toi, max_depth, T(tol),
+                                                        toi_stride);
+            }
+        };
+
+        once();  // warm-up: first call also sizes the persistent global stack
+        ORACLE_CUDA_CHECK(cudaDeviceSynchronize());
+
+        double best = 1e30;
+        for (int r = 0; r < repeats; ++r) {
+            ORACLE_CUDA_CHECK(cudaEventRecord(beg));
+            once();
+            ORACLE_CUDA_CHECK(cudaEventRecord(end));
+            ORACLE_CUDA_CHECK(cudaEventSynchronize(end));
+            float ms = 0.f;
+            ORACLE_CUDA_CHECK(cudaEventElapsedTime(&ms, beg, end));
+            best = std::min(best, static_cast<double>(ms));
+        }
+        cudaEventDestroy(beg);
+        cudaEventDestroy(end);
+        return best;
+    }
+#endif
+
     // Rows are "num,den,num,den,num,den": exact rationals from the benchmark.
     bool parse_query_row(const std::string& line, scalar_t coords[3]) {
         double values[6];
@@ -98,7 +347,10 @@ namespace {
         return true;
     }
 
-    bool read_queries(const fs::path& path, const bool is_vf, QuerySet& out) {
+    bool read_queries(const fs::path& path,
+                      const bool is_vf,
+                      const bool narrow_geometry_to_float,
+                      QuerySet& out) {
         std::ifstream in(path);
         if (!in) {
             return false;
@@ -150,6 +402,13 @@ namespace {
                 out.prim[1].push_back(base + 1);
                 out.prim[0].push_back(base + 2);
                 out.prim[1].push_back(base + 3);
+            }
+        }
+
+        if (narrow_geometry_to_float) {
+            for (int d = 0; d < 3; ++d) {
+                for (auto& v : out.p0[d]) v = static_cast<scalar_t>(static_cast<float>(v));
+                for (auto& v : out.p1[d]) v = static_cast<scalar_t>(static_cast<float>(v));
             }
         }
 
@@ -276,23 +535,52 @@ namespace {
     }
 
     // The modes under comparison. TI itself is the reference, not a mode.
-    enum class Mode { Scalar, Vector, TiVector };
+    //
+    // Device is the CUDA narrow phase. It is deliberately scored by the same
+    // gate as the host modes rather than compared against them: the invariant is
+    // a property of the answer, not of which processor produced it. Note that it
+    // does not honour SCCD_NARROWPHASE_MODE at all -- the device has one kernel
+    // -- so unlike the host rows its name describes the hardware, not the
+    // algorithm.
+    enum class Mode { Scalar, Vector, TiVector, Device, DeviceTi };
+#ifdef SCCD_ENABLE_CUDA
+    constexpr int N_MODES = 5;
+#else
     constexpr int N_MODES = 3;
+#endif
 
     const char* mode_name(const Mode m) {
         switch (m) {
             case Mode::Scalar: return "scalar";
             case Mode::Vector: return "vector";
             case Mode::TiVector: return "ti-vec";
+            case Mode::Device: return "device";
+            case Mode::DeviceTi: return "device-ti";
         }
         return "?";
     }
 
     Mode mode_of(const int m) { return static_cast<Mode>(m); }
 
+    /**
+     * \brief Point the next narrow-phase call at one mode.
+     *
+     * SCCD_NARROWPHASE_MODE is set for every mode rather than only the host ones.
+     * It takes precedence over the legacy SCCD_USE_VNARROW_PHASE, so leaving it
+     * unset for some rows would let a previous row's value leak into this one --
+     * and now that the device honours the mode too, that leak would silently
+     * decide which GPU kernel ran.
+     */
     void select_mode(const Mode m) {
-        // The kernels read this at entry, so the mode is selected per call.
-        const char* value = (m == Mode::TiVector) ? "2" : (m == Mode::Vector ? "1" : "0");
+        const char* value = "0";
+        switch (m) {
+            case Mode::Scalar: value = "0"; break;
+            case Mode::Vector: value = "1"; break;
+            case Mode::TiVector: value = "2"; break;
+            case Mode::Device: value = "0"; break;
+            case Mode::DeviceTi: value = "2"; break;
+        }
+        setenv("SCCD_NARROWPHASE_MODE", value, 1);
         setenv("SCCD_USE_VNARROW_PHASE", value, 1);
         unsetenv("SCCD_VNARROWPHASE_TI_COMPAT");
         unsetenv("SCCD_USE_TI");
@@ -321,6 +609,13 @@ int main(int argc, char** argv) {
             opt.violations_csv = next();
         } else if (a == "--no-strict") {
             opt.strict = false;
+        } else if (a == "--device-float") {
+            opt.device_float = true;
+        } else if (a == "--float-geometry") {
+            opt.float_geometry = true;
+        } else if (a == "--bench") {
+            const std::string v = next();
+            opt.bench_repeats = v.empty() ? 3 : std::max(1, atoi(v.c_str()));
         } else if (a == "--gate") {
             opt.gate = next();
         } else if (!a.empty() && a[0] != '-') {
@@ -328,14 +623,33 @@ int main(int argc, char** argv) {
         }
     }
 
+    const bool geometry_is_narrowed = opt.float_geometry || opt.device_float;
+
     if (opt.dataset_dir.empty()) {
         std::cerr << "usage: ti_oracle <dataset-dir> [--phase vf|ee|both] [--max-files N]\n"
                      "                 [--tol T] [--max-depth N] [--csv out.csv]\n"
                      "                 [--violations-csv out.csv] [--no-strict] [--gate MODE]\n"
+#ifdef SCCD_ENABLE_CUDA
+                     "                 [--device-float] [--float-geometry]\n"
+#endif
                      "\n"
                      "Exits non-zero when a mode misses a collision or reports a time of\n"
-                     "impact later than TightInclusion's; both break conservativeness.\n"
-                     "Pass --no-strict to report without failing.\n";
+                     "impact later than the dataset's exact root; both break\n"
+                     "conservativeness. Pass --no-strict to report without failing.\n"
+                     "\n"
+                     "--gate MODE restricts the exit code to one mode: scalar, vector,\n"
+                     "ti-vec"
+#ifdef SCCD_ENABLE_CUDA
+                     ", device, device-ti"
+#endif
+                     ", or all (the default).\n"
+#ifdef SCCD_ENABLE_CUDA
+                     "\n"
+                     "Built with CUDA: the 'device' row is the GPU narrow phase, run over\n"
+                     "the same queries and held to the same gate. --device-float runs it\n"
+                     "in single precision instead of double.\n"
+#endif
+            ;
         return 1;
     }
 
@@ -379,6 +693,93 @@ int main(int argc, char** argv) {
             continue;
         }
 
+        if (opt.bench_repeats > 0) {
+            QuerySet batch;
+            for (const fs::path& file : files) {
+                QuerySet qs;
+                if (!read_queries(file, phase.is_vf, opt.float_geometry, qs)) continue;
+                append_query_set(batch, qs, phase.is_vf);
+            }
+            batch.bind();
+            if (batch.n_queries == 0) continue;
+
+            const char* omp = getenv("OMP_NUM_THREADS");
+            std::printf("\n%s / %s  throughput: %zu queries in one batch, %s, best of %d"
+                        "  [host threads: %s]\n",
+                        opt.dataset_dir.filename().string().c_str(),
+                        phase.name,
+                        batch.n_queries,
+                        opt.device_float ? "float storage" : "double storage",
+                        opt.bench_repeats,
+                        omp ? omp : "unset");
+            // stride 1 writes a time of impact per query; stride 0 writes one
+            // global minimum. They are different questions and different kernels:
+            // stride 1 gives a block to each query, stride 0 a thread, and stride
+            // 0's single shared toi lets every query prune against every other
+            // query's progress. Timed side by side because production callers
+            // choose between them.
+            std::printf("%-12s %12s %12s %10s\n", "mode", "stride1_ms", "stride0_ms", "ratio");
+            for (int m = 0; m < N_MODES; ++m) {
+                const Mode mode = mode_of(m);
+                const bool is_device = (mode == Mode::Device || mode == Mode::DeviceTi);
+                // Every mode, host and device, at both strides. The host rows are
+                // what make a device row readable: `ti-vec` and `device-ti` run the
+                // identical conservative search, and `scalar`/`vector` are the host
+                // counterparts of `device`. Without a like-for-like pair there is
+                // no way to tell "this kernel is inefficient" from "this search is
+                // expensive on this geometry".
+                select_mode(mode);
+
+                double ms = 0.0;
+                (void)ms;
+#ifdef SCCD_ENABLE_CUDA
+                if (is_device) {
+                    double ms_s[2] = {0.0, 0.0};
+                    for (int k = 0; k < 2; ++k) {
+                        const int stride = (k == 0) ? 1 : 0;
+                        ms_s[k] = opt.device_float
+                                      ? bench_device<float>(batch, phase.is_vf, opt.max_depth, opt.tol,
+                                                            opt.bench_repeats, stride)
+                                      : bench_device<double>(batch, phase.is_vf, opt.max_depth, opt.tol,
+                                                             opt.bench_repeats, stride);
+                    }
+                    std::printf("%-12s %12.3f %12.3f %9.2fx\n", mode_name(mode), ms_s[0], ms_s[1],
+                                ms_s[1] > 0 ? ms_s[0] / ms_s[1] : 0.0);
+                    continue;
+                }
+#else
+                if (is_device) continue;  // no device rows without CUDA
+#endif
+                {
+                    double ms_s[2] = {0.0, 0.0};
+                    for (int k = 0; k < 2; ++k) {
+                        const int stride = (k == 0) ? 1 : 0;
+                        std::vector<scalar_t> toi(stride == 0 ? 1 : batch.n_queries, 1.0);
+                        double best = 1e30;
+                        for (int r = 0; r < opt.bench_repeats; ++r) {
+                            std::fill(toi.begin(), toi.end(), scalar_t(1));
+                            const double t0 = now_seconds();
+                            if (phase.is_vf) {
+                                sccd::narrow_phase_vf<3, scalar_t, idx_t>(
+                                    batch.n_queries, batch.q0.data(), batch.q1.data(), batch.p0_ptr, batch.p1_ptr, 1,
+                                    batch.prim_ptr, scalar_t(1), toi.data(), opt.max_depth, opt.tol, stride);
+                            } else {
+                                sccd::narrow_phase_ee<scalar_t, idx_t>(
+                                    batch.n_queries, batch.q0.data(), batch.q1.data(), batch.p0_ptr, batch.p1_ptr, 1,
+                                    batch.prim_ptr, scalar_t(1), toi.data(), opt.max_depth, opt.tol, stride);
+                            }
+                            best = std::min(best, (now_seconds() - t0) * 1e3);
+                        }
+                        ms_s[k] = best;
+                    }
+                    std::printf("%-12s %12.3f %12.3f %9.2fx\n", mode_name(mode), ms_s[0], ms_s[1],
+                                ms_s[1] > 0 ? ms_s[0] / ms_s[1] : 0.0);
+                    continue;
+                }
+            }
+            continue;
+        }
+
         Stats stats[N_MODES];
         double ti_seconds = 0;
         std::size_t ti_hits = 0;
@@ -387,7 +788,7 @@ int main(int argc, char** argv) {
 
         for (const fs::path& file : files) {
             QuerySet qs;
-            if (!read_queries(file, phase.is_vf, qs)) {
+            if (!read_queries(file, phase.is_vf, opt.float_geometry, qs)) {
                 std::cerr << "warn: skipping " << file << "\n";
                 continue;
             }
@@ -441,6 +842,15 @@ int main(int argc, char** argv) {
 
                 std::vector<scalar_t> toi(qs.n_queries, 1.0);
                 const double t0 = now_seconds();
+#ifdef SCCD_ENABLE_CUDA
+                if (mode_of(m) == Mode::Device || mode_of(m) == Mode::DeviceTi) {
+                    if (opt.device_float) {
+                        run_device_narrow_phase<float>(qs, phase.is_vf, opt.max_depth, opt.tol, toi);
+                    } else {
+                        run_device_narrow_phase<double>(qs, phase.is_vf, opt.max_depth, opt.tol, toi);
+                    }
+                } else
+#endif
                 if (phase.is_vf) {
                     sccd::narrow_phase_vf<3, scalar_t, idx_t>(qs.n_queries,
                                                               qs.q0.data(),
@@ -495,7 +905,7 @@ int main(int argc, char** argv) {
                     // --- the real invariant check, against the exact root ---
                     if (have_gt_toi) {
                         const double truth = gt_toi[i];
-                        if (!std::isnan(truth)) {
+                        if (!sccd::is_nan_bits(truth)) {
                             stats[m].gt_checked += 1;
                             if (!hit) {
                                 stats[m].gt_missed += 1;
@@ -567,6 +977,12 @@ int main(int argc, char** argv) {
                     "  own answer is a lower bound on the truth, so lateTI over-reports.\n"
                     "  relerr over the %zu/%zu queries with TI toi >= %g; the rest are covered by abserr.\n",
                     stats[0].rel_err.size(), stats[0].rel_err.size() + stats[0].near_zero_ref, REL_ERR_FLOOR);
+#ifdef SCCD_ENABLE_CUDA
+        std::printf("  device rows: CUDA narrow phase in %s. 'device' is the mode-0\n"
+                    "  kernel; 'device-ti' is the conservative one, with TightInclusion's\n"
+                    "  predicate, split rule and numerical error bound.\n",
+                    opt.device_float ? "single precision (--device-float)" : "double precision");
+#endif
         if (gt_available) {
             std::printf("  (ground truth available for %zu queries; gt_FN: scalar=%zu vector=%zu ti-vec=%zu)\n",
                         gt_available, stats[0].gt_false_negative, stats[1].gt_false_negative,
@@ -633,8 +1049,18 @@ int main(int argc, char** argv) {
         std::printf("\nFAIL: %zu queries break conservativeness "
                     "(a missed collision, or a time of impact after the true one).\n",
                     violations_total);
-        if (opt.strict) {
+        if (opt.strict && !geometry_is_narrowed) {
             return 2;
+        }
+        if (geometry_is_narrowed) {
+            std::printf(
+                "\nNOT GATED: the geometry was narrowed to float (--device-float or\n"
+                "--float-geometry). The dataset's exact roots belong to the original\n"
+                "rational geometry, so narrowing the input moves the true root and every\n"
+                "correct kernel looks late against them. Control: the host ti-vec kernel,\n"
+                "which is bit-identical to TightInclusion and computes in double, reports\n"
+                "~4500 'late' queries on armadillo-rollers under --float-geometry and zero\n"
+                "without it. Use the double-geometry run to gate.\n");
         }
     } else {
         std::printf("\nOK: no missed collisions and no late times of impact%s.\n",

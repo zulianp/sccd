@@ -85,7 +85,7 @@ namespace sccd {
 
         const NarrowPhaseMode mode = narrow_phase_mode();
 
-        if (mode == NarrowPhaseMode::Conservative) {
+        if (mode == NarrowPhaseMode::TightInclusionExact) {
             return v_narrow_phase_ti_vf<nxe, T, I>(
                 noverlaps, voveralp, foveralp, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_stride);
         }
@@ -371,7 +371,7 @@ namespace sccd {
 
         // Edge-edge had no vectorized path at all; the conservative mode supplies
         // one. Every other mode falls through to the scalar search below.
-        if (narrow_phase_mode() == NarrowPhaseMode::Conservative) {
+        if (narrow_phase_mode() == NarrowPhaseMode::TightInclusionExact) {
             return v_narrow_phase_ti_ee<T, I>(noverlaps,
                                               e0overalp,
                                               e1overalp,
