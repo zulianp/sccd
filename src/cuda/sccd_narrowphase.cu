@@ -139,6 +139,12 @@ namespace sccd {
         // accepts at it.
         __device__ unsigned long long g_np_level[80] = {0};
         __device__ unsigned long long g_np_depth_accept = 0;
+        // Where pushed boxes land: the block's shared stack, the shared global
+        // queue when that is full, or nowhere when the queue is full too. Says
+        // whether the flush-and-drain machinery is being exercised at all.
+        __device__ unsigned long long g_np_push_shared = 0;
+        __device__ unsigned long long g_np_push_global = 0;
+        __device__ unsigned long long g_np_push_lost = 0;
 #define SCCD_NP_EVAL_TICK() atomicAdd(&g_np_evals, 1ull)
 #define SCCD_NP_PERQ_TICK(qid, n)                                             \
     do {                                                                      \
@@ -1707,6 +1713,9 @@ namespace sccd {
 
                 if (will_push) {
                     const int slot = reserve_slots(&s_top, 1, S_CAP);
+#ifdef SCCD_NP_COUNT_BOXES
+                    atomicAdd((slot >= 0 && slot < S_CAP) ? &g_np_push_shared : &g_np_push_global, 1ull);
+#endif
                     if (slot >= 0 && slot < S_CAP) {
                         s_stack.tlower[slot] = push_box.tlower;
                         s_stack.tupper[slot] = push_box.tupper;
@@ -1720,6 +1729,9 @@ namespace sccd {
                         const int g_slot = reserve_slots(g_stack.top, 1, g_stack.capacity);
                         if (g_slot < 0) {
                             atomicAdd(g_stack.request, 1);
+#ifdef SCCD_NP_COUNT_BOXES
+                            atomicAdd(&g_np_push_lost, 1ull);
+#endif
                         } else {
                             while (atomicCAS(&g_stack.qid[g_slot], SCCD_QID_EMPTY, SCCD_QID_WRITING) !=
                                    SCCD_QID_EMPTY) {
@@ -2375,6 +2387,10 @@ namespace sccd {
             cudaGetDeviceProperties(&prop, dev);
 
             constexpr int N = SCCD_NP_THREADS_PER_BLOCK;
+#ifdef SCCD_NP_COUNT_BOXES
+            const int S_CAP_DIAG = SharedStackCap<T>::value;
+            int drain_rounds_total = 0;
+#endif
 
             int SCCD_BLOCKS_PER_SM = 4;
             {
@@ -2476,6 +2492,9 @@ namespace sccd {
                 const unsigned long long zero = 0;
                 SCCD_CHECK_CUDA(cudaMemcpyToSymbol(g_np_evals, &zero, sizeof(zero)));
                 SCCD_CHECK_CUDA(cudaMemcpyToSymbol(g_np_depth_accept, &zero, sizeof(zero)));
+                SCCD_CHECK_CUDA(cudaMemcpyToSymbol(g_np_push_shared, &zero, sizeof(zero)));
+                SCCD_CHECK_CUDA(cudaMemcpyToSymbol(g_np_push_global, &zero, sizeof(zero)));
+                SCCD_CHECK_CUDA(cudaMemcpyToSymbol(g_np_push_lost, &zero, sizeof(zero)));
                 unsigned long long lvl_zero[80] = {0};
                 SCCD_CHECK_CUDA(cudaMemcpyToSymbol(g_np_level, lvl_zero, sizeof(lvl_zero)));
                 SCCD_CHECK_CUDA(cudaMalloc(&d_perq, noverlaps * sizeof(unsigned long long)));
@@ -2570,6 +2589,9 @@ namespace sccd {
                     // drain is recorded in g_request and handled by the
                     // outer retry below.
                     while (h_g_top > 0) {
+#ifdef SCCD_NP_COUNT_BOXES
+                        ++drain_rounds_total;
+#endif
                         // printf("Draining g_stack with from-stack kernel (%d)\n", h_g_top);
                         int grid_blocks = (toi_stride == 0) ? (h_g_top + N - 1) / N : h_g_top;
                         if (grid_blocks > base_grid_blocks) grid_blocks = base_grid_blocks;
@@ -2707,6 +2729,18 @@ namespace sccd {
                 unsigned long long lvl[80] = {0}, depth_acc = 0;
                 SCCD_CHECK_CUDA(cudaMemcpyFromSymbol(lvl, g_np_level, sizeof(lvl)));
                 SCCD_CHECK_CUDA(cudaMemcpyFromSymbol(&depth_acc, g_np_depth_accept, sizeof(depth_acc)));
+                unsigned long long ps = 0, pg = 0, pl = 0;
+                SCCD_CHECK_CUDA(cudaMemcpyFromSymbol(&ps, g_np_push_shared, sizeof(ps)));
+                SCCD_CHECK_CUDA(cudaMemcpyFromSymbol(&pg, g_np_push_global, sizeof(pg)));
+                SCCD_CHECK_CUDA(cudaMemcpyFromSymbol(&pl, g_np_push_lost, sizeof(pl)));
+                fprintf(stderr,
+                        "sccd-np-push stride=%d s_cap=%d shared=%llu global=%llu lost=%llu drains=%d\n",
+                        toi_stride,
+                        S_CAP_DIAG,
+                        ps,
+                        pg,
+                        pl,
+                        drain_rounds_total);
                 fprintf(stderr, "sccd-np-level device depth_accept=%llu levels=", depth_acc);
                 for (int b = 0; b < 80; ++b) fprintf(stderr, "%llu%s", lvl[b], b == 79 ? "\n" : ",");
 
