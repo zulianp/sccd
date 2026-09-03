@@ -117,6 +117,73 @@ namespace sccd {
         }
     }
 
+    /**
+     * \brief The per-query reductions the search needs, in one pass.
+     *
+     * Three things are derived from a vertex-quad query before the search
+     * starts, and they were computed by three separate walks over the same
+     * thirty coordinates:
+     *
+     *  - the per-axis Lipschitz constants, which are the codomain widths;
+     *  - the per-axis tolerances, which are a constant divided by those same
+     *    Lipschitz constants;
+     *  - the certified numerical error bound, from the largest coordinate.
+     *
+     * The first two were computing the identical reduction twice --
+     * `compute_vertex_quad_tolerance` and `compute_vertex_quad_codomain_widths`
+     * have the same loop body, one dividing at the end and the other not.
+     *
+     * That matters more than it sounds. In the regime the mesh pipeline actually
+     * runs -- a time of impact shared across queries, so the bound tightens and
+     * prunes -- the search explores about 1.2 boxes per query. The preamble is
+     * not amortised over a deep search; it is most of the query.
+     */
+    template <typename T>
+    struct VQBounds {
+        T lipschitz[3];
+        T max_coord[3];
+    };
+
+    template <typename T>
+    inline void vq_bounds(const T sv[3],
+                          const T s1[3],
+                          const T s2[3],
+                          const T s3[3],
+                          const T s4[3],
+                          const T ev[3],
+                          const T e1[3],
+                          const T e2[3],
+                          const T e3[3],
+                          const T e4[3],
+                          VQBounds<T> &out) {
+        for (int i = 0; i < 3; ++i) out.lipschitz[i] = T(0);
+
+        for (int d = 0; d < 3; ++d) {
+            const T vt = ev[d] - sv[d];
+            out.lipschitz[0] = sccd::max<T>(
+                out.lipschitz[0],
+                sccd::max<T>(sccd::max<T>(sccd::abs<T>(vt - (e1[d] - s1[d])), sccd::abs<T>(vt - (e2[d] - s2[d]))),
+                             sccd::max<T>(sccd::abs<T>(vt - (e3[d] - s3[d])), sccd::abs<T>(vt - (e4[d] - s4[d])))));
+            out.lipschitz[1] = sccd::max<T>(
+                out.lipschitz[1],
+                sccd::max<T>(sccd::max<T>(sccd::abs<T>(s2[d] - s1[d]), sccd::abs<T>(s4[d] - s3[d])),
+                             sccd::max<T>(sccd::abs<T>(e2[d] - e1[d]), sccd::abs<T>(e4[d] - e3[d]))));
+            out.lipschitz[2] = sccd::max<T>(
+                out.lipschitz[2],
+                sccd::max<T>(sccd::max<T>(sccd::abs<T>(s3[d] - s1[d]), sccd::abs<T>(s4[d] - s2[d])),
+                             sccd::max<T>(sccd::abs<T>(e3[d] - e1[d]), sccd::abs<T>(e4[d] - e2[d]))));
+
+            // Same walk, so the error bound's reduction rides along with it.
+            const T m = sccd::max<T>(
+                sccd::max<T>(sccd::max<T>(sccd::abs<T>(sv[d]), sccd::abs<T>(s1[d])),
+                             sccd::max<T>(sccd::abs<T>(s2[d]), sccd::abs<T>(s3[d]))),
+                sccd::max<T>(sccd::max<T>(sccd::abs<T>(s4[d]), sccd::abs<T>(ev[d])),
+                             sccd::max<T>(sccd::max<T>(sccd::abs<T>(e1[d]), sccd::abs<T>(e2[d])),
+                                          sccd::max<T>(sccd::abs<T>(e3[d]), sccd::abs<T>(e4[d])))));
+            out.max_coord[d] = sccd::max<T>(T(1), m);
+        }
+    }
+
     template <typename T>
     inline void compute_vertex_quad_tolerance(const T codomain_tol,
                                               const T sv[3],
@@ -130,29 +197,9 @@ namespace sccd {
                                               const T e3[3],
                                               const T e4[3],
                                               T *const SCCD_RESTRICT tol) {
-        T lipschitz[3] = {T(0), T(0), T(0)};
-        for (int d = 0; d < 3; ++d) {
-            const T vt = ev[d] - sv[d];
-            lipschitz[0] =
-                sccd::max<T>(lipschitz[0],
-                              sccd::max<T>(
-                                  sccd::max<T>(sccd::abs<T>(vt - (e1[d] - s1[d])),
-                                               sccd::abs<T>(vt - (e2[d] - s2[d]))),
-                                  sccd::max<T>(sccd::abs<T>(vt - (e3[d] - s3[d])),
-                                               sccd::abs<T>(vt - (e4[d] - s4[d])))));
-
-            lipschitz[1] =
-                sccd::max<T>(lipschitz[1],
-                              sccd::max<T>(
-                                  sccd::max<T>(sccd::abs<T>(s2[d] - s1[d]), sccd::abs<T>(s4[d] - s3[d])),
-                                  sccd::max<T>(sccd::abs<T>(e2[d] - e1[d]), sccd::abs<T>(e4[d] - e3[d]))));
-
-            lipschitz[2] =
-                sccd::max<T>(lipschitz[2],
-                              sccd::max<T>(
-                                  sccd::max<T>(sccd::abs<T>(s3[d] - s1[d]), sccd::abs<T>(s4[d] - s2[d])),
-                                  sccd::max<T>(sccd::abs<T>(e3[d] - e1[d]), sccd::abs<T>(e4[d] - e2[d]))));
-        }
+        VQBounds<T> b;
+        vq_bounds<T>(sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, b);
+        const T *const lipschitz = b.lipschitz;
 
         const T axis_tol = codomain_tol / T(3);
         const T eps = std::numeric_limits<T>::epsilon();
@@ -173,27 +220,11 @@ namespace sccd {
                                                     const T e3[3],
                                                     const T e4[3],
                                                     T widths[3]) {
-        T wt = T(0);
-        T wu = T(0);
-        T wv = T(0);
-        for (int d = 0; d < 3; ++d) {
-            const T vt = ev[d] - sv[d];
-            wt = sccd::max<T>(
-                wt,
-                sccd::max<T>(sccd::max<T>(sccd::abs<T>(vt - (e1[d] - s1[d])), sccd::abs<T>(vt - (e2[d] - s2[d]))),
-                              sccd::max<T>(sccd::abs<T>(vt - (e3[d] - s3[d])), sccd::abs<T>(vt - (e4[d] - s4[d])))));
-            wu = sccd::max<T>(wu,
-                               sccd::max<T>(
-                                   sccd::max<T>(sccd::abs<T>(s2[d] - s1[d]), sccd::abs<T>(s4[d] - s3[d])),
-                                   sccd::max<T>(sccd::abs<T>(e2[d] - e1[d]), sccd::abs<T>(e4[d] - e3[d]))));
-            wv = sccd::max<T>(wv,
-                               sccd::max<T>(
-                                   sccd::max<T>(sccd::abs<T>(s3[d] - s1[d]), sccd::abs<T>(s4[d] - s2[d])),
-                                   sccd::max<T>(sccd::abs<T>(e3[d] - e1[d]), sccd::abs<T>(e4[d] - e2[d]))));
-        }
-        widths[0] = wt;
-        widths[1] = wu;
-        widths[2] = wv;
+        VQBounds<T> b;
+        vq_bounds<T>(sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, b);
+        widths[0] = b.lipschitz[0];
+        widths[1] = b.lipschitz[1];
+        widths[2] = b.lipschitz[2];
     }
 
     template <typename T>
@@ -304,6 +335,42 @@ namespace sccd {
                                            e3[0], e3[1], e3[2],
                                            e4[0], e4[1], e4[2],
                                            &out[0], &out[1], &out[2]);
+    }
+
+    /**
+     * \brief Everything the search needs from a query, from one pass.
+     *
+     * The hot path calls this instead of the three functions above, which now
+     * share its reduction and remain for callers that want one of the three on
+     * its own.
+     */
+    template <typename T>
+    inline void vq_prepare(const T codomain_tol,
+                           const T sv[3],
+                           const T s1[3],
+                           const T s2[3],
+                           const T s3[3],
+                           const T s4[3],
+                           const T ev[3],
+                           const T e1[3],
+                           const T e2[3],
+                           const T e3[3],
+                           const T e4[3],
+                           T tols[3],
+                           T widths[3],
+                           T numerical_error[3]) {
+        VQBounds<T> b;
+        vq_bounds<T>(sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, b);
+
+        const T axis_tol = codomain_tol / T(3);
+        const T eps = std::numeric_limits<T>::epsilon();
+        const T kFilter = T(38) * eps;
+        for (int d = 0; d < 3; ++d) {
+            tols[d] = b.lipschitz[d] > eps ? axis_tol / b.lipschitz[d] : T(1);
+            widths[d] = b.lipschitz[d];
+            numerical_error[d] = sccd::pow3<T>(b.max_coord[d]) * kFilter;
+        }
+        normalize_vertex_quad_codomain_widths<T>(widths);
     }
 
     template <typename T>
