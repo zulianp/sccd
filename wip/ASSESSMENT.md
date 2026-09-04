@@ -163,7 +163,7 @@ they were read as saying, and the section below retracts that reading.
 The narrow rows above were run with `SCCD_NARROWPHASE_MODE=2` on both sides,
 which looks like the fair comparison and is not one. **The mode enum names a
 different kernel on each side.** On the host, mode 2 is the vectorised
-TightInclusion-exact kernel in `src/sccd_vnarrowphase_ti.hpp` — the *fast* one,
+TightInclusion-exact kernel in `src/narrowphase/sccd_narrowphase_tight.hpp` — the *fast* one,
 which wins cloth-ball. On the device, mode 2 selects
 `narrow_phase_generic<..., conservative=true>`, a scalar per-thread branch and
 bound that is the device's *slowest* path. The sweep therefore raced the host's
@@ -221,7 +221,7 @@ device-internal rather than host-versus-device.
 Two structural causes, both visible in the source:
 
 1. **The device recomputes every corner it already has.** The host carries the
-   eight corner values with each box (`TiBox::corner[3][8]`), and on a split
+   eight corner values with each box (`TightBox::corner[3][8]`), and on a split
    evaluates only the four mid-face corners, inheriting the other four from the
    parent: 12 corner evaluations per split. The device's `Domain` is six bounds
    and nothing else, so `evaluate_cell_3d_policy` re-evaluates all eight corners
@@ -361,7 +361,7 @@ on the easy queries too. It is not the acceptance test or the tolerances, which
 are transcribed and would shift the whole distribution rather than stretch its
 tail. And it is not the split rule in the obvious sense: `bisect_ti_axis` picks
 the axis with the largest width/tolerance ratio, the same rule as the host's
-`ti_split_axis`.
+`tight_split_axis`.
 
 What is left is what happens to a box once the search is deep — the interaction
 between the depth cap, the `t` bound each query searches under, and the order in
@@ -552,7 +552,7 @@ Rejecting a box is the only operation in the search that can lose a root, and it
 is sound only when the origin-containment test is padded by at least the
 certified numerical error bound, `(vf ? 30 : 28) * eps * min(max_coord, 1)^3`.
 The device's `evaluate_cell_3d` padded it with the caller's distance tolerance
-instead. The host's mode 0 does not — `srootfinder.hpp:525` pads by
+instead. The host's mode 0 does not — `sccd_rootfinder.hpp:525` pads by
 `numerical_error[d]` — and neither does the device's quad kernel, whose comment
 names this exact substitution as "the unsound rejection this project has already
 found once". The triangle device kernel was the one still carrying it.
@@ -745,7 +745,7 @@ conservativeness claim, and the benchmark does not currently say so — it repor
 ## Quads
 
 **Quads had no device narrow phase when this ran.** The three `hopper/refine-quad`
-rows are `FAILED rc=134` — `sccd_smesh_CCD.hpp` raised `SMESH_ERROR` and aborted.
+rows are `FAILED rc=134` — `sccd_smesh_ccd.hpp` raised `SMESH_ERROR` and aborted.
 Recorded as explicit rows so the gap is in the data rather than an absence. It has
 since been implemented (`src/cuda/sccd_narrowphase_vq.cu`) and these rows are kept
 as the before picture; they have not been re-measured.
@@ -825,7 +825,7 @@ list and **zero** with the unfixed sweep. On the refined cube it showed up as
 that.
 
 **Fix.** The window comparison is now inclusive (`fimin <= second_xmax[begin]`),
-in `broadphase.hpp` and in both CUDA sweeps. cell2d and sweep now agree exactly
+in `sccd_broadphase_sweep.hpp` and in both CUDA sweeps. cell2d and sweep now agree exactly
 at every refinement level.
 
 **Regression test.** `sccd_broadphase_cell2d_test` gained flat-coincident-box cases

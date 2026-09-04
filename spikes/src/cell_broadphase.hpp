@@ -6,7 +6,7 @@
 #include "sccd_parallel.hpp"
 
 namespace sccd {
-    namespace sccd_detail {
+    namespace detail {
 
         template <int F, int S, typename T, typename I>
         static inline void cell_mask_out_shared_two_lists(uint32_t *const SCCD_RESTRICT dmask,
@@ -165,7 +165,7 @@ namespace sccd {
             return count;
         }
 
-    }  // namespace sccd_detail
+    }  // namespace detail
 
     template <typename T>
     static void cell_setup(const ptrdiff_t n,
@@ -364,7 +364,7 @@ namespace sccd {
                     }
 
                     if (end_k - begin_k < SCCD_AABB_DISJOINT_NOVECTORIZE_THRESHOLD) {
-                        count += sccd_detail::cell_scalar_count_range_two_lists<first_nxe, second_nxe>(first_aabbs,
+                        count += detail::cell_scalar_count_range_two_lists<first_nxe, second_nxe>(first_aabbs,
                                                                                                        fi,
                                                                                                        second_aabbs,
                                                                                                        second_idx,
@@ -406,7 +406,7 @@ namespace sccd {
                             B_maxz[lane] = second_aabbs[5][j];
                         }
 
-                        sccd_detail::tail_fill_B(
+                        detail::tail_fill_B(
                             amaxx, amaxy, amaxz, chunk_len, B_minx, B_miny, B_minz, B_maxx, B_maxy, B_maxz);
 
                         vaabb_disjoint_one_to_many(aminx,
@@ -423,7 +423,7 @@ namespace sccd {
                                                    B_maxz,
                                                    dmask);
 
-                        sccd_detail::cell_mask_out_shared_two_lists<first_nxe, second_nxe, T, I>(
+                        detail::cell_mask_out_shared_two_lists<first_nxe, second_nxe, T, I>(
                             dmask, chunk_len, begin_k, ev, second_idx, second_elements, second_stride, cellidx);
 
                         for (ptrdiff_t lane = 0; lane < chunk_len; ++lane) {
@@ -522,7 +522,7 @@ namespace sccd {
                         continue;
                     }
 
-                    count += sccd_detail::cell_scalar_collect_range_two_lists<first_nxe,
+                    count += detail::cell_scalar_collect_range_two_lists<first_nxe,
                                                                               second_nxe>(
                         first_aabbs,                     // 0
                         fi,                              // 1
@@ -609,7 +609,7 @@ namespace sccd {
                 }
 
                 ptrdiff_t end = ni;
-                sccd_detail::compute_candidate_window_progressive(
+                detail::compute_candidate_window_progressive(
                     fimin, fimax, second_xmax, second_xmin, second_count, ni, end);
 
                 if (ni >= end) {
@@ -617,7 +617,7 @@ namespace sccd {
                 }
 
                 if (end - ni < SCCD_AABB_DISJOINT_NOVECTORIZE_THRESHOLD) {
-                    ptrdiff_t count = sccd_detail::scalar_count_range_two_lists<first_nxe, second_nxe>(
+                    ptrdiff_t count = detail::scalar_count_range_two_lists<first_nxe, second_nxe>(
                         first_aabbs, fi, second_aabbs, second_idx, second_elements, second_stride, ev, ni, end);
                     ccdptr[fi + 1] = count;
                     continue;
@@ -631,7 +631,7 @@ namespace sccd {
 
                     uint32_t dmask[SCCD_AABB_DISJOINT_CHUNK_SIZE] = {0};
 
-                    sccd_detail::build_disjoint_mask_for_block(second_aabbs,
+                    detail::build_disjoint_mask_for_block(second_aabbs,
                                                                noffset,
                                                                chunk_len,
                                                                first_aabbs[0][fi],
@@ -642,7 +642,7 @@ namespace sccd {
                                                                first_aabbs[5][fi],
                                                                dmask);
 
-                    sccd_detail::mask_out_shared_two_lists<first_nxe, second_nxe>(
+                    detail::mask_out_shared_two_lists<first_nxe, second_nxe>(
                         dmask, chunk_len, noffset, ev, second_idx, second_elements, second_stride);
 
                     for (ptrdiff_t lane = 0; lane < chunk_len; ++lane) {

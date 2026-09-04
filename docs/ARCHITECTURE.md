@@ -28,7 +28,7 @@ drops.
 Two implementations, both kept, because neither wins everywhere and they produce
 **identical pair sets**.
 
-| | `broadphase.hpp` | `cell2d_broadphase.hpp` |
+| | `sccd_broadphase_sweep.hpp` | `sccd_broadphase_cell2d.hpp` |
 |---|---|---|
 | method | sweep and prune along a sorted axis | uniform 2D cell list, no sorting |
 | wins | armadillo-rollers 1.59×, cloth-ball 1.36× | cloth-funnel; dense synthetic input by 4–7× |
@@ -36,7 +36,7 @@ Two implementations, both kept, because neither wins everywhere and they produce
 Two dimensions, not three: a surface does not fill a volume, so a third axis buys
 cells rather than selectivity.
 
-`broadphase_strategy.hpp` chooses between them by **racing them** — one on a
+`sccd_broadphase_strategy.hpp` chooses between them by **racing them** — one on a
 step, the other on the next, keep the faster, re-probe periodically. Five
 attempts to predict the winner from geometry all failed (anisotropy, expected
 sweep window, estimated pair density, mesh size, and a fixed default), and they
@@ -101,10 +101,10 @@ toward negative infinity.
 
 ## Interfaces
 
-- **`CCD<T>`** (`src/integrations/smesh/sccd_smesh_CCD.hpp`) — the main interface.
+- **`CCD<T>`** (`src/integrations/smesh/sccd_smesh_ccd.hpp`) — the main interface.
   `find_earliest_impact_time` and `find_impact_times` for one-shot use, or the
   staged broad/narrow calls to interleave your own logic. Needs smesh.
-- **C ABI** (`src/sccd.cpp`, documented in `docs/API.md`) — seven exports for
+- **C ABI** (`src/api/sccd_c_api.cpp`, documented in `docs/API.md`) — seven exports for
   single queries, and the basis for `python/sccd_py.py`.
 - **Headers** — sixteen installed, listed explicitly in `CMakeLists.txt`. A
   configure-time check fails on any header under `src/` that nobody classified,

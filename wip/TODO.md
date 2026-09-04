@@ -82,6 +82,10 @@ fetches them and a user who wants the library does not.
 
 ## Done
 
+- ~~Device dead code in the shipped CUDA build~~ — **done**, in
+  `spikes/src/dead.cuh`. Verified: clean CUDA build and ctest 9/9 on GH200.
+
+
 - ~~The refactor's CUDA build was unverified~~ — **verified** on GH200,
   2026-09-04, after the certificate was re-signed. Clean compile with zero
   errors; `ctest` 9/9 including `sccd_narrowphase_cuda_test`; and all twelve
@@ -138,76 +142,4 @@ this right; `sccd_bench` does not.
 Cheap to fix and worth doing before the next accuracy claim is made from a
 benchmark run.
 
-### Device dead code is still in the shipped CUDA build
 
-The host half of this landed in `spikes/src/dead.{hpp,cpp}`; the device half did
-not, because removing kernels without a compiler to check the result is not
-worth the risk and the CSCS certificate expired mid-refactor.
-
-Still in `src/cuda/`, called by nothing:
-
-- `sccd_broadphase.{cu,cuh}` — the whole `*_overlaps_with_starts` variant:
-  `count_overlaps_with_starts_kernel`, `collect_overlaps_with_starts_kernel` and
-  their wrappers, two declarations, two instantiation macros and 8 explicit
-  instantiations. Roughly 160 lines of kernel code compiled into every CUDA
-  build for nothing. The only `spikes/` hit is a different function of the same
-  name.
-- `sccd_reduce.cuh` — `block_max_to_root` and `broadcast_to_block`; about 43 of
-  the file's 126 lines. `broadcast_to_block` computes `warp_id`, `lid`,
-  `root_warp` and `root_lid` and then uses none of them.
-- `sccd_narrowphase.cu` — `reset_batch_narrow_phase_kernel`, a `__global__` that
-  is never launched, and `release_slot`, orphaned by the double-buffered queue
-  in `09757ac3`.
-
-Move to `spikes/src/dead.cu` and delete from `src/`. Verify with a CUDA build
-and `ctest --test-dir build-hopper` at 9/9.
-
-## Lower
-
-- **The device conservative search classifies 111 boxes per query where the host
-  classifies 1.2.** Note this is a count of *work*, not of time: double-buffering
-  the queue cut the time gap to 5.1×, 3.4× and better-than-host across the three
-  scenes without changing the search at all. The remaining item is to make the
-  search smaller, not better balanced. On the path `find_earliest_impact_time` uses: 97.8M boxes
-  against 1.04M on cloth-funnel, **94×**. Same acceptance test, same tolerances,
-  same queries, and not the price of the guarantee — the host is conservative too.
-  Counted with `SCCD_NP_COUNT_BOXES` (off by default).
-
-  A **separate and larger** defect sits on the `find_impact_times` path, which
-  runs the block-per-query kernel: 274 queries there cost 706M boxes, 2.58 million
-  each against the host's 1,844, a ratio of **1397×**. Start with its 128-way
-  seeding dice, and re-run the measurement that kept the dice (single-root seeding
-  was recorded as worse, 803 → 871 ms on armadillo edge-edge, which is hard to
-  credit against 2.58M boxes per query).
-
-  Ruled out along the way: the depth cap (neither side ever accepts at it), the
-  split rule (both take the largest width/tolerance ratio), the acceptance test
-  and the tolerances (transcribed). What is left is the `t` bound each query
-  searches under and the order boxes leave a stack that mixes queries — the device
-  tree *broadens* to 4.2M boxes at level 16 where the host has 7,000.
-
-  Corner reuse, which this item used to propose, is **not available**: the kernel
-  uses 238 of 255 registers with no spills, and carrying eight corners for three
-  components needs 48 more. Three other explanations were measured and refuted —
-  sequential batching, atomic contention on the shared time of impact, and
-  per-box arithmetic — and are recorded so they are not retried.
-
-  Counted per query, the gap **scales with query difficulty**: the two are within
-  a few percent on queries needing 0–1 boxes, 2× apart at 8, 32× at 64 and 462× at
-  16,384. So the device is not starting wrong, it is failing to converge on the
-  queries that need real search.
-
-- **`SCCD_NARROWPHASE_MODE` does not reach the quad path.** There is one quad
-  root-finder variant, so the enum has nothing to select between. It now says so
-  once on stderr rather than being silently ignored, which closes the trap but
-  not the gap.
-
-- **`broadphase_strategy.hpp` has no test.** It picks between the sweep and the
-  cell list by racing them at run time, and nothing checks that the race
-  converges on the faster one or that switching mid-run keeps the pair sets
-  identical.
-
-- **Two CUDA tests are built but never registered.** `sccd_mesh_cuda_test` and
-  `sccd_cuda_cpu_gpu_parity` need mesh data that a fresh clone does not have.
-  `sccd_add_raw_mesh_test` now reports what is missing instead of returning
-  silently, so the gap is visible, but the tests still do not run anywhere.
