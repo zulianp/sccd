@@ -664,6 +664,61 @@ CCD narrow phase over every broad-phase pair; the errors run over the datasets'
 curated query sets, which are the queries that ship exact roots — 7 to 519 per
 case, against 843k to 33M pairs.
 
+## Withdrawn: "mode 2's earliest impact is late on armadillo-rollers"
+
+Checking `find_earliest_impact_time` against the exact roots reported mode 2 as
+late on 5 of 16 armadillo-rollers cases, by 1.4e-6 to 3.7e-5, all edge-edge, with
+mode 0 clean. **The reference was wrong and the finding is withdrawn.**
+
+The two paths do not run on the same geometry, and the reason is exact rather
+than circumstantial: **smesh stores coordinates as `float`**
+(`smesh_config.hpp`: `typedef float geom_t`). The per-query path takes its
+coordinates from `queries/<key>.csv`, which stores them as exact dyadic
+rationals, and `roots/<key>/toi.float64` holds the exact roots of *those*
+numbers. `find_earliest_impact_time` runs on the mesh, so those same coordinates
+have been rounded to float32 on the way in — regardless of the PLY's own
+precision, which for armadillo is `property double`.
+
+That predicts exactly which scene breaks, from the query files alone:
+
+| scene | stored as | numerator bits | float32 holds it? |
+|---|---|---:|---|
+| cloth-ball | `-7299283 / 2^19` | 23 | yes — geometries agree |
+| cloth-funnel | `9833139 / 2^34` | 24 | yes — geometries agree |
+| armadillo-rollers | `3349804065100909 / 2^56` | **52** | **no — rounded** |
+
+Only armadillo's coordinates need a mantissa float32 does not have, and
+armadillo is the only scene where the check fired. Note this does not contradict
+the rule that the root finders compute in double: the *search* is double, but the
+geometry handed to it was already rounded at storage.
+
+Comparing SCCD's own mode-2 answer on each geometry settles it. On the CSV
+geometry it is conservative on **16 of 16** cases; the mesh answer scatters around
+it in **both directions** by 5e-8 to 4.6e-5:
+
+| case | CSV geometry | exact root | mesh geometry | mesh − CSV |
+|---|---:|---:|---:|---:|
+| 100ee | 0.00102997 | 0.001031 | 0.00103297 | +3.0e-6 |
+| 123ee | 0.0109749 | 0.0109835 | 0.0110207 | +4.6e-5 |
+| 55ee | 0.00386333 | 0.00386404 | 0.00384754 | −1.6e-5 |
+| 348vf | 0.0486879 | 0.04869 | 0.0486794 | −8.5e-6 |
+
+A kernel that reported late would err in one direction and would do it on the CSV
+path too, where `toi_late` is 0. Two-sided scatter at the size of a coordinate
+difference is what a geometry mismatch looks like.
+
+Why only mode 2: the float32 perturbation is worth 1e-6 to 5e-5, and mode 0's
+median earliness on armadillo is 4e-4 — it reports far enough ahead to stay under
+it. Mode 2's is 1.8e-5, the same size as the rounding. **An accuracy claim
+tighter than the coordinate rounding is measuring the rounding.**
+
+**What this leaves.** The per-query check is sound, because it runs on the same
+geometry the roots were computed for. The mesh path has *no* exact reference: the
+datasets ship roots for the query sets, not for the frames. Checking
+`find_earliest_impact_time` against truth needs roots computed for the mesh
+geometry, and until those exist the honest statement is that the path is
+unverified rather than either correct or broken.
+
 ## Retracted: every `fn=0` in this document before the matrix above
 
 Every measurement in this branch before the matrix reported `fn=0`, cited as
@@ -814,3 +869,4 @@ the timings stand.
 | narrow-phase mode 2 accuracy | **quantified** | 69× tighter median than mode 0 on cloth-funnel, 22× on armadillo |
 | conservativeness, all 12 configs | **holds** | 0 late and 0 missed over 101,164 exact roots |
 | `fn=0` before the matrix | **retracted** | that data tree ships no roots; the column was vacuous |
+| "mode 2 earliest impact is late" | **withdrawn** | reference was roots for the query geometry, not the mesh |

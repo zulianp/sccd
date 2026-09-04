@@ -962,6 +962,16 @@ namespace {
                 if (r < gt_earliest) gt_earliest = r;
             }
         }
+        // The same kernel's answer over the curated queries, whose coordinates come
+        // from the CSV, against its answer over the mesh, whose coordinates come
+        // from the PLY. If those disagree the two paths are not being given the
+        // same geometry, and gt_earliest is not a reference for the mesh path.
+        double s1_min = 1.0;
+        for (std::size_t i = 0; i < sccd_toi.size(); ++i) {
+            const double v = static_cast<double>(sccd_toi[i]);
+            if (v < s1_min) s1_min = v;
+        }
+
         const int s0_late = (static_cast<double>(earliest_toi) > gt_earliest) ? 1 : 0;
         const double s0_margin = gt_earliest - static_cast<double>(earliest_toi);
 
@@ -977,7 +987,8 @@ namespace {
                   << fp_count << ',' << fn_count << ',' << broadphase.false_positives << ',' << broad_fn_count
                   << ',' << narrow_ms_s1 << ',' << toi_n << ',' << toi_late << ',' << toi_max_late << ','
                   << toi_max_early << ',' << toi_med_early << ',' << s0_late << ',' << s0_margin << ','
-                  << static_cast<double>(earliest_toi) << ',' << gt_earliest << ',' << root_toi.size() << '\n';
+                  << static_cast<double>(earliest_toi) << ',' << gt_earliest << ',' << root_toi.size() << ','
+                  << s1_min << '\n';
         return wrote;
     }
 
@@ -1117,7 +1128,7 @@ int main(int argc, char** argv) {
     }
     std::cout << "dataset,mode,case,type,queries,prep_ms,broad_ms,narrow_ms,query_narrow_ms,fp,fn,broad_fp,broad_fn,"
               "narrow_ms_s1,toi_n,toi_late,toi_max_late,toi_max_early,toi_med_early,s0_late,s0_margin,"
-              "s0_toi,gt_earliest,root_n\n";
+              "s0_toi,gt_earliest,root_n,s1_min\n";
     for (int i = 2; i < argc; ++i) {
         const std::string dataset = argv[i];
         const fs::path dataset_dir = data_dir / dataset;
