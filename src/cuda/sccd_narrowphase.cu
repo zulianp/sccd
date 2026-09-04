@@ -2117,10 +2117,33 @@ namespace sccd {
             load_query_and_tol<is_vf, conservative, T, Vec4, I>(
                 qid, overlap0, overlap1, sp, ep, element_stride, elements, tol, sx, sy, sz, ex, ey, ez, atol, aerr);
 
+#ifdef SCCD_NP_SINGLE_SEED
+            // One seed, the root box, on thread 0. The dice below fills the block
+            // with NT*NU*NV subboxes of the root, which is what a block wants for
+            // occupancy and is the opposite of what a branch-and-bound wants: all
+            // of them start before any accept exists, so 128 subtrees expand in
+            // lock-step with nothing to prune them. On toi_stride=0 another query
+            // supplies a bound; on toi_stride=1 the block is alone with its query
+            // and there is no bound until one of its own subtrees reaches a leaf.
+            //
+            // This is the switch that tests that. It was tried once before, read
+            // 803 -> 871 ms on armadillo edge-edge, and was kept out on that
+            // basis -- a time measurement, on a baseline since shown to swing
+            // 28-48%, taken before anyone knew the path costs thousands of boxes
+            // per query. Re-measure with box counts, split by stride.
+            const int ti = 0;
+            const int ui = 0;
+            const int vi = 0;
+            const int seed_NT = 1, seed_NU = 1, seed_NV = 1;
+            const bool seeded = (tid == 0);
+#else
             const int ti = tid / (NU * NV);
             const int rem = tid % (NU * NV);
             const int ui = rem / NV;
             const int vi = rem % NV;
+            const int seed_NT = NT, seed_NU = NU, seed_NV = NV;
+            const bool seeded = true;
+#endif
 
             // Seeding is the uniform NT*NU*NV dice on both paths.
             //
@@ -2140,13 +2163,13 @@ namespace sccd {
             Domain<TC> cur;
             int contains = 0;
             int accept = 0;
-            SCCD_NP_PERQ_TICK(qid, 1);
+            if (seeded) SCCD_NP_PERQ_TICK(qid, 1);
             sample_cell_3d<is_vf, conservative, TC, Vec4>(ti,
                                                           ui,
                                                           vi,
-                                                          NT,
-                                                          NU,
-                                                          NV,
+                                                          seed_NT,
+                                                          seed_NU,
+                                                          seed_NV,
                                                           sampling_root,
                                                           sx,
                                                           sy,
@@ -2161,12 +2184,12 @@ namespace sccd {
                                                           accept,
                                                           cur);
 
-            if (accept && is_domain_valid<is_vf>(cur, s_toi, atol)) {
+            if (seeded && accept && is_domain_valid<is_vf>(cur, s_toi, atol)) {
                 device::atomic_min(&s_toi, cur.tlower);
             }
             __syncthreads();
 
-            const int active_seed = contains && !accept && (cur.tlower < s_toi);
+            const int active_seed = seeded && contains && !accept && (cur.tlower < s_toi);
 
             const int co_count = block_popc<N>(active_seed, warp_sums);
             if (!co_count) {
