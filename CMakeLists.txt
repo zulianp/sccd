@@ -265,8 +265,16 @@ install(
 # install(FILES sccd.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/sccd RENAME sccd.hpp)
 
 
+# Demos that need nothing but the library itself build in every configuration --
+# they are what a reader checks the API against, so gating them on an optional
+# dependency would defeat the point.
+add_executable(sccd_minimal "${CMAKE_CURRENT_SOURCE_DIR}/demo/sccd_minimal.exe.cpp")
+target_link_libraries(sccd_minimal PRIVATE sccd)
+add_test(NAME sccd_minimal COMMAND $<TARGET_FILE:sccd_minimal>)
+
 if(SCCD_ENABLE_SMESH)
   file(GLOB DEMO_DRIVERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/demo/*.exe.cpp")
+  list(FILTER DEMO_DRIVERS EXCLUDE REGEX "sccd_minimal\\.exe\\.cpp$")
   foreach(DEMO_DRIVER ${DEMO_DRIVERS})
     get_filename_component(DEMO_TARGET ${DEMO_DRIVER} NAME_WE)
     string(REGEX REPLACE "\\.exe$" "" DEMO_TARGET "${DEMO_TARGET}")

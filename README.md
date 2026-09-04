@@ -32,20 +32,37 @@ No external dependencies, no network, no options, no environment variables.
 
 ## Use
 
-```cpp
-#include "sccd_smesh_ccd.hpp"
+SCCD is kernels over plain arrays — no container type, no mesh type, no required
+dependency. Structure-of-arrays geometry in, times of impact out:
 
-sccd::CCD<double> ccd(mesh);
-double toi;
-ccd.find_earliest_impact_time(points_t0, points_t1, toi);       // one value per step
-ccd.find_impact_times(points_t0, points_t1, vf_tois, ee_tois);  // one per candidate
+```cpp
+#include "sccd_narrowphase.hpp"
+
+std::vector<double> x0 = {0.0, 1.0, 0.0, 0.25};   // one array per axis
+std::vector<double> y0 = {0.0, 0.0, 1.0, 0.25};
+std::vector<double> z0 = {0.0, 0.0, 0.0, 1.00};
+double* v0[3] = {x0.data(), y0.data(), z0.data()};
+// ... v1 likewise for the end of the step
+
+sccd::narrow_phase_vf<3, double, int>(n_pairs, vertex_of_pair, face_of_pair,
+                                      v0, v1, /*face_stride=*/1, faces,
+                                      /*max_toi=*/1.0, toi.data(),
+                                      /*max_depth=*/69, /*tol=*/3e-8,
+                                      /*toi_stride=*/1);
 ```
 
-Broad and narrow phases are also callable separately. For a C ABI, or the
-kernels against your own data layout, see [`docs/API.md`](docs/API.md).
+`demo/sccd_minimal.exe.cpp` is that end to end and builds with no options:
 
-Includes are flat: `#include "sccd_narrowphase.hpp"`, whatever subdirectory the
-header lives in.
+```sh
+cmake --build build -j --target sccd_minimal && ./build/sccd_minimal
+```
+
+It reports `0.249999998` for a contact whose exact time is `0.25` — early by
+2e-9, which is the safe direction and the guarantee in one line.
+
+For meshes, `CCD<T>` wires the broad and narrow phases together over an smesh
+mesh; that path is optional and needs `SCCD_ENABLE_SMESH=ON`. Both are in
+[`docs/API.md`](docs/API.md).
 
 ### Quads
 
