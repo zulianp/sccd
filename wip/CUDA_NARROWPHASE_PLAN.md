@@ -704,6 +704,47 @@ The per-query row is the one that moved: the GPU went from losing on all three
 scenes to winning on two. The broad-phase table is unchanged and reproduces to
 within 2%, which is the control that says this run is comparable to the old one.
 
+## D: the residual, and the counter that was supposed to explain it
+
+Two things were suspected: that the two counters count different units, and that
+something in the per-query search still differed.
+
+**The counting asymmetry is real and negligible.** The host drops a box in its
+refill loop when the bound has already passed it, *before* classifying it, so it
+never ticks; the device evaluates both children of a split and ticks them, then
+applies the equivalent filter. `g_np_bound_killed` counts exactly those, so
+`corner_evals - bound_killed` is the figure that means the same thing on both
+machines. Measured on cloth-funnel:
+
+| | evaluations | bound-killed | share |
+|---|---:|---:|---|
+| device, stride 0 | 3,762,296 | 922 | **0.025%** |
+| device, stride 1 | 7,708,066 | 853 | **0.011%** |
+
+So the counters have been comparable all along, and every ratio computed from
+them stands.
+
+**The residual itself is gone**, and item A took it. One query per call,
+`max_toi = 1`:
+
+| | host | device now | device after the tolerance fix | before it |
+|---|---:|---:|---:|---:|
+| `w1ee` | 55 | **55** | 274 | 53,015,756 |
+| `w2ee` | 543 | **543** | 1,786 | 47,578,924 |
+| `w3ee` | 645 | **837** | 1,056 | 2,466,808 |
+
+Exact agreement on two of the three, 1.30× on the third. The 5.0×/3.3×/1.6× that
+this item was opened on was the 128-way dice's floor of 128 boxes per query;
+running stride 1 one thread per query removed it.
+
+**What remains is not a defect.** At scene level the device still classifies 5.3×
+(stride 1) and 5.5× (stride 0) the host's boxes on cloth-funnel. That is the
+bound-collapse-rate difference step 0 identified: the host hands out queries in
+chunks and a few early chunks collapse the bound for the hundreds of thousands
+that follow, while the device starts every query at once. It is a property of
+running queries in sequence, not of the search — which is now the same search on
+both machines, as the isolated queries show.
+
 ## What must not change
 
 - **Conservativeness.** A reported time of impact is at or before the true one,
@@ -745,7 +786,7 @@ remains is listed first.
 | ~~**A**~~ | ~~Stride 1 on the thread-per-query kernel~~ | **Done, and it is the default.** 4.47×, 2.76× and 4.43× on the three scenes, identical false positives, `fn=0`, gate green both ways. Detail below. |
 | ~~**B**~~ | ~~D2, the capacity-1024 anomaly~~ | **Gone.** It no longer reproduces; the curve is smooth and shallow from 4 to 1024, and no capacity in that range differs from another by more than the run-to-run spread. D1 is unblocked. Detail below. |
 | ~~**C**~~ | ~~Refresh the end-to-end table~~ | **Done.** The reduction is `broad_ms + narrow_ms`, no prep, min over modes — recovered the same way as the narrow-phase table. It now has a row per stride, because only one of them moved. |
-| **D** | **The per-query residual** | On `worst-query-w{1,2,3}ee` the device is 5.0×, 3.3× and 1.6× the host, down from 964,000×. Start with whether the two counters count the same unit: the device ticks both children of every split, including ones discarded immediately. |
+| ~~**D**~~ | ~~The per-query residual~~ | **Gone.** The device now matches the host box-for-box on two of the three worst queries and is 1.30× on the third. The counting asymmetry it was blamed on is 0.011–0.025%. Detail below. |
 | **E** | **A1/A2, per-box cost** | Still last. The stride-1 path is scheduling-bound, so 4× of arithmetic buys nothing there either. |
 | — | *Loose end* | The host's mode 0 increments the box counter and nothing prints it — the `fprintf` lives in `narrow_phase_tight_*` and the scalar path has none. Host `Relaxed` box counts are not obtainable from a run. |
 
