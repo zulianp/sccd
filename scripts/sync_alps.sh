@@ -38,7 +38,7 @@ DEST="${1:-${SCCD_ALPS_DIR:-alps:/capstor/scratch/cscs/zulianp/sccd}}"
 # directory named 'digit'.
 #
 # data/ is excluded with everything else git ignores. Fetch it on the cluster
-# with benchmark/download_datasets.sh rather than pushing it over the link.
+# with benchmark/scripts/download_datasets.sh rather than pushing it over the link.
 exec rsync -av --delete \
     --include '/docs/*.md' \
     --exclude '/benchmark/oracle/violations-*.csv' \

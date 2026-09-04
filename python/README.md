@@ -68,16 +68,16 @@ python3 -m venv .venv
 .venv/bin/pip install numpy sympy pandas matplotlib
 ```
 
-`scripts/venv.sh`, which `scripts/crosscheck.sh` and `scripts/plot.sh` source,
+`benchmark/scripts/venv.sh`, which `benchmark/scripts/crosscheck.sh` and `benchmark/scripts/plot.sh` source,
 activates `$SCCD_VENV` if set, then `.venv`, then `data/venv`, and falls through
 to the system `python3` if it finds none.
 
 The cross-check needs the benchmark datasets under `data/`, which are gigabytes
-and are not in the repository; `benchmark/download_datasets.sh` fetches them.
+and are not in the repository; `benchmark/scripts/download_datasets.sh` fetches them.
 
 ```sh
-scripts/crosscheck.sh          # every query through the C ABI, against exact roots
-scripts/plot.sh                # figures from the tables it wrote
+benchmark/scripts/crosscheck.sh          # every query through the C ABI, against exact roots
+benchmark/scripts/plot.sh                # figures from the tables it wrote
 ```
 
 `sccd_crosscheck.py` and `sccd_plot_toi_error.py` exit non-zero on a missed
