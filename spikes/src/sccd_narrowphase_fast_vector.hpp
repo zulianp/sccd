@@ -1822,10 +1822,15 @@ namespace sccd {
                           const int max_depth,
                           const T tol,
                           const int toi_stride) {
-        if (narrow_phase_mode() == NarrowPhaseMode::TightInclusionCorrected) {
-#ifndef SCCD_ENABLE_TIGHT_INCLUSION
-            return -1;
-#else
+        // The old mode 3 dispatched here and then corrected every answer with
+        // TightInclusion. That mode is gone: a hybrid of this kernel and the
+        // reference was neither, and if you want the reference you should call
+        // it. SCCD_SPIKE_CORRECT_WITH_TI=1 keeps the correction reachable from
+        // the spike for anyone reproducing the old comparison.
+#ifdef SCCD_ENABLE_TIGHT_INCLUSION
+        int SCCD_SPIKE_CORRECT_WITH_TI = 0;
+        SCCD_READ_ENV(SCCD_SPIKE_CORRECT_WITH_TI, atoi);
+        if (SCCD_SPIKE_CORRECT_WITH_TI) {
             const int vector_status = v_narrow_phase_vf_impl<nxe, T, I>(
                 noverlaps, voveralp, foveralp, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_stride);
             if (vector_status != 0) {
@@ -1833,8 +1838,8 @@ namespace sccd {
             }
             return correct_vf_with_tight_inclusion<nxe, T, I>(
                 noverlaps, voveralp, foveralp, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_stride);
-#endif
         }
+#endif
         return v_narrow_phase_vf_impl<nxe, T, I>(
             noverlaps, voveralp, foveralp, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_stride);
     }

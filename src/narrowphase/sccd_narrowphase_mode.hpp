@@ -38,53 +38,39 @@ namespace sccd {
         /// Scalar search with the looser acceptance test: it compares codomain
         /// widths against domain tolerances, so it accepts sooner and reports a
         /// time of impact further before the true one. Median earliness 1.18e-01
-        /// on cloth-funnel. Ships.
+        /// on cloth-funnel.
         Fast = 0,
-        /// The Fast predicate, lane-packed. Vertex-face only; edge-edge falls
-        /// back to the scalar search. Validation only -- it lost every scene the
-        /// assessment measured.
-#ifdef SCCD_ENABLE_TIGHT_INCLUSION
-        FastVectorized = 1,
-#endif
-        /// Lane-packed search that compares *domain* widths against domain
+        /// Lane-packed search comparing *domain* widths against domain
         /// tolerances, which is what makes it tight rather than merely
         /// conservative: median earliness 1.72e-03 on cloth-funnel, 69x tighter
-        /// than Fast, and 22x tighter on armadillo-rollers. Ships.
-        Tight = 2,
-        /// Runs the FastVectorized kernel and then corrects every result with
-        /// the external TightInclusion library. An oracle, not a code path to
-        /// ship -- and the only mode here that touches that library, which is
-        /// why it is the only one still named after it.
-#ifdef SCCD_ENABLE_TIGHT_INCLUSION
-        TightInclusionCorrected = 3,
-#endif
+        /// than Fast, and 22x tighter on armadillo-rollers.
+        Tight = 2
 
-        // Values 1 and 3 exist only in a validation build. They are not
-        // omissions: the kernel behind them is installed only with
-        // SCCD_ENABLE_TIGHT_INCLUSION, so exposing the names unconditionally
-        // meant a caller could write NarrowPhaseMode::TightInclusionCorrected,
-        // compile, and silently run Fast. An enum value that cannot do what it
-        // says is worse than one that does not compile. The numbers stay 1 and 3
-        // so SCCD_NARROWPHASE_MODE keeps meaning the same thing either way.
-
-        // Reserved, deliberately unused: RationalMode. Nothing in SCCD computes
-        // with rational arithmetic -- the dependency's rational mode is forced
-        // OFF in cmake/SCCDDependencies.cmake, and the datasets' num/den
-        // coordinates are parsed straight to double. If an exact-arithmetic
-        // kernel is ever added it takes that name, so that no approximate kernel
-        // is ever called "exact" again.
+        // 1 and 3 are not defined, and the gap is deliberate.
+        //
+        // Mode 1 was the vectorised form of the Fast predicate. It was the
+        // slowest kernel in the library on every scene measured -- 15.9 ms
+        // against 6.4 and 8.1 on cloth-funnel, 90.9 against 19.4 and 17.5 on
+        // armadillo-rollers -- so its name promised the opposite of what it did.
+        // It is in spikes/src/sccd_narrowphase_fast_vector.hpp.
+        //
+        // Mode 3 ran mode 1 and then corrected each answer with TightInclusion.
+        // If you want TightInclusion's answer, call TightInclusion: set
+        // SCCD_USE_TI=1, which dispatches straight to the library, or use the
+        // sccd_find_root_tight_inclusion_* entry points. A hybrid that is
+        // neither this library's kernel nor the reference is not worth shipping
+        // or maintaining.
+        //
+        // Reserved, still unused: RationalMode. Nothing here computes with
+        // rational arithmetic; the name is held so no approximate kernel is ever
+        // called "exact".
     };
+
 
     static inline const char* narrow_phase_mode_name(const NarrowPhaseMode mode) {
         switch (mode) {
             case NarrowPhaseMode::Fast: return "fast";
-#ifdef SCCD_ENABLE_TIGHT_INCLUSION
-            case NarrowPhaseMode::FastVectorized: return "fast-vectorized";
-#endif
             case NarrowPhaseMode::Tight: return "tight";
-#ifdef SCCD_ENABLE_TIGHT_INCLUSION
-            case NarrowPhaseMode::TightInclusionCorrected: return "tight-inclusion-corrected";
-#endif
         }
         return "unknown";
     }
@@ -97,11 +83,7 @@ namespace sccd {
      * on to choose between its two kernels.
      */
     static inline bool narrow_phase_mode_is_tight(const NarrowPhaseMode mode) {
-#ifdef SCCD_ENABLE_TIGHT_INCLUSION
-        return mode == NarrowPhaseMode::Tight || mode == NarrowPhaseMode::TightInclusionCorrected;
-#else
         return mode == NarrowPhaseMode::Tight;
-#endif
     }
 
     /**
@@ -136,12 +118,6 @@ namespace sccd {
      * than an error, because the caller asked for a time of impact and the
      * scalar path is the supported way to get one.
      */
-    /// True for the mode numbers that only a validation build provides, 1 and 3.
-    /// Takes an int rather than the enum so it can be asked about a value the
-    /// current build does not name.
-    static inline bool narrow_phase_mode_is_validation_only(const int mode) {
-        return mode == 1 || mode == 3;
-    }
 
     /**
      * \brief Resolve the requested narrow-phase kernel, saying so when it cannot
@@ -169,54 +145,58 @@ namespace sccd {
             const long value = strtol(explicit_mode, &end, 10);
             const bool parsed = (end != explicit_mode) && (end != nullptr) && (*end == '\0');
 
-            if (parsed && value >= 0 && value <= 3) {
-#ifndef SCCD_ENABLE_TIGHT_INCLUSION
-                if (narrow_phase_mode_is_validation_only((int)value)) {
-                    static bool warned_unavailable = false;
-                    if (!warned_unavailable) {
-                        warned_unavailable = true;
-                        fprintf(stderr,
-                                "SCCD: SCCD_NARROWPHASE_MODE=%ld is validation-only and needs a "
-                                "build with SCCD_ENABLE_TIGHT_INCLUSION=ON; running mode 0 "
-                                "(Fast) instead.\n",
-                                value);
-                    }
-                    return NarrowPhaseMode::Fast;
-                }
-#endif
+            if (parsed && (value == 0 || value == 2)) {
                 return static_cast<NarrowPhaseMode>(value);
+            }
+
+            if (parsed && (value == 1 || value == 3)) {
+                static bool warned_removed = false;
+                if (!warned_removed) {
+                    warned_removed = true;
+                    fprintf(stderr,
+                            "SCCD: SCCD_NARROWPHASE_MODE=%ld no longer exists; running 0 (Fast). "
+                            "Mode 1 was the slowest kernel here and is now in spikes/. Mode 3 "
+                            "corrected mode 1 with TightInclusion -- set SCCD_USE_TI=1 to call "
+                            "that library directly instead.\n",
+                            value);
+                }
+                return NarrowPhaseMode::Fast;
             }
 
             static bool warned_invalid = false;
             if (!warned_invalid) {
                 warned_invalid = true;
                 fprintf(stderr,
-                        "SCCD: ignoring SCCD_NARROWPHASE_MODE=\"%s\" -- expected 0 (Fast), "
-                        "1, 2 (Tight) or 3.\n",
+                        "SCCD: ignoring SCCD_NARROWPHASE_MODE=\"%s\" -- expected 0 (Fast) or "
+                        "2 (Tight).\n",
                         explicit_mode);
             }
         }
 
-        int SCCD_VNARROWPHASE_TI_COMPAT = SCCD_VNARROWPHASE_TI_COMPAT_DEFAULT;
-        SCCD_READ_ENV(SCCD_VNARROWPHASE_TI_COMPAT, atoi);
-        if (SCCD_VNARROWPHASE_TI_COMPAT) {
-#ifdef SCCD_ENABLE_TIGHT_INCLUSION
-            return NarrowPhaseMode::TightInclusionCorrected;
-#else
-            return NarrowPhaseMode::Fast;
-#endif
-        }
-
+        // The two pre-enum switches. Both selected kernels that no longer exist
+        // here, so both are dead letters now; they warn rather than silently
+        // doing something else, and SCCD_USE_VNARROW_PHASE=2 still means Tight
+        // because that mode is still real.
         int SCCD_USE_VNARROW_PHASE = SCCD_USE_VNARROW_PHASE_DEFAULT;
         SCCD_READ_ENV(SCCD_USE_VNARROW_PHASE, atoi);
         if (SCCD_USE_VNARROW_PHASE == 2) {
             return NarrowPhaseMode::Tight;
         }
-#ifdef SCCD_ENABLE_TIGHT_INCLUSION
-        return SCCD_USE_VNARROW_PHASE ? NarrowPhaseMode::FastVectorized : NarrowPhaseMode::Fast;
-#else
+
+        int SCCD_VNARROWPHASE_TI_COMPAT = SCCD_VNARROWPHASE_TI_COMPAT_DEFAULT;
+        SCCD_READ_ENV(SCCD_VNARROWPHASE_TI_COMPAT, atoi);
+        if (SCCD_VNARROWPHASE_TI_COMPAT || SCCD_USE_VNARROW_PHASE) {
+            static bool warned_legacy = false;
+            if (!warned_legacy) {
+                warned_legacy = true;
+                fprintf(stderr,
+                        "SCCD: SCCD_VNARROWPHASE_TI_COMPAT and SCCD_USE_VNARROW_PHASE selected "
+                        "kernels that have moved to spikes/; running 0 (Fast). Use "
+                        "SCCD_NARROWPHASE_MODE=2 for the tight kernel, or SCCD_USE_TI=1 to call "
+                        "TightInclusion directly.\n");
+            }
+        }
         return NarrowPhaseMode::Fast;
-#endif
     }
 
     /**

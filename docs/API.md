@@ -48,9 +48,11 @@ the running minimum, which is markedly cheaper.
 
 Device entry points take **device** arrays of device pointers, not host arrays.
 
-Which kernel runs is chosen by `SCCD_NARROWPHASE_MODE`. A default build offers
-`NarrowPhaseMode::Fast` and `NarrowPhaseMode::Tight`; the two validation modes are
-not part of the enum unless `SCCD_ENABLE_TIGHT_INCLUSION=ON`. See
+Which kernel runs is chosen by `SCCD_NARROWPHASE_MODE`: `0` for
+`NarrowPhaseMode::Fast`, `2` for `NarrowPhaseMode::Tight`. Those are the two modes
+there are. To get the external TightInclusion answer instead, set `SCCD_USE_TI=1`
+in a build with `SCCD_ENABLE_TIGHT_INCLUSION=ON`, or call the
+`sccd_find_root_tight_inclusion_*` C entry points. See
 [`ENVIRONMENT.md`](ENVIRONMENT.md) for the modes and
 [`BENCHMARKS.md`](BENCHMARKS.md) for what each costs and how tight it is.
 

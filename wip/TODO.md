@@ -43,6 +43,14 @@ shared history, clone the URL and measure that.
 
 ## Done
 
+- ~~Validation-only narrow-phase modes in the shipped API~~ — **removed.** Mode 1
+  was the slowest kernel in the library on every scene (15.9 / 90.9 / 223.4 ms
+  against Fast's 6.4 / 19.4 / 190.7) and is now in
+  `spikes/src/sccd_narrowphase_fast_vector.hpp`. Mode 3 corrected mode 1 with
+  TightInclusion; `SCCD_USE_TI=1` calls the library directly instead. The enum is
+  `Fast` and `Tight`.
+
+
 - ~~Device dead code in the shipped CUDA build~~ — **done**, in
   `spikes/src/dead.cuh`. Verified: clean CUDA build and ctest 9/9 on GH200.
 

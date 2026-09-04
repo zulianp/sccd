@@ -12,9 +12,6 @@
 // The vectorised kernel is validation-only; see narrow_phase_mode_available in
 // sccd_narrowphase_mode.hpp for why. Without TightInclusion no mode reaches it,
 // so it is not compiled in either.
-#ifdef SCCD_ENABLE_TIGHT_INCLUSION
-#include "sccd_narrowphase_fast_vector.hpp"
-#endif
 #include "sccd_narrowphase_tight.hpp"
 #include "sccd_rootfinder.hpp"
 #include "sccd_aabb.hpp"
@@ -83,15 +80,6 @@ namespace sccd {
                 noverlaps, voveralp, foveralp, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_stride);
         }
 
-#ifdef SCCD_ENABLE_TIGHT_INCLUSION
-        // FastVector and TightInclusionCompat both enter the vectorized kernel;
-        // the compat mode then corrects its results inside v_narrow_phase_vf.
-        // narrow_phase_mode() only returns these when TightInclusion is built in.
-        if (mode == NarrowPhaseMode::FastVectorized || mode == NarrowPhaseMode::TightInclusionCorrected) {
-            return v_narrow_phase_vf<nxe, T, I>(
-                noverlaps, voveralp, foveralp, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_stride);
-        }
-#endif
 
         int SCCD_USE_TI = 0;
         SCCD_READ_ENV(SCCD_USE_TI, atoi);
