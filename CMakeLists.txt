@@ -314,6 +314,16 @@ if(SCCD_ENABLE_SMESH)
   target_link_libraries(sccd_refine_scaling PRIVATE sccd)
 endif()
 
+# Per-query box counts, host and device, one query at a time. Needs neither smesh
+# nor TightInclusion -- it reads the datasets' query CSVs directly -- so it builds
+# in the default configuration and is the tool to reach for when a box count needs
+# explaining. Build it with -DSCCD_NP_COUNT_BOXES for the counts to exist.
+add_executable(sccd_np_trace "${CMAKE_CURRENT_SOURCE_DIR}/benchmark/np_trace.exe.cpp")
+target_link_libraries(sccd_np_trace PRIVATE sccd)
+if(SCCD_ENABLE_CUDA)
+  target_link_libraries(sccd_np_trace PRIVATE CUDA::cudart)
+endif()
+
 # Accuracy oracle: compares every narrow-phase mode against TightInclusion on the
 # CCD benchmark query sets. Needs TightInclusion but deliberately not smesh, so
 # it can be built and run without the mesh stack.
