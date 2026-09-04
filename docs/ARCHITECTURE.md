@@ -51,16 +51,20 @@ Both handle triangles and quads, on host and device.
 |---|---|---|---|
 | 0 | `Fast` | scalar; codomain widths against domain tolerances | **ships** |
 | 2 | `Tight` | lane-packed; domain widths against domain tolerances | **ships** |
-| 1 | `FastVectorized` | the `Fast` predicate, lane-packed, vertex-face only | validation only |
-| 3 | `TightInclusionCorrected` | mode 1 corrected by the external library | oracle only |
+| 1 | `FastVectorized` | the `Fast` predicate, lane-packed, vertex-face only | validation build only |
+| 3 | `TightInclusionCorrected` | mode 1 corrected by the external library | validation build only |
 
 Modes 0 and 2 both ship because neither dominates: `Fast` wins cloth-funnel on
 speed, `Tight` wins cloth-ball, and `Tight` is 69× tighter at the median error.
 They differ in accuracy and speed, never in safety — every mode is conservative.
 
-Modes 1 and 3 need `SCCD_ENABLE_TIGHT_INCLUSION=ON`; asking for either without it
-gets mode 0. Mode 3 is the only one that calls the external library, which is why
-it is the only one named after it.
+Modes 1 and 3 exist **only** in a build with `SCCD_ENABLE_TIGHT_INCLUSION=ON`.
+The enum does not name them otherwise, so a caller cannot write
+`NarrowPhaseMode::FastVectorized` in a default build and silently get `Fast` —
+it does not compile. `SCCD_NARROWPHASE_MODE=1` still falls back to mode 0 with a
+warning, because an environment variable is a string, not a symbol. Mode 3 is the
+only mode that calls the external library, which is why it is the only one named
+after it.
 
 Splitting is Gauss–Newton adaptive. Uniform splitting was a complete second
 implementation, roughly 550 lines, that never won on any real scene; it is a
