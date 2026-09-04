@@ -97,6 +97,24 @@ fetches them and a user who wants the library does not.
   trajectory. Written up under "Withdrawn: mode 2 is about 100× slower on
   armadillo edge-edge" in `benchmark/ASSESSMENT.md`.
 
+### The benchmark reports `fn=0` on datasets that have no ground truth
+
+`write_case_outputs` sets `expected` from `mma_bool` when it exists and from
+`roots/<key>/toi.float64` otherwise. With neither present it is false for every
+query, so `fn` is zero by construction and `fp` degenerates into a count of
+collisions reported. Nothing in the output says the comparison had nothing to
+compare against.
+
+This is not hypothetical: it invalidated every `fn=0` reading in this branch
+until the full matrix was run against a tree that does ship roots. A
+conservativeness claim rests on that column, so the benchmark should refuse to
+print it rather than print a zero — emit `fn=-1`, or a `gt=none` marker, or fail
+outright, but not a clean zero that reads as a pass. `ti_oracle` already gets
+this right; `sccd_bench` does not.
+
+Cheap to fix and worth doing before the next accuracy claim is made from a
+benchmark run.
+
 ## Lower
 
 - **The device conservative search classifies 111 boxes per query where the host
