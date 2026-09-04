@@ -57,7 +57,7 @@ namespace {
     // similar scene has the same time of impact, so the earliness at every scale
     // should match the earliness at scale 1 rather than merely stay under a cap.
     constexpr double kScaleDriftFactor = 4.0;
-    constexpr double kSlowEarlyBudget  = 1e-2;
+    constexpr double kSlowEarlyBudget  = 1e-3;
     constexpr double kEntryEarlyBudget = 1e-3;
 
     void fail(const char* what, const double a, const double b) {

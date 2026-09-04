@@ -180,7 +180,15 @@ namespace sccd {
                 sccd::max<T>(sccd::max<T>(sccd::abs<T>(s4[d]), sccd::abs<T>(ev[d])),
                              sccd::max<T>(sccd::max<T>(sccd::abs<T>(e1[d]), sccd::abs<T>(e2[d])),
                                           sccd::max<T>(sccd::abs<T>(e3[d]), sccd::abs<T>(e4[d])))));
-            out.max_coord[d] = sccd::max<T>(T(1), m);
+            // Clamped from ABOVE, not below: TightInclusion's bound is
+            // `filter * min(max_coord, 1)^3` (interval_root_finder.cpp, which
+            // writes it `max.cwiseMin(1)`), so the cube never exceeds 1 and the
+            // bound is a constant `filter` on any scene whose coordinates reach
+            // unit scale. Clamping the other way makes the pad grow as the cube
+            // of the scene size -- a factor of 1e6 at scale 100 -- which the
+            // acceptance test then spends, accepting boxes the search could
+            // still have resolved.
+            out.max_coord[d] = sccd::min<T>(T(1), m);
         }
     }
 
@@ -236,7 +244,7 @@ namespace sccd {
     }
 
     template <typename T>
-    static inline void sccd_get_numerical_error_vq_soa(const int use_ms,
+    static inline void sccd_get_numerical_error_vq_soa(
                                                        const T v0sx,
                                                        const T v0sy,
                                                        const T v0sz,
@@ -270,9 +278,14 @@ namespace sccd {
                                                        T *const SCCD_RESTRICT errx,
                                                        T *const SCCD_RESTRICT erry,
                                                        T *const SCCD_RESTRICT errz) {
-        const T kFilter = (use_ms ? T(42) : T(38)) * std::numeric_limits<T>::epsilon();
+        // 38 is an over-estimate: TightInclusion certifies 30 for vertex-face
+        // and 28 for edge-edge, and derives no constant for the bilinear quad
+        // form. Nothing in this repository derives 38 either. It exceeds both
+        // triangle constants, so it errs on the safe side; lowering it is the
+        // unsafe direction and needs a derivation first.
+        const T kFilter = T(38) * std::numeric_limits<T>::epsilon();
         const T maxx =
-            sccd::max<T>(T(1),
+            sccd::min<T>(T(1),
                          sccd::max<T>(
                              sccd::max<T>(sccd::max<T>(sccd::abs<T>(v0sx), sccd::abs<T>(v1sx)),
                                           sccd::max<T>(sccd::abs<T>(v2sx), sccd::abs<T>(v3sx))),
@@ -281,7 +294,7 @@ namespace sccd {
                                               sccd::max<T>(sccd::abs<T>(v1ex), sccd::abs<T>(v2ex)),
                                               sccd::max<T>(sccd::abs<T>(v3ex), sccd::abs<T>(v4ex))))));
         const T maxy =
-            sccd::max<T>(T(1),
+            sccd::min<T>(T(1),
                          sccd::max<T>(
                              sccd::max<T>(sccd::max<T>(sccd::abs<T>(v0sy), sccd::abs<T>(v1sy)),
                                           sccd::max<T>(sccd::abs<T>(v2sy), sccd::abs<T>(v3sy))),
@@ -290,7 +303,7 @@ namespace sccd {
                                               sccd::max<T>(sccd::abs<T>(v1ey), sccd::abs<T>(v2ey)),
                                               sccd::max<T>(sccd::abs<T>(v3ey), sccd::abs<T>(v4ey))))));
         const T maxz =
-            sccd::max<T>(T(1),
+            sccd::min<T>(T(1),
                          sccd::max<T>(
                              sccd::max<T>(sccd::max<T>(sccd::abs<T>(v0sz), sccd::abs<T>(v1sz)),
                                           sccd::max<T>(sccd::abs<T>(v2sz), sccd::abs<T>(v3sz))),
@@ -323,7 +336,7 @@ namespace sccd {
                                    const T e3[3],
                                    const T e4[3],
                                    T out[3]) {
-        sccd_get_numerical_error_vq_soa<T>(/*use_ms=*/0,
+        sccd_get_numerical_error_vq_soa<T>(
                                            sv[0], sv[1], sv[2],
                                            s1[0], s1[1], s1[2],
                                            s2[0], s2[1], s2[2],

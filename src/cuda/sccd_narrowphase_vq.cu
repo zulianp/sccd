@@ -162,7 +162,11 @@ namespace sccd {
                     for (int k = 0; k < 4; ++k) {
                         m = fmax(m, fmax(fabs(s[k][d]), fabs(e[k][d])));
                     }
-                    maxc[d] = fmax(TC(1), m);
+                    // fmin, not fmax: TightInclusion's bound is
+                    // `filter * min(max_coord, 1)^3`, so the cube is 1 on any
+                    // scene at unit scale or larger. Clamping the other way
+                    // grows the pad as the cube of the scene size.
+                    maxc[d] = fmin(TC(1), m);
                 }
 
                 const TC axis_tol = codomain_tol / TC(3);
