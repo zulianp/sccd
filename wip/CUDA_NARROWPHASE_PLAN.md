@@ -544,6 +544,29 @@ fewer false positive and `w3ee`'s time of impact moving 0.163146973 → 0.174438
 are both the expected sign — a correct, smaller tolerance converges where the old
 one accepted early, so the answer is *later* and still at or before the truth.
 
+### After the fix the device and host agree exactly on the classification
+
+Same binary, same cases, same candidate sets, mode 2, only
+`SCCD_BENCH_EXECUTION_SPACE` differing:
+
+| scene | type | queries | host fp | device fp | fn |
+|---|---|---:|---:|---:|---:|
+| armadillo-rollers | vf | 62,420 | **444** | **444** | 0 |
+| armadillo-rollers | ee | 409,527 | **170** | **170** | 0 |
+| cloth-funnel | ee | 510,022 | **74** | **74** | 0 |
+
+Exact agreement, and zero false negatives on both sides.
+
+This is new. Before the tolerance fix cloth-funnel edge-edge read 75 on the device
+against the host's 74 — the extra false positive was the wrong tolerance
+accepting a box it should have refined. So the fix is not only 3.5× faster, it
+removes a divergence in the answers.
+
+What this does *not* establish: these are counts, not a per-query comparison, and
+equal totals could in principle hide two compensating disagreements. `ti_oracle`
+compares query by query and gates on it; running it host-against-device on all
+three scenes is the stronger check and has not been done since the fix.
+
 ### The vertex-face caps: parity, not a win
 
 Both sides use the generated expression there, with three distinct denominators,
