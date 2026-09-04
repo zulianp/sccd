@@ -82,6 +82,17 @@ fetches them and a user who wants the library does not.
 
 ## Done
 
+- ~~The refactor's CUDA build was unverified~~ — **verified** on GH200,
+  2026-09-04, after the certificate was re-signed. Clean compile with zero
+  errors; `ctest` 9/9 including `narrowphase_cuda_test`; and all twelve
+  configurations reproduce `benchmark/assessment/mode-stride-matrix.csv`
+  exactly — every `fp`, `fn`, root count and `late`, across 101,164 exact roots.
+  One timing outlier worth a repeat if anyone cares: `armadillo-rollers` mode 2
+  device at `toi_stride=1` measured 3776.8 ms against a 3126.7 ms three-repeat
+  median, ~21% high. Its `toi_stride=0` companion is 56.3 ms before and after,
+  so this is the block-per-query kernel's variance rather than the refactor.
+
+
 - ~~Mode 2's earliest-impact answer may be late on armadillo-rollers~~ —
   **withdrawn, the reference was wrong.** smesh stores coordinates as `float`
   (`typedef float geom_t`), so `find_earliest_impact_time` runs on float32-rounded
