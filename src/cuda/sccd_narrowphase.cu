@@ -1449,8 +1449,7 @@ namespace sccd {
                                                                   Domain<T>& right) {
             left = in;
             right = in;
-#define SCCD_ENABLE_CODOMAIN_SCALING
-#ifdef SCCD_ENABLE_CODOMAIN_SCALING
+#if SCCD_ENABLE_CODOMAIN_SCALING
             const T t0 = in.tlower;
             const T t1 = in.tupper;
             const T u0 = in.ulower;

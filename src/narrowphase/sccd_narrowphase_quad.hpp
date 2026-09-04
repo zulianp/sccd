@@ -25,6 +25,7 @@
  */
 
 #include "sccd_base.hpp"
+#include "sccd_parallel.hpp"
 #include "sccd_narrowphase_mode.hpp"
 #include "sccd_rootfinder_quad.hpp"
 
@@ -34,24 +35,7 @@
 #include <cstdlib>
 #include <vector>
 
-#ifndef SCCD_ENABLE_CODOMAIN_SCALING
-#define SCCD_ENABLE_CODOMAIN_SCALING 1
-#endif
-
 namespace sccd {
-
-    namespace detail {
-        template <typename T>
-        inline T atomic_min_vq(std::atomic<T> &atm, const T val) {
-            T expected = atm.load();
-            while (expected > val) {
-                if (atm.compare_exchange_strong(expected, val)) {
-                    break;
-                }
-            }
-            return expected;
-        }
-    } // namespace detail
 
     template <int nxe, typename T, typename I>
     int narrow_phase_vq(const size_t noverlaps,
@@ -80,19 +64,17 @@ namespace sccd {
         }
         assert(toi != nullptr);
 
-        int SCCD_REFINE = 0;
-        SCCD_READ_ENV(SCCD_REFINE, atoi);
 
         std::atomic<T> min_t = max_toi;
 
         if (toi_stride == 1) {
-#pragma omp parallel for
-            for (ptrdiff_t i = 0; i < noverlaps; ++i) {
-                toi[i] = max_toi;
-            }
+            sccd::parallel_for_br_dynamic(0, (ptrdiff_t)noverlaps,
+                                          [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+                                              for (ptrdiff_t i = rbegin; i < rend; ++i) toi[i] = max_toi;
+                                          });
         }
 
-        if (toi_stride == 0 && min_t.load() == T(0)) {
+        if (toi_stride == 0 && min_t.load(std::memory_order_relaxed) == T(0)) {
             toi[0] = T(0);
             return 0;
         }
@@ -101,13 +83,19 @@ namespace sccd {
             toi[0] = max_toi;
         }
 
-#pragma omp parallel
-        {
-            std::vector<Box<T_HP>> stack;
+        // Per-candidate cost varies by orders of magnitude, hence the dynamic
+        // schedule. Going through parallel_for_br_dynamic rather than a raw
+        // OpenMP pragma is what lets a TBB build use TBB: with SCCD_ENABLE_TBB
+        // set and no -fopenmp the pragmas below were ignored and the whole quad
+        // narrow phase ran on one thread, and with both it oversubscribed. The
+        // stack is thread_local rather than block-local so it keeps its capacity
+        // across blocks instead of reallocating per chunk.
+        sccd::parallel_for_br_dynamic(0, (ptrdiff_t)noverlaps, [&](const ptrdiff_t rbegin,
+                                                                   const ptrdiff_t rend) {
+            static thread_local std::vector<Box<T_HP>> stack;
             stack.reserve(64);
 
-#pragma omp for schedule(dynamic, 64) nowait
-            for (ptrdiff_t i = 0; i < static_cast<ptrdiff_t>(noverlaps); ++i) {
+            for (ptrdiff_t i = rbegin; i < rend; ++i) {
                 if (toi_stride == 1) {
                     toi[i] = max_toi;
                 }
@@ -133,7 +121,7 @@ namespace sccd {
                 const T_HP e3[3] = {v1[0][nodes[2]], v1[1][nodes[2]], v1[2][nodes[2]]};
                 const T_HP e4[3] = {v1[0][nodes[3]], v1[1][nodes[3]], v1[2][nodes[3]]};
 
-                T_HP t = toi_stride == 0 ? T_HP(min_t.load()) : T_HP(toi[i]);
+                T_HP t = toi_stride == 0 ? T_HP(min_t.load(std::memory_order_relaxed)) : T_HP(toi[i]);
                 T_HP u = T_HP(0);
                 T_HP v = T_HP(0);
 
@@ -194,11 +182,11 @@ namespace sccd {
                                                                               u,
                                                                               v,
                                                                               stack,
-                                                                              SCCD_REFINE);
+                                                                              /*refine=*/false);
 
                     if (found) {
                         if (toi_stride == 0) {
-                            const T previous = detail::atomic_min_vq<T>(min_t, T(t));
+                            const T previous = sccd::atomic_min<T>(min_t, T(t));
                             if (previous < T(t)) {
                                 t = T_HP(previous);
                             }
@@ -206,14 +194,14 @@ namespace sccd {
                             toi[i] = T(t);
                         }
                     } else if (!stack.empty() && toi_stride == 0) {
-                        t = sccd::min<T_HP>(t, T_HP(min_t.load()));
+                        t = sccd::min<T_HP>(t, T_HP(min_t.load(std::memory_order_relaxed)));
                     }
                 }
             }
-        }
+        });
 
         if (toi_stride == 0) {
-            toi[0] = min_t.load();
+            toi[0] = min_t.load(std::memory_order_relaxed);
         }
         return 0;
     }

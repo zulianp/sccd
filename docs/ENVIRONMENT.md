@@ -49,7 +49,7 @@ anywhere; setting them does nothing.
 |---|---|---|---|
 | `SCCD_MAX_DEPTH` | int | `69` | Maximum subdivision depth. At the cap a box is **accepted** at its `t` lower bound, never dropped — that is what keeps a depth limit from costing a collision. |
 | `SCCD_TOL` | float | `3e-8` | Codomain tolerance for the acceptance test. |
-| `SCCD_REFINE` | int | `0` | Extra refinement passes in the vertex-quad search. |
+| `SCCD_REFINE` | int | `0` | Newton polish on an accepted vertex-face box: if it converges to an earlier time inside the box, that time is reported instead. Vertex-face only — the edge-edge and vertex-quad searches have no polish step and ignore it. |
 
 Lowering `SCCD_TOL` or raising `SCCD_MAX_DEPTH` tightens the reported time of
 impact and costs time. Neither can make the result unsafe: the rejection test

@@ -18,35 +18,9 @@
 
 #include <atomic>
 
-#define SCCD_ENABLE_CODOMAIN_SCALING 1
 
 namespace sccd {
 
-    /**
-     * \brief Monotonically lower a shared minimum.
-     *
-     * Relaxed ordering is sufficient: the value is a pruning bound, not a
-     * synchronization edge, and it is only ever decreased. Nothing is published
-     * alongside it, so no acquire/release pairing is needed. Under the default
-     * seq_cst this sat on the DFS inner loop and serialized every worker on one
-     * cache line.
-     *
-     * \return The value the atomic held when the exchange settled, i.e. the
-     *         prior minimum.
-     */
-    template <typename T>
-    T atomic_min(std::atomic<T>& atm, T val) {
-        T expected = atm.load(std::memory_order_relaxed);
-        while (expected > val) {
-            // compare_exchange_weak refreshes 'expected' on failure, so the loop
-            // re-tests and exits as soon as another thread has published a
-            // smaller value.
-            if (atm.compare_exchange_weak(expected, val, std::memory_order_relaxed, std::memory_order_relaxed)) {
-                break;
-            }
-        }
-        return expected;
-    }
 
 
     template <int nxe, typename T, typename I>
@@ -157,7 +131,7 @@ namespace sccd {
                                                Interval<T_HP>{T_HP(0), T_HP(1)},
                                                0);
 
-#ifndef SCCD_ENABLE_CODOMAIN_SCALING
+#if !SCCD_ENABLE_CODOMAIN_SCALING
                 T_HP codomain_widths[3] = {1, 1, 1};
 #else
                 T_HP codomain_widths[3];
@@ -392,7 +366,7 @@ namespace sccd {
                                                Interval<T_HP>{T_HP(0), T_HP(1)},
                                                0);
 
-#ifndef SCCD_ENABLE_CODOMAIN_SCALING
+#if !SCCD_ENABLE_CODOMAIN_SCALING
                 T_HP codomain_widths[3] = {1, 1, 1};
 #else
                 T_HP codomain_widths[3];

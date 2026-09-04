@@ -9,9 +9,9 @@
  * \file
  * \brief Device vertex-quad narrow phase.
  *
- * Quads had no device narrow phase at all: `sccd_smesh_CCD.hpp` raised
- * `SMESH_ERROR("CUDA QUADSHELL4 narrow phase is not implemented")`, so a quad
- * mesh could be broad-phased on the GPU and then not finished there.
+ * A quad mesh runs both phases on the device: the broad phase through
+ * `count_overlaps<4, 1>` and this kernel for the narrow phase. The smesh
+ * integration dispatches both for QUADSHELL4.
  *
  * ## Node order: lexicographic, not cyclic
  *
