@@ -134,7 +134,7 @@ namespace sccd {
      *
      * The mode is read from the environment on **every call** rather than cached,
      * because callers switch it between calls -- `sccd_bench` and
-     * `narrowphase_cuda_test` both do -- so the warnings below are one-shot flags
+     * `sccd_narrowphase_cuda_test` both do -- so the warnings below are one-shot flags
      * rather than a resolved-once result.
      *
      * Two requests used to be swallowed in silence, which is the thing worth

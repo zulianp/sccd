@@ -116,7 +116,7 @@ toward negative infinity.
 non-zero on a missed collision or a late time of impact. It runs as part of
 `ctest` when TightInclusion and the datasets are present.
 
-`narrowphase_cuda_test` is the device narrow phase's gate. It builds queries
+`sccd_narrowphase_cuda_test` is the device narrow phase's gate. It builds queries
 whose time of impact is known -- the primitive stays in a plane and the vertex
 descends through it, so the contact time is one division, solved in `long double`
 and rounded up -- then requires every kernel, host and device, triangle and quad,

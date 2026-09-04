@@ -65,7 +65,7 @@ namespace sccd {
      * trilinear evaluations of the same depth -- each term is a product of three
      * rounded factors summed with the others -- so the certified bound that makes
      * the rejection sound covers this form as it covers the reference. That is an
-     * argument, not a proof, which is why `vertex_quad_root_test` checks the two
+     * argument, not a proof, which is why `sccd_rootfinder_quad_test` checks the two
      * against each other and against a densely sampled reference root rather than
      * taking it on trust.
      */

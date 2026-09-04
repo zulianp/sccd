@@ -78,8 +78,8 @@ enable_testing()
 # excluded from the smesh glob below; otherwise enabling both options registers
 # each of them twice and configuration fails on the duplicate target.
 set(SCCD_TI_ONLY_TESTS
-  numerical_error_ti_parity_test
-  tolerance_ti_parity_test)
+  sccd_numerical_error_ti_parity_test
+  sccd_tolerance_ti_parity_test)
 
 if(SCCD_ENABLE_TIGHT_INCLUSION)
   foreach(SCCD_TI_TEST IN LISTS SCCD_TI_ONLY_TESTS)
@@ -93,17 +93,17 @@ endif()
 
 # Tests that need neither smesh nor TightInclusion, so they run in any build.
 #
-# vnarrowphase_ti_compat_test is here despite the name: it guards its body with
+# sccd_tight_inclusion_corrected_test is here despite the name: it guards its body with
 # #ifndef SCCD_ENABLE_TIGHT_INCLUSION and returns success without it, and it
 # never touches smesh. It used to be registered by the smesh glob below, so a
 # TightInclusion build without smesh silently did not run the one test that
 # checks the vectorised kernel against TightInclusion.
 set(SCCD_STANDALONE_TESTS
-  cell2d_broadphase_test
-  vertex_quad_root_test
-  vnarrowphase_ti_compat_test
-  c_abi_test
-  vaabb_test)
+  sccd_broadphase_cell2d_test
+  sccd_rootfinder_quad_test
+  sccd_tight_inclusion_corrected_test
+  sccd_c_abi_test
+  sccd_aabb_test)
 foreach(SCCD_TEST IN LISTS SCCD_STANDALONE_TESTS)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/${SCCD_TEST}.exe.cpp")
     add_executable(${SCCD_TEST} "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/${SCCD_TEST}.exe.cpp")
@@ -162,18 +162,18 @@ endif()
 
 # CUDA tests that also need smesh. Registering these on SCCD_ENABLE_CUDA alone
 # meant a CUDA build without smesh failed to compile them.
-set(SCCD_CUDA_SMESH_TESTS mesh_sccd_cuda_test)
+set(SCCD_CUDA_SMESH_TESTS sccd_mesh_cuda_test)
 
 # CUDA tests that take arguments, and so must not be registered bare.
 #
-# mesh_sccd_cuda_test needs two mesh paths and aborts with its usage message
+# sccd_mesh_cuda_test needs two mesh paths and aborts with its usage message
 # without them. It is registered properly further down by sccd_add_raw_mesh_test,
 # which supplies the meshes and skips when the data is absent -- so the bare
 # registration below could only ever abort, and did: a CUDA build without the
 # n-body dataset failed ctest on it every time. Neither local configuration
 # showed it, because the machine with the data has no CUDA and the machine with
 # CUDA has no data.
-set(SCCD_CUDA_ARG_TESTS mesh_sccd_cuda_test)
+set(SCCD_CUDA_ARG_TESTS sccd_mesh_cuda_test)
 
 file(GLOB_RECURSE SCCD_CUDA_TESTS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/cuda/*.exe.cpp")
 foreach(SCCD_CUDA_TEST IN LISTS SCCD_CUDA_TESTS)
@@ -191,10 +191,10 @@ foreach(SCCD_CUDA_TEST IN LISTS SCCD_CUDA_TESTS)
   endif()
 endforeach()
 
-if(TARGET mesh_sccd_cuda_test)
+if(TARGET sccd_mesh_cuda_test)
   sccd_add_raw_mesh_test(
     sccd_cuda_cpu_gpu_parity
-    mesh_sccd_cuda_test
+    sccd_mesh_cuda_test
     sccd_cuda_cpu_gpu_parity_meshes
     "${CMAKE_CURRENT_BINARY_DIR}/tmp/sccd_cuda_cpu_gpu_parity"
     "${CMAKE_CURRENT_SOURCE_DIR}/data/n-body-simulation/frames/balls16_18.ply"

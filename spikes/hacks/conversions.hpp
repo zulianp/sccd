@@ -11,6 +11,7 @@
 using namespace scalable_ccd;
 
 #include "broadphase_lb.hpp"
+#include "spikes_only.hpp"
 #include "cell_broadphase.hpp"
 #include "sccd_narrowphase.hpp"
 

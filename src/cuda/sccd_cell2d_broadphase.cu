@@ -20,7 +20,7 @@
 namespace sccd {
     namespace device {
 
-        namespace c2d {
+        namespace detail {
 
             template <typename T>
             static __device__ __forceinline__ int clamp_cell(const T v, const T lo, const T inv, const int n) {
@@ -428,7 +428,7 @@ namespace sccd {
                 SCCD_CHECK_CUDA(cub::DeviceScan::InclusiveSum(tmp, bytes, data, data, n));
             }
 
-        }  // namespace c2d
+        }  // namespace detail
 
         template <typename T, typename I>
         void cell2d_setup_and_count(const int dim,
@@ -449,7 +449,7 @@ namespace sccd {
             T* const stats = workspace(WorkspaceSlot::Scratch).get_as<T>(9);
             T h_min[3], h_max[3], h_sum[3];
             for (int d = 0; d < 3; ++d) {
-                c2d::grid_stats_kernel<T><<<1, 256, 3 * 256 * sizeof(T)>>>(n,
+                detail::grid_stats_kernel<T><<<1, 256, 3 * 256 * sizeof(T)>>>(n,
                                                       soa_device_row<T>(aabbs, dim, d),
                                                       soa_device_row<T>(aabbs, dim, 3 + d),
                                                       stats + 3 * d,
@@ -510,7 +510,7 @@ namespace sccd {
 
             dim3 block(SCCD_C2D_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
             dim3 gridsz((n + block.x - 1) / block.x);
-            c2d::bin_count_kernel<T><<<gridsz, block>>>(n,
+            detail::bin_count_kernel<T><<<gridsz, block>>>(n,
                                                         soa_device_row<T>(aabbs, dim, grid.axis0),
                                                         soa_device_row<T>(aabbs, dim, 3 + grid.axis0),
                                                         soa_device_row<T>(aabbs, dim, grid.axis1),
@@ -519,7 +519,7 @@ namespace sccd {
                                                         cellptr);
             SCCD_CUDA_LAST_ERROR();
 
-            c2d::inclusive_sum<T>(cellptr, ncells + 1);
+            detail::inclusive_sum<T>(cellptr, ncells + 1);
             SCCD_CHECK_CUDA(cudaMemcpy(span_count, cellptr + ncells, sizeof(ptrdiff_t), cudaMemcpyDeviceToHost));
         }
 
@@ -536,7 +536,7 @@ namespace sccd {
             dim3 block(SCCD_C2D_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
             dim3 gridsz((n + block.x - 1) / block.x);
             // dim is 3 here: the caller passes rows already, see soa_device_row.
-            c2d::bin_fill_kernel<T, I><<<gridsz, block>>>(n,
+            detail::bin_fill_kernel<T, I><<<gridsz, block>>>(n,
                                                           soa_device_row<T>(aabbs, 3, grid.axis0),
                                                           soa_device_row<T>(aabbs, 3, 3 + grid.axis0),
                                                           soa_device_row<T>(aabbs, 3, grid.axis1),
@@ -570,7 +570,7 @@ namespace sccd {
 
             dim3 block(SCCD_C2D_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
             dim3 gridsz((first_count + block.x - 1) / block.x);
-            c2d::count_overlaps_kernel<first_nxe, second_nxe, T, I><<<gridsz, block>>>(first_count,
+            detail::count_overlaps_kernel<first_nxe, second_nxe, T, I><<<gridsz, block>>>(first_count,
                                                                                        first_aabbs,
                                                                                        first_idx,
                                                                                        first_stride,
@@ -584,7 +584,7 @@ namespace sccd {
                                                                                        cellidx,
                                                                                        ccdptr);
             SCCD_CUDA_LAST_ERROR();
-            c2d::inclusive_sum<T>(ccdptr, first_count + 1);
+            detail::inclusive_sum<T>(ccdptr, first_count + 1);
         }
 
         template <int first_nxe, int second_nxe, typename T, typename I>
@@ -606,7 +606,7 @@ namespace sccd {
             if (first_count <= 0) return;
             dim3 block(SCCD_C2D_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
             dim3 gridsz((first_count + block.x - 1) / block.x);
-            c2d::collect_overlaps_kernel<first_nxe, second_nxe, T, I><<<gridsz, block>>>(first_count,
+            detail::collect_overlaps_kernel<first_nxe, second_nxe, T, I><<<gridsz, block>>>(first_count,
                                                                                          first_aabbs,
                                                                                          first_idx,
                                                                                          first_stride,
@@ -642,10 +642,10 @@ namespace sccd {
 
             dim3 block(SCCD_C2D_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
             dim3 gridsz((element_count + block.x - 1) / block.x);
-            c2d::count_self_kernel<nxe, T, I><<<gridsz, block>>>(
+            detail::count_self_kernel<nxe, T, I><<<gridsz, block>>>(
                 element_count, aabbs, idx, stride, elements, grid, cellptr, cellidx, ccdptr);
             SCCD_CUDA_LAST_ERROR();
-            c2d::inclusive_sum<T>(ccdptr, element_count + 1);
+            detail::inclusive_sum<T>(ccdptr, element_count + 1);
         }
 
         template <int nxe, typename T, typename I>
@@ -663,7 +663,7 @@ namespace sccd {
             if (element_count <= 0) return;
             dim3 block(SCCD_C2D_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
             dim3 gridsz((element_count + block.x - 1) / block.x);
-            c2d::collect_self_kernel<nxe, T, I><<<gridsz, block>>>(
+            detail::collect_self_kernel<nxe, T, I><<<gridsz, block>>>(
                 element_count, aabbs, idx, stride, elements, grid, cellptr, cellidx, ccdptr, out0, out1);
             SCCD_CUDA_LAST_ERROR();
         }
