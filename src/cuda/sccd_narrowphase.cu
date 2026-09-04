@@ -1672,7 +1672,7 @@ namespace sccd {
                 // 4th, 16th, 64th and 256th iteration instead was measured
                 // monotonically worse on all three scenes -- 638 -> 3377 ms on
                 // cloth-funnel at 256 -- because the pruning a fresh bound buys is
-                // worth more than the atomic costs. See benchmark/ASSESSMENT.md.
+                // worth more than the atomic costs. See wip/ASSESSMENT.md.
                 if (tid == 0) {
                     const TC g = atomic_min_toi<T>(&toi[0], s_toi);
                     if (g < s_toi) s_toi = g;

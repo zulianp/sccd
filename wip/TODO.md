@@ -2,7 +2,7 @@
 
 Known open work, with the evidence for each so the next person does not have to
 re-derive it. Items leave this file when they are done or when a measurement
-refutes them; a refuted item goes to `benchmark/ASSESSMENT.md` rather than being
+refutes them; a refuted item goes to `wip/ASSESSMENT.md` rather than being
 deleted, so it is not retried.
 
 ---
@@ -101,13 +101,13 @@ fetches them and a user who wants the library does not.
   1024 entries to 64, which is what actually redistributes heavy queries, and the
   conservative device kernel got 17× faster on cloth-funnel and 5.1× on
   armadillo-rollers. Written up under "Fixed: the queue is double-buffered" in
-  `benchmark/ASSESSMENT.md`, including one unexplained regression at the old
+  `wip/ASSESSMENT.md`, including one unexplained regression at the old
   capacity.
 
 - ~~The armadillo edge-edge blowup~~ — **withdrawn**. All 396 edge-edge cases,
   twice: the worst is 9.4×, none exceeds 10×, and mode 2 is 10% faster over the
   trajectory. Written up under "Withdrawn: mode 2 is about 100× slower on
-  armadillo edge-edge" in `benchmark/ASSESSMENT.md`.
+  armadillo edge-edge" in `wip/ASSESSMENT.md`.
 
 ### The benchmark reports `fn=0` on datasets that have no ground truth
 
@@ -126,6 +126,30 @@ this right; `sccd_bench` does not.
 
 Cheap to fix and worth doing before the next accuracy claim is made from a
 benchmark run.
+
+### Device dead code is still in the shipped CUDA build
+
+The host half of this landed in `spikes/src/dead.{hpp,cpp}`; the device half did
+not, because removing kernels without a compiler to check the result is not
+worth the risk and the CSCS certificate expired mid-refactor.
+
+Still in `src/cuda/`, called by nothing:
+
+- `sccd_broadphase.{cu,cuh}` — the whole `*_overlaps_with_starts` variant:
+  `count_overlaps_with_starts_kernel`, `collect_overlaps_with_starts_kernel` and
+  their wrappers, two declarations, two instantiation macros and 8 explicit
+  instantiations. Roughly 160 lines of kernel code compiled into every CUDA
+  build for nothing. The only `spikes/` hit is a different function of the same
+  name.
+- `sccd_reduce.cuh` — `block_max_to_root` and `broadcast_to_block`; about 43 of
+  the file's 126 lines. `broadcast_to_block` computes `warp_id`, `lid`,
+  `root_warp` and `root_lid` and then uses none of them.
+- `sccd_narrowphase.cu` — `reset_batch_narrow_phase_kernel`, a `__global__` that
+  is never launched, and `release_slot`, orphaned by the double-buffered queue
+  in `09757ac3`.
+
+Move to `spikes/src/dead.cu` and delete from `src/`. Verify with a CUDA build
+and `ctest --test-dir build-hopper` at 9/9.
 
 ## Lower
 

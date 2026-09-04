@@ -9,7 +9,7 @@
 // edge-edge, reachable only through SCCD_ADAPTIVE_SPLIT=0.
 //
 // It was demoted because it never won. Measured end to end on three real scenes
-// (benchmark/ASSESSMENT.md), adaptive is ahead on all three, and on cloth-funnel
+// (wip/ASSESSMENT.md), adaptive is ahead on all three, and on cloth-funnel
 // by 19% against a 6-10% run-to-run spread. The other two margins are inside the
 // noise and prove nothing on their own -- but a duplicate that never wins does
 // not meet the keep bar, and this one carried about 550 lines.

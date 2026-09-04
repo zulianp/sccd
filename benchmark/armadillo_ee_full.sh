@@ -8,7 +8,7 @@
 # is invisible to a sum. So this runs the whole scene and emits per-case rows.
 #
 # Output feeds benchmark/assessment/armadillo-ee-full.csv, cited by the
-# "Withdrawn" section of benchmark/ASSESSMENT.md.
+# "Withdrawn" section of wip/ASSESSMENT.md.
 #
 # Usage, inside an allocation with a GH200 node (about 12 minutes for two modes):
 #   srun --account=... --partition=debug --nodes=1 --ntasks=1 --gpus-per-task=1 \
