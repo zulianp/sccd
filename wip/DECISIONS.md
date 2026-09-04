@@ -12,6 +12,7 @@ every one of these was believed at the time on evidence that looked sufficient.
 - [Withdrawn: "mode 2's earliest impact is late on armadillo-rollers"](ASSESSMENT.md)
 - [Retracted: every `fn=0` in this document before the matrix above](ASSESSMENT.md)
 - [Resolved: the sweep dropped touching pairs](ASSESSMENT.md)
+- Reversed: demoting `external/json` to `spikes/` — see below
 
 The full argument and the numbers behind each sit in
 [`ASSESSMENT.md`](ASSESSMENT.md).
@@ -60,6 +61,30 @@ the one being asked. It survived longer than the others because it was never
 challenged — it was measured once, written down with a table of largest blobs
 that made it look thoroughly established, and cited unchallenged for several
 turns.
+
+## 6. Checking one caller and calling it none
+
+`external/json` was demoted to `spikes/` in `e313109` on the stated grounds that
+it was "never `add_subdirectory`'d, so it was not in the build at all". That
+sentence is true and the conclusion drawn from it is not. The main
+`CMakeLists.txt` does not reference it, which is what I checked; `benchmark/bench.sh`
+configures it as a **standalone CMake project**, which I did not.
+
+Its two programs turn the datasets' `boxes/*.json` and `mma_bool/*.json` into the
+raw arrays `bench.exe.cpp` reads — `boxes/<key>/c0.int32`, `c1.int32` and
+`mma_bool/<key>/mma_bool.uint8`. Without them `sccd_bench` has no expected pair
+sets and no hit/miss booleans, so the whole accuracy half of the benchmark is
+gone. And `bench.sh` did not degrade gracefully: it configures that path
+unconditionally, so from `e313109` until now the harness failed on its second
+step with "The source directory .../external/json does not exist".
+
+It is now `benchmark/json/`, beside its only caller. It stays a separate CMake
+project rather than joining the main one, because it fetches simdjson at
+configure time and the shipped library must build with nothing fetched.
+
+The shape is the same as the other five, one level up: the *check* answered a
+different question than the one being asked. "Is it in the build?" is not "does
+anything use it?", and a grep of `CMakeLists.txt` cannot tell them apart.
 
 ## A note on the C ABI
 
