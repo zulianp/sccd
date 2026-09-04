@@ -84,7 +84,7 @@ fetches them and a user who wants the library does not.
 
 - ~~The refactor's CUDA build was unverified~~ — **verified** on GH200,
   2026-09-04, after the certificate was re-signed. Clean compile with zero
-  errors; `ctest` 9/9 including `narrowphase_cuda_test`; and all twelve
+  errors; `ctest` 9/9 including `sccd_narrowphase_cuda_test`; and all twelve
   configurations reproduce `benchmark/assessment/mode-stride-matrix.csv`
   exactly — every `fp`, `fn`, root count and `late`, across 101,164 exact roots.
   One timing outlier worth a repeat if anyone cares: `armadillo-rollers` mode 2
@@ -207,7 +207,7 @@ and `ctest --test-dir build-hopper` at 9/9.
   converges on the faster one or that switching mid-run keeps the pair sets
   identical.
 
-- **Two CUDA tests are built but never registered.** `mesh_sccd_cuda_test` and
+- **Two CUDA tests are built but never registered.** `sccd_mesh_cuda_test` and
   `sccd_cuda_cpu_gpu_parity` need mesh data that a fresh clone does not have.
   `sccd_add_raw_mesh_test` now reports what is missing instead of returning
   silently, so the gap is visible, but the tests still do not run anywhere.

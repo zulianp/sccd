@@ -194,38 +194,6 @@ namespace sccd {
 #endif  // SCCD_ENABLE_TBB
     }
 
-    template <typename T>
-    void parallel_cum_max_br(T* const begin, T* const end) {
-        const ptrdiff_t len = end - begin;
-        if (len <= 0) {
-            return;
-        }
-
-#ifdef SCCD_ENABLE_TBB
-        tbb::parallel_scan(
-            tbb::blocked_range<ptrdiff_t>(0, len),
-            begin[0],
-            [=](const tbb::blocked_range<ptrdiff_t>& r, T acc, bool is_final_scan) -> T {
-                if (!is_final_scan) {
-                    T temp = acc;
-                    for (ptrdiff_t i = r.begin(); i < r.end(); ++i) {
-                        temp = sccd::max(temp, begin[i]);
-                    }
-                    return temp;
-                } else {
-                    begin[r.begin()] = sccd::max(begin[r.begin()], acc);
-                    for (ptrdiff_t i = r.begin() + 1; i < r.end(); ++i) {
-                        begin[i] = sccd::max(begin[i], begin[i - 1]);
-                    }
-
-                    return begin[r.end() - 1];
-                }
-            },
-            [](T left, T right) { return sccd::max(left, right); });
-#else
-        detail::parallel_inclusive_scan<T>(begin, len, [](const T a, const T b) { return sccd::max(a, b); });
-#endif  // SCCD_ENABLE_TBB
-    }
 }  // namespace sccd
 
 #endif  // SCCD_PARALLEL_HPP

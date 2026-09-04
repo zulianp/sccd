@@ -562,7 +562,7 @@ double, so the bound is at most `30 * 2.22e-16 = 6.7e-15`, and every measurement
 here passes `tol = 3e-8`, four hundred thousand times wider. The pad was
 therefore too wide rather than too narrow on every scene in this document.
 
-It was not reachable at `tol = 1e-16` either. `narrowphase_cuda_test` was written
+It was not reachable at `tol = 1e-16` either. `sccd_narrowphase_cuda_test` was written
 partly to gate this, running 1,400 constructed queries -- full-mantissa
 coordinates, a quarter of them grazing contacts where the root is
 ill-conditioned -- at a tolerance below the bound, and the pre-fix kernel passes
@@ -828,7 +828,7 @@ that.
 in `broadphase.hpp` and in both CUDA sweeps. cell2d and sweep now agree exactly
 at every refinement level.
 
-**Regression test.** `cell2d_broadphase_test` gained flat-coincident-box cases
+**Regression test.** `sccd_broadphase_cell2d_test` gained flat-coincident-box cases
 that run the sweep on each of the three axes explicitly. Forcing the axis is
 what makes the test work: `choose_axis` avoids the degenerate axis, so the
 original random cases passed against the buggy sweep and would have kept
@@ -843,7 +843,7 @@ re-run on a GH200 node, the two now agree at every refinement level:
 | 1 | 18,240 / 39,912 | 18,240 / 39,912 |
 | 2 | 294,144 / 657,240 | 294,144 / 657,240 |
 
-`cell2d_broadphase_cuda_test` also passes, so the device cell list and the device
+`sccd_broadphase_cell2d_cuda_test` also passes, so the device cell list and the device
 sweep agree as well.
 
 **Effect on the numbers above.** None. The three real scenes had identical pair

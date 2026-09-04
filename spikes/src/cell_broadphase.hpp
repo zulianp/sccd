@@ -2,6 +2,7 @@
 #define CELL_BROADPHASE_HPP
 
 #include "sccd_broadphase_sweep.hpp"
+#include "spikes_only.hpp"
 #include "sccd_parallel.hpp"
 
 namespace sccd {

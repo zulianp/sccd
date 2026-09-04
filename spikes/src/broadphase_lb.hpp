@@ -2,6 +2,7 @@
 #define SCCC_BROADPHASE_LB_HPP
 
 #include "sccd_broadphase_sweep.hpp"
+#include "spikes_only.hpp"
 
 namespace sccd {
     template <int first_nxe, int second_nxe, typename T, typename I>
