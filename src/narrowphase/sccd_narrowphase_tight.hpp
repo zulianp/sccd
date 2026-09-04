@@ -94,6 +94,7 @@
 #endif
 
 #include <cstdio>
+#include <cstdlib>
 
 namespace sccd {
 
@@ -534,7 +535,30 @@ namespace sccd {
                 TightQueryBlock<T_HP, VSIZE> block;
                 T_HP toi_q[VSIZE];
 
+#ifdef SCCD_NP_COUNT_BOXES
+                // Measurement knob, present only in an instrumented build.
+                //
+                // For toi_stride == 0 the host seeds each block of queries with
+                // the global minimum as it stands when the block starts, so a
+                // block scheduled late searches a t-window that earlier blocks
+                // have already collapsed. The device has no such sequence: one
+                // launch starts every query at once against max_toi and the bound
+                // only tightens as the launch runs.
+                //
+                // SCCD_NP_NO_GLOBAL_SEED=1 removes the host's advantage, seeding
+                // every block at max_toi. If the host's box count then approaches
+                // the device's, the 94x gap is the bound schedule and not the
+                // kernel -- which is the question this knob exists to answer.
+                static const bool no_global_seed_ = [] {
+                    const char* e = getenv("SCCD_NP_NO_GLOBAL_SEED");
+                    return e != nullptr && atoi(e) != 0;
+                }();
+                const T_HP seed = (toi_stride == 0 && !no_global_seed_)
+                                      ? global_min.load(std::memory_order_relaxed)
+                                      : domain_toi;
+#else
                 const T_HP seed = toi_stride == 0 ? global_min.load(std::memory_order_relaxed) : domain_toi;
+#endif
 
                 for (int q = 0; q < VSIZE; ++q) {
                     toi_q[q] = seed;

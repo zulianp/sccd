@@ -65,10 +65,55 @@ Each was measured, and the measurement is in `wip/ASSESSMENT.md`.
 **The cause of the 94× is not established.** Everything above says what it is
 not. That is why step 0 exists.
 
-## Step 0 — establish the cause before redesigning anything
+## Step 0, first result: the host's 1.2 boxes per query is not its search
 
-`wip/ASSESSMENT.md` ends on this and it has not been done: *trace a single hard
-query box by box, not another aggregate.*
+Measured with `sccd_np_trace`, cloth-funnel `227vf`, 92 queries, the **same host
+`Tight` kernel** on the **same data**, differing only in how the queries are
+presented to it:
+
+| | host boxes | per query |
+|---|---:|---:|
+| one query per call, `max_toi = 1` | 51,509 | **559.88** |
+| all 92 in one `toi_stride=0` call | 4,098 | **44.54** |
+
+**12.6× from the shared collapsing bound alone**, with nothing else changed. The
+batched call reaches an earliest impact of 0.045, and once the bound is there
+almost every remaining query is rejected at its root box.
+
+That is the same mechanism, at 92 queries, that produces 1.2 boxes per query over
+881,420. The host is not a better searcher than the device — it is the same
+search running behind a bound that has already collapsed. Its advantage is
+sequencing: `parallel_for_br_dynamic` hands out chunks of `VSIZE` queries, each
+chunk seeds `toi_q` from the global minimum as it stands when that chunk starts,
+and a few early chunks establish a bound the remaining hundreds of thousands are
+killed by. The device has no such sequence: one launch starts every query at once
+against `max_toi`, and its bound can only tighten as the launch runs.
+
+**So the 94× is very likely a bound-collapse-rate difference, not a search-quality
+difference.** That is a different problem with a different set of fixes, and it
+promotes B1 and C1 below for a reason they did not previously have.
+
+Two supporting measurements, and one caveat:
+
+- **Removing the host's per-chunk seeding** (`SCCD_NP_NO_GLOBAL_SEED=1`, an
+  instrumented-build-only knob) over four cases of cloth-funnel moves the
+  aggregate only 0.72 → 0.80 boxes per query. But per call it ranges from 0.78×
+  to **26.35×**: the aggregate is diluted because `max_toi` already arrives
+  collapsed from the previous call, so in most calls the knob has nothing to
+  remove. The knob isolates within-call seeding only.
+- **`tight_toi >= relaxed_toi` held on all 92 queries**, with zero violations.
+  That ordering is what B1's culling argument needs, and it is now measured rather
+  than assumed.
+- **Not yet established:** the device half. If the device costs ~560 boxes on an
+  isolated query too, the search is fine and this is settled. If it costs far
+  more, there is a second, per-query problem underneath. `sccd_np_trace` needs its
+  device path and a run on Alps; that is the next thing.
+
+## What is still worth tracing box by box
+
+Only if the device's isolated per-query cost turns out **not** to match the
+host's. In that case: *trace a single hard query box by box, not another
+aggregate.*
 
 Pick one query from the ≥1,048,576-box set on cloth-funnel. Run it through the
 host `Tight` kernel and the device kernel with a per-box trace — `(level, t, u, v)
@@ -111,7 +156,9 @@ unbounded and would have to be capped.
 
 ## Family B — reduce the number of queries that need the tight search
 
-**B1. `Relaxed` prepass to cull queries.** `Relaxed` averages 3.6 boxes per query
+**B1. `Relaxed` prepass to cull queries.** *Now the highest-value item, given the
+step 0 result: it manufactures the collapsed bound the host gets from sequencing,
+in one cheap pass, with no sequence.* `Relaxed` averages 3.6 boxes per query
 against `Tight`'s 944, and its answer is *at or before* the true time of impact.
 So for the earliest-impact query: if a query's `Relaxed` time of impact is later
 than the best `Tight` answer found so far, its true time of impact is later too,
@@ -143,11 +190,12 @@ carve the `t` interval down before the 3D search starts. Whether the multilinear
 hull is tight enough over full-width `u`,`v` for this to reject anything is an
 open question and answerable on paper before any code.
 
-**C3. Per-query bound in addition to the global one.** The device prunes against
-a single global minimum. A query being expanded across several blocks has no
-per-query bound of its own, so an accept in one block does not prune that
-query's boxes in another until it beats the global minimum. Cheap to add, and
-step 0's second outcome would point straight at it.
+**~~C3. Per-query bound in addition to the global one.~~** Dropped. The device
+already prunes against a single global minimum refreshed every loop iteration,
+which is *tighter* than the host's per-chunk snapshot, not looser. Reading the two
+kernels side by side settles it without a measurement: the device's bound
+discipline is the better of the two, and adding a per-query bound on top can only
+be weaker than the global one it already has.
 
 **C4. Re-run the seeding measurement on the `toi_stride=1` path.** The single-root
 seed was measured at 803 → 871 ms, which is why the dice stayed. That measurement
@@ -199,9 +247,17 @@ the drain loop is not understood, and D1 tunes exactly that machinery.
 
 ## Order
 
-0. Trace one hard query. Everything else waits on it.
-1. Whatever step 0 points at — most likely C1 or C3.
-2. B1's offline estimate, which is arithmetic on data already collected.
-3. D2, because D1 cannot be tuned honestly until it is understood.
-4. A1, if and only if a C has already shrunk the search. 4× on a 94× gap is not
-   where to start.
+0. **Done for the host half.** The 12.6× above says the bound schedule dominates.
+1. **Finish step 0:** give `sccd_np_trace` its device path and run it on Alps. One
+   isolated query, host and device, same data. This decides whether there is a
+   per-query problem at all underneath the bound-schedule one.
+2. **B1**, which directly attacks the mechanism step 0 found.
+3. **C1**, which attacks the same mechanism from the other side: best-first makes
+   the bound arrive early *within* the launch.
+4. D2, because D1 cannot be tuned honestly until it is understood.
+5. A1, if and only if a B or C has already shrunk the search.
+
+Also outstanding, and cheap: **the host box counter only covers the `Tight`
+kernel.** `SCCD_NP_HOST_BOX_TICK` lives in `sccd_narrowphase_tight.hpp`, so mode 0
+reports zero boxes and `Relaxed`'s per-query cost — the thing B1's economics turn
+on — cannot currently be measured on the host at all.
