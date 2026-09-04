@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# Demoted to spikes/ -- no caller anywhere in the repository.
+#
+# It reimplements sccd::srootfinder::normal_equation_axis_splitters_ee from
+# src/srootfinder.hpp; neither that namespace nor that file exists any more. It
+# also imports read_queries and the ctypes binding from python/, so it needs that
+# directory on sys.path. Its two rendered figures sit alongside it.
+
 """
 Reimplementation of sccd::srootfinder::normal_equation_axis_splitters_ee
 from src/srootfinder.hpp (lines ~1117–1178) plus diff_ee.

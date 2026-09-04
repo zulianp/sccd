@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Demoted to spikes/ -- no caller anywhere in the repository.
+#
+# Re-exports the two-dimensional helpers from python/sccd_reference.py, which is
+# still in the shipped tree, so this needs that directory on sys.path to run.
+# SCCD is three-dimensional; nothing imports this.
+
 
 from typing import Tuple, Optional
 
