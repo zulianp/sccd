@@ -13,6 +13,10 @@ changed.
 Run directly, or through ctest as `sccd_binding_test`:
 
     SCCD_LIB_PATH=build python3 python/sccd_binding_test.py
+
+Not registered in a sanitizer build: the runtime has to be loaded before main and
+ctypes loads it after, so an uninstrumented interpreter cannot dlopen the library
+at all. That is a property of the sanitizer, not of the binding.
 """
 
 from __future__ import annotations
