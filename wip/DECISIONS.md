@@ -141,6 +141,58 @@ The rule to carry forward: **when a plan rests on a number, re-derive the
 number before executing the plan, and check that the knob you are varying moves
 only the thing you think it moves.**
 
+### Then it was built anyway, and measured
+
+The reasoning above is sound about *sizes* and wrong about one conclusion, which
+is worth separating. Varying `SCCD_VQ_STACK_CAP` does not change the register
+count or the spill — that part holds. But the spill was not caused by the array's
+size; it was caused by there being a dynamically-indexed array at all. The
+restructured kernel, which keeps one box per thread and puts the rest in a
+block-shared pool, reports:
+
+    before   8128 B frame   112/216 spill   255 registers
+    after     336 B frame       0/0 spill   216-226 registers, 3.6 KB smem
+
+So the restructure does deliver the static improvement the plan claimed. It was
+built in full — a seed kernel, a drain kernel, a shared body, a host grow-and-retry
+loop, all mirroring `narrow_phase_dfs_zero_stride_body` — and it is conservative:
+`sccd_narrowphase_cuda_test` passes all 20 configurations, and at `tol = 1e-16`
+the device vertex-quad row is slightly *better* than before (6.675e-14 against
+8.601e-14 of earliness).
+
+It still does not ship, because throughput does not follow. 400k queries on
+GH200, best of 5, every configuration returning an identical answer:
+
+    scene / stride          before   order only   restructured
+    stationary, stride 1    7.393      4.456          8.181
+    stationary, stride 0    0.972      0.608          0.739
+    moving,     stride 1   16.367     18.012         34.734
+    moving,     stride 0    1.796      1.900          1.501
+
+The restructure wins one cell of four (1.20x) and loses more than half its
+throughput in another (0.47x). The loss is not the global queue overflowing:
+raising the shared pool from 64 to 512 entries moves moving/stride 1 only from
+34.4 ms to 32.1 ms. It is the design itself. In `per_query` mode every query is
+uniformly deep, so work sharing has no imbalance to correct, while the block
+still pays a `__syncthreads()` per DFS iteration and a thirty-coordinate reload
+plus a `prepare()` every time a thread picks up a box belonging to another
+query. That is the fourth experiment in this project to land on the same
+finding: **the lanes are finished, not waiting.** Best-first ordering, per-query
+bounds and 128-way dicing on the triangle kernel all lost for the same reason.
+
+The `order only` column is a separate discovery and a separate question: it is a
+ten-line change to the existing kernel — buffer the surviving sub-boxes and push
+them in reverse, so the LIFO pop follows the earliest `t` first and tightens the
+bound sooner. It is worth 1.60-1.66x on a stationary quad and costs 5-9% on a
+moving one. Neither synthetic scene is the mesh pipeline, and a change that
+swings that far by scene should not be taken on synthetic evidence, so it is
+recorded as an open lead rather than applied. What would settle it is
+`sccd_refine_scaling` with `SCCD_TOPOLOGY=quad`, which needs smesh in the build.
+
+What survives from the whole exercise is the header extraction
+(`sccd_device_dfs_stack.cuh`), which stands on its own, and the stack now being
+sized from a depth rather than the other way round.
+
 ## A note on the C ABI
 
 Both are the kind of thing that only shows up once something is actually tested,
