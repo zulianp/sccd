@@ -47,7 +47,7 @@ anywhere; setting them does nothing.
 
 | Variable | Type | Default | Effect |
 |---|---|---|---|
-| `SCCD_MAX_DEPTH` | int | `69` | Maximum subdivision depth. At the cap a box is **accepted** at its `t` lower bound, never dropped — that is what keeps a depth limit from costing a collision. |
+| `SCCD_MAX_DEPTH` | int | `69` | Maximum subdivision depth. At the cap a box is **accepted** at its `t` lower bound, never dropped — that is what keeps a depth limit from costing a collision. The device vertex-quad kernel holds a stack for depth 128 (`-DSCCD_VQ_MAX_DEPTH`) and reports on stderr if asked for more. |
 | `SCCD_TOL` | float | `3e-8` | Codomain tolerance for the acceptance test. |
 | `SCCD_REFINE` | int | `0` | Newton polish on an accepted vertex-face box: if it converges to an earlier time inside the box, that time is reported instead. Vertex-face only — the edge-edge and vertex-quad searches have no polish step and ignore it. |
 

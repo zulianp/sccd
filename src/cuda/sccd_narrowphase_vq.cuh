@@ -51,13 +51,19 @@
  *    drop, because dropping a box that may contain a root is the one way this
  *    algorithm loses a collision.
  *
- * The per-thread stack is sized so overflow cannot occur, and the search depth
- * is clamped to what it holds. Those two numbers are tied together deliberately.
- * Neither limit can cost a collision -- exhaustion accepts, and accepting is
- * always safe -- so what an undersized stack buys is false positives and a time
- * of impact further before the true one than it needs to be. That is an accuracy
- * cost, not a safety one, and it is silent, which is why the two numbers are
- * derived from each other rather than chosen independently.
+ * The per-thread stack is sized from `SCCD_VQ_MAX_DEPTH` (128) so that overflow
+ * cannot occur, and the search depth is clamped to what it holds. Neither limit
+ * can cost a collision -- exhaustion accepts, and accepting is always safe -- so
+ * what a short search buys is false positives and a time of impact further
+ * before the true one than it needs to be. That is an accuracy cost rather than
+ * a safety one, and it would otherwise be silent, so a `max_depth` beyond what
+ * the stack holds is reported on stderr.
+ *
+ * The stack is deliberately larger than the default depth of 69 needs. Measured
+ * on GH200, growing it from 8 KB to 29 KB per thread changes neither the
+ * register count (255) nor the spill (112/216 bytes) nor the runtime: only the
+ * entries a search reaches are ever touched. Depth is what costs, and headroom
+ * for it is free.
  *
  * Arithmetic is double throughout regardless of the storage type: the error
  * bound and the tolerances that terminate the search are too close together in
