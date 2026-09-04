@@ -170,6 +170,21 @@ namespace sccd {
         // `corner_evals - bound_killed` is the count that means the same thing on
         // both machines, and the raw `corner_evals` overstates the device.
         __device__ unsigned long long g_np_bound_killed = 0;
+        // Occupancy of a block's own threads, iteration by iteration. The loop
+        // already reduces `active` across the block to decide when to stop; this
+        // accumulates it. Divided by the iteration count it gives the mean number
+        // of the N threads that had a box in hand, which is what a divergence
+        // bound looks like from the inside: three __syncthreads() per iteration
+        // and everyone waiting for the deepest thread.
+        __device__ unsigned long long g_np_active_sum = 0;
+        __device__ unsigned long long g_np_iters = 0;
+#define SCCD_NP_ACTIVE_TICK(n)                                                \
+    do {                                                                       \
+        if (threadIdx.x == 0) {                                                \
+            atomicAdd(&g_np_active_sum, (unsigned long long)(n));              \
+            atomicAdd(&g_np_iters, 1ull);                                      \
+        }                                                                      \
+    } while (0)
 #define SCCD_NP_BOUND_KILL_TICK() atomicAdd(&g_np_bound_killed, 1ull)
 #define SCCD_NP_EVAL_TICK() atomicAdd(&g_np_evals, 1ull)
 #define SCCD_NP_PERQ_TICK(qid, n)                                             \
@@ -181,6 +196,7 @@ namespace sccd {
 #else
 #define SCCD_NP_EVAL_TICK() ((void)0)
 #define SCCD_NP_BOUND_KILL_TICK() ((void)0)
+#define SCCD_NP_ACTIVE_TICK(n) ((void)0)
 #define SCCD_NP_PERQ_TICK(qid, n) ((void)0)
 #endif
 
@@ -1982,6 +1998,7 @@ namespace sccd {
                 __syncthreads();
 
                 const int n_active = block_popc<N>(active, warp_sums);
+                SCCD_NP_ACTIVE_TICK(n_active);
                 if (n_active == 0) {
                     const int s_now = atomicAdd(&s_top, 0);
                     if (s_now <= 0) break;
@@ -2717,6 +2734,8 @@ namespace sccd {
                 SCCD_CHECK_CUDA(cudaMemcpyToSymbol(g_np_push_global, &zero, sizeof(zero)));
                 SCCD_CHECK_CUDA(cudaMemcpyToSymbol(g_np_push_lost, &zero, sizeof(zero)));
                 SCCD_CHECK_CUDA(cudaMemcpyToSymbol(g_np_bound_killed, &zero, sizeof(zero)));
+                SCCD_CHECK_CUDA(cudaMemcpyToSymbol(g_np_active_sum, &zero, sizeof(zero)));
+                SCCD_CHECK_CUDA(cudaMemcpyToSymbol(g_np_iters, &zero, sizeof(zero)));
                 unsigned long long lvl_zero[80] = {0};
                 SCCD_CHECK_CUDA(cudaMemcpyToSymbol(g_np_level, lvl_zero, sizeof(lvl_zero)));
                 SCCD_CHECK_CUDA(cudaMalloc(&d_perq, noverlaps * sizeof(unsigned long long)));
@@ -2994,6 +3013,14 @@ namespace sccd {
                 SCCD_CHECK_CUDA(cudaDeviceSynchronize());
                 SCCD_CHECK_CUDA(cudaMemcpyFromSymbol(&evals, g_np_evals, sizeof(evals)));
                 SCCD_CHECK_CUDA(cudaMemcpyFromSymbol(&bound_killed, g_np_bound_killed, sizeof(bound_killed)));
+                unsigned long long act = 0, iters = 0;
+                SCCD_CHECK_CUDA(cudaMemcpyFromSymbol(&act, g_np_active_sum, sizeof(act)));
+                SCCD_CHECK_CUDA(cudaMemcpyFromSymbol(&iters, g_np_iters, sizeof(iters)));
+                fprintf(stderr,
+                        "sccd-np-active stride=%d threads_per_block=%d iters=%llu mean_active=%.2f occupancy=%.1f%%\n",
+                        toi_stride, SCCD_NP_THREADS_PER_BLOCK, iters,
+                        iters ? (double)act / (double)iters : 0.0,
+                        iters ? 100.0 * (double)act / ((double)iters * SCCD_NP_THREADS_PER_BLOCK) : 0.0);
                 fprintf(stderr,
                         "sccd-np-count %s %s stride=%d queries=%zu corner_evals=%llu per_query=%.1f "
                         "bound_killed=%llu comparable=%llu\n",
