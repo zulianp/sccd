@@ -239,9 +239,52 @@ broad-phase set — **31× apart**. A prepass at 3.6 plus `Tight` on one survivi
 query is ~3.6 per query against 111, if the cull rate above carries over from the
 curated query sets to the broad-phase candidate sets.
 
-**So B1 must be estimated on the device, and that measurement has not been made.**
-It is the next thing: `sccd_np_trace --device --batch`, both modes, on a
-broad-phase-sized candidate set.
+### Priced on the device. B1 buys 1.6x here, not 31x
+
+`sccd_np_trace --device --batch` on a GH200, the same files, one device
+`toi_stride=0` call each:
+
+| scene | file | queries | host R | host T | **dev R** | **dev T** | dev T / dev R |
+|---|---|---:|---:|---:|---:|---:|---:|
+| cloth-funnel | 227vf | 92 | 6.53 | 44.54 | 42.3 | 144.5 | 3.4× |
+| cloth-funnel | 317vf | 24 | 77.46 | 283.12 | 231.2 | 1,643.8 | 7.1× |
+| armadillo-rollers | 326vf | 4,652 | 13.14 | 16.04 | 85.0 | 165.1 | 1.94× |
+| armadillo-rollers | 229vf | 1,597 | 28.59 | 38.57 | 126.0 | 200.4 | 1.59× |
+| cloth-ball | 92vf | 19,034 | 7.75 | 7.85 | 94.7 | 152.1 | 1.61× |
+| cloth-ball | 91vf | 11,278 | 8.03 | 8.47 | 97.7 | 155.0 | 1.59× |
+
+On the device `Relaxed` is **1.6× to 3.4×** cheaper than `Tight` on the large
+files, not 31×. A prepass at 94.7 boxes per query plus `Tight` on the one
+surviving query is ~95 against `Tight` alone at 152: **1.6×, for an extra launch
+and an extra pass over the candidate set.** Real, but not the order of magnitude
+the cull rate suggested.
+
+**Where the 31× came from, and why it should not have been quoted.** It paired
+`3.6` boxes per query for device mode 0 with `111` for device mode 2. Those come
+from different runs over different populations: 3.6 was measured on the broad-phase
+candidate set before the queue rewrite and summed across both `toi_stride` paths,
+111 is the post-rewrite zero-stride figure. That is the same error the decision
+record already lists twice — comparing across populations — and it produced an
+estimate 20× too favourable.
+
+**What is still genuinely open.** These are curated query files: every query in
+them is an interesting case. The broad-phase candidate set the library actually
+sees is dominated by pairs that are trivially far apart, and `Relaxed` should
+dispose of those far more cheaply than `Tight` does. The ratio on *that*
+population is what decides B1, it is not measurable with `sccd_np_trace` as it
+stands (which reads curated query CSVs), and it wants a clean single-run
+measurement of both modes on the broad-phase set through `sccd_bench` — both
+strides separated, one allocation, post-queue-rewrite.
+
+Until that exists, **B1 is a 1.6× optimisation with a measured cull rate and an
+unmeasured prize on the population that matters.** It should not be built yet.
+
+### A device number worth carrying forward
+
+Batched, on the same call, the device costs 12-19× the host: 94.7 against 7.75 on
+cloth-ball 92vf, 152.1 against 7.85 for `Tight`. That is the bound-collapse gap
+measured on a single call rather than inferred from a scene aggregate, and it is
+the number C1 has to move.
 
 ## Family C — reduce the size of the search
 

@@ -36,6 +36,10 @@
 //                   the query, so the two streams can be joined.
 //   --no-isolated   skip the per-query pass; useful with --batch when only the
 //                   batched earliest time of impact is wanted
+//   --device --batch  run the whole file as ONE device toi_stride=0 call, which is
+//                   where a Relaxed prepass has to be priced: the device's bound
+//                   does not collapse the way the host's does, so the two modes
+//                   cost very different amounts there and the same amount here.
 //   --batch         also run the whole file as ONE toi_stride=0 call, which is
 //                   how the library is actually used, and report the same counts.
 //                   The difference between the two is the value of the collapsing
@@ -403,6 +407,39 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "error: --device needs a CUDA build\n");
         return 1;
 #else
+        if (batch) {
+            // One device call for the whole file, the way the library runs it.
+            // The kernel prints its own count line to stderr.
+            std::printf("\n# device, batched: whole file in one toi_stride=0 call\n");
+            for (const auto& file : files) {
+                std::vector<Query> queries;
+                if (!read_queries(file, queries)) continue;
+                BatchScene scene(queries, is_vf);
+                DeviceFile df(scene, is_vf, queries.size());
+                std::vector<scalar_t> ones(queries.size(), 1.0);
+                NPT_CUDA(cudaMemcpy(df.d_toi, ones.data(), sizeof(scalar_t) * ones.size(),
+                                    cudaMemcpyHostToDevice));
+                std::fflush(stdout);
+                std::fprintf(stderr, "np_trace-batch %s queries=%zu mode=%d\n",
+                             file.filename().c_str(), queries.size(), mode);
+                std::fflush(stderr);
+                if (is_vf) {
+                    sccd::device::narrow_phase_vf<3, scalar_t, idx_t>(
+                        queries.size(), df.d_a, df.d_b, df.d_p0, df.d_p1, 1, df.d_elem,
+                        /*max_toi=*/1.0, df.d_toi, max_depth, tol, /*toi_stride=*/0);
+                } else {
+                    sccd::device::narrow_phase_ee<scalar_t, idx_t>(
+                        queries.size(), df.d_a, df.d_b, df.d_p0, df.d_p1, 1, df.d_elem,
+                        /*max_toi=*/1.0, df.d_toi, max_depth, tol, /*toi_stride=*/0);
+                }
+                scalar_t dt = 1.0;
+                NPT_CUDA(cudaMemcpy(&dt, df.d_toi, sizeof(scalar_t), cudaMemcpyDeviceToHost));
+                std::printf("device batched %s queries %zu earliest_toi %.9f\n",
+                            file.filename().c_str(), queries.size(), (double)dt);
+            }
+            return 0;
+        }
+
         std::printf("\n# device, one query per call, max_toi = 1, toi_stride = 1\n");
         std::printf("# each call's box count is on stderr, after its marker\n");
         std::size_t idx = 0;
