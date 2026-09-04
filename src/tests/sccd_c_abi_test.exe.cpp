@@ -1,5 +1,5 @@
 // The C ABI, which is the library's only compiled translation unit and the basis
-// for python/sccd_py.py, had no test at all.
+// for python/sccd.py, had no test at all.
 //
 // That mattered more than an untested corner usually does. The C entry points do
 // not share a dispatcher with the C++ API -- each one assembles its own search --

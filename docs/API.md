@@ -111,7 +111,7 @@ edge against edge.
 ## The C ABI
 
 For callers that are not C++. `src/api/sccd_c_api.cpp` is SCCD's only compiled
-translation unit; `python/sccd_py.py` is a `ctypes` binding on top of it.
+translation unit; `python/sccd.py` is a `ctypes` binding on top of it.
 
 It is a thin layer. Each entry point takes one query, runs the branch-and-bound
 search on it, and writes back a time of impact and the parameter coordinates of
@@ -202,9 +202,37 @@ geometry they are handed has been rounded on the way into the mesh. If you are
 comparing against an exact reference, compare against roots computed for the
 coordinates the mesh actually holds.
 
+## Python
+
+`python/sccd.py` is a `ctypes` binding over the C ABI above. It needs nothing but
+the standard library, and importing it does not load the shared library, so an
+import never fails for want of a build.
+
+```python
+import sccd
+
+hit = sccd.find_root_vf(max_iter=69, tol=1e-8,
+                        sv=(0.25, 0.25,  1.0),                  # vertex, start
+                        s1=(0, 0, 0), s2=(1, 0, 0), s3=(0, 1, 0),
+                        ev=(0.25, 0.25, -1.0),                  # vertex, end
+                        e1=(0, 0, 0), e2=(1, 0, 0), e3=(0, 1, 0))
+if hit:
+    print(hit.t, hit.u, hit.v)      # 0.499999999 0.25 0.25
+```
+
+The result is a `Root(hit, t, u, v)` named tuple that is falsey on a miss.
+`dtype="float"` selects the `_f` export where one exists. `available()` reports
+which of the seven C exports the loaded library actually has, which is how to
+tell whether the build has TightInclusion rather than catching an error from the
+call.
+
+Set `SCCD_LIB_PATH` to the build directory or to the library file; failing that,
+the module looks beside itself and then asks the system loader.
+
 ## Building against it
 
 The library installs as `libsccd`, and the C declarations are in
 `src/api/sccd_c_api.cpp`; there is no separate installed C header yet, so a consumer
-declares the entry points it needs. `python/sccd_py.py` shows the shape, and
-`python/ccd_test.py` exercises it.
+declares the entry points it needs. `python/sccd.py` shows the shape, and
+`python/sccd_binding_test.py` -- registered as the `sccd_binding_test` ctest --
+checks that the binding and the library still agree.
