@@ -789,6 +789,61 @@ build is at 32 to 40 registers with no spills. Quads are a supported topology an
 nothing in this investigation has looked at their kernel; that it is the one
 spilling is worth knowing before anyone does.
 
+## F: the bound is divergence, and a smaller block does not fix it
+
+The loop already reduces `active` across the block to decide when to stop.
+Accumulating that reduction gives the mean number of a block's threads that had a
+box in hand, per iteration:
+
+| scene | stride | block iterations | mean active | of 128 |
+|---|---|---:|---:|---:|
+| cloth-funnel | 0 | 43,478 | 26.11 | **20.4%** |
+| cloth-funnel | 1 | 79,321 | 40.47 | 31.6% |
+| armadillo-rollers | 0 | 223,616 | 28.18 | **22.0%** |
+| armadillo-rollers | 1 | 687,103 | 60.15 | 47.0% |
+
+**Four threads in five are idle at the barrier on the earliest-impact path**, and
+the loop has three `__syncthreads()` per iteration. Against 12.5% of the SM's warp
+slots being resident, that is roughly 2.5% effective utilisation — which is
+exactly why the arithmetic measured 0.11% of peak in item E. The three numbers are
+one number seen three ways.
+
+### Block size is not the lever
+
+`SCCD_NP_THREADS_PER_BLOCK`, one build each, mode 2, device, three repeats:
+
+| scene | | 32 | 64 | 128 | 256 |
+|---|---|---:|---:|---:|---:|
+| cloth-funnel | s0 | 29.5 | 27.2 | 27.2 | 30.3 |
+| cloth-funnel | s1 | **31.5** | 33.4 | 33.5 | 35.3 |
+| armadillo-rollers | s0 | 47.0 | 41.3 | **37.4** | 39.3 |
+| armadillo-rollers | s1 | 99.4 | 71.6 | **66.0** | 77.7 |
+| cloth-ball | s0 | **94.1** | 98.1 | 100.4 | 109.5 |
+| cloth-ball | s1 | 151.7 | **151.2** | 160.0 | 231.6 |
+
+Scene-dependent and contradictory: cloth-ball mildly prefers 32, armadillo
+strongly prefers the shipped 128 — 32 is 1.5× worse there on stride 1 — and 256
+is worst almost everywhere. False positives 260 / 5,637 / 95,424 at every size,
+`fn=0`, gate green at 32.
+
+The reason a smaller block does not help is the reason the divergence exists: a
+thread that goes idle looks for work on **its own block's** stack, and a smaller
+block has a smaller pool to steal from, so it goes idle sooner with fewer
+neighbours able to help. Shrinking the block trades one form of waste for another.
+
+**Leave `SCCD_NP_THREADS_PER_BLOCK` at 128.** No size wins on more than one scene
+and the shipped one is best where the differences are largest.
+
+### Which makes D1 the item
+
+The fix is not a smaller block or a bigger stack — both have now been swept and
+neither moves it. It is that an idle thread should be able to take **a new query**
+from a global cursor rather than wait for its block's stack to refill. The global
+queue already exists, is wait-free and double-buffered, and D2 confirmed it no
+longer has an anomaly hiding in it. Making it the primary source of work rather
+than an overflow target is the one structural change left with a measured reason
+behind it.
+
 ## What must not change
 
 - **Conservativeness.** A reported time of impact is at or before the true one,
@@ -832,7 +887,8 @@ remains is listed first.
 | ~~**C**~~ | ~~Refresh the end-to-end table~~ | **Done.** The reduction is `broad_ms + narrow_ms`, no prep, min over modes — recovered the same way as the narrow-phase table. It now has a row per stride, because only one of them moved. |
 | ~~**D**~~ | ~~The per-query residual~~ | **Gone.** The device now matches the host box-for-box on two of the three worst queries and is 1.30× on the third. The counting asymmetry it was blamed on is 0.011–0.025%. Detail below. |
 | ~~**E**~~ | ~~A1/A2, per-box cost~~ | **Closed, not worth doing.** The kernel is neither arithmetic-bound (0.11% of fp64 peak) nor occupancy-bound (4× the blocks per SM buys 2–5%). Both premises measured false. Detail below. |
-| **F** | **What the kernel *is* bound by** | New, and open. Three `__syncthreads()` per loop iteration on a DFS whose depth varies wildly across threads is the leading suspect — a divergence bound, not arithmetic or occupancy. Nothing has measured it. |
+| ~~**F**~~ | ~~What the kernel is bound by~~ | **Divergence, measured.** 20–22% of a block's threads have a box in hand on a typical iteration at stride 0. Smaller blocks do not fix it. The fix is D1. Detail below. |
+| **D1** | **Feed idle lanes from a global source** | Now the only structural item left, and F says why. A thread whose query finishes waits at the barrier because its block's stack is empty; it should pull a new query from a global cursor instead. |
 | — | *Loose end* | The host's mode 0 increments the box counter and nothing prints it — the `fprintf` lives in `narrow_phase_tight_*` and the scalar path has none. Host `Relaxed` box counts are not obtainable from a run. |
 
 ### Closed
