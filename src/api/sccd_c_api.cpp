@@ -64,7 +64,7 @@ int sccd_find_root_vf_f(int max_iter,
 
 
     float tols[3];
-    compute_face_vertex_tolerance<float>(tol, sv, s1, s2, s3, ev, e1, e2, e3, tols);
+    sccd::compute_face_vertex_tolerance<float>(tol, sv, s1, s2, s3, ev, e1, e2, e3, tols);
     float numerical_error[3];
     sccd::numerical_error_bound<true, float>(sv, s1, s2, s3, ev, e1, e2, e3, numerical_error);
     const float codomain_widths[3] = {1, 1, 1};
@@ -99,7 +99,7 @@ int sccd_find_root_vf_d(int max_iter,
     stack.reserve(1024);
 
     double tols[3];
-    compute_face_vertex_tolerance<double>(tol, sv, s1, s2, s3, ev, e1, e2, e3, tols);
+    sccd::compute_face_vertex_tolerance<double>(tol, sv, s1, s2, s3, ev, e1, e2, e3, tols);
     double numerical_error[3];
     sccd::numerical_error_bound<true, double>(sv, s1, s2, s3, ev, e1, e2, e3, numerical_error);
     const double codomain_widths[3] = {1, 1, 1};
@@ -168,7 +168,7 @@ int sccd_find_root_ee_d(int max_iter,
 
 
     double tols[3];
-    compute_edge_edge_tolerance<double>(tol, s0, s1, s2, s3, e0, e1, e2, e3, tols);
+    sccd::compute_edge_edge_tolerance<double>(tol, s0, s1, s2, s3, e0, e1, e2, e3, tols);
     double numerical_error[3];
     sccd::numerical_error_bound<false, double>(s0, s1, s2, s3, e0, e1, e2, e3, numerical_error);
     const double codomain_widths[3] = {1, 1, 1};

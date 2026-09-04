@@ -8,11 +8,11 @@
 
 #include <cuda_runtime.h>
 
-#ifndef MIN
-#define MIN(a, b) ((a) < (b) ? (a) : (b))
+#ifndef SCCD_MIN
+#define SCCD_MIN(a, b) ((a) < (b) ? (a) : (b))
 #endif
-#ifndef MAX
-#define MAX(a, b) ((a) > (b) ? (a) : (b))
+#ifndef SCCD_MAX
+#define SCCD_MAX(a, b) ((a) > (b) ? (a) : (b))
 #endif
 
 #define SCCD_WARP_SIZE 32

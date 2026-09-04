@@ -730,7 +730,7 @@ namespace sccd {
             return false;
         }
 
-        return grid_search_adaptive_split_vq<ADAPTIVE_NUM_SPLITS, T>(
+        return grid_search_adaptive_split_vq<SCCD_ADAPTIVE_NUM_SPLITS, T>(
             initial_domain, max_iter, tol, tols, numerical_error, codomain_widths, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, t, u, v, stack, refine);
     }
 

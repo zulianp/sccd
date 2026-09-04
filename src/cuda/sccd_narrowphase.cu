@@ -579,8 +579,8 @@ namespace sccd {
             fmin = f[0];
             fmax = f[0];
             for (int i = 1; i < 8; i++) {
-                fmin = MIN(fmin, f[i]);
-                fmax = MAX(fmax, f[i]);
+                fmin = SCCD_MIN(fmin, f[i]);
+                fmax = SCCD_MAX(fmax, f[i]);
             }
         }
 
@@ -601,11 +601,11 @@ namespace sccd {
             }
         }
 
-#define MASK_FULL 0xf
-#define MASK_DOMAIN_SMALLER_THAN_TOL 1
-#define MASK_BOX_INSIDE_EPSILON_BOX 2
-#define MASK_REAL_TOLERANCE_SMALLER_THAN_INT_TOLERANCE 4
-#define MASK_INTERVAL_TERMINAL 8
+#define SCCD_MASK_FULL 0xf
+#define SCCD_MASK_DOMAIN_SMALLER_THAN_TOL 1
+#define SCCD_MASK_BOX_INSIDE_EPSILON_BOX 2
+#define SCCD_MASK_REAL_TOLERANCE_SMALLER_THAN_INT_TOLERANCE 4
+#define SCCD_MASK_INTERVAL_TERMINAL 8
 
         template <typename T>
         __device__ uint8_t cond_mask(const T fmin, const T fmax, const T tol, const T adaptive_tol) {
@@ -614,11 +614,11 @@ namespace sccd {
             bool cond3 = (fmax - fmin < tol);
             bool cond4 = (fmin >= fmax);
 
-            uint8_t cond_mask = (cond1 ? MASK_DOMAIN_SMALLER_THAN_TOL : 0);
-            cond_mask |= (cond2 ? MASK_BOX_INSIDE_EPSILON_BOX : 0);
-            cond_mask |= (cond3 ? MASK_REAL_TOLERANCE_SMALLER_THAN_INT_TOLERANCE : 0);
-            cond_mask |= (cond4 ? MASK_INTERVAL_TERMINAL : 0);
-            cond_mask &= ((fmin <= tol) && (fmax >= -tol)) ? MASK_FULL : 0;
+            uint8_t cond_mask = (cond1 ? SCCD_MASK_DOMAIN_SMALLER_THAN_TOL : 0);
+            cond_mask |= (cond2 ? SCCD_MASK_BOX_INSIDE_EPSILON_BOX : 0);
+            cond_mask |= (cond3 ? SCCD_MASK_REAL_TOLERANCE_SMALLER_THAN_INT_TOLERANCE : 0);
+            cond_mask |= (cond4 ? SCCD_MASK_INTERVAL_TERMINAL : 0);
+            cond_mask &= ((fmin <= tol) && (fmax >= -tol)) ? SCCD_MASK_FULL : 0;
             return cond_mask;
         }
 
@@ -687,10 +687,10 @@ namespace sccd {
             const uint8_t and_mask = (x_mask & y_mask & z_mask);
             const T true_tol = device::max<T>(x_width, device::max<T>(y_width, z_width));
 
-            const bool cond1 = and_mask & MASK_DOMAIN_SMALLER_THAN_TOL;
-            const bool cond2 = and_mask & MASK_BOX_INSIDE_EPSILON_BOX;
+            const bool cond1 = and_mask & SCCD_MASK_DOMAIN_SMALLER_THAN_TOL;
+            const bool cond2 = and_mask & SCCD_MASK_BOX_INSIDE_EPSILON_BOX;
             const bool cond3 = (tl > T(0)) && (true_tol < tol);
-            const bool cond4 = and_mask & MASK_INTERVAL_TERMINAL;
+            const bool cond4 = and_mask & SCCD_MASK_INTERVAL_TERMINAL;
 
             contains_origin = co;
             accept = co && (cond1 || cond2 || cond3 || cond4);
@@ -2870,7 +2870,7 @@ namespace sccd {
     }  // namespace device
 }  // namespace sccd
 
-#define INSTANTIATE_NARROW_PHASE_EE(T, I)                                                   \
+#define SCCD_NP_NARROW_PHASE_EE(T, I)                                                   \
     template int sccd::device::narrow_phase_ee<T, I>(const size_t noverlaps,                \
                                                      const I* const SCCD_RESTRICT overlap0, \
                                                      const I* const SCCD_RESTRICT overlap1, \
@@ -2884,7 +2884,7 @@ namespace sccd {
                                                      const T tol,                           \
                                                      const int toi_stride);
 
-#define INSTANTIATE_NARROW_PHASE_VF(NXE, T, I)                                                   \
+#define SCCD_NP_NARROW_PHASE_VF(NXE, T, I)                                                   \
     template int sccd::device::narrow_phase_vf<NXE, T, I>(const size_t noverlaps,                \
                                                           const I* const SCCD_RESTRICT voveralp, \
                                                           const I* const SCCD_RESTRICT foveralp, \
@@ -2898,15 +2898,15 @@ namespace sccd {
                                                           const T tol,                           \
                                                           const int toi_stride);
 
-INSTANTIATE_NARROW_PHASE_EE(float, int32_t);
-INSTANTIATE_NARROW_PHASE_EE(float, int64_t);
-INSTANTIATE_NARROW_PHASE_EE(double, int32_t);
-INSTANTIATE_NARROW_PHASE_EE(double, int64_t);
+SCCD_NP_NARROW_PHASE_EE(float, int32_t);
+SCCD_NP_NARROW_PHASE_EE(float, int64_t);
+SCCD_NP_NARROW_PHASE_EE(double, int32_t);
+SCCD_NP_NARROW_PHASE_EE(double, int64_t);
 
-INSTANTIATE_NARROW_PHASE_VF(3, float, int32_t);
-INSTANTIATE_NARROW_PHASE_VF(3, float, int64_t);
-INSTANTIATE_NARROW_PHASE_VF(3, double, int32_t);
-INSTANTIATE_NARROW_PHASE_VF(3, double, int64_t);
+SCCD_NP_NARROW_PHASE_VF(3, float, int32_t);
+SCCD_NP_NARROW_PHASE_VF(3, float, int64_t);
+SCCD_NP_NARROW_PHASE_VF(3, double, int32_t);
+SCCD_NP_NARROW_PHASE_VF(3, double, int64_t);
 
 template int sccd::device::minmax<float>(const float* const SCCD_RESTRICT data,
                                          const size_t n,
@@ -2917,5 +2917,5 @@ template int sccd::device::minmax<double>(const double* const SCCD_RESTRICT data
                                           double* const h_min,
                                           double* const h_max);
 
-#undef INSTANTIATE_NARROW_PHASE_EE
-#undef INSTANTIATE_NARROW_PHASE_VF
+#undef SCCD_NP_NARROW_PHASE_EE
+#undef SCCD_NP_NARROW_PHASE_VF

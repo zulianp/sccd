@@ -71,8 +71,8 @@ namespace {
         // bitmask of the lanes that overlap, so it is compared lane by lane
         // against the scalar predicate on the same inputs.
         for (ptrdiff_t i = 0; i < a.n; ++i) {
-            for (ptrdiff_t start = 0; start < b.n; start += AABB_DISJOINT_CHUNK_SIZE) {
-                const int len = (int)std::min<ptrdiff_t>(AABB_DISJOINT_CHUNK_SIZE, b.n - start);
+            for (ptrdiff_t start = 0; start < b.n; start += SCCD_AABB_DISJOINT_CHUNK_SIZE) {
+                const int len = (int)std::min<ptrdiff_t>(SCCD_AABB_DISJOINT_CHUNK_SIZE, b.n - start);
 
                 T* bp[6] = {b.lo[0].data(), b.lo[1].data(), b.lo[2].data(),
                             b.hi[0].data(), b.hi[1].data(), b.hi[2].data()};
@@ -131,22 +131,22 @@ namespace {
         Boxes<T> a = make_boxes<T>(rng, n, grid);
         Boxes<T> b = make_boxes<T>(rng, n, grid);
 
-        // It writes exactly AABB_DISJOINT_CHUNK_SIZE lanes and takes no count, so
+        // It writes exactly SCCD_AABB_DISJOINT_CHUNK_SIZE lanes and takes no count, so
         // the second list is walked a whole chunk at a time; n is chosen to be a
         // multiple of the chunk.
-        std::vector<std::uint32_t> mask(AABB_DISJOINT_CHUNK_SIZE);
+        std::vector<std::uint32_t> mask(SCCD_AABB_DISJOINT_CHUNK_SIZE);
         int mismatches = 0;
 
         for (ptrdiff_t i = 0; i < a.n; ++i) {
-          for (ptrdiff_t start = 0; start + AABB_DISJOINT_CHUNK_SIZE <= b.n;
-               start += AABB_DISJOINT_CHUNK_SIZE) {
+          for (ptrdiff_t start = 0; start + SCCD_AABB_DISJOINT_CHUNK_SIZE <= b.n;
+               start += SCCD_AABB_DISJOINT_CHUNK_SIZE) {
             sccd::vaabb_disjoint_one_to_many<T>(
                 a.lo[0][i], a.lo[1][i], a.lo[2][i], a.hi[0][i], a.hi[1][i], a.hi[2][i],
                 b.lo[0].data() + start, b.lo[1].data() + start, b.lo[2].data() + start,
                 b.hi[0].data() + start, b.hi[1].data() + start, b.hi[2].data() + start,
                 mask.data());
 
-            for (ptrdiff_t lane = 0; lane < AABB_DISJOINT_CHUNK_SIZE; ++lane) {
+            for (ptrdiff_t lane = 0; lane < SCCD_AABB_DISJOINT_CHUNK_SIZE; ++lane) {
                 const ptrdiff_t j = start + lane;
                 const bool vector_disjoint = mask[lane] != 0;
                 const bool scalar_disjoint = sccd::disjoint<T>(

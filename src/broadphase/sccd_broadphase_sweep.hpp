@@ -154,11 +154,11 @@ namespace sccd {
     }
 
     /**
-     * \namespace sccd_detail
+     * \namespace detail
      * \brief Internal helpers for vectorized AABB disjoint tests and overlap
      * filtering.
      */
-    namespace sccd_detail {
+    namespace detail {
 
         /**
          * \brief Load the \p nxe vertex indices of element \p elem_idx.
@@ -287,7 +287,7 @@ namespace sccd {
                                        T *const SCCD_RESTRICT B_maxx,
                                        T *const SCCD_RESTRICT B_maxy,
                                        T *const SCCD_RESTRICT B_maxz) {
-            for (ptrdiff_t lane = len; lane < AABB_DISJOINT_CHUNK_SIZE; ++lane) {
+            for (ptrdiff_t lane = len; lane < SCCD_AABB_DISJOINT_CHUNK_SIZE; ++lane) {
                 B_minx[lane] = amaxx0 + 1;
                 B_miny[lane] = amaxy0 + 1;
                 B_minz[lane] = amaxz0 + 1;
@@ -302,7 +302,7 @@ namespace sccd {
          * \param second_aabbs SoA arrays for the second list.
          * \param start First B index to test.
          * \param chunk_len Number of lanes to process (<=
-         * AABB_DISJOINT_CHUNK_SIZE).
+         * SCCD_AABB_DISJOINT_CHUNK_SIZE).
          * \param aminx Scalar A min x.
          * \param aminy Scalar A min y.
          * \param aminz Scalar A min z.
@@ -322,13 +322,13 @@ namespace sccd {
                                                          const T amaxy,
                                                          const T amaxz,
                                                          uint32_t *const SCCD_RESTRICT mask_out) {
-            if (chunk_len != AABB_DISJOINT_CHUNK_SIZE) {
-                alignas(64) T B_minx[AABB_DISJOINT_CHUNK_SIZE];
-                alignas(64) T B_miny[AABB_DISJOINT_CHUNK_SIZE];
-                alignas(64) T B_minz[AABB_DISJOINT_CHUNK_SIZE];
-                alignas(64) T B_maxx[AABB_DISJOINT_CHUNK_SIZE];
-                alignas(64) T B_maxy[AABB_DISJOINT_CHUNK_SIZE];
-                alignas(64) T B_maxz[AABB_DISJOINT_CHUNK_SIZE];
+            if (chunk_len != SCCD_AABB_DISJOINT_CHUNK_SIZE) {
+                alignas(64) T B_minx[SCCD_AABB_DISJOINT_CHUNK_SIZE];
+                alignas(64) T B_miny[SCCD_AABB_DISJOINT_CHUNK_SIZE];
+                alignas(64) T B_minz[SCCD_AABB_DISJOINT_CHUNK_SIZE];
+                alignas(64) T B_maxx[SCCD_AABB_DISJOINT_CHUNK_SIZE];
+                alignas(64) T B_maxy[SCCD_AABB_DISJOINT_CHUNK_SIZE];
+                alignas(64) T B_maxz[SCCD_AABB_DISJOINT_CHUNK_SIZE];
 
                 prepare_B_block(second_aabbs, start, chunk_len, B_minx, B_miny, B_minz, B_maxx, B_maxy, B_maxz);
                 tail_fill_B(amaxx, amaxy, amaxz, chunk_len, B_minx, B_miny, B_minz, B_maxx, B_maxy, B_maxz);
@@ -748,7 +748,7 @@ namespace sccd {
             return count;
         }
 
-    }  // namespace sccd_detail
+    }  // namespace detail
 
     template <typename T>
     void cummax(const ptrdiff_t n, const T *const SCCD_RESTRICT in, T *const SCCD_RESTRICT out) {
@@ -823,7 +823,7 @@ namespace sccd {
                 }
 
                 ptrdiff_t end = ni;
-                sccd_detail::compute_candidate_window_progressive(
+                detail::compute_candidate_window_progressive(
                     fimin, fimax, second_xmax, second_xmin, second_count, ni, end);
 
                 if (ni >= end) {
@@ -834,9 +834,9 @@ namespace sccd {
                 ptrdiff_t count = 0;
 
                 for (ptrdiff_t noffset = ni; noffset < end;) {
-                    const int chunk_len = (int)sccd::min((ptrdiff_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
+                    const int chunk_len = (int)sccd::min((ptrdiff_t)SCCD_AABB_DISJOINT_CHUNK_SIZE, end - noffset);
 
-                    uint32_t bits = sccd_detail::overlap_bits_for_block(second_aabbs,
+                    uint32_t bits = detail::overlap_bits_for_block(second_aabbs,
                                                                         noffset,
                                                                         chunk_len,
                                                                         first_aabbs[0][fi],
@@ -846,7 +846,7 @@ namespace sccd {
                                                                         first_aabbs[4][fi],
                                                                         first_aabbs[5][fi]);
 
-                    bits = sccd_detail::mask_out_shared_two_lists_bits<first_nxe, second_nxe>(
+                    bits = detail::mask_out_shared_two_lists_bits<first_nxe, second_nxe>(
                         bits, noffset, ev, second_idx, second_elements, second_stride);
 
                     count += sccd::popcount32(bits);
@@ -927,7 +927,7 @@ namespace sccd {
                 }
 
                 ptrdiff_t end = ni;
-                sccd_detail::compute_candidate_window_progressive(
+                detail::compute_candidate_window_progressive(
                     fimin, fimax, second_xmax, second_xmin, second_count, ni, end);
 
                 if (ni >= end) {
@@ -937,9 +937,9 @@ namespace sccd {
                 ptrdiff_t count = 0;
 
                 for (ptrdiff_t noffset = ni; noffset < end;) {
-                    const int chunk_len = (int)sccd::min((ptrdiff_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
+                    const int chunk_len = (int)sccd::min((ptrdiff_t)SCCD_AABB_DISJOINT_CHUNK_SIZE, end - noffset);
 
-                    uint32_t bits = sccd_detail::overlap_bits_for_block(second_aabbs,
+                    uint32_t bits = detail::overlap_bits_for_block(second_aabbs,
                                                                         noffset,
                                                                         chunk_len,
                                                                         first_aabbs[0][fi],
@@ -949,7 +949,7 @@ namespace sccd {
                                                                         first_aabbs[4][fi],
                                                                         first_aabbs[5][fi]);
 
-                    bits = sccd_detail::mask_out_shared_two_lists_bits<first_nxe, second_nxe>(
+                    bits = detail::mask_out_shared_two_lists_bits<first_nxe, second_nxe>(
                         bits, noffset, ev, second_idx, second_elements, second_stride);
 
                     while (bits) {
@@ -1016,7 +1016,7 @@ namespace sccd {
 
                 ptrdiff_t noffset = fi + 1;
                 ptrdiff_t end = noffset;
-                sccd_detail::compute_candidate_window_progressive(
+                detail::compute_candidate_window_progressive(
                     fimin, fimax, xmax, xmin, element_count, noffset, end);
 
                 if (noffset >= end) {
@@ -1027,9 +1027,9 @@ namespace sccd {
                 ptrdiff_t count = 0;
 
                 for (; noffset < end;) {
-                    const int chunk_len = (int)sccd::min((ptrdiff_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
+                    const int chunk_len = (int)sccd::min((ptrdiff_t)SCCD_AABB_DISJOINT_CHUNK_SIZE, end - noffset);
 
-                    uint32_t bits = sccd_detail::overlap_bits_for_block(aabbs,
+                    uint32_t bits = detail::overlap_bits_for_block(aabbs,
                                                                         noffset,
                                                                         chunk_len,
                                                                         aabbs[0][fi],
@@ -1039,7 +1039,7 @@ namespace sccd {
                                                                         aabbs[4][fi],
                                                                         aabbs[5][fi]);
 
-                    bits = sccd_detail::mask_out_shared_self_bits<nxe>(bits, noffset, ev, idx, elements, stride);
+                    bits = detail::mask_out_shared_self_bits<nxe>(bits, noffset, ev, idx, elements, stride);
 
                     count += sccd::popcount32(bits);
                     noffset += chunk_len;
@@ -1101,7 +1101,7 @@ namespace sccd {
 
                 ptrdiff_t noffset = fi + 1;
                 ptrdiff_t end = noffset;
-                sccd_detail::compute_candidate_window_progressive(
+                detail::compute_candidate_window_progressive(
                     fimin, fimax, xmax, xmin, element_count, noffset, end);
 
                 if (noffset >= end) {
@@ -1110,9 +1110,9 @@ namespace sccd {
 
                 ptrdiff_t count = 0;
                 for (; noffset < end;) {
-                    const int chunk_len = (int)sccd::min((ptrdiff_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
+                    const int chunk_len = (int)sccd::min((ptrdiff_t)SCCD_AABB_DISJOINT_CHUNK_SIZE, end - noffset);
 
-                    uint32_t bits = sccd_detail::overlap_bits_for_block(aabbs,
+                    uint32_t bits = detail::overlap_bits_for_block(aabbs,
                                                                         noffset,
                                                                         chunk_len,
                                                                         aabbs[0][fi],
@@ -1122,7 +1122,7 @@ namespace sccd {
                                                                         aabbs[4][fi],
                                                                         aabbs[5][fi]);
 
-                    bits = sccd_detail::mask_out_shared_self_bits<nxe>(bits, noffset, ev, idx, elements, stride);
+                    bits = detail::mask_out_shared_self_bits<nxe>(bits, noffset, ev, idx, elements, stride);
 
                     while (bits) {
                         const int lane = sccd::ctz32(bits);
