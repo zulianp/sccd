@@ -16,7 +16,7 @@ namespace sccd {
             // together that the guarantee does not survive.
             using TC = double;
 
-            // Splits per axis, matching ADAPTIVE_NUM_SPLITS on the host so the two
+            // Splits per axis, matching SCCD_ADAPTIVE_NUM_SPLITS on the host so the two
             // explore the same tree.
             constexpr int kSplits = 2;
             constexpr int kSamples = kSplits + 2;

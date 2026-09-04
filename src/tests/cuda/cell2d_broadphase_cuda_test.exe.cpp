@@ -29,7 +29,7 @@ using idx_t = std::int32_t;
 
 namespace {
 
-#define CHECK(call)                                                                          \
+#define SCCD_CUDA_CHECK(call)                                                                          \
     do {                                                                                     \
         const cudaError_t err_ = (call);                                                     \
         if (err_ != cudaSuccess) {                                                           \
@@ -41,8 +41,8 @@ namespace {
     template <typename T>
     T* dup(const std::vector<T>& h) {
         T* d = nullptr;
-        CHECK(cudaMalloc(&d, sizeof(T) * (h.empty() ? 1 : h.size())));
-        if (!h.empty()) CHECK(cudaMemcpy(d, h.data(), sizeof(T) * h.size(), cudaMemcpyHostToDevice));
+        SCCD_CUDA_CHECK(cudaMalloc(&d, sizeof(T) * (h.empty() ? 1 : h.size())));
+        if (!h.empty()) SCCD_CUDA_CHECK(cudaMemcpy(d, h.data(), sizeof(T) * h.size(), cudaMemcpyHostToDevice));
         return d;
     }
 
@@ -60,12 +60,12 @@ namespace {
         void upload() {
             for (int d = 0; d < 6; ++d) rows[d] = dup(h[d]);
             aabbs = nullptr;
-            CHECK(cudaMalloc(&aabbs, sizeof(scalar_t*) * 6));
-            CHECK(cudaMemcpy(aabbs, rows, sizeof(scalar_t*) * 6, cudaMemcpyHostToDevice));
+            SCCD_CUDA_CHECK(cudaMalloc(&aabbs, sizeof(scalar_t*) * 6));
+            SCCD_CUDA_CHECK(cudaMemcpy(aabbs, rows, sizeof(scalar_t*) * 6, cudaMemcpyHostToDevice));
 
             for (int v = 0; v < nxe; ++v) elem_rows[v] = dup(h_elem[v]);
-            CHECK(cudaMalloc(&elements, sizeof(idx_t*) * 3));
-            CHECK(cudaMemcpy(elements, elem_rows, sizeof(idx_t*) * (size_t)nxe, cudaMemcpyHostToDevice));
+            SCCD_CUDA_CHECK(cudaMalloc(&elements, sizeof(idx_t*) * 3));
+            SCCD_CUDA_CHECK(cudaMemcpy(elements, elem_rows, sizeof(idx_t*) * (size_t)nxe, cudaMemcpyHostToDevice));
 
             std::vector<idx_t> ids(n);
             for (ptrdiff_t i = 0; i < n; ++i) ids[i] = (idx_t)i;
@@ -179,8 +179,8 @@ namespace {
         PairSet out;
         if (n <= 0) return out;
         std::vector<idx_t> ha(n), hb(n);
-        CHECK(cudaMemcpy(ha.data(), a, sizeof(idx_t) * n, cudaMemcpyDeviceToHost));
-        CHECK(cudaMemcpy(hb.data(), b, sizeof(idx_t) * n, cudaMemcpyDeviceToHost));
+        SCCD_CUDA_CHECK(cudaMemcpy(ha.data(), a, sizeof(idx_t) * n, cudaMemcpyDeviceToHost));
+        SCCD_CUDA_CHECK(cudaMemcpy(hb.data(), b, sizeof(idx_t) * n, cudaMemcpyDeviceToHost));
         for (ptrdiff_t i = 0; i < n; ++i) out.insert({ha[i], hb[i]});
         return out;
     }
@@ -192,29 +192,29 @@ namespace {
 
         // ncells is not known until setup picks the axes, so size generously and
         // let setup memset what it needs; 4n is the cap setup itself enforces.
-        CHECK(cudaMalloc(&cellptr, sizeof(ptrdiff_t) * (size_t)(4 * e.n + 2)));
+        SCCD_CUDA_CHECK(cudaMalloc(&cellptr, sizeof(ptrdiff_t) * (size_t)(4 * e.n + 2)));
         sccd::device::cell2d_setup_and_count<scalar_t, idx_t>(3, e.n, e.aabbs, grid, cellptr, &spans);
 
         idx_t* cellidx = nullptr;
         ptrdiff_t* cursor = nullptr;
-        CHECK(cudaMalloc(&cellidx, sizeof(idx_t) * (size_t)(spans > 0 ? spans : 1)));
-        CHECK(cudaMalloc(&cursor, sizeof(ptrdiff_t) * (size_t)(grid.ncells() + 1)));
+        SCCD_CUDA_CHECK(cudaMalloc(&cellidx, sizeof(idx_t) * (size_t)(spans > 0 ? spans : 1)));
+        SCCD_CUDA_CHECK(cudaMalloc(&cursor, sizeof(ptrdiff_t) * (size_t)(grid.ncells() + 1)));
         sccd::device::cell2d_fill<scalar_t, idx_t>(e.n, e.aabbs, grid, cellptr, cellidx, cursor);
 
         ptrdiff_t* ccdptr = nullptr;
-        CHECK(cudaMalloc(&ccdptr, sizeof(ptrdiff_t) * (size_t)(e.n + 1)));
+        SCCD_CUDA_CHECK(cudaMalloc(&ccdptr, sizeof(ptrdiff_t) * (size_t)(e.n + 1)));
         sccd::device::cell2d_count_self_overlaps<2, scalar_t, idx_t>(
             e.n, e.aabbs, e.idx, 1, e.elements, grid, cellptr, cellidx, ccdptr);
 
         ptrdiff_t total = 0;
-        CHECK(cudaMemcpy(&total, ccdptr + e.n, sizeof(ptrdiff_t), cudaMemcpyDeviceToHost));
+        SCCD_CUDA_CHECK(cudaMemcpy(&total, ccdptr + e.n, sizeof(ptrdiff_t), cudaMemcpyDeviceToHost));
 
         idx_t *o0 = nullptr, *o1 = nullptr;
-        CHECK(cudaMalloc(&o0, sizeof(idx_t) * (size_t)(total > 0 ? total : 1)));
-        CHECK(cudaMalloc(&o1, sizeof(idx_t) * (size_t)(total > 0 ? total : 1)));
+        SCCD_CUDA_CHECK(cudaMalloc(&o0, sizeof(idx_t) * (size_t)(total > 0 ? total : 1)));
+        SCCD_CUDA_CHECK(cudaMalloc(&o1, sizeof(idx_t) * (size_t)(total > 0 ? total : 1)));
         sccd::device::cell2d_collect_self_overlaps<2, scalar_t, idx_t>(
             e.n, e.aabbs, e.idx, 1, e.elements, grid, cellptr, cellidx, ccdptr, o0, o1);
-        CHECK(cudaDeviceSynchronize());
+        SCCD_CUDA_CHECK(cudaDeviceSynchronize());
 
         PairSet out = download(o0, o1, total);
         cudaFree(cellptr);
@@ -228,23 +228,23 @@ namespace {
 
     PairSet sweep_self(DeviceBoxes& e) {
         scalar_t* scratch = nullptr;
-        CHECK(cudaMalloc(&scratch, sizeof(scalar_t) * (size_t)(2 * e.n)));
+        SCCD_CUDA_CHECK(cudaMalloc(&scratch, sizeof(scalar_t) * (size_t)(2 * e.n)));
         const int axis = sccd::device::choose_axis<scalar_t>(3, e.n, e.aabbs);
         sccd::device::sort_along_axis<scalar_t, idx_t>(3, e.n, axis, e.aabbs, e.idx, scratch);
 
         ptrdiff_t* ccdptr = nullptr;
-        CHECK(cudaMalloc(&ccdptr, sizeof(ptrdiff_t) * (size_t)(e.n + 1)));
+        SCCD_CUDA_CHECK(cudaMalloc(&ccdptr, sizeof(ptrdiff_t) * (size_t)(e.n + 1)));
         sccd::device::count_self_overlaps<2, scalar_t, idx_t>(axis, e.n, e.aabbs, e.idx, 1, e.elements, ccdptr);
 
         ptrdiff_t total = 0;
-        CHECK(cudaMemcpy(&total, ccdptr + e.n, sizeof(ptrdiff_t), cudaMemcpyDeviceToHost));
+        SCCD_CUDA_CHECK(cudaMemcpy(&total, ccdptr + e.n, sizeof(ptrdiff_t), cudaMemcpyDeviceToHost));
 
         idx_t *o0 = nullptr, *o1 = nullptr;
-        CHECK(cudaMalloc(&o0, sizeof(idx_t) * (size_t)(total > 0 ? total : 1)));
-        CHECK(cudaMalloc(&o1, sizeof(idx_t) * (size_t)(total > 0 ? total : 1)));
+        SCCD_CUDA_CHECK(cudaMalloc(&o0, sizeof(idx_t) * (size_t)(total > 0 ? total : 1)));
+        SCCD_CUDA_CHECK(cudaMalloc(&o1, sizeof(idx_t) * (size_t)(total > 0 ? total : 1)));
         sccd::device::collect_self_overlaps<2, scalar_t, idx_t>(
             axis, e.n, e.aabbs, e.idx, 1, e.elements, ccdptr, o0, o1);
-        CHECK(cudaDeviceSynchronize());
+        SCCD_CUDA_CHECK(cudaDeviceSynchronize());
 
         PairSet out = download(o0, o1, total);
         cudaFree(scratch);
@@ -282,24 +282,24 @@ namespace {
     // only the query would flatter it.
     double time_ms(const char* which, DeviceBoxes& e, const int repeats) {
         cudaEvent_t a, b;
-        CHECK(cudaEventCreate(&a));
-        CHECK(cudaEventCreate(&b));
+        SCCD_CUDA_CHECK(cudaEventCreate(&a));
+        SCCD_CUDA_CHECK(cudaEventCreate(&b));
 
         double best = 1e30;
         for (int r = 0; r < repeats; ++r) {
             DeviceBoxes copy = e;  // the sweep permutes in place
             copy.upload();
-            CHECK(cudaDeviceSynchronize());
-            CHECK(cudaEventRecord(a));
+            SCCD_CUDA_CHECK(cudaDeviceSynchronize());
+            SCCD_CUDA_CHECK(cudaEventRecord(a));
             if (std::string(which) == "cell2d") {
                 (void)cell2d_self(copy);
             } else {
                 (void)sweep_self(copy);
             }
-            CHECK(cudaEventRecord(b));
-            CHECK(cudaEventSynchronize(b));
+            SCCD_CUDA_CHECK(cudaEventRecord(b));
+            SCCD_CUDA_CHECK(cudaEventSynchronize(b));
             float ms = 0.f;
-            CHECK(cudaEventElapsedTime(&ms, a, b));
+            SCCD_CUDA_CHECK(cudaEventElapsedTime(&ms, a, b));
             best = std::min(best, (double)ms);
             copy.free_all();
         }

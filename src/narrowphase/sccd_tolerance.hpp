@@ -47,7 +47,6 @@ namespace sccd {
         return (value < cap) ? value : cap;
     }
 
-}  // namespace sccd
 
 template <typename T>
 static inline void compute_face_vertex_tolerance_soa(const T codomain_tol,
@@ -280,5 +279,7 @@ static inline void compute_edge_edge_tolerance(const T codomain_tol,
 }
 
 SCCD_FP_STRICT_END
+
+}  // namespace sccd
 
 #endif

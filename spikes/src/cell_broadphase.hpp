@@ -362,7 +362,7 @@ namespace sccd {
                         continue;
                     }
 
-                    if (end_k - begin_k < AABB_DISJOINT_NOVECTORIZE_THRESHOLD) {
+                    if (end_k - begin_k < SCCD_AABB_DISJOINT_NOVECTORIZE_THRESHOLD) {
                         count += sccd_detail::cell_scalar_count_range_two_lists<first_nxe, second_nxe>(first_aabbs,
                                                                                                        fi,
                                                                                                        second_aabbs,
@@ -377,9 +377,9 @@ namespace sccd {
                     }
 
                     for (; begin_k < end_k;) {
-                        const ptrdiff_t chunk_len = std::min((ptrdiff_t)AABB_DISJOINT_CHUNK_SIZE, end_k - begin_k);
+                        const ptrdiff_t chunk_len = std::min((ptrdiff_t)SCCD_AABB_DISJOINT_CHUNK_SIZE, end_k - begin_k);
 
-                        uint32_t dmask[AABB_DISJOINT_CHUNK_SIZE] = {0};
+                        uint32_t dmask[SCCD_AABB_DISJOINT_CHUNK_SIZE] = {0};
 
                         const T aminx = first_aabbs[0][fi];
                         const T aminy = first_aabbs[1][fi];
@@ -388,12 +388,12 @@ namespace sccd {
                         const T amaxy = first_aabbs[4][fi];
                         const T amaxz = first_aabbs[5][fi];
 
-                        alignas(64) T B_minx[AABB_DISJOINT_CHUNK_SIZE];
-                        alignas(64) T B_miny[AABB_DISJOINT_CHUNK_SIZE];
-                        alignas(64) T B_minz[AABB_DISJOINT_CHUNK_SIZE];
-                        alignas(64) T B_maxx[AABB_DISJOINT_CHUNK_SIZE];
-                        alignas(64) T B_maxy[AABB_DISJOINT_CHUNK_SIZE];
-                        alignas(64) T B_maxz[AABB_DISJOINT_CHUNK_SIZE];
+                        alignas(64) T B_minx[SCCD_AABB_DISJOINT_CHUNK_SIZE];
+                        alignas(64) T B_miny[SCCD_AABB_DISJOINT_CHUNK_SIZE];
+                        alignas(64) T B_minz[SCCD_AABB_DISJOINT_CHUNK_SIZE];
+                        alignas(64) T B_maxx[SCCD_AABB_DISJOINT_CHUNK_SIZE];
+                        alignas(64) T B_maxy[SCCD_AABB_DISJOINT_CHUNK_SIZE];
+                        alignas(64) T B_maxz[SCCD_AABB_DISJOINT_CHUNK_SIZE];
 
                         for (ptrdiff_t lane = 0; lane < chunk_len; ++lane) {
                             const ptrdiff_t j = cellidx[begin_k + lane];
@@ -615,7 +615,7 @@ namespace sccd {
                     continue;
                 }
 
-                if (end - ni < AABB_DISJOINT_NOVECTORIZE_THRESHOLD) {
+                if (end - ni < SCCD_AABB_DISJOINT_NOVECTORIZE_THRESHOLD) {
                     ptrdiff_t count = sccd_detail::scalar_count_range_two_lists<first_nxe, second_nxe>(
                         first_aabbs, fi, second_aabbs, second_idx, second_elements, second_stride, ev, ni, end);
                     ccdptr[fi + 1] = count;
@@ -626,9 +626,9 @@ namespace sccd {
                 ptrdiff_t noffset = ni;
 
                 for (; noffset < end;) {
-                    const ptrdiff_t chunk_len = std::min((ptrdiff_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
+                    const ptrdiff_t chunk_len = std::min((ptrdiff_t)SCCD_AABB_DISJOINT_CHUNK_SIZE, end - noffset);
 
-                    uint32_t dmask[AABB_DISJOINT_CHUNK_SIZE] = {0};
+                    uint32_t dmask[SCCD_AABB_DISJOINT_CHUNK_SIZE] = {0};
 
                     sccd_detail::build_disjoint_mask_for_block(second_aabbs,
                                                                noffset,

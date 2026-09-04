@@ -69,7 +69,7 @@ namespace sccd {
         ptrdiff_t cell_of(const int c0, const int c1) const { return (ptrdiff_t)c1 * n0 + c0; }
     };
 
-    namespace cell2d_detail {
+    namespace detail {
 
         /** \brief The two axes with the largest centre spread, widest first. */
         template <typename T>
@@ -91,7 +91,7 @@ namespace sccd {
             a1 = order[1];
         }
 
-    }  // namespace cell2d_detail
+    }  // namespace detail
 
     /**
      * \brief Size a grid for \p n boxes so a box spans O(1) cells.
@@ -104,7 +104,7 @@ namespace sccd {
      */
     template <typename T>
     static void cell2d_setup(const ptrdiff_t n, T** const SCCD_RESTRICT aabb, Cell2DGrid<T>& grid) {
-        cell2d_detail::choose_two_axes<T>(n, aabb, grid.axis0, grid.axis1);
+        detail::choose_two_axes<T>(n, aabb, grid.axis0, grid.axis1);
 
         const int d0 = grid.axis0;
         const int d1 = grid.axis1;
@@ -219,7 +219,7 @@ namespace sccd {
         }
     }
 
-    namespace cell2d_detail {
+    namespace detail {
 
         /**
          * \brief Walk the cells a box touches, reporting each overlapping partner once.
@@ -291,7 +291,7 @@ namespace sccd {
                             for (int v = 0; v < S; ++v) {
                                 sev[v] = second_elements[v][jidx * second_stride];
                             }
-                            share = sccd::sccd_detail::shares_vertex<F, S>(ev, sev);
+                            share = sccd::detail::shares_vertex<F, S>(ev, sev);
                         } else {
                             for (int a = 0; a < F; ++a) {
                                 if (ev[a] == second_idx[j]) {
@@ -379,7 +379,7 @@ namespace sccd {
                         for (int v = 0; v < NXE; ++v) {
                             sev[v] = elements[v][jidx * stride];
                         }
-                        if (sccd::sccd_detail::shares_vertex<NXE, NXE>(ev, sev)) {
+                        if (sccd::detail::shares_vertex<NXE, NXE>(ev, sev)) {
                             continue;
                         }
 
@@ -389,7 +389,7 @@ namespace sccd {
             }
         }
 
-    }  // namespace cell2d_detail
+    }  // namespace detail
 
     /** \brief Self-overlap count: one list against itself, CRS offsets out. */
     template <int nxe, typename T, typename I>
@@ -413,7 +413,7 @@ namespace sccd {
                 }
 
                 ptrdiff_t count = 0;
-                cell2d_detail::for_each_unique_self_partner<nxe, T, I>(
+                detail::for_each_unique_self_partner<nxe, T, I>(
                     aabbs, fi, idx, elements, stride, ev, grid, cellptr, cellidx,
                     [&](const ptrdiff_t, const I) { ++count; });
                 ccdptr[fi + 1] = count;
@@ -446,7 +446,7 @@ namespace sccd {
                 }
 
                 ptrdiff_t at = ccdptr[fi];
-                cell2d_detail::for_each_unique_self_partner<nxe, T, I>(
+                detail::for_each_unique_self_partner<nxe, T, I>(
                     aabbs, fi, idx, elements, stride, ev, grid, cellptr, cellidx,
                     [&](const ptrdiff_t, const I jidx) {
                         out0[at] = sccd::min<I>(idxi, jidx);
@@ -483,7 +483,7 @@ namespace sccd {
                 }
 
                 ptrdiff_t count = 0;
-                cell2d_detail::for_each_unique_partner<first_nxe, second_nxe, T, I>(first_aabbs,
+                detail::for_each_unique_partner<first_nxe, second_nxe, T, I>(first_aabbs,
                                                                                     fi,
                                                                                     second_aabbs,
                                                                                     second_idx,
@@ -528,7 +528,7 @@ namespace sccd {
                 }
 
                 ptrdiff_t at = ccdptr[fi];
-                cell2d_detail::for_each_unique_partner<first_nxe, second_nxe, T, I>(
+                detail::for_each_unique_partner<first_nxe, second_nxe, T, I>(
                     first_aabbs,
                     fi,
                     second_aabbs,

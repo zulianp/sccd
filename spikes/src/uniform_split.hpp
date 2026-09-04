@@ -232,7 +232,7 @@ namespace sccd {
             return false;
         }
 
-        return grid_search_uniform_split_vf<UNIFORM_NUM_SPLITS, T>(
+        return grid_search_uniform_split_vf<SCCD_UNIFORM_NUM_SPLITS, T>(
             initial_domain, max_iter, tol, tols, numerical_error, codomain_widths, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack, refine);
     }
 
@@ -505,7 +505,7 @@ namespace sccd {
             return false;
         }
 
-        return grid_search_uniform_split_ee<UNIFORM_NUM_SPLITS, T>(
+        return grid_search_uniform_split_ee<SCCD_UNIFORM_NUM_SPLITS, T>(
             initial_domain, max_iter, tol, tols, numerical_error, codomain_widths, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v, stack, refine);
     }
 

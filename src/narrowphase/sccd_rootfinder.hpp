@@ -23,11 +23,11 @@
 #include "tight_inclusion/interval_root_finder.hpp"
 #endif
 
-#ifndef ADAPTIVE_NUM_SPLITS
-#define ADAPTIVE_NUM_SPLITS 2
+#ifndef SCCD_ADAPTIVE_NUM_SPLITS
+#define SCCD_ADAPTIVE_NUM_SPLITS 2
 #endif
-#ifndef UNIFORM_NUM_SPLITS
-#define UNIFORM_NUM_SPLITS 4
+#ifndef SCCD_UNIFORM_NUM_SPLITS
+#define SCCD_UNIFORM_NUM_SPLITS 4
 #endif
 
 namespace sccd {
@@ -1234,7 +1234,7 @@ namespace sccd {
             return false;
         }
 
-        return grid_search_adaptive_split_vf<ADAPTIVE_NUM_SPLITS, T>(
+        return grid_search_adaptive_split_vf<SCCD_ADAPTIVE_NUM_SPLITS, T>(
             initial_domain, max_iter, tol, tols, numerical_error, codomain_widths, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack, refine);
     }
 
@@ -1601,7 +1601,7 @@ namespace sccd {
             return false;
         }
 
-        return grid_search_adaptive_split_ee<ADAPTIVE_NUM_SPLITS, T>(
+        return grid_search_adaptive_split_ee<SCCD_ADAPTIVE_NUM_SPLITS, T>(
             initial_domain, max_iter, tol, tols, numerical_error, codomain_widths, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v, stack, refine);
     }
 

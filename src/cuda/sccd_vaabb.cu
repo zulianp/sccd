@@ -161,7 +161,7 @@ namespace sccd {
     }  // namespace device
 }  // namespace sccd
 
-#define EXPLICT_INSTANTIATION(idx_t, geom_t, aabb_t)                    \
+#define SCCD_VAABB_INSTANTIATE(idx_t, geom_t, aabb_t)                    \
     template void sccd::device::compute_aabbs<idx_t, geom_t, aabb_t>(   \
         const int nxe,                                                  \
         const ptrdiff_t n_elements,                                     \
@@ -193,7 +193,7 @@ namespace sccd {
         aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabbs,         \
         const bool safe_inflate)
 
-EXPLICT_INSTANTIATION(int, float, float);
-EXPLICT_INSTANTIATION(int, double, double);
+SCCD_VAABB_INSTANTIATE(int, float, float);
+SCCD_VAABB_INSTANTIATE(int, double, double);
 
-#undef EXPLICT_INSTANTIATION
+#undef SCCD_VAABB_INSTANTIATE

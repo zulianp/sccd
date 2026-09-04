@@ -66,7 +66,7 @@ namespace sccd {
 #endif
     }
 
-    namespace sccd_detail {
+    namespace detail {
         /**
          * \brief In-place parallel inclusive scan under an arbitrary associative op.
          *
@@ -144,7 +144,7 @@ namespace sccd {
             std::inplace_merge(begin, mid, end, fun);
         }
 #endif
-    }  // namespace sccd_detail
+    }  // namespace detail
 
     template <typename T, typename F>
     void parallel_sort(T* const begin, T* const end, F fun) {
@@ -154,7 +154,7 @@ namespace sccd {
 #pragma omp parallel
         {
 #pragma omp single nowait
-            sccd_detail::parallel_sort_impl(begin, end, fun);
+            detail::parallel_sort_impl(begin, end, fun);
         }
 #else
         std::sort(begin, end, fun);
@@ -190,7 +190,7 @@ namespace sccd {
             },
             [](T left, T right) { return left + right; });
 #else
-        sccd_detail::parallel_inclusive_scan<T>(begin, len, [](const T a, const T b) { return a + b; });
+        detail::parallel_inclusive_scan<T>(begin, len, [](const T a, const T b) { return a + b; });
 #endif  // SCCD_ENABLE_TBB
     }
 
@@ -223,7 +223,7 @@ namespace sccd {
             },
             [](T left, T right) { return sccd::max(left, right); });
 #else
-        sccd_detail::parallel_inclusive_scan<T>(begin, len, [](const T a, const T b) { return sccd::max(a, b); });
+        detail::parallel_inclusive_scan<T>(begin, len, [](const T a, const T b) { return sccd::max(a, b); });
 #endif  // SCCD_ENABLE_TBB
     }
 }  // namespace sccd

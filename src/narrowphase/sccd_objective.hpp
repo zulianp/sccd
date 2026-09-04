@@ -5,6 +5,9 @@
 
 #include "sccd_math.hpp"
 
+namespace sccd {
+
+
 template <typename T>
 static inline void vf_objective(const T sv[3],
                                 const T s1[3],
@@ -557,5 +560,7 @@ static inline void ee_all(const T sv[3],
     out_H[8] = (sccd::pow2<T>(ssa30) + sccd::pow2<T>(ssa31) + sccd::pow2<T>(ssa32)) * (t * t);
 }
 
+
+}  // namespace sccd
 
 #endif

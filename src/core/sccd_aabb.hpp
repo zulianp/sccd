@@ -17,8 +17,8 @@
 #include <arm_neon.h>
 #endif
 
-#define AABB_DISJOINT_CHUNK_SIZE 32
-#define AABB_DISJOINT_NOVECTORIZE_THRESHOLD 16
+#define SCCD_AABB_DISJOINT_CHUNK_SIZE 32
+#define SCCD_AABB_DISJOINT_NOVECTORIZE_THRESHOLD 16
 
 namespace sccd {
     /**
@@ -83,7 +83,7 @@ namespace sccd {
         if constexpr (std::is_same<T, double>::value)  //
         {
 #if defined(__AVX512F__)
-            for (int i = 0; i < AABB_DISJOINT_CHUNK_SIZE; i += 8) {
+            for (int i = 0; i < SCCD_AABB_DISJOINT_CHUNK_SIZE; i += 8) {
                 const __m512d a_minx = _mm512_loadu_pd(aminx + i);
                 const __m512d a_miny = _mm512_loadu_pd(aminy + i);
                 const __m512d a_minz = _mm512_loadu_pd(aminz + i);
@@ -113,7 +113,7 @@ namespace sccd {
             }
             return;
 #elif defined(__AVX2__)
-            for (int i = 0; i < AABB_DISJOINT_CHUNK_SIZE; i += 4) {
+            for (int i = 0; i < SCCD_AABB_DISJOINT_CHUNK_SIZE; i += 4) {
                 const __m256d a_minx = _mm256_loadu_pd(aminx + i);
                 const __m256d a_miny = _mm256_loadu_pd(aminy + i);
                 const __m256d a_minz = _mm256_loadu_pd(aminz + i);
@@ -146,7 +146,7 @@ namespace sccd {
             }
             return;
 #elif defined(__ARM_NEON) || defined(__ARM_NEON__)
-            for (int i = 0; i < AABB_DISJOINT_CHUNK_SIZE; i += 2) {
+            for (int i = 0; i < SCCD_AABB_DISJOINT_CHUNK_SIZE; i += 2) {
                 const float64x2_t a_minx = vld1q_f64(aminx + i);
                 const float64x2_t a_miny = vld1q_f64(aminy + i);
                 const float64x2_t a_minz = vld1q_f64(aminz + i);
@@ -176,7 +176,7 @@ namespace sccd {
 #endif
         }
 #pragma omp simd aligned(aminx, aminy, aminz, amaxx, amaxy, amaxz, bminx, bminy, bminz, bmaxx, bmaxy, bmaxz, mask : 64)
-        for (int i = 0; i < AABB_DISJOINT_CHUNK_SIZE; i++) {
+        for (int i = 0; i < SCCD_AABB_DISJOINT_CHUNK_SIZE; i++) {
             mask[i] = disjoint<T>(aminx[i],
                                   aminy[i],
                                   aminz[i],
@@ -196,7 +196,7 @@ namespace sccd {
      * \brief Broadcast AABB at \p fi into SoA buffers sized for SIMD chunking.
      * \param aabbs SoA AABB arrays [6][...].
      * \param fi Index of the AABB to broadcast.
-     * \param A_minx..A_maxz Output arrays of length AABB_DISJOINT_CHUNK_SIZE.
+     * \param A_minx..A_maxz Output arrays of length SCCD_AABB_DISJOINT_CHUNK_SIZE.
      */
     template <typename T>
     inline static void vaabb_broadcast(T** const SCCD_RESTRICT aabbs,
@@ -213,7 +213,7 @@ namespace sccd {
         const T amaxx = aabbs[3][fi];
         const T amaxy = aabbs[4][fi];
         const T amaxz = aabbs[5][fi];
-        for (int k = 0; k < AABB_DISJOINT_CHUNK_SIZE; ++k) {
+        for (int k = 0; k < SCCD_AABB_DISJOINT_CHUNK_SIZE; ++k) {
             A_minx[k] = aminx;
             A_miny[k] = aminy;
             A_minz[k] = aminz;
@@ -237,7 +237,7 @@ namespace sccd {
      * loop. It also takes an explicit \p count and handles the remainder with
      * scalar code, so no padded scratch buffers are needed for partial chunks.
      *
-     * \param count Number of valid lanes, 0..AABB_DISJOINT_CHUNK_SIZE.
+     * \param count Number of valid lanes, 0..SCCD_AABB_DISJOINT_CHUNK_SIZE.
      */
     template <typename T>
     inline static uint32_t vaabb_overlap_one_to_many_bits(const T aminx,
@@ -253,7 +253,7 @@ namespace sccd {
                                                           const T* const SCCD_RESTRICT bmaxy,
                                                           const T* const SCCD_RESTRICT bmaxz,
                                                           const int count) {
-        assert(count >= 0 && count <= AABB_DISJOINT_CHUNK_SIZE);
+        assert(count >= 0 && count <= SCCD_AABB_DISJOINT_CHUNK_SIZE);
 
         uint32_t disjoint_bits = 0;
         int i = 0;
@@ -411,7 +411,7 @@ namespace sccd {
             const __m512d a_maxy = _mm512_set1_pd(amaxy);
             const __m512d a_maxz = _mm512_set1_pd(amaxz);
 
-            for (int i = 0; i < AABB_DISJOINT_CHUNK_SIZE; i += 8) {
+            for (int i = 0; i < SCCD_AABB_DISJOINT_CHUNK_SIZE; i += 8) {
                 const __m512d b_minx = _mm512_loadu_pd(bminx + i);
                 const __m512d b_miny = _mm512_loadu_pd(bminy + i);
                 const __m512d b_minz = _mm512_loadu_pd(bminz + i);
@@ -441,7 +441,7 @@ namespace sccd {
             const __m256d a_maxy = _mm256_set1_pd(amaxy);
             const __m256d a_maxz = _mm256_set1_pd(amaxz);
 
-            for (int i = 0; i < AABB_DISJOINT_CHUNK_SIZE; i += 4) {
+            for (int i = 0; i < SCCD_AABB_DISJOINT_CHUNK_SIZE; i += 4) {
                 const __m256d b_minx = _mm256_loadu_pd(bminx + i);
                 const __m256d b_miny = _mm256_loadu_pd(bminy + i);
                 const __m256d b_minz = _mm256_loadu_pd(bminz + i);
@@ -474,7 +474,7 @@ namespace sccd {
             const float64x2_t a_maxy = vdupq_n_f64(amaxy);
             const float64x2_t a_maxz = vdupq_n_f64(amaxz);
 
-            for (int i = 0; i < AABB_DISJOINT_CHUNK_SIZE; i += 2) {
+            for (int i = 0; i < SCCD_AABB_DISJOINT_CHUNK_SIZE; i += 2) {
                 const float64x2_t b_minx = vld1q_f64(bminx + i);
                 const float64x2_t b_miny = vld1q_f64(bminy + i);
                 const float64x2_t b_minz = vld1q_f64(bminz + i);
@@ -504,7 +504,7 @@ namespace sccd {
             const __m512 a_maxy = _mm512_set1_ps(amaxy);
             const __m512 a_maxz = _mm512_set1_ps(amaxz);
 
-            for (int i = 0; i < AABB_DISJOINT_CHUNK_SIZE; i += 16) {
+            for (int i = 0; i < SCCD_AABB_DISJOINT_CHUNK_SIZE; i += 16) {
                 const __m512 b_minx = _mm512_loadu_ps(bminx + i);
                 const __m512 b_miny = _mm512_loadu_ps(bminy + i);
                 const __m512 b_minz = _mm512_loadu_ps(bminz + i);
@@ -530,7 +530,7 @@ namespace sccd {
             const __m256 a_maxy = _mm256_set1_ps(amaxy);
             const __m256 a_maxz = _mm256_set1_ps(amaxz);
 
-            for (int i = 0; i < AABB_DISJOINT_CHUNK_SIZE; i += 8) {
+            for (int i = 0; i < SCCD_AABB_DISJOINT_CHUNK_SIZE; i += 8) {
                 const __m256 b_minx = _mm256_loadu_ps(bminx + i);
                 const __m256 b_miny = _mm256_loadu_ps(bminy + i);
                 const __m256 b_minz = _mm256_loadu_ps(bminz + i);
@@ -559,7 +559,7 @@ namespace sccd {
             const float32x4_t a_maxy = vdupq_n_f32(amaxy);
             const float32x4_t a_maxz = vdupq_n_f32(amaxz);
 
-            for (int i = 0; i < AABB_DISJOINT_CHUNK_SIZE; i += 4) {
+            for (int i = 0; i < SCCD_AABB_DISJOINT_CHUNK_SIZE; i += 4) {
                 const float32x4_t b_minx = vld1q_f32(bminx + i);
                 const float32x4_t b_miny = vld1q_f32(bminy + i);
                 const float32x4_t b_minz = vld1q_f32(bminz + i);
@@ -579,7 +579,7 @@ namespace sccd {
 #endif
         }
 #pragma omp simd
-        for (int i = 0; i < AABB_DISJOINT_CHUNK_SIZE; i++) {
+        for (int i = 0; i < SCCD_AABB_DISJOINT_CHUNK_SIZE; i++) {
             mask[i] = disjoint<T>(
                 aminx, aminy, aminz, amaxx, amaxy, amaxz, bminx[i], bminy[i], bminz[i], bmaxx[i], bmaxy[i], bmaxz[i]);
         }

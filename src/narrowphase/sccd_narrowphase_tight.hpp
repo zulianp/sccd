@@ -254,7 +254,7 @@ namespace sccd {
      */
     static constexpr int ti_mid_corner[3][4] = {{4, 6, 5, 7}, {2, 6, 3, 7}, {1, 5, 3, 7}};
 
-    namespace ti_detail {
+    namespace detail {
 
         /**
          * \brief Componentwise bounds of the function over a box, per lane.
@@ -468,7 +468,7 @@ namespace sccd {
             return best;
         }
 
-    }  // namespace ti_detail
+    }  // namespace detail
 
     /**
      * \brief TightInclusion-equivalent vectorized narrow phase.
@@ -616,7 +616,7 @@ namespace sccd {
                             rd[k][d] = block.delta[k][d][q];
                         }
                     }
-                    ti_detail::ti_eval_all_corners<IsVertexFace, T_HP>(rs, rd, root.lo, root.hi, root.corner);
+                    detail::ti_eval_all_corners<IsVertexFace, T_HP>(rs, rd, root.lo, root.hi, root.corner);
 
                     // Pushed even when the time budget is already zero: a box of
                     // zero extent in t can still hold a contact at t == 0, and
@@ -636,7 +636,7 @@ namespace sccd {
                 int split_axis[VSIZE];
                 T_HP split_mid[VSIZE];
                 uint8_t will_split[VSIZE];
-                ti_detail::TiLaneGeometry<T_HP, VSIZE> lane;
+                detail::TiLaneGeometry<T_HP, VSIZE> lane;
                 int lane_query[VSIZE];
                 int lane_depth[VSIZE];
                 uint8_t active[VSIZE];
@@ -657,7 +657,7 @@ namespace sccd {
                     will_split[l] = 0;
                     // Idle lanes evaluate a zero box over query 0's geometry;
                     // the result is finite and discarded.
-                    ti_detail::ti_load_lane<T_HP, VSIZE>(block, 0, l, lane);
+                    detail::ti_load_lane<T_HP, VSIZE>(block, 0, l, lane);
                 }
 
                 while (true) {
@@ -676,7 +676,7 @@ namespace sccd {
                                 continue;
                             }
                             if (lane_query[l] != b.query) {
-                                ti_detail::ti_load_lane<T_HP, VSIZE>(block, b.query, l, lane);
+                                detail::ti_load_lane<T_HP, VSIZE>(block, b.query, l, lane);
                             }
                             lane_query[l] = b.query;
                             lane_depth[l] = b.depth;
@@ -701,7 +701,7 @@ namespace sccd {
                         break;
                     }
 
-                    ti_detail::ti_bounds_from_corners<T_HP, VSIZE>(corner, fmin, fmax);
+                    detail::ti_bounds_from_corners<T_HP, VSIZE>(corner, fmin, fmax);
 
                     // Phase 1: decide each lane's fate from the bounds it already
                     // carries. No function evaluation happens here.
@@ -726,7 +726,7 @@ namespace sccd {
                             ++g_np_host_level[lv < 80 ? lv : 79];
                         }
 #endif
-                        if (!ti_detail::ti_classify<T_HP, VSIZE>(
+                        if (!detail::ti_classify<T_HP, VSIZE>(
                                 fmin, fmax, box_lo, box_hi, lane, l, accept)) {
                             continue;  // no root in this box
                         }
@@ -741,7 +741,7 @@ namespace sccd {
                             continue;
                         }
 
-                        const int axis = ti_detail::ti_split_axis<T_HP, VSIZE>(box_lo, box_hi, lane, l);
+                        const int axis = detail::ti_split_axis<T_HP, VSIZE>(box_lo, box_hi, lane, l);
                         T_HP mid;
                         if (!ti_bisect<T_HP>(box_lo[axis][l], box_hi[axis][l], mid)) {
                             // Cannot subdivide further; accepting is conservative.
@@ -774,7 +774,7 @@ namespace sccd {
                         }
                     }
 
-                    ti_detail::ti_eval_mid_face<IsVertexFace, T_HP, VSIZE>(
+                    detail::ti_eval_mid_face<IsVertexFace, T_HP, VSIZE>(
                         lane, mt, mu, mv, will_split, mid_face);
 
                     // Phase 3: assemble both children from the parent's corners

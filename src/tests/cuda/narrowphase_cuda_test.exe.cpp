@@ -98,7 +98,7 @@ using idx_t = std::int32_t;
 
 namespace {
 
-#define CHECK(call)                                                                                  \
+#define SCCD_CUDA_CHECK(call)                                                                                  \
     do {                                                                                             \
         const cudaError_t err_ = (call);                                                             \
         if (err_ != cudaSuccess) {                                                                   \
@@ -408,8 +408,8 @@ namespace {
     template <typename T>
     T* dup(const std::vector<T>& h) {
         T* d = nullptr;
-        CHECK(cudaMalloc(&d, sizeof(T) * (h.empty() ? 1 : h.size())));
-        if (!h.empty()) CHECK(cudaMemcpy(d, h.data(), sizeof(T) * h.size(), cudaMemcpyHostToDevice));
+        SCCD_CUDA_CHECK(cudaMalloc(&d, sizeof(T) * (h.empty() ? 1 : h.size())));
+        if (!h.empty()) SCCD_CUDA_CHECK(cudaMemcpy(d, h.data(), sizeof(T) * h.size(), cudaMemcpyHostToDevice));
         return d;
     }
 
@@ -431,18 +431,18 @@ namespace {
                 rows0[d] = dup(s.p0[d]);
                 rows1[d] = dup(s.p1[d]);
             }
-            CHECK(cudaMalloc(&d_p0, sizeof(scalar_t*) * 3));
-            CHECK(cudaMalloc(&d_p1, sizeof(scalar_t*) * 3));
-            CHECK(cudaMemcpy(d_p0, rows0, sizeof(scalar_t*) * 3, cudaMemcpyHostToDevice));
-            CHECK(cudaMemcpy(d_p1, rows1, sizeof(scalar_t*) * 3, cudaMemcpyHostToDevice));
+            SCCD_CUDA_CHECK(cudaMalloc(&d_p0, sizeof(scalar_t*) * 3));
+            SCCD_CUDA_CHECK(cudaMalloc(&d_p1, sizeof(scalar_t*) * 3));
+            SCCD_CUDA_CHECK(cudaMemcpy(d_p0, rows0, sizeof(scalar_t*) * 3, cudaMemcpyHostToDevice));
+            SCCD_CUDA_CHECK(cudaMemcpy(d_p1, rows1, sizeof(scalar_t*) * 3, cudaMemcpyHostToDevice));
 
             for (int v = 0; v < nxe; ++v) elem_rows[v] = dup(s.elem[v]);
-            CHECK(cudaMalloc(&d_elem, sizeof(idx_t*) * 4));
-            CHECK(cudaMemcpy(d_elem, elem_rows, sizeof(idx_t*) * (size_t)nxe, cudaMemcpyHostToDevice));
+            SCCD_CUDA_CHECK(cudaMalloc(&d_elem, sizeof(idx_t*) * 4));
+            SCCD_CUDA_CHECK(cudaMemcpy(d_elem, elem_rows, sizeof(idx_t*) * (size_t)nxe, cudaMemcpyHostToDevice));
 
             d_q0 = dup(s.q0);
             d_q1 = dup(s.q1);
-            CHECK(cudaMalloc(&d_toi, sizeof(scalar_t) * s.nq()));
+            SCCD_CUDA_CHECK(cudaMalloc(&d_toi, sizeof(scalar_t) * s.nq()));
         }
 
         void free_all() {
@@ -597,9 +597,9 @@ namespace {
                                                                1);
                 break;
         }
-        CHECK(cudaDeviceSynchronize());
+        SCCD_CUDA_CHECK(cudaDeviceSynchronize());
         std::vector<scalar_t> toi(s.nq());
-        CHECK(cudaMemcpy(toi.data(), d.d_toi, sizeof(scalar_t) * s.nq(), cudaMemcpyDeviceToHost));
+        SCCD_CUDA_CHECK(cudaMemcpy(toi.data(), d.d_toi, sizeof(scalar_t) * s.nq(), cudaMemcpyDeviceToHost));
         d.free_all();
         return toi;
     }

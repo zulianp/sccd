@@ -61,7 +61,7 @@ namespace sccd {
                     continue;
                 }
 
-                if (end - ni < AABB_DISJOINT_NOVECTORIZE_THRESHOLD) {
+                if (end - ni < SCCD_AABB_DISJOINT_NOVECTORIZE_THRESHOLD) {
                     ptrdiff_t count = sccd_detail::scalar_count_range_two_lists<first_nxe, second_nxe>(
                         first_aabbs, fi, second_aabbs, second_idx, second_elements, second_stride, ev, ni, end);
                     ccdptr[fi + 1] = count;
@@ -72,9 +72,9 @@ namespace sccd {
                 ptrdiff_t noffset = ni;
 
                 for (; noffset < end;) {
-                    const ptrdiff_t chunk_len = sccd::min((ptrdiff_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
+                    const ptrdiff_t chunk_len = sccd::min((ptrdiff_t)SCCD_AABB_DISJOINT_CHUNK_SIZE, end - noffset);
 
-                    uint32_t dmask[AABB_DISJOINT_CHUNK_SIZE] = {0};
+                    uint32_t dmask[SCCD_AABB_DISJOINT_CHUNK_SIZE] = {0};
 
                     sccd_detail::build_disjoint_mask_for_block(second_aabbs,
                                                                noffset,
@@ -170,7 +170,7 @@ namespace sccd {
                     continue;
                 }
 
-                if (end - ni < AABB_DISJOINT_NOVECTORIZE_THRESHOLD) {
+                if (end - ni < SCCD_AABB_DISJOINT_NOVECTORIZE_THRESHOLD) {
                     ptrdiff_t count =
                         sccd_detail::scalar_collect_range_two_lists<first_nxe, second_nxe>(first_aabbs,
                                                                                            fi,
@@ -192,9 +192,9 @@ namespace sccd {
                 ptrdiff_t noffset = ni;
 
                 for (; noffset < end;) {
-                    const ptrdiff_t chunk_len = sccd::min((ptrdiff_t)AABB_DISJOINT_CHUNK_SIZE, end - noffset);
+                    const ptrdiff_t chunk_len = sccd::min((ptrdiff_t)SCCD_AABB_DISJOINT_CHUNK_SIZE, end - noffset);
 
-                    uint32_t dmask[AABB_DISJOINT_CHUNK_SIZE] = {0};
+                    uint32_t dmask[SCCD_AABB_DISJOINT_CHUNK_SIZE] = {0};
                     sccd_detail::build_disjoint_mask_for_block(second_aabbs,
                                                                noffset,
                                                                chunk_len,

@@ -476,8 +476,8 @@ namespace sccd {
                     continue;
                 }
 
-                first_local_elements[count] = MIN(idxi, jidx);
-                second_local_elements[count] = MAX(idxi, jidx);
+                first_local_elements[count] = SCCD_MIN(idxi, jidx);
+                second_local_elements[count] = SCCD_MAX(idxi, jidx);
 
                 count++;
             }
@@ -1033,14 +1033,14 @@ namespace sccd {
     }  // namespace device
 }  // namespace sccd
 
-#define INSTANTIATE_CHOOSE_AXIS(T)             \
+#define SCCD_BP_INSTANTIATE_CHOOSE_AXIS(T)             \
     template int sccd::device::choose_axis<T>( \
         const int dim, const ptrdiff_t n, const T* const SCCD_RESTRICT* const SCCD_RESTRICT aabbs)
 
-#define INSTANTIATE_ENUMERATE(T) \
+#define SCCD_BP_INSTANTIATE_ENUMERATE(T) \
     template void sccd::device::enumerate<T>(const ptrdiff_t begin, const ptrdiff_t end, T* const SCCD_RESTRICT idx)
 
-#define INSTANTIATE_SORT_ALONG_AXIS(T, I)                                             \
+#define SCCD_BP_INSTANTIATE_SORT_ALONG_AXIS(T, I)                                             \
     template void sccd::device::sort_along_axis<T, I>(const int dim,                  \
                                                       const ptrdiff_t n,              \
                                                       const int sort_axis,            \
@@ -1048,7 +1048,7 @@ namespace sccd {
                                                       I* const SCCD_RESTRICT idx,     \
                                                       T* const SCCD_RESTRICT scratch)
 
-#define INSTANTIATE_COUNT_SELF_OVERLAPS(NXE, T, I)                                               \
+#define SCCD_BP_INSTANTIATE_COUNT_SELF_OVERLAPS(NXE, T, I)                                               \
     template void sccd::device::count_self_overlaps<NXE, T, I>(const int sort_axis,              \
                                                                const ptrdiff_t element_count,    \
                                                                T** const SCCD_RESTRICT aabbs,    \
@@ -1057,7 +1057,7 @@ namespace sccd {
                                                                I** const SCCD_RESTRICT elements, \
                                                                ptrdiff_t* const SCCD_RESTRICT ccdptr)
 
-#define INSTANTIATE_COLLECT_SELF_OVERLAPS(NXE, T, I)                                                          \
+#define SCCD_BP_INSTANTIATE_COLLECT_SELF_OVERLAPS(NXE, T, I)                                                          \
     template void sccd::device::collect_self_overlaps<NXE, T, I>(const int sort_axis,                         \
                                                                  const ptrdiff_t element_count,               \
                                                                  T** const SCCD_RESTRICT aabbs,               \
@@ -1068,14 +1068,14 @@ namespace sccd {
                                                                  I* SCCD_RESTRICT foverlap,                   \
                                                                  I* SCCD_RESTRICT noverlap)
 
-#define INSTANTIATE_CUMMAX(T)              \
+#define SCCD_BP_INSTANTIATE_CUMMAX(T)              \
     template void sccd::device::cummax<T>( \
         const ptrdiff_t n, const T* const SCCD_RESTRICT in, T* const SCCD_RESTRICT out)
 
-#define INSTANTIATE_SOA_DEVICE_ROW(T) \
+#define SCCD_BP_INSTANTIATE_SOA_DEVICE_ROW(T) \
     template T* sccd::device::soa_device_row<T>(T * * const SCCD_RESTRICT arrays, const int dim, const int row)
 
-#define INSTANTIATE_COUNT_OVERLAPS(FIRST_NXE, SECOND_NXE, T, I)                                                      \
+#define SCCD_BP_INSTANTIATE_COUNT_OVERLAPS(FIRST_NXE, SECOND_NXE, T, I)                                                      \
     template void sccd::device::count_overlaps<FIRST_NXE, SECOND_NXE, T, I>(const int sort_axis,                     \
                                                                             const ptrdiff_t first_count,             \
                                                                             T** const SCCD_RESTRICT first_aabbs,     \
@@ -1090,7 +1090,7 @@ namespace sccd {
                                                                             ptrdiff_t* const SCCD_RESTRICT ccdptr,   \
                                                                             const T* const SCCD_RESTRICT cummax)
 
-#define INSTANTIATE_COLLECT_OVERLAPS(FIRST_NXE, SECOND_NXE, T, I)              \
+#define SCCD_BP_INSTANTIATE_COLLECT_OVERLAPS(FIRST_NXE, SECOND_NXE, T, I)              \
     template void sccd::device::collect_overlaps<FIRST_NXE, SECOND_NXE, T, I>( \
         const int sort_axis,                                                   \
         const ptrdiff_t first_count,                                           \
@@ -1108,7 +1108,7 @@ namespace sccd {
         I* SCCD_RESTRICT foverlap,                                             \
         I* SCCD_RESTRICT noverlap)
 
-#define INSTANTIATE_COUNT_OVERLAPS_WITH_STARTS(FIRST_NXE, SECOND_NXE, T, I)              \
+#define SCCD_BP_INSTANTIATE_COUNT_OVERLAPS_WITH_STARTS(FIRST_NXE, SECOND_NXE, T, I)              \
     template void sccd::device::count_overlaps_with_starts<FIRST_NXE, SECOND_NXE, T, I>( \
         const int sort_axis,                                                             \
         const ptrdiff_t first_count,                                                     \
@@ -1124,7 +1124,7 @@ namespace sccd {
         ptrdiff_t* const SCCD_RESTRICT ccdptr,                                           \
         const I* const SCCD_RESTRICT starts)
 
-#define INSTANTIATE_COLLECT_OVERLAPS_WITH_STARTS(FIRST_NXE, SECOND_NXE, T, I)              \
+#define SCCD_BP_INSTANTIATE_COLLECT_OVERLAPS_WITH_STARTS(FIRST_NXE, SECOND_NXE, T, I)              \
     template void sccd::device::collect_overlaps_with_starts<FIRST_NXE, SECOND_NXE, T, I>( \
         const int sort_axis,                                                               \
         const ptrdiff_t first_count,                                                       \
@@ -1142,75 +1142,75 @@ namespace sccd {
         I* SCCD_RESTRICT foverlap,                                                         \
         I* SCCD_RESTRICT noverlap)
 
-INSTANTIATE_CHOOSE_AXIS(float);
-INSTANTIATE_CHOOSE_AXIS(double);
-INSTANTIATE_ENUMERATE(int32_t);
-INSTANTIATE_ENUMERATE(int64_t);
-INSTANTIATE_SORT_ALONG_AXIS(float, int32_t);
-INSTANTIATE_SORT_ALONG_AXIS(float, int64_t);
-INSTANTIATE_SORT_ALONG_AXIS(double, int32_t);
-INSTANTIATE_SORT_ALONG_AXIS(double, int64_t);
+SCCD_BP_INSTANTIATE_CHOOSE_AXIS(float);
+SCCD_BP_INSTANTIATE_CHOOSE_AXIS(double);
+SCCD_BP_INSTANTIATE_ENUMERATE(int32_t);
+SCCD_BP_INSTANTIATE_ENUMERATE(int64_t);
+SCCD_BP_INSTANTIATE_SORT_ALONG_AXIS(float, int32_t);
+SCCD_BP_INSTANTIATE_SORT_ALONG_AXIS(float, int64_t);
+SCCD_BP_INSTANTIATE_SORT_ALONG_AXIS(double, int32_t);
+SCCD_BP_INSTANTIATE_SORT_ALONG_AXIS(double, int64_t);
 
-INSTANTIATE_COUNT_SELF_OVERLAPS(2, float, int32_t);
-INSTANTIATE_COUNT_SELF_OVERLAPS(2, float, int64_t);
-INSTANTIATE_COUNT_SELF_OVERLAPS(2, double, int32_t);
-INSTANTIATE_COUNT_SELF_OVERLAPS(2, double, int64_t);
+SCCD_BP_INSTANTIATE_COUNT_SELF_OVERLAPS(2, float, int32_t);
+SCCD_BP_INSTANTIATE_COUNT_SELF_OVERLAPS(2, float, int64_t);
+SCCD_BP_INSTANTIATE_COUNT_SELF_OVERLAPS(2, double, int32_t);
+SCCD_BP_INSTANTIATE_COUNT_SELF_OVERLAPS(2, double, int64_t);
 
-INSTANTIATE_COLLECT_SELF_OVERLAPS(2, float, int32_t);
-INSTANTIATE_COLLECT_SELF_OVERLAPS(2, float, int64_t);
-INSTANTIATE_COLLECT_SELF_OVERLAPS(2, double, int32_t);
-INSTANTIATE_COLLECT_SELF_OVERLAPS(2, double, int64_t);
+SCCD_BP_INSTANTIATE_COLLECT_SELF_OVERLAPS(2, float, int32_t);
+SCCD_BP_INSTANTIATE_COLLECT_SELF_OVERLAPS(2, float, int64_t);
+SCCD_BP_INSTANTIATE_COLLECT_SELF_OVERLAPS(2, double, int32_t);
+SCCD_BP_INSTANTIATE_COLLECT_SELF_OVERLAPS(2, double, int64_t);
 
-INSTANTIATE_CUMMAX(float);
-INSTANTIATE_CUMMAX(double);
+SCCD_BP_INSTANTIATE_CUMMAX(float);
+SCCD_BP_INSTANTIATE_CUMMAX(double);
 
-INSTANTIATE_SOA_DEVICE_ROW(float);
-INSTANTIATE_SOA_DEVICE_ROW(double);
+SCCD_BP_INSTANTIATE_SOA_DEVICE_ROW(float);
+SCCD_BP_INSTANTIATE_SOA_DEVICE_ROW(double);
 
-INSTANTIATE_COUNT_OVERLAPS(3, 1, float, int32_t);
-INSTANTIATE_COUNT_OVERLAPS(3, 1, float, int64_t);
-INSTANTIATE_COUNT_OVERLAPS(3, 1, double, int32_t);
-INSTANTIATE_COUNT_OVERLAPS(3, 1, double, int64_t);
+SCCD_BP_INSTANTIATE_COUNT_OVERLAPS(3, 1, float, int32_t);
+SCCD_BP_INSTANTIATE_COUNT_OVERLAPS(3, 1, float, int64_t);
+SCCD_BP_INSTANTIATE_COUNT_OVERLAPS(3, 1, double, int32_t);
+SCCD_BP_INSTANTIATE_COUNT_OVERLAPS(3, 1, double, int64_t);
 
-INSTANTIATE_COLLECT_OVERLAPS(3, 1, float, int32_t);
-INSTANTIATE_COLLECT_OVERLAPS(3, 1, float, int64_t);
-INSTANTIATE_COLLECT_OVERLAPS(3, 1, double, int32_t);
-INSTANTIATE_COLLECT_OVERLAPS(3, 1, double, int64_t);
+SCCD_BP_INSTANTIATE_COLLECT_OVERLAPS(3, 1, float, int32_t);
+SCCD_BP_INSTANTIATE_COLLECT_OVERLAPS(3, 1, float, int64_t);
+SCCD_BP_INSTANTIATE_COLLECT_OVERLAPS(3, 1, double, int32_t);
+SCCD_BP_INSTANTIATE_COLLECT_OVERLAPS(3, 1, double, int64_t);
 
 // Quads. broad_phase_fv_step_device_ dispatches QUADSHELL4 to <4, 1>, so
 // without these the CUDA build does not link at all once a quad mesh is
 // reachable -- which it always is, the dispatch being on a runtime element type.
-INSTANTIATE_COUNT_OVERLAPS(4, 1, float, int32_t);
-INSTANTIATE_COUNT_OVERLAPS(4, 1, float, int64_t);
-INSTANTIATE_COUNT_OVERLAPS(4, 1, double, int32_t);
-INSTANTIATE_COUNT_OVERLAPS(4, 1, double, int64_t);
+SCCD_BP_INSTANTIATE_COUNT_OVERLAPS(4, 1, float, int32_t);
+SCCD_BP_INSTANTIATE_COUNT_OVERLAPS(4, 1, float, int64_t);
+SCCD_BP_INSTANTIATE_COUNT_OVERLAPS(4, 1, double, int32_t);
+SCCD_BP_INSTANTIATE_COUNT_OVERLAPS(4, 1, double, int64_t);
 
-INSTANTIATE_COLLECT_OVERLAPS(4, 1, float, int32_t);
-INSTANTIATE_COLLECT_OVERLAPS(4, 1, float, int64_t);
-INSTANTIATE_COLLECT_OVERLAPS(4, 1, double, int32_t);
-INSTANTIATE_COLLECT_OVERLAPS(4, 1, double, int64_t);
+SCCD_BP_INSTANTIATE_COLLECT_OVERLAPS(4, 1, float, int32_t);
+SCCD_BP_INSTANTIATE_COLLECT_OVERLAPS(4, 1, float, int64_t);
+SCCD_BP_INSTANTIATE_COLLECT_OVERLAPS(4, 1, double, int32_t);
+SCCD_BP_INSTANTIATE_COLLECT_OVERLAPS(4, 1, double, int64_t);
 
-INSTANTIATE_COUNT_OVERLAPS_WITH_STARTS(3, 1, float, int32_t);
-INSTANTIATE_COUNT_OVERLAPS_WITH_STARTS(3, 1, float, int64_t);
-INSTANTIATE_COUNT_OVERLAPS_WITH_STARTS(3, 1, double, int32_t);
-INSTANTIATE_COUNT_OVERLAPS_WITH_STARTS(3, 1, double, int64_t);
+SCCD_BP_INSTANTIATE_COUNT_OVERLAPS_WITH_STARTS(3, 1, float, int32_t);
+SCCD_BP_INSTANTIATE_COUNT_OVERLAPS_WITH_STARTS(3, 1, float, int64_t);
+SCCD_BP_INSTANTIATE_COUNT_OVERLAPS_WITH_STARTS(3, 1, double, int32_t);
+SCCD_BP_INSTANTIATE_COUNT_OVERLAPS_WITH_STARTS(3, 1, double, int64_t);
 
-INSTANTIATE_COLLECT_OVERLAPS_WITH_STARTS(3, 1, float, int32_t);
-INSTANTIATE_COLLECT_OVERLAPS_WITH_STARTS(3, 1, float, int64_t);
-INSTANTIATE_COLLECT_OVERLAPS_WITH_STARTS(3, 1, double, int32_t);
-INSTANTIATE_COLLECT_OVERLAPS_WITH_STARTS(3, 1, double, int64_t);
+SCCD_BP_INSTANTIATE_COLLECT_OVERLAPS_WITH_STARTS(3, 1, float, int32_t);
+SCCD_BP_INSTANTIATE_COLLECT_OVERLAPS_WITH_STARTS(3, 1, float, int64_t);
+SCCD_BP_INSTANTIATE_COLLECT_OVERLAPS_WITH_STARTS(3, 1, double, int32_t);
+SCCD_BP_INSTANTIATE_COLLECT_OVERLAPS_WITH_STARTS(3, 1, double, int64_t);
 
-#undef INSTANTIATE_CHOOSE_AXIS
-#undef INSTANTIATE_ENUMERATE
-#undef INSTANTIATE_SORT_ALONG_AXIS
-#undef INSTANTIATE_COUNT_SELF_OVERLAPS
-#undef INSTANTIATE_COLLECT_SELF_OVERLAPS
-#undef INSTANTIATE_CUMMAX
-#undef INSTANTIATE_SOA_DEVICE_ROW
-#undef INSTANTIATE_COUNT_OVERLAPS
-#undef INSTANTIATE_COLLECT_OVERLAPS
-#undef INSTANTIATE_COUNT_OVERLAPS_WITH_STARTS
-#undef INSTANTIATE_COLLECT_OVERLAPS_WITH_STARTS
+#undef SCCD_BP_INSTANTIATE_CHOOSE_AXIS
+#undef SCCD_BP_INSTANTIATE_ENUMERATE
+#undef SCCD_BP_INSTANTIATE_SORT_ALONG_AXIS
+#undef SCCD_BP_INSTANTIATE_COUNT_SELF_OVERLAPS
+#undef SCCD_BP_INSTANTIATE_COLLECT_SELF_OVERLAPS
+#undef SCCD_BP_INSTANTIATE_CUMMAX
+#undef SCCD_BP_INSTANTIATE_SOA_DEVICE_ROW
+#undef SCCD_BP_INSTANTIATE_COUNT_OVERLAPS
+#undef SCCD_BP_INSTANTIATE_COLLECT_OVERLAPS
+#undef SCCD_BP_INSTANTIATE_COUNT_OVERLAPS_WITH_STARTS
+#undef SCCD_BP_INSTANTIATE_COLLECT_OVERLAPS_WITH_STARTS
 
 // Clean-up kernel macros
 #undef SCCD_BP_N_WARPS_PER_BLOCK
