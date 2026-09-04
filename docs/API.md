@@ -228,6 +228,8 @@ call.
 
 Set `SCCD_LIB_PATH` to the build directory or to the library file; failing that,
 the module looks beside itself and then asks the system loader.
+[`python/README.md`](../python/README.md) covers the binding and the analysis
+tools that sit beside it.
 
 ## Building against it
 

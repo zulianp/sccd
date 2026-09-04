@@ -86,6 +86,7 @@ src/broadphase/    sweep-and-prune, 2D cell list, run-time strategy
 src/narrowphase/   modes, root finders, tolerances, error bounds
 src/cuda/          device kernels
 src/api/           C ABI
+python/            ctypes binding and the analysis tools
 benchmark/         harnesses and committed result tables
 spikes/            demoted and dead code; not built, not installed
 wip/               open work, decision records, retractions
@@ -97,7 +98,8 @@ wip/               open work, decision records, retractions
 |---|---|
 | [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) | Full evaluation: timings, accuracy, occupancy, work counts. |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | How the guarantee is obtained. |
-| [`docs/API.md`](docs/API.md) | `CCD<T>`, the C ABI, the kernels. |
+| [`docs/API.md`](docs/API.md) | The kernels, the broad phase, the C ABI, Python, `CCD<T>`. |
+| [`python/README.md`](python/README.md) | The `ctypes` binding and the analysis tools. |
 | [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md) | Every environment variable. None is needed. |
 | [`wip/`](wip/) | Open items and the measurement record, including withdrawn claims. |
 

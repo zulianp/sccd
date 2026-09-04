@@ -268,14 +268,21 @@ add_test(NAME sccd_minimal COMMAND $<TARGET_FILE:sccd_minimal>)
 # surface. It needs nothing but the standard library -- no NumPy, no SymPy -- so
 # any python3 on PATH will do, and the test is simply skipped when there is none.
 find_package(Python3 COMPONENTS Interpreter QUIET)
-if(Python3_Interpreter_FOUND)
+# A sanitizer build cannot be dlopen'd by an uninstrumented interpreter: the
+# runtime has to be loaded before main, and ctypes loads it after. That is a
+# property of the sanitizer, not of the binding, so the test is not registered
+# there rather than failing there.
+string(FIND "${CMAKE_CXX_FLAGS}" "-fsanitize" _sccd_sanitized)
+if(NOT Python3_Interpreter_FOUND)
+  message(STATUS "No python3 interpreter: skipping sccd_binding_test")
+elseif(NOT _sccd_sanitized EQUAL -1)
+  message(STATUS "Sanitizer build: skipping sccd_binding_test (ctypes cannot dlopen it)")
+else()
   add_test(NAME sccd_binding_test
            COMMAND "${Python3_EXECUTABLE}"
                    "${CMAKE_CURRENT_SOURCE_DIR}/python/sccd_binding_test.py")
   set_tests_properties(sccd_binding_test PROPERTIES
     ENVIRONMENT "SCCD_LIB_PATH=$<TARGET_FILE_DIR:sccd>")
-else()
-  message(STATUS "No python3 interpreter: skipping sccd_binding_test")
 endif()
 
 if(SCCD_ENABLE_SMESH)
