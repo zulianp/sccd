@@ -28,27 +28,45 @@ is `find_impact_times` — one result per candidate, no shared bound.
 
 ## Narrow phase, milliseconds
 
-> **The GPU columns predate a fix and understate the device.** The device's
-> edge-edge domain tolerances were assigned to the wrong axes, which starved the
-> `u` axis of splits and made the search run far past where it should have
-> stopped. Measured before and after on cloth-funnel, same binary and same cases:
-> the narrow phase goes from 172.90 ms to **49.69 ms**, a **3.5×** improvement,
-> and stride-1 boxes fall 13.8×. Re-measuring this table on all three scenes is
-> outstanding; the CPU columns are unaffected.
-
 | scene | mode | CPU s0 | GPU s0 | CPU s1 | GPU s1 |
 |---|---|---:|---:|---:|---:|
-| cloth-funnel | Fast | **6.2** | 23.1 | **9.7** | 56.3 |
-| cloth-funnel | Tight | **7.1** | 36.5 | **12.3** | 789.9 |
-| armadillo-rollers | Fast | **18.0** | 31.7 | **62.8** | 218.8 |
-| armadillo-rollers | Tight | **17.4** | 56.3 | **77.3** | 3126.7 |
-| cloth-ball | Fast | 184.1 | **102.1** | **308.4** | 612.2 |
-| cloth-ball | Tight | 114.9 | **107.9** | **241.2** | 902.8 |
+| cloth-funnel | Relaxed | **6.2** | 22.8 | **9.7** | 59.3 |
+| cloth-funnel | Tight | **7.1** | 28.3 | **12.2** | 155.7 |
+| armadillo-rollers | Relaxed | **18.0** | 32.5 | **62.8** | 234.5 |
+| armadillo-rollers | Tight | **17.5** | 37.1 | **77.1** | 188.1 |
+| cloth-ball | Relaxed | 186.5 | **106.5** | **309.8** | 670.1 |
+| cloth-ball | Tight | 122.6 | **105.2** | **241.4** | 695.7 |
+
+Each cell is the sum over the scene's 16 cases within one repeat, then the median
+over three repeats; vertex-face and edge-edge cases are summed together. Timings
+come from a build **without** `-DSCCD_NP_COUNT_BOXES`, which puts a global atomic
+on the hot path and makes an instrumented build 20× slower on the host.
 
 Stride 1 costs the CPU 1.6–4.4× over stride 0 — the value of the shared running
-minimum. It costs the GPU 2.4–55×, because stride 1 runs a different kernel: one
-block per query, seeded with a 128-way dice, which classifies 2.58 million boxes
-per query against the host's 1,844.
+minimum. It costs the GPU 2.6–6.6×, because stride 1 runs a different kernel: one
+block per query, seeded with a 128-way dice.
+
+These GPU numbers improved substantially against the previous measurement of this
+table, all of it on `Tight`:
+
+| | was | now | |
+|---|---:|---:|---:|
+| armadillo-rollers, GPU s1 | 3126.7 | **188.1** | **16.6×** |
+| cloth-funnel, GPU s1 | 789.9 | **155.7** | 5.1× |
+| armadillo-rollers, GPU s0 | 56.3 | **37.1** | 1.5× |
+| cloth-funnel, GPU s0 | 36.5 | **28.3** | 1.3× |
+| cloth-ball, GPU s1 | 902.8 | **695.7** | 1.3× |
+
+The device's edge-edge domain tolerances had been assigned to the wrong axes: `u`
+got the `t` tolerance, up to 286× too large, and the `v` denominator was never
+computed. The split rule picks the axis with the largest width/tolerance ratio, so
+`u` was starved of splits and the search refined `t` and `v` against a `u`
+interval pinned at full width. Nothing unsafe followed — a larger domain tolerance
+only accepts sooner, which is the conservative direction, and every gate stayed
+green — but on one query it cost 53 million boxes where the host needed 55.
+
+The CPU columns reproduce the previous measurement to within 1–7% and are
+unaffected.
 
 ## Broad phase, milliseconds
 
@@ -69,6 +87,11 @@ them at run time, because which one wins is not predictable from the geometry.
 | cloth-funnel | **29.2** | 38.4 | 1.3× CPU |
 | armadillo-rollers | 47.8 | 47.3 | parity |
 | cloth-ball | 408.8 | **159.4** | 2.6× GPU |
+
+> These predate the narrow-phase fix above. The GPU column is a sum of prep,
+> broad phase and narrow phase, and its narrow-phase term has fallen; refreshing
+> it needs the broad-phase timings measured in the same run, which the run behind
+> the table above did not capture.
 
 ## Accuracy against exact roots
 
