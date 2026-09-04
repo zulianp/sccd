@@ -238,7 +238,7 @@ foreach(_hdr IN LISTS SCCD_PUBLIC_HEADERS)
   install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/${_hdr}"
           DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${_hdr_dir}")
 endforeach()
-install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/python/sccd_py.py" DESTINATION python)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/python/sccd.py" DESTINATION python)
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/sccd_config.hpp" DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 install(EXPORT SCCD_TARGETS
@@ -263,6 +263,20 @@ install(
 add_executable(sccd_minimal "${CMAKE_CURRENT_SOURCE_DIR}/demo/sccd_minimal.exe.cpp")
 target_link_libraries(sccd_minimal PRIVATE sccd)
 add_test(NAME sccd_minimal COMMAND $<TARGET_FILE:sccd_minimal>)
+
+# The ctypes binding is installed as public surface, so it is tested like public
+# surface. It needs nothing but the standard library -- no NumPy, no SymPy -- so
+# any python3 on PATH will do, and the test is simply skipped when there is none.
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+  add_test(NAME sccd_binding_test
+           COMMAND "${Python3_EXECUTABLE}"
+                   "${CMAKE_CURRENT_SOURCE_DIR}/python/sccd_binding_test.py")
+  set_tests_properties(sccd_binding_test PROPERTIES
+    ENVIRONMENT "SCCD_LIB_PATH=$<TARGET_FILE_DIR:sccd>")
+else()
+  message(STATUS "No python3 interpreter: skipping sccd_binding_test")
+endif()
 
 if(SCCD_ENABLE_SMESH)
   file(GLOB DEMO_DRIVERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/demo/*.exe.cpp")

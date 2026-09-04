@@ -112,7 +112,7 @@ toward negative infinity.
   `find_earliest_impact_time` and `find_impact_times` for one-shot use, or the
   staged broad/narrow calls to interleave your own logic. Needs smesh.
 - **C ABI** (`src/api/sccd_c_api.cpp`, documented in `docs/API.md`) — seven exports for
-  single queries, and the basis for `python/sccd_py.py`.
+  single queries, and the basis for `python/sccd.py`.
 - **Headers** — sixteen installed, listed explicitly in `CMakeLists.txt`. A
   configure-time check fails on any header under `src/` that nobody classified,
   so the list cannot drift from the tree.

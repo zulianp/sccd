@@ -813,12 +813,12 @@ def solve_ee_root_with_sccd(
     old_adaptive_split = os.environ.get("SCCD_ADAPTIVE_SPLIT")
     os.environ["SCCD_ADAPTIVE_SPLIT"] = "1"
     try:
-        import sccd_py
+        import sccd
 
-        ok, t, u, v = sccd_py.find_root_ee_d(
+        ok, t, u, v = sccd.find_root_ee(
             max_iter, tol, s1, s2, s3, s4, e1, e2, e3, e4
         )
-        return ok, t, u, v, "sccd_py.find_root_ee_d"
+        return ok, t, u, v, "sccd.find_root_ee"
     finally:
         if old_adaptive_split is None:
             os.environ.pop("SCCD_ADAPTIVE_SPLIT", None)
@@ -849,12 +849,12 @@ def resolve_highlight_root(
         if ok:
             return t, u, v, source
         print(
-            "Warning: sccd_py.find_root_ee_d did not report a root; using fallback highlight.",
+            "Warning: sccd.find_root_ee did not report a root; using fallback highlight.",
             file=sys.stderr,
         )
     except Exception as exc:
         print(
-            f"Warning: could not compute EE root with sccd_py ({exc}); "
+            f"Warning: could not compute EE root with sccd ({exc}); "
             "using fallback highlight.",
             file=sys.stderr,
         )
@@ -930,19 +930,19 @@ def main() -> None:
         type=float,
         metavar=("T", "U", "V"),
         default=None,
-        help="highlight this root instead of solving it with sccd_py",
+        help="highlight this root instead of solving it with sccd",
     )
     parser.add_argument(
         "--max-iter",
         type=int,
         default=100,
-        help="maximum root-finder iterations passed to sccd_py",
+        help="maximum root-finder iterations passed to sccd",
     )
     parser.add_argument(
         "--tol",
         type=float,
         default=1e-10,
-        help="root-finder tolerance passed to sccd_py",
+        help="root-finder tolerance passed to sccd",
     )
     parser.add_argument(
         "--refine-rows",

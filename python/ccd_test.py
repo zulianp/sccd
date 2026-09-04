@@ -8,7 +8,7 @@ import read_wxf
 from ccd3D import find_root_vf
 from numeric_roots import vf_F_3d, ee_F_3d, find_root_dfs_3D
 import read_mma
-import sccd_py
+import sccd
 
 import time
 
@@ -87,10 +87,10 @@ if __name__ == "__main__":
     false_negatives = 0
     
     funs = {
-        "vf" : (sccd_py.find_root_vf_d, vf_F_3d, 40, 1e-14),
-        "ee" : (sccd_py.find_root_ee_d, ee_F_3d, 40, 1e-14),
-        # "vf" : (sccd_py.find_root_tight_inclusion_vf_d, vf_F_3d, 10000, 1e-8),
-        # "ee" : (sccd_py.find_root_tight_inclusion_ee_d, ee_F_3d, 10000, 1e-8),
+        "vf" : (sccd.find_root_vf, vf_F_3d, 40, 1e-14),
+        "ee" : (sccd.find_root_ee, ee_F_3d, 40, 1e-14),
+        # "vf" : (sccd.find_root_tight_inclusion_vf, vf_F_3d, 10000, 1e-8),
+        # "ee" : (sccd.find_root_tight_inclusion_ee, ee_F_3d, 10000, 1e-8),
     }
 
     find_root, F_eval, max_iter, tol = funs[prefix]
