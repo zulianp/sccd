@@ -58,7 +58,7 @@ in a build with `SCCD_ENABLE_TIGHT_INCLUSION=ON`, or call the
 
 ### A complete working example
 
-[`demo/sccd_minimal.exe.cpp`](../demo/sccd_minimal.exe.cpp) is the above end to
+[`demo/sccd_minimal.exe.cpp`](../demo/sccd_minimal.exe.cpp) is both stages end to
 end, with `std::vector` and no other dependency. It builds in the default
 configuration and runs as part of `ctest`:
 
@@ -68,23 +68,38 @@ cmake -S . -B build && cmake --build build -j --target sccd_minimal
 ```
 
 ```
-query  vertex  face  time of impact
-  0       3      0    0.249999998
-  1       4      0    no collision
+broad phase: 1 vertex-face and 3 edge-edge candidate pairs
+narrow phase: vertex-face 0.499999999, edge-edge 0.749999993
 
-exact time of impact for query 0 is 0.250000000
-reported 0.249999998, which is at or before it, as guaranteed (early by 1.966e-09)
+earliest time of impact  0.499999999
+exact answer             0.500000000
+early by                 6.859e-10  (the safe direction, as guaranteed)
 ```
 
-The scene is built so the exact answer is known: a vertex crossing the triangle's
-plane at `t = 1/4`, and a second vertex that never touches it. The reported value
-is 2e-9 early — the safe direction, and the whole point of the guarantee.
+Two disconnected triangles, one descending through the other. The scene is built
+so the exact answer is known: all coordinates are exactly representable, the
+leading vertex of the moving triangle crosses the plane of the stationary one at
+exactly `t = 1/2`, and it does so strictly inside that triangle, so the true time
+of impact is the floating-point number `0.5` and not a rounding of it. The demo
+runs swept AABBs, `choose_axis`, `sort_along_axis`, the count pass and the fill
+pass, then feeds the resulting pairs to `narrow_phase_vf` and `narrow_phase_ee`,
+and exits non-zero if the broad phase drops the colliding pair or the reported
+time lands after `0.5`. It reports 7e-10 early — the safe direction, and the whole
+point of the guarantee.
 
 ## The broad phase
 
 To go from a mesh to candidate pairs, compute swept AABBs and run one of the two
 broad phases. Both produce identical pair sets; `sccd_broadphase_strategy.hpp`
 picks between them at run time, and `SCCD_BROADPHASE=sweep|cell2d` forces one.
+The demo above uses the sweep, in full.
+
+Both are count-then-fill: `count_overlaps` writes prefix offsets, so the exact
+output size is known before a pair is written and the fill pass needs neither a
+reallocation nor a per-thread growable buffer. Pairs sharing a vertex are masked
+out by the sweep itself, which is why the connectivity arrays go to both passes.
+`count_self_overlaps` / `collect_self_overlaps` are the one-list form, used for
+edge against edge.
 
 | | header |
 |---|---|

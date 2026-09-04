@@ -51,14 +51,17 @@ sccd::narrow_phase_vf<3, double, int>(n_pairs, vertex_of_pair, face_of_pair,
                                       /*toi_stride=*/1);
 ```
 
-`demo/sccd_minimal.exe.cpp` is that end to end and builds with no options:
+`demo/sccd_minimal.exe.cpp` is both stages end to end — two disconnected
+triangles, swept AABBs, the sweep-and-prune broad phase, then the narrow phase —
+and builds with no options:
 
 ```sh
 cmake --build build -j --target sccd_minimal && ./build/sccd_minimal
 ```
 
-It reports `0.249999998` for a contact whose exact time is `0.25` — early by
-2e-9, which is the safe direction and the guarantee in one line.
+It reports `0.499999999` for a contact whose exact time is `0.5`, and fails if
+that is ever late. Early by 7e-10 is the safe direction, and the guarantee in one
+line.
 
 For meshes, `CCD<T>` wires the broad and narrow phases together over an smesh
 mesh; that path is optional and needs `SCCD_ENABLE_SMESH=ON`. Both are in
