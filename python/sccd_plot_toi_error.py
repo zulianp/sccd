@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+"""Plot the time-of-impact error from a sccd_crosscheck.py table.
+
+    python3 sccd_plot_toi_error.py <output-prefix> <table.csv>
+
+Writes <prefix>_diff_histogram.pdf and <prefix>_diff.png, and prints the summary
+statistics. The error is signed and stays signed: `expected - reported` is
+positive when the reported time of impact is earlier than the exact root, which
+is the safe direction, and negative when it is later, which is a conservativeness
+violation. The script exits non-zero if any query is late or missed.
+"""
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -41,6 +51,16 @@ if __name__ == "__main__":
     print(f'Max:    {np.max(diff)}')
     print(f'Median: {np.median(diff)}')
 
+    # diff = expected - reported, so a negative entry is a time of impact after
+    # the exact root. That is the failure the whole design exists to prevent, and
+    # it is exactly what the mean, the median and an unsigned error all hide.
+    n_late = int(np.count_nonzero(diff < 0))
+    if n_late:
+        print(f'LATE: {n_late} of {len(diff)} reported after the exact root, '
+              f'worst by {-np.min(diff):.3e} relative')
+    else:
+        print(f'No late times of impact over {len(diff)} queries with a root.')
+
     plt.hist(diff, bins=100, log=True)
     plt.ylabel("Count")
     plt.xlabel("Relative Difference Between Expected TOI and TOI")
@@ -72,3 +92,9 @@ if __name__ == "__main__":
     print(f"Number of False Positives: {np.count_nonzero(hits[hit_diff])}/{np.count_nonzero(~expected_hits)}")
     print(f"Number of False Negatives: {np.count_nonzero(~hits[hit_diff])}/{np.count_nonzero(expected_hits)}")
     print(f"Queries per second {len(time)}/{time.sum():.5f} = {len(time)/time.sum():.5f} [qxs]")
+
+    n_false_negative = int(np.count_nonzero(~hits[hit_diff]))
+    if n_late or n_false_negative:
+        print("FAIL: the conservativeness invariant is broken -- "
+              f"{n_false_negative} missed collisions, {n_late} late times of impact.")
+        sys.exit(1)

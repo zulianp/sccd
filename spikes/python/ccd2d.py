@@ -8,8 +8,8 @@
 
 from typing import Tuple, Optional
 
-# Reuse the 2D helpers implemented in numeric_roots.py
-from numeric_roots import (
+# Reuse the 2D helpers implemented in sccd_reference.py
+from sccd_reference import (
     find_root_line_2d as _find_root_line_2d_impl,
     visualize_Fvl_tu_2d as _visualize_Fvl_tu_2d_impl,
     visualize_Fvl_norm_tu_2d as _visualize_Fvl_norm_tu_2d_impl,

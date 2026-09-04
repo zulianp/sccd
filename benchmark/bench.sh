@@ -95,7 +95,7 @@ done
 
 "${PYTHON}" "${BENCHMARK_DIR}/roots_to_raw.py" "${DATA_DIR}" "${PYTHON_DIR}" "${datasets[@]}"
 
-is_enabled "${SCCD_ENABLE_CLOTH_FUNNEL}" && "${PYTHON}" "${PYTHON_DIR}"/remove_nonascii.py "${DATA_DIR}"/cloth-funnel/frames/*.ply
+is_enabled "${SCCD_ENABLE_CLOTH_FUNNEL}" && "${PYTHON}" "${PYTHON_DIR}"/sccd_strip_nonascii.py "${DATA_DIR}"/cloth-funnel/frames/*.ply
 
 for dataset in "${datasets[@]}"; do
     mma_bool_dir="${DATA_DIR}/${dataset}/mma_bool"

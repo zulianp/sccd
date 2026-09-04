@@ -43,6 +43,7 @@ given on the command line and refuses to write into `src/`.
 |---|---|
 | `exact_roots_ee.py` | A SymPy solver for exact edge-edge roots, the Python half of the pair below. Superseded by the ground truth committed as `roots/<key>/toi.float64`, which the benchmark reads directly. No caller. |
 | `exact_roots_vf.wls` | The vertex-face half, and the original: it is Mathematica, not Python. It was tracked as `python/root_vf.py`, where it raised `SyntaxError` on import for as long as it existed. Renamed to the extension that matches its language. |
-| `ccd2d.py` | Re-exports the two-dimensional helpers from the reference implementation. SCCD is three-dimensional; nothing imports this. |
+| `ccd3d.py` | Three pass-through wrappers over `python/sccd_reference.py`, adding a docstring each and nothing else. Its only importer bound `find_root_vf` from here and then never called it. |
+| `ccd2d.py` | Re-exports the two-dimensional helpers from `python/sccd_reference.py`. SCCD is three-dimensional; nothing imports this. |
 | `swept_axis_intersection.py` | A SymPy derivation that aligns a swept triangle to the x-axis and solves for intersection roots. A one-off, referenced by nothing. |
 | `plot_ee_splitters.py` | Plots the adaptive bisection splitters for an edge-edge case. It reimplements `sccd::srootfinder::normal_equation_axis_splitters_ee` from `src/srootfinder.hpp` — a namespace and a file that no longer exist — and nothing calls it. Its two rendered figures are alongside it. |

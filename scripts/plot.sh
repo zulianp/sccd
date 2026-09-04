@@ -1,32 +1,34 @@
 #!/usr/bin/env bash
+#
+# Render the figures from the cross-check tables produced by scripts/crosscheck.sh.
+# Reads research/csv/*_table.csv and writes research/figures.
 
-set -e 
+set -e
 
 SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
-PROJECT_DIR=$SCRIPTPATH/..
+PROJECT_DIR="$( cd -- "${SCRIPTPATH}/.." >/dev/null 2>&1 ; pwd -P )"
 
-source $PROJECT_DIR/data/venv/bin/activate
+# shellcheck source=/dev/null
+source "${SCRIPTPATH}/venv.sh"
+
+CSV_DIR="${PROJECT_DIR}/research/csv"
+FIG_DIR="${PROJECT_DIR}/research/figures"
+mkdir -p "${FIG_DIR}"
 
 set -x
 
+python3 "${PROJECT_DIR}/python/sccd_plot_toi_error.py" "${FIG_DIR}/armadillo-rollers_ee"  "${CSV_DIR}/armadillo-rollers_ee_table.csv"
+python3 "${PROJECT_DIR}/python/sccd_plot_toi_error.py" "${FIG_DIR}/armadillo-rollers_fv"  "${CSV_DIR}/armadillo-rollers_vf_table.csv"
+python3 "${PROJECT_DIR}/python/sccd_plot_toi_error.py" "${FIG_DIR}/n-body-simulation_vf"  "${CSV_DIR}/n-body-simulation_vf_table.csv"
+python3 "${PROJECT_DIR}/python/sccd_plot_toi_error.py" "${FIG_DIR}/puffer-ball_vf"        "${CSV_DIR}/puffer-ball_vf_table.csv"
 
+# Bar charts: total false positives and false negatives per scene.
+python3 "${PROJECT_DIR}/python/sccd_plot_fp_fn.py" "${FIG_DIR}/vf_fp_fn_per_scene" \
+	armadillo-rollers "${CSV_DIR}/armadillo-rollers_vf_table.csv" \
+	n-body-simulation "${CSV_DIR}/n-body-simulation_vf_table.csv" \
+	puffer-ball       "${CSV_DIR}/puffer-ball_vf_table.csv"
 
-python3 $PROJECT_DIR/python/plot_ccd.py $PROJECT_DIR/figures/armadillo-rollers_ee  $PROJECT_DIR/csv/armadillo-rollers_ee_table.csv
-python3 $PROJECT_DIR/python/plot_ccd.py $PROJECT_DIR/figures/armadillo-rollers_fv  $PROJECT_DIR/csv/armadillo-rollers_vf_table.csv
-
-# python3 $PROJECT_DIR/python/plot_ccd.py $PROJECT_DIR/figures/n-body-simulation_ee  $PROJECT_DIR/csv/n-body-simulation_ee_table.csv
-python3 $PROJECT_DIR/python/plot_ccd.py $PROJECT_DIR/figures/n-body-simulation_vf  $PROJECT_DIR/csv/n-body-simulation_vf_table.csv
-
-# python3 $PROJECT_DIR/python/plot_ccd.py $PROJECT_DIR/figures/puffer-ball_ee 	   	 $PROJECT_DIR/csv/puffer-ball_ee_table.csv
-python3 $PROJECT_DIR/python/plot_ccd.py $PROJECT_DIR/figures/puffer-ball_vf 	     $PROJECT_DIR/csv/puffer-ball_vf_table.csv
-
-# Bar charts: total false positives / false negatives per simulation scene (VF tables)
-python3 $PROJECT_DIR/python/plot_ccd_fp_fn_bars.py $PROJECT_DIR/figures/vf_fp_fn_per_scene \
-	armadillo-rollers $PROJECT_DIR/csv/armadillo-rollers_vf_table.csv \
-	n-body-simulation $PROJECT_DIR/csv/n-body-simulation_vf_table.csv \
-	puffer-ball $PROJECT_DIR/csv/puffer-ball_vf_table.csv
-
-python3 $PROJECT_DIR/python/plot_ccd_fp_fn_bars.py $PROJECT_DIR/figures/ee_fp_fn_per_scene \
-	armadillo-rollers $PROJECT_DIR/csv/armadillo-rollers_ee_table.csv \
-	n-body-simulation $PROJECT_DIR/csv/n-body-simulation_ee_table.csv \
-	puffer-ball $PROJECT_DIR/csv/puffer-ball_ee_table.csv
+python3 "${PROJECT_DIR}/python/sccd_plot_fp_fn.py" "${FIG_DIR}/ee_fp_fn_per_scene" \
+	armadillo-rollers "${CSV_DIR}/armadillo-rollers_ee_table.csv" \
+	n-body-simulation "${CSV_DIR}/n-body-simulation_ee_table.csv" \
+	puffer-ball       "${CSV_DIR}/puffer-ball_ee_table.csv"

@@ -3,7 +3,7 @@
 #
 # It reimplements sccd::srootfinder::normal_equation_axis_splitters_ee from
 # src/srootfinder.hpp; neither that namespace nor that file exists any more. It
-# also imports read_queries and the ctypes binding from python/, so it needs that
+# also imports sccd_read_queries and the ctypes binding from python/, so it needs that
 # directory on sys.path. Its two rendered figures sit alongside it.
 
 """
@@ -755,9 +755,9 @@ def load_ee_query_case(
     np.ndarray,
 ]:
     _ensure_repo_python_path()
-    import read_queries
+    import sccd_read_queries
 
-    query_data = read_queries.read_queries(path)
+    query_data = sccd_read_queries.read_queries(path)
     n_queries = len(query_data["s0"][0])
     if index < 0 or index >= n_queries:
         raise ValueError(
@@ -898,7 +898,7 @@ def main() -> None:
         "--query-file",
         default=None,
         metavar="PATH",
-        help="load an EE case from a query CSV in python/read_queries.py format",
+        help="load an EE case from a query CSV in python/sccd_read_queries.py format",
     )
     parser.add_argument(
         "--query-index",

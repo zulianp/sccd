@@ -70,7 +70,7 @@ def main(argv: list[str]) -> int:
     datasets = argv[3:]
     sys.path.insert(0, python_dir)
 
-    # read_wxf pulls in sympy, which is only needed to convert an archive that is
+    # sccd_read_roots pulls in sympy, which is only needed to convert an archive that is
     # actually stale. Importing it eagerly made this script fail on machines
     # where every root file was already converted and there was no work to do.
     class LazyRootReader:
@@ -79,14 +79,14 @@ def main(argv: list[str]) -> int:
         def read_wxf_roots(self, path):
             if LazyRootReader.module is None:
                 try:
-                    import read_wxf
+                    import sccd_read_roots
                 except ImportError as exc:
                     raise SystemExit(
-                        f"error: converting {path} needs the 'read_wxf' module and its sympy "
+                        f"error: converting {path} needs the 'sccd_read_roots' module and its sympy "
                         f"dependency ({exc}). Install sympy, or leave the already-converted "
                         f"toi.float64 files in place so no conversion is required."
                     ) from exc
-                LazyRootReader.module = read_wxf
+                LazyRootReader.module = sccd_read_roots
             return LazyRootReader.module.read_wxf_roots(path)
 
     reader = LazyRootReader()
