@@ -335,12 +335,49 @@ differences read off inside the noise, that may be worth more than the 2.2×.
 `sccd_narrowphase_cuda_test` passes on the best-first build: all 20
 configurations conservative, `missed=0 late=0`.
 
-**Not measured: time.** These query files are 24 to 19,034 queries and the kernel
-is a small fraction of a 0.7 s process, so wall clock shows nothing at this scale
-— all three files time identically on both builds. Whether one block-wide argmin
-per refill round pays for itself needs `sccd_bench` on the broad-phase set. Until
-that exists the switch stays off by default, because a 54% box reduction on one
-file is not a reason to ship a change whose cost has not been measured.
+### Time: costs 4–9% where it saves nothing, and the rest is not resolvable
+
+`np_trace --repeat 11` times the device call itself with CUDA events, so process
+startup is out. Two independent jobs, medians of 11:
+
+| scene | file | queries | DFS job 1 | DFS job 2 | best-first |
+|---|---|---:|---:|---:|---:|
+| cloth-ball | 92vf | 19,034 | 2.635 | 2.644 | 2.750 / 2.895 (**+4 to +9%**) |
+| cloth-ball | 91vf | 11,278 | 2.498 | 2.380 | 2.430 / 2.496 |
+| armadillo-rollers | 326vf | 4,652 | 3.562 | 3.131 | 3.381 / 3.006 |
+| cloth-funnel | 317vf | 24 | 2.369 | **3.499** | 1.760 / 1.765 |
+| cloth-funnel | 227vf | 92 | 1.550 | 1.643 | 1.653 / 1.671 |
+
+**Only the first row is resolvable.** cloth-ball 92vf is the one file where the
+DFS baseline repeats across jobs — 2.635 against 2.644, 0.3% apart. There
+best-first costs **4–9% and saves no boxes**, which is the argmin's price with
+nothing to buy.
+
+Everywhere else the baseline moves more than the effect. The DFS time on 317vf
+went 2.369 → 3.499 ms between two jobs on the same binary and the same 24
+queries: **48%**, against a claimed −50%. These kernels are 1.5–3.5 ms on files of
+24 to 19,034 queries, and at that size the launch and the drain rounds dominate.
+Note that best-first itself repeats to ~0.3% across jobs, consistent with the box
+counts — it is the DFS baseline that is unstable, which is the same finding as the
+33% box-count spread, seen in time.
+
+A threshold that skips the reorder on shallow stacks
+(`SCCD_NP_BEST_FIRST_MIN_TOP`) was tried at 8 and 32 and read *slower* on
+cloth-ball — +31% and +16% against +9% for no threshold. That is the wrong sign
+for a knob that removes work, it is one sample against an unresolvable baseline,
+and it is recorded as unexplained rather than as a result. The default is 1, which
+is the configuration actually measured.
+
+### What this needs next
+
+**A workload large enough to time.** The broad-phase candidate sets are 843,140 to
+33 million pairs against these files' 19,034, and the narrow phase there runs for
+tens to hundreds of milliseconds rather than 2.6. That is where a 4–9% overhead
+and a 54% box reduction can both be seen. It means building `sccd_bench` on Alps,
+which needs smesh in the uenv — not yet done, and the next concrete task.
+
+Until then: the box result is solid and the time result is one row. The switch
+stays off by default.
 
 **C2. Bound the search by `t` before refining `u` and `v`.** A 1D pass over `t`
 with `u` and `v` at full width is cheap and its rejections are sound; it can

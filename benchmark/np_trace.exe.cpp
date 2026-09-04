@@ -34,6 +34,10 @@
 //                   host's. Needs a CUDA build; each call prints its own
 //                   "sccd-np-count" line to stderr, preceded by a marker naming
 //                   the query, so the two streams can be joined.
+//   --repeat N      with --device --batch, run the device call N times and report
+//                   the per-call time. Process startup and CUDA context creation
+//                   dominate a single run on these file sizes, so a wall-clock
+//                   comparison of two binaries needs this to mean anything.
 //   --no-isolated   skip the per-query pass; useful with --batch when only the
 //                   batched earliest time of impact is wanted
 //   --device --batch  run the whole file as ONE device toi_stride=0 call, which is
@@ -304,6 +308,7 @@ int main(int argc, char** argv) {
     bool batch = false;
     bool device = false;
     bool no_isolated = false;
+    int repeat = 1;
 
     for (int i = 3; i < argc; ++i) {
         const std::string a = argv[i];
@@ -318,6 +323,7 @@ int main(int argc, char** argv) {
         else if (a == "--batch") batch = true;
         else if (a == "--device") device = true;
         else if (a == "--no-isolated") no_isolated = true;
+        else if (a == "--repeat") repeat = std::stoi(next());
         else { usage(argv[0]); return 1; }
     }
 
@@ -423,19 +429,41 @@ int main(int argc, char** argv) {
                 std::fprintf(stderr, "np_trace-batch %s queries=%zu mode=%d\n",
                              file.filename().c_str(), queries.size(), mode);
                 std::fflush(stderr);
-                if (is_vf) {
-                    sccd::device::narrow_phase_vf<3, scalar_t, idx_t>(
-                        queries.size(), df.d_a, df.d_b, df.d_p0, df.d_p1, 1, df.d_elem,
-                        /*max_toi=*/1.0, df.d_toi, max_depth, tol, /*toi_stride=*/0);
-                } else {
-                    sccd::device::narrow_phase_ee<scalar_t, idx_t>(
-                        queries.size(), df.d_a, df.d_b, df.d_p0, df.d_p1, 1, df.d_elem,
-                        /*max_toi=*/1.0, df.d_toi, max_depth, tol, /*toi_stride=*/0);
-                }
+
+                std::vector<double> ms;
                 scalar_t dt = 1.0;
-                NPT_CUDA(cudaMemcpy(&dt, df.d_toi, sizeof(scalar_t), cudaMemcpyDeviceToHost));
-                std::printf("device batched %s queries %zu earliest_toi %.9f\n",
-                            file.filename().c_str(), queries.size(), (double)dt);
+                cudaEvent_t t0, t1;
+                NPT_CUDA(cudaEventCreate(&t0));
+                NPT_CUDA(cudaEventCreate(&t1));
+                for (int rep = 0; rep < repeat; ++rep) {
+                    // Every repeat starts from the same state: the bound is what
+                    // the search collapses, so carrying it over would measure the
+                    // second call against the first call's answer.
+                    NPT_CUDA(cudaMemcpy(df.d_toi, ones.data(), sizeof(scalar_t) * ones.size(),
+                                        cudaMemcpyHostToDevice));
+                    NPT_CUDA(cudaEventRecord(t0));
+                    if (is_vf) {
+                        sccd::device::narrow_phase_vf<3, scalar_t, idx_t>(
+                            queries.size(), df.d_a, df.d_b, df.d_p0, df.d_p1, 1, df.d_elem,
+                            /*max_toi=*/1.0, df.d_toi, max_depth, tol, /*toi_stride=*/0);
+                    } else {
+                        sccd::device::narrow_phase_ee<scalar_t, idx_t>(
+                            queries.size(), df.d_a, df.d_b, df.d_p0, df.d_p1, 1, df.d_elem,
+                            /*max_toi=*/1.0, df.d_toi, max_depth, tol, /*toi_stride=*/0);
+                    }
+                    NPT_CUDA(cudaEventRecord(t1));
+                    NPT_CUDA(cudaEventSynchronize(t1));
+                    float el = 0.0f;
+                    NPT_CUDA(cudaEventElapsedTime(&el, t0, t1));
+                    ms.push_back((double)el);
+                    NPT_CUDA(cudaMemcpy(&dt, df.d_toi, sizeof(scalar_t), cudaMemcpyDeviceToHost));
+                }
+                cudaEventDestroy(t0);
+                cudaEventDestroy(t1);
+                std::sort(ms.begin(), ms.end());
+                const double med = ms[ms.size() / 2];
+                std::printf("device batched %s queries %zu earliest_toi %.9f ms_median %.3f ms_min %.3f reps %d\n",
+                            file.filename().c_str(), queries.size(), (double)dt, med, ms.front(), repeat);
             }
             return 0;
         }

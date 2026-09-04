@@ -37,6 +37,19 @@
 // How many boxes one block takes off the global stack per launch. Bounded only
 // so a pathological run cannot spin a block forever; the host loop relaunches
 // while anything remains, so lowering this costs rounds but never correctness.
+// Shared-stack depth below which the best-first reorder is skipped. Only read
+// when SCCD_NP_BEST_FIRST is defined.
+//
+// 1 means "never skip", which is the configuration that has actually been
+// measured. 8 and 32 were tried and read *slower* on cloth-ball, which is the
+// wrong sign for a knob that removes work -- but the timing at that workload size
+// is not resolvable (see wip/CUDA_NARROWPHASE_PLAN.md), so that is an unexplained
+// sample rather than a result. Left as a knob for when there is a workload big
+// enough to tune against.
+#ifndef SCCD_NP_BEST_FIRST_MIN_TOP
+#define SCCD_NP_BEST_FIRST_MIN_TOP 1
+#endif
+
 #ifndef SCCD_NP_DRAIN_PER_BLOCK
 #define SCCD_NP_DRAIN_PER_BLOCK 4096
 #endif
@@ -1235,7 +1248,10 @@ namespace sccd {
                                                          int* SCCD_RESTRICT s_qid,
                                                          const int top,
                                                          int* SCCD_RESTRICT warp_sums) {
-            if (top <= 1) return;
+            // Nothing to reorder below two entries. The threshold is a knob for
+            // skipping shallow stacks, where the argmin is a fixed cost per refill
+            // round against little to choose between; it defaults to off.
+            if (top <= SCCD_NP_BEST_FIRST_MIN_TOP) return;
 
             // Argmin over the live entries, one per thread, reduced across the
             // block. Ties break on the lower index so the choice is deterministic.
