@@ -11,6 +11,9 @@ deleted, so it is not retried.
 
 * [`wip/ALPS.md`](ALPS.md) — how to run the tests on the CSCS Alps cluster.
   `ctest` under `srun` stalls after the first test; run the binaries directly.
+* [`wip/CUDA_NARROWPHASE_PLAN.md`](CUDA_NARROWPHASE_PLAN.md) — the device narrow
+  phase's remaining work: the 94× box-count gap on the earliest-impact path, what
+  has already been ruled out, and the variants worth trying. Branch `cuda-op-np`.
 
 ---
 
