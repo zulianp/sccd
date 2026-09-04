@@ -693,15 +693,32 @@ here. Struck items are closed with a measurement, not abandoned.
 
 ### What the fix put at the top instead
 
-**1. Check the vertex-face tolerance against TightInclusion.** This is the same
-class of defect and it would be invisible to everything done so far. The host's
-*edge-edge* tolerance was rewritten by hand from TightInclusion's
-`compute_edge_edge_tolerances`; its *vertex-face* tolerance is still the SymPy
-generator's output, and so is the device's. The two machines therefore agree — and
-would agree just as well if the generated expression were wrong, because they are
-the same expression. Nobody has compared it to
-`compute_face_vertex_tolerances`. Given what the generator did to edge-edge, that
-comparison is overdue.
+### ~~1. Check the vertex-face tolerance against TightInclusion~~ — clean
+
+The concern was real and the answer is no. The host's *edge-edge* tolerance was
+rewritten by hand from TightInclusion; its *vertex-face* tolerance is still the
+SymPy generator's output, and so is the device's — so the two machines would agree
+just as well if the generated expression were wrong, and every comparison run so
+far has been host against device, which cannot see a shared error.
+
+Both were checked against TightInclusion's own source directly
+(`_deps/tight_inclusion-src/src/tight_inclusion/ccd.cpp`, `compute_vertex_face_tolerances`
+and `compute_edge_edge_tolerances`), evaluated on real dataset queries:
+
+| | queries compared | worst relative difference |
+|---|---:|---|
+| vertex-face, the generated expression | 26,423 | **5.81e-13** |
+| edge-edge, the host's hand-written version | 125,525 | **0.00e+00** |
+
+5.8e-13 is floating-point reassociation — the generated form computes the same
+maxima through different intermediates — not a semantic difference. The
+vertex-face generator got the bilinear corner right, including
+`p011 = v - (f1 + f2 - f0)`, which is the part of the vertex-face formula that is
+easy to get wrong and the reason the check was worth running.
+
+So the edge-edge device defect was a transcription failure in one place, not a bad
+expression propagated from the generator. Nothing else in the tolerance path is
+carrying the same class of error.
 
 **2. Re-measure `docs/BENCHMARKS.md` on all three scenes.** Its GPU columns
 predate the fix and now carry a note saying so. A first attempt at refreshing them
