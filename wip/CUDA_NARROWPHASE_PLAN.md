@@ -418,16 +418,59 @@ block per query and the 128-way seeding dice, and it dominates the narrow phase.
 **Everything else in this document is optimising the 12 ms.** The next work is on
 the 160 ms:
 
-- **C4 is now the top item, not a footnote.** The 128-way dice evaluates 128
-  subboxes per query before the search starts. The measurement that kept it —
-  a single root seed read 803 → 871 ms on armadillo edge-edge — predates knowing
-  the path costs millions of boxes per query, and it was a time measurement on a
-  baseline this document has since shown to be unstable. Re-run it with box
-  counts.
-- **Why is a per-query answer 435× a shared-minimum answer?** Both search the same
-  geometry. Stride 1 loses only the shared bound, and the shared bound is worth
-  12.6× on the host. 435× is not that. Something else about the block-per-query
-  kernel is wrong, and it has never been looked at directly.
+### ~~C4, the seeding dice~~ — closed. It is not a work multiplier
+
+`SCCD_NP_SINGLE_SEED` replaces the 128-way dice with one root seed on thread 0.
+cloth-funnel, 4 cases, device, mode 2, two runs of each:
+
+| build | s0 boxes | s0 ms | s1 boxes | s1 ms | fp | fn |
+|---|---:|---:|---:|---:|---:|---:|
+| dice | 4,108,982 | 11.75 | 2,030,476,582 | 166.43 | 75 | 0 |
+| single seed | 4,071,618 | 11.84 | 2,103,899,876 | **324.50** | 75 | 0 |
+| dice | 4,065,004 | 11.42 | 1,748,064,282 | 159.25 | 75 | 0 |
+| single seed | 4,083,746 | 10.95 | 2,090,055,042 | **244.97** | 75 | 0 |
+
+**The box counts do not move** — 2.03 G and 1.75 G with the dice against 2.10 G
+and 2.09 G without, inside the 28% run-to-run swing. The time is 1.5–2× *worse*,
+which is what leaving 127 of 128 threads idle costs.
+
+So the dice does no extra work; it fills the block. The original time-based
+verdict was right, and it is now right for a reason that can be stated: removing
+the dice changes nothing about the search and only wastes the machine.
+
+It also refutes the hypothesis that motivated re-opening it — that 128 subtrees
+starting before any accept exists is what stops the bound arriving. If that were
+so, one seed would have cut the box count. It does not move it at all.
+
+Conservativeness holds on the single-seed build: all 20 configurations, `fn=0`.
+
+### The open question, sharpened
+
+Same workload, same 510,098 stride-1 queries, no shared bound on either side:
+
+| | boxes per query |
+|---|---:|
+| host `Tight`, `toi_stride=1` | **1.22** |
+| device `Tight`, `toi_stride=1` | **3,480** |
+
+Neither side has a cross-query bound to help it, so this is not the bound
+schedule. It is also not the dice, not the depth cap, not the split rule, not the
+acceptance test, and not the seeding — all measured.
+
+And it contradicts the isolated measurement from step 0, where the device was
+**2.31×** the host on one query at `max_toi = 1`. Two possibilities, and they are
+distinguishable by one look:
+
+1. `sccd_bench` passes the stride-1 call a `max_toi` already collapsed by the
+   stride-0 call. The host's root is then `[0, tiny]` and dies immediately, 1.22
+   boxes; the device would have to be failing to use the same bound. That is a
+   contained bug, and the first thing to check.
+2. The two populations differ — the curated query files step 0 used are not the
+   broad-phase candidates. That would make 2.31× and 2,852× both correct and
+   about different things.
+
+**Check what `max_toi` reaches each side's stride-1 call.** It is one print, and
+it decides between a bug and a population difference.
 
 **C2. Bound the search by `t` before refining `u` and `v`.** A 1D pass over `t`
 with `u` and `v` at full width is cheap and its rejections are sound; it can
