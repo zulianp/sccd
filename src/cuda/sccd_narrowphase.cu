@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <climits>
 #include <limits>
+#include <algorithm>
 #include <vector>
 
 #include <thrust/device_ptr.h>
@@ -2904,6 +2905,92 @@ namespace sccd {
                         worst,
                         worst_q);
                 for (int b = 0; b < 24; ++b) fprintf(stderr, "%llu%s", hist[b], b == 23 ? "\n" : ",");
+
+                // The histogram says a few queries carry almost everything and
+                // says nothing about *which*, so there has never been a way to
+                // look at one. SCCD_NP_WORST_CSV names a file; the geometry of
+                // the costliest queries is appended to it in the datasets' own
+                // query-CSV format, which sccd_np_trace reads, so one of them can
+                // be run on both machines and diffed box by box.
+                //
+                // Written as value/1 rather than as a dyadic rational: the
+                // coordinates have already been through the mesh (float) or the
+                // parser (double) by this point, so there is no exact rational to
+                // recover, and %.17g round-trips a double exactly.
+                if (const char* worst_csv = getenv("SCCD_NP_WORST_CSV")) {
+                    int want = 4;
+                    if (const char* n = getenv("SCCD_NP_WORST_N")) {
+                        want = atoi(n);
+                        if (want < 1) want = 1;
+                    }
+                    std::vector<size_t> order(noverlaps);
+                    for (size_t q = 0; q < noverlaps; ++q) order[q] = q;
+                    const size_t take = (size_t)want < noverlaps ? (size_t)want : noverlaps;
+                    std::partial_sort(order.begin(), order.begin() + take, order.end(),
+                                      [&](size_t a, size_t b) { return perq[a] > perq[b]; });
+
+                    // Everything needed to reconstruct a query lives on the
+                    // device: two index arrays, three or four element rows, and
+                    // the point rows behind two arrays of device pointers.
+                    std::vector<I> h_o0(noverlaps), h_o1(noverlaps);
+                    SCCD_CHECK_CUDA(cudaMemcpy(h_o0.data(), overlap0, noverlaps * sizeof(I), cudaMemcpyDeviceToHost));
+                    SCCD_CHECK_CUDA(cudaMemcpy(h_o1.data(), overlap1, noverlaps * sizeof(I), cudaMemcpyDeviceToHost));
+                    T* h_sp[3];
+                    T* h_ep[3];
+                    SCCD_CHECK_CUDA(cudaMemcpy(h_sp, v0, 3 * sizeof(T*), cudaMemcpyDeviceToHost));
+                    SCCD_CHECK_CUDA(cudaMemcpy(h_ep, v1, 3 * sizeof(T*), cudaMemcpyDeviceToHost));
+                    const int nrows = is_vf ? 3 : 2;
+                    I* h_elem[4] = {nullptr, nullptr, nullptr, nullptr};
+                    SCCD_CHECK_CUDA(cudaMemcpy(h_elem, elements, nrows * sizeof(I*), cudaMemcpyDeviceToHost));
+
+                    auto node_at = [&](I* row, const I e) {
+                        I v = 0;
+                        SCCD_CHECK_CUDA(cudaMemcpy(&v, row + (size_t)e * element_stride, sizeof(I),
+                                                   cudaMemcpyDeviceToHost));
+                        return v;
+                    };
+                    auto point_at = [&](T* const rows[3], const I node, double out[3]) {
+                        for (int d = 0; d < 3; ++d) {
+                            T v = T(0);
+                            SCCD_CHECK_CUDA(cudaMemcpy(&v, rows[d] + (size_t)node, sizeof(T),
+                                                       cudaMemcpyDeviceToHost));
+                            out[d] = (double)v;
+                        }
+                    };
+
+                    FILE* f = fopen(worst_csv, "a");
+                    if (f) {
+                        for (size_t k = 0; k < take; ++k) {
+                            const size_t q = order[k];
+                            if (perq[q] == 0) break;  // nothing left worth dumping
+                            I node[4];
+                            if (is_vf) {
+                                node[0] = h_o0[q];
+                                for (int r = 0; r < 3; ++r) node[r + 1] = node_at(h_elem[r], h_o1[q]);
+                            } else {
+                                node[0] = node_at(h_elem[0], h_o0[q]);
+                                node[1] = node_at(h_elem[1], h_o0[q]);
+                                node[2] = node_at(h_elem[0], h_o1[q]);
+                                node[3] = node_at(h_elem[1], h_o1[q]);
+                            }
+                            fprintf(stderr, "sccd-np-worst %s stride=%d q=%zu boxes=%llu -> %s\n",
+                                    is_vf ? "vf" : "ee", toi_stride, q, perq[q], worst_csv);
+                            // Four start points then four end points, one row
+                            // each: the layout every query CSV in data/ uses.
+                            for (int half = 0; half < 2; ++half) {
+                                T* const* rows = half == 0 ? h_sp : h_ep;
+                                for (int k4 = 0; k4 < 4; ++k4) {
+                                    double xyz[3];
+                                    point_at(rows, node[k4], xyz);
+                                    fprintf(f, "%.17g,1,%.17g,1,%.17g,1\n", xyz[0], xyz[1], xyz[2]);
+                                }
+                            }
+                        }
+                        fclose(f);
+                    } else {
+                        fprintf(stderr, "sccd-np-worst: could not open %s\n", worst_csv);
+                    }
+                }
 
                 unsigned long long lvl[80] = {0}, depth_acc = 0;
                 SCCD_CHECK_CUDA(cudaMemcpyFromSymbol(lvl, g_np_level, sizeof(lvl)));
