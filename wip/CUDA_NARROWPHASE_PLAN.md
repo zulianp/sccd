@@ -368,16 +368,66 @@ for a knob that removes work, it is one sample against an unresolvable baseline,
 and it is recorded as unexplained rather than as a result. The default is 1, which
 is the configuration actually measured.
 
-### What this needs next
+### On the real workload it does nothing
 
-**A workload large enough to time.** The broad-phase candidate sets are 843,140 to
-33 million pairs against these files' 19,034, and the narrow phase there runs for
-tens to hundreds of milliseconds rather than 2.6. That is where a 4–9% overhead
-and a 54% box reduction can both be seen. It means building `sccd_bench` on Alps,
-which needs smesh in the uenv — not yet done, and the next concrete task.
+`sccd_bench` now builds on Alps (smesh at
+`/capstor/scratch/cscs/zulianp/installations/smesh-rel/lib64/cmake/smesh`), so the
+broad-phase candidate set can be measured. cloth-funnel, 4 cases, device, mode 2,
+two runs of each build:
 
-Until then: the box result is solid and the time result is one row. The switch
-stays off by default.
+| run | s0 boxes | s0 ms | s1 boxes | s1 ms | fp | fn |
+|---|---:|---:|---:|---:|---:|---:|
+| DFS | 4,082,926 | 12.39 | 1,775,276,978 | 160.51 | 75 | 0 |
+| best-first | 3,984,686 | 12.03 | 2,274,348,484 | 164.37 | 75 | 0 |
+| DFS | 4,049,386 | 11.76 | 2,001,051,794 | 158.07 | 75 | 0 |
+| best-first | 4,079,490 | 12.43 | 1,772,120,888 | 165.19 | 75 | 0 |
+
+**No difference.** Stride-0 boxes agree within 2%, time within 5%, and the
+stride-1 box count swings 28% between two runs of the *same* binary. False
+positives are 75 and false negatives 0 in all four, so the results are identical.
+
+The 54% on cloth-funnel 317vf does not carry over, and in hindsight the curated
+files already said so: the reduction appeared only where the search is deep, and
+on the broad-phase set stride 0 averages **7.6 boxes per query**. There is no
+frontier to reorder. C1's first cut is a no-op on the workload that matters.
+
+**C1 in this form is finished.** A global frontier bucketed by `tlower` would go
+further than a block-local swap, but the evidence now says the block-local
+frontier is not where the work is, and there is no reason to think a global one
+would be either — not on a path averaging 7.6 boxes.
+
+## What the real workload says instead: stride 1 is the whole problem
+
+The same four runs, split by code path:
+
+| path | queries | boxes | boxes/query | ms |
+|---|---:|---:|---:|---:|
+| `toi_stride=0` | 537,940 | 4.08 M | **7.6** | **12.4** |
+| `toi_stride=1` | 510,098 | 1.78 G | **3,480** | **160.5** |
+
+Stride 1 costs **13× the time and 435× the boxes**, and individual calls are far
+worse than the average: one call ran 3 queries at 2,060,321 boxes each, another 15
+queries at 8,482,418 each.
+
+This is the same imbalance the earlier counting found — 274 queries accounting for
+88% of the device's boxes — but measured after the queue rewrite, on the real
+candidate sets, with the two paths separated and the time attributed. It is not a
+tail on the main path. It is a different kernel, `narrow_phase_dfs_*` with one
+block per query and the 128-way seeding dice, and it dominates the narrow phase.
+
+**Everything else in this document is optimising the 12 ms.** The next work is on
+the 160 ms:
+
+- **C4 is now the top item, not a footnote.** The 128-way dice evaluates 128
+  subboxes per query before the search starts. The measurement that kept it —
+  a single root seed read 803 → 871 ms on armadillo edge-edge — predates knowing
+  the path costs millions of boxes per query, and it was a time measurement on a
+  baseline this document has since shown to be unstable. Re-run it with box
+  counts.
+- **Why is a per-query answer 435× a shared-minimum answer?** Both search the same
+  geometry. Stride 1 loses only the shared bound, and the shared bound is worth
+  12.6× on the host. 435× is not that. Something else about the block-per-query
+  kernel is wrong, and it has never been looked at directly.
 
 **C2. Bound the search by `t` before refining `u` and `v`.** A 1D pass over `t`
 with `u` and `v` at full width is cheap and its rejections are sound; it can
