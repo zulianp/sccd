@@ -52,7 +52,7 @@ per query against the host's 1,844.
 
 Two implementations ship — sweep-and-prune and a 2D cell list — and they produce
 identical pair sets. `sccd_broadphase_strategy.hpp` picks between them by racing
-them at run time; five attempts to predict the winner from geometry all failed.
+them at run time, because which one wins is not predictable from the geometry.
 
 ## End to end, each side at its best mode
 

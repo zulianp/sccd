@@ -52,12 +52,12 @@ separately, into `../build_json`.
 
 ## Two things that will bite
 
-**Modes are `0` and `2`.** `SCCD_NARROWPHASE_MODE=1` and `=3` no longer exist;
-setting either warns and runs `Relaxed`, so a sweep that includes them measures mode
-0 twice under two names. Older CSVs under `oracle/` carry the retired names
-(`scalar`, `vector`, `ti-vec`, `ti-compat`) and the report renderer maps them.
+**Modes are `0` and `2`.** Anything else warns and runs `0`, so a sweep over
+`0 1 2` measures mode 0 twice under two names. CSVs under `oracle/` may carry
+names from other runs (`scalar`, `vector`, `ti-vec`, `ti-compat`); the report
+renderer maps them onto the current ones.
 
 **Measure inside one allocation.** Between `srun` allocations this harness varies
-by about 40%, and several conclusions in this project were retracted after being
-read off differences smaller than that. `assess.sbatch.sh` interleaves variants
-inside one job for exactly this reason, and says so at length.
+by about 40%, so a difference smaller than that is not a result.
+`assess.sbatch.sh` interleaves variants inside one job for that reason, and says
+so at length.

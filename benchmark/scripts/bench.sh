@@ -66,10 +66,9 @@ else
 fi
 
 # A CMake cache remembers the source directory it was generated from and refuses
-# to be reused with another, which is a hard error rather than a reconfigure.
-# This project moved (external/json -> benchmark/json), so an existing build tree
-# from before that is stale; drop it rather than making the caller work it out
-# from "does not match the source used to generate cache".
+# to be reused with another -- a hard error, not a reconfigure. Drop a build tree
+# that points elsewhere rather than making the caller work that out from CMake's
+# "does not match the source used to generate cache".
 if [[ -f "${JSON_BUILD_DIR}/CMakeCache.txt" ]]; then
     cached_home="$(sed -n 's/^CMAKE_HOME_DIRECTORY:INTERNAL=//p' "${JSON_BUILD_DIR}/CMakeCache.txt" | tail -n 1)"
     if [[ -n "${cached_home}" && "${cached_home}" != "${JSON_PROJECT_DIR}" ]]; then

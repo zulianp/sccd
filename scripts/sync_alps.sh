@@ -15,27 +15,21 @@ PROJECT_DIR="$( cd -- "${SCRIPTPATH}/.." >/dev/null 2>&1 ; pwd -P )"
 
 DEST="${1:-${SCCD_ALPS_DIR:-alps:/capstor/scratch/cscs/zulianp/sccd}}"
 
-# What gets sent is what git tracks, and the filter says so directly: rsync reads
-# the same .gitignore files git does, rather than carrying a hand-maintained
-# exclude list that drifts from them. The four --include rules ahead of it
-# restore the tracked files whose .gitignore entry is a negation, since rsync's
-# per-directory merge reads `!` as a literal pattern rather than as one.
+# What gets sent is what git tracks: rsync reads the same .gitignore files git
+# does, so there is no exclude list here to keep in step with them. The four
+# --include rules ahead of the merge restore the tracked files whose .gitignore
+# entry is a negation, since rsync's per-directory merge reads `!` as a literal
+# pattern rather than as one. That comes to 151 files and 2.3 MB.
 #
-# Measured against this tree: 151 files, 2.3 MB, and every tracked file present.
-# The hand-maintained list this replaced sent 836 MB, 770 MB of which was
-# benchmark/alps -- run output that had come *from* the cluster.
+# --delete matters. Sources are globbed by CMake (file(GLOB_RECURSE ...)), so a
+# file left behind from an earlier sync -- a renamed header, a demoted kernel --
+# is compiled into the next build, and the SCCD_PUBLIC_HEADERS guard turns a
+# stale public header into a configure-time FATAL_ERROR. Excluded paths are not
+# deleted, so the remote build trees survive a re-sync.
 #
-# --delete is the point, not a flourish. Sources are globbed by CMake
-# (file(GLOB_RECURSE ...)), so a file left behind from an earlier sync -- a
-# header that has since been renamed, a demoted kernel -- is compiled into the
-# next build, and the SCCD_PUBLIC_HEADERS guard turns a stale public header into
-# a configure-time FATAL_ERROR. Without it the remote tree only ever grows.
-#
-# Anchor every pattern with a leading slash or a trailing one. An unanchored
-# pattern matches at every level: the version of this script that this replaced
-# excluded 'api', which silently dropped src/api/ -- the library's only compiled
-# translation unit -- and '*git', which matches .git but would also match a
-# directory named 'digit'.
+# Anchor every pattern with a leading or trailing slash. An unanchored pattern
+# matches at every level: `api` would drop src/api/, the library's only compiled
+# translation unit, and `*git` matches .git but also a directory named `digit`.
 #
 # data/ is excluded with everything else git ignores. Fetch it on the cluster
 # with benchmark/scripts/download_datasets.sh rather than pushing it over the link.
