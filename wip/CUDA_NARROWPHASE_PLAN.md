@@ -745,6 +745,50 @@ that follow, while the device starts every query at once. It is a property of
 running queries in sequence, not of the search — which is now the same search on
 both machines, as the isolated queries show.
 
+## E: neither premise survives measurement
+
+A1 packs one query per warp so the geometry is held once instead of per thread;
+A2 spends the registers that frees on carrying the eight corner values, so a split
+costs 12 corner evaluations instead of 48. Both exist to make the kernel cheaper
+per box. Neither is worth building, and the two measurements that say so are
+cheap enough that they should have been made before the family was written down.
+
+**Not arithmetic-bound.** cloth-funnel, stride 0, device: 3,762,296 boxes in
+27.2 ms is 138 M boxes/s, and a box is 8 corners over 3 axes. That is 3.3 G corner
+evaluations per second — order 33 GFLOP/s against a GH200's fp64 peak near 30,000.
+**0.11% of peak.** A 4× cut in arithmetic on a kernel using a thousandth of the
+arithmetic units buys nothing.
+
+**Not occupancy-bound either.** `-maxrregcount` forces the register count down and
+the resident blocks per SM up. From the default to 128 registers, roughly doubling
+to tripling residency:
+
+| scene | | default | 200 | 168 | 128 |
+|---|---|---:|---:|---:|---:|
+| cloth-funnel | s0 | 28.3 | 26.4 | 26.3 | 26.2 |
+| cloth-funnel | s1 | 33.3 | 33.8 | 32.7 | 32.9 |
+| armadillo-rollers | s0 | 37.2 | 35.5 | 36.0 | 35.3 |
+| armadillo-rollers | s1 | 64.5 | 66.2 | 62.7 | 63.9 |
+
+2–5%, inside the run-to-run band, with false positives unchanged at 260 and 5,637
+and `fn=0` throughout. The 12.5% occupancy that this document has cited since the
+beginning is not what is costing the time.
+
+**So what is?** Not arithmetic, not occupancy. The leading suspect is
+**divergence**: the loop carries three `__syncthreads()` per iteration and every
+thread waits for the slowest, on a depth-first search whose depth varies by orders
+of magnitude between threads in a block. That is item F, and nothing has measured
+it.
+
+### One thing the register dump did turn up
+
+`narrow_phase_vq_kernel` — the vertex-quad kernel, both the `double` and `float`
+instantiations — compiles to **255 registers with 136 bytes of spill stores and
+216 of spill loads**, and an 8,128-byte stack frame. Every other kernel in the
+build is at 32 to 40 registers with no spills. Quads are a supported topology and
+nothing in this investigation has looked at their kernel; that it is the one
+spilling is worth knowing before anyone does.
+
 ## What must not change
 
 - **Conservativeness.** A reported time of impact is at or before the true one,
@@ -787,7 +831,8 @@ remains is listed first.
 | ~~**B**~~ | ~~D2, the capacity-1024 anomaly~~ | **Gone.** It no longer reproduces; the curve is smooth and shallow from 4 to 1024, and no capacity in that range differs from another by more than the run-to-run spread. D1 is unblocked. Detail below. |
 | ~~**C**~~ | ~~Refresh the end-to-end table~~ | **Done.** The reduction is `broad_ms + narrow_ms`, no prep, min over modes — recovered the same way as the narrow-phase table. It now has a row per stride, because only one of them moved. |
 | ~~**D**~~ | ~~The per-query residual~~ | **Gone.** The device now matches the host box-for-box on two of the three worst queries and is 1.30× on the third. The counting asymmetry it was blamed on is 0.011–0.025%. Detail below. |
-| **E** | **A1/A2, per-box cost** | Still last. The stride-1 path is scheduling-bound, so 4× of arithmetic buys nothing there either. |
+| ~~**E**~~ | ~~A1/A2, per-box cost~~ | **Closed, not worth doing.** The kernel is neither arithmetic-bound (0.11% of fp64 peak) nor occupancy-bound (4× the blocks per SM buys 2–5%). Both premises measured false. Detail below. |
+| **F** | **What the kernel *is* bound by** | New, and open. Three `__syncthreads()` per loop iteration on a DFS whose depth varies wildly across threads is the leading suspect — a divergence bound, not arithmetic or occupancy. Nothing has measured it. |
 | — | *Loose end* | The host's mode 0 increments the box counter and nothing prints it — the `fprintf` lives in `narrow_phase_tight_*` and the scalar path has none. Host `Relaxed` box counts are not obtainable from a run. |
 
 ### Closed
