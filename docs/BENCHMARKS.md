@@ -28,6 +28,14 @@ is `find_impact_times` — one result per candidate, no shared bound.
 
 ## Narrow phase, milliseconds
 
+> **The GPU columns predate a fix and understate the device.** The device's
+> edge-edge domain tolerances were assigned to the wrong axes, which starved the
+> `u` axis of splits and made the search run far past where it should have
+> stopped. Measured before and after on cloth-funnel, same binary and same cases:
+> the narrow phase goes from 172.90 ms to **49.69 ms**, a **3.5×** improvement,
+> and stride-1 boxes fall 13.8×. Re-measuring this table on all three scenes is
+> outstanding; the CPU columns are unaffected.
+
 | scene | mode | CPU s0 | GPU s0 | CPU s1 | GPU s1 |
 |---|---|---:|---:|---:|---:|
 | cloth-funnel | Fast | **6.2** | 23.1 | **9.7** | 56.3 |
@@ -68,7 +76,7 @@ Signed error over queries with a real collision. **Zero late times of impact and
 zero missed collisions in all twelve configurations**, across 101,164 roots. Late
 would be a correctness failure; early only costs a solver step size.
 
-| scene | roots | Fast CPU | Fast GPU | Tight CPU | Tight GPU |
+| scene | roots | Relaxed CPU | Relaxed GPU | Tight CPU | Tight GPU |
 |---|---:|---:|---:|---:|---:|
 | cloth-funnel | 104 | 1.18e-01 | 1.60e-01 | **1.72e-03** | 9.40e-02 |
 | armadillo-rollers | 5,636 | 4.04e-04 | 5.56e-04 | **1.83e-05** | **1.83e-05** |
@@ -85,6 +93,44 @@ Accuracy is measured on the datasets' curated query sets, which carry exact
 roots and whose coordinates are exact dyadic rationals. It cannot be measured
 through the mesh path: smesh stores coordinates as `float`, so the mesh geometry
 is a rounded copy of the geometry those roots belong to.
+
+## Hit and miss, against TightInclusion and against exact roots
+
+`ti_oracle`, every query of every curated query set, edge-edge, one GH200
+allocation. `FP`/`FN` are against TightInclusion's own answer; `gtMISS`/`gtLATE`
+are against the datasets' exact roots and are the gate.
+
+| scene | queries | TI hits | mode | hits | FP | FN | gtMISS | gtLATE |
+|---|---:|---:|---|---:|---:|---:|---:|---:|
+| cloth-funnel | 6,751 | 6,259 | `tight` CPU | 6,259 | **0** | **0** | 0 | 0 |
+| | | | `tight` GPU | 6,259 | **0** | **0** | 0 | 0 |
+| | | | `relaxed` CPU | 6,700 | 441 | 0 | 0 | 0 |
+| | | | `relaxed` GPU | 6,734 | 475 | 0 | 0 | 0 |
+| armadillo-rollers | 99,104 | 98,761 | `tight` CPU | 98,761 | **0** | **0** | 0 | 0 |
+| | | | `tight` GPU | 98,761 | **0** | **0** | 0 | 0 |
+| | | | `relaxed` CPU | 98,895 | 134 | 0 | 0 | 0 |
+| | | | `relaxed` GPU | 98,930 | 169 | 0 | 0 | 0 |
+| cloth-ball | 557,683 | 557,668 | `tight` CPU | 557,668 | **0** | **0** | 0 | 0 |
+| | | | `tight` GPU | 557,668 | **0** | **0** | 0 | 0 |
+| | | | `relaxed` CPU | 557,669 | 1 | 0 | 0 | 0 |
+| | | | `relaxed` GPU | 557,669 | 1 | 0 | 0 | 0 |
+
+**`Tight` reproduces TightInclusion's hit set exactly on both machines**, over
+663,538 queries: no false positive, no false negative, no missed collision and no
+late time of impact. The gate exits zero on all three scenes.
+
+`Relaxed` accepts sooner by design, so it reports more hits — 441 and 475 extra on
+cloth-funnel out of 6,751. Those are false positives, which cost work and never
+safety, and the two implementations of the looser predicate do not agree query for
+query, which is expected: `Relaxed` is a different search on each machine, unlike
+`Tight`.
+
+One difference worth naming rather than hiding. The host's `Tight` is bit-identical
+to TightInclusion (`abserr_max` 0.000e+00 on every scene); the device's reproduces
+the hit set exactly but its times of impact sit up to 5.25e-3, 4.43e-4 and 1.76e-6
+*after* TightInclusion's. TightInclusion's answer is itself a lower bound on the
+truth, so being later than it is not a violation — `gtLATE` is zero — and the
+`lateTI` column that counts it is documented as over-reporting for that reason.
 
 ## Device narrow phase, occupancy
 
@@ -108,6 +154,8 @@ Counted with `-DSCCD_NP_COUNT_BOXES` (off by default), cloth-funnel, `Tight`:
 | device, `toi_stride=0` | 97,757,836 | 111 |
 | device, `toi_stride=1` | 705,986,614 | 2,576,594 |
 
-The device does 94× the host's work on the earliest-impact path. The per-query
-path is worse by an order of magnitude and is the largest open item; see
-`wip/TODO.md`.
+These counts are from the same pre-fix build as the timing table above. After the
+edge-edge tolerance fix the same cloth-funnel run classifies 1.35 M boxes on the
+earliest-impact path and 129 M on the per-query path, against 4.08 M and 1.78 G
+before. The investigation is in
+[`../wip/CUDA_NARROWPHASE_PLAN.md`](../wip/CUDA_NARROWPHASE_PLAN.md).
