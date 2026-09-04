@@ -542,11 +542,11 @@ namespace {
     // does not honour SCCD_NARROWPHASE_MODE at all -- the device has one kernel
     // -- so unlike the host rows its name describes the hardware, not the
     // algorithm.
-    // The names are the shipped mode names: SCCD_NARROWPHASE_MODE 0 is Fast and 2
+    // The names are the shipped mode names: SCCD_NARROWPHASE_MODE 0 is Relaxed and 2
     // is Tight. There used to be a third host row, "vector", pinned to mode 1;
-    // mode 1 no longer exists, so that row was measuring Fast a second time under
+    // mode 1 no longer exists, so that row was measuring Relaxed a second time under
     // a different name.
-    enum class Mode { Fast, Tight, DeviceFast, DeviceTight };
+    enum class Mode { Relaxed, Tight, DeviceRelaxed, DeviceTight };
 #ifdef SCCD_ENABLE_CUDA
     constexpr int N_MODES = 4;
 #else
@@ -555,9 +555,9 @@ namespace {
 
     const char* mode_name(const Mode m) {
         switch (m) {
-            case Mode::Fast: return "fast";
+            case Mode::Relaxed: return "relaxed";
             case Mode::Tight: return "tight";
-            case Mode::DeviceFast: return "device-fast";
+            case Mode::DeviceRelaxed: return "device-relaxed";
             case Mode::DeviceTight: return "device-tight";
         }
         return "?";
@@ -577,9 +577,9 @@ namespace {
     void select_mode(const Mode m) {
         const char* value = "0";
         switch (m) {
-            case Mode::Fast: value = "0"; break;
+            case Mode::Relaxed: value = "0"; break;
             case Mode::Tight: value = "2"; break;
-            case Mode::DeviceFast: value = "0"; break;
+            case Mode::DeviceRelaxed: value = "0"; break;
             case Mode::DeviceTight: value = "2"; break;
         }
         setenv("SCCD_NARROWPHASE_MODE", value, 1);
@@ -639,9 +639,9 @@ int main(int argc, char** argv) {
                      "impact later than the dataset's exact root; both break\n"
                      "conservativeness. Pass --no-strict to report without failing.\n"
                      "\n"
-                     "--gate MODE restricts the exit code to one mode: fast, tight"
+                     "--gate MODE restricts the exit code to one mode: relaxed, tight"
 #ifdef SCCD_ENABLE_CUDA
-                     ", device-fast, device-tight"
+                     ", device-relaxed, device-tight"
 #endif
                      ", or all (the default).\n"
 #ifdef SCCD_ENABLE_CUDA
@@ -722,11 +722,11 @@ int main(int argc, char** argv) {
             std::printf("%-12s %12s %12s %10s\n", "mode", "stride1_ms", "stride0_ms", "ratio");
             for (int m = 0; m < N_MODES; ++m) {
                 const Mode mode = mode_of(m);
-                const bool is_device = (mode == Mode::DeviceFast || mode == Mode::DeviceTight);
+                const bool is_device = (mode == Mode::DeviceRelaxed || mode == Mode::DeviceTight);
                 // Every mode, host and device, at both strides. The host rows are
                 // what make a device row readable: `tight` and `device-tight` run
-                // the identical search, and `fast` is the host counterpart of
-                // `device-fast`. Without a like-for-like pair there is
+                // the identical search, and `relaxed` is the host counterpart of
+                // `device-relaxed`. Without a like-for-like pair there is
                 // no way to tell "this kernel is inefficient" from "this search is
                 // expensive on this geometry".
                 select_mode(mode);
@@ -844,7 +844,7 @@ int main(int argc, char** argv) {
                 std::vector<scalar_t> toi(qs.n_queries, 1.0);
                 const double t0 = now_seconds();
 #ifdef SCCD_ENABLE_CUDA
-                if (mode_of(m) == Mode::DeviceFast || mode_of(m) == Mode::DeviceTight) {
+                if (mode_of(m) == Mode::DeviceRelaxed || mode_of(m) == Mode::DeviceTight) {
                     if (opt.device_float) {
                         run_device_narrow_phase<float>(qs, phase.is_vf, opt.max_depth, opt.tol, toi);
                     } else {
@@ -979,13 +979,13 @@ int main(int argc, char** argv) {
                     "  relerr over the %zu/%zu queries with TI toi >= %g; the rest are covered by abserr.\n",
                     stats[0].rel_err.size(), stats[0].rel_err.size() + stats[0].near_zero_ref, REL_ERR_FLOOR);
 #ifdef SCCD_ENABLE_CUDA
-        std::printf("  device rows: CUDA narrow phase in %s. 'device-fast' is the\n"
+        std::printf("  device rows: CUDA narrow phase in %s. 'device-relaxed' is the\n"
                     "  mode-0 kernel; 'device-tight' is mode 2, with TightInclusion's\n"
                     "  predicate, split rule and numerical error bound.\n",
                     opt.device_float ? "single precision (--device-float)" : "double precision");
 #endif
         if (gt_available) {
-            std::printf("  (ground truth available for %zu queries; gt_FN: fast=%zu tight=%zu)\n",
+            std::printf("  (ground truth available for %zu queries; gt_FN: relaxed=%zu tight=%zu)\n",
                         gt_available, stats[0].gt_false_negative, stats[1].gt_false_negative);
         }
 

@@ -13,7 +13,7 @@ supported configuration.
 
 | Variable | Values | Default | Effect |
 |---|---|---|---|
-| `SCCD_NARROWPHASE_MODE` | `0`, `2` | `0` | Narrow-phase kernel: `0` `Fast`, `2` `Tight`. `1` and `3` were removed; setting either warns and runs `0`. **Ignored for quads**, which have one root-finder variant. |
+| `SCCD_NARROWPHASE_MODE` | `0`, `2` | `0` | Narrow-phase kernel: `0` `Relaxed`, `2` `Tight`. `1` and `3` were removed; setting either warns and runs `0`. **Ignored for quads**, which have one root-finder variant. |
 | `SCCD_BROADPHASE` | `sweep`, `cell2d` | auto | Forces a broad phase instead of letting `choose_broadphase_strategy` decide. Both produce identical pair sets, so this only changes speed. |
 | `SCCD_USE_VNARROW_PHASE` | `0`, `1` | build option | Older, narrower switch for the vectorised vertex-face kernel. `SCCD_NARROWPHASE_MODE` supersedes it. |
 | `SCCD_VNARROWPHASE_TI_COMPAT` | `0`, `1` | build option | Corrects vectorised vertex-face output against TightInclusion. Requires a TightInclusion build. |

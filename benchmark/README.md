@@ -53,7 +53,7 @@ separately, into `../build_json`.
 ## Two things that will bite
 
 **Modes are `0` and `2`.** `SCCD_NARROWPHASE_MODE=1` and `=3` no longer exist;
-setting either warns and runs `Fast`, so a sweep that includes them measures mode
+setting either warns and runs `Relaxed`, so a sweep that includes them measures mode
 0 twice under two names. Older CSVs under `oracle/` carry the retired names
 (`scalar`, `vector`, `ti-vec`, `ti-compat`) and the report renderer maps them.
 

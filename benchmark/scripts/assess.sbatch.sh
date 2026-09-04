@@ -196,7 +196,7 @@ for rep in $(seq 1 "$ASSESS_REPEATS"); do
         #
         # Mode 1 used to be swept alongside them, so that demoting it would cite a
         # number. It did -- it was the slowest kernel on every scene -- and it is
-        # gone: SCCD_NARROWPHASE_MODE=1 now warns and runs Fast, so sweeping it
+        # gone: SCCD_NARROWPHASE_MODE=1 now warns and runs Relaxed, so sweeping it
         # would measure mode 0 twice under two names. Its rows are kept in
         # benchmark/assessment/assessment.csv as the evidence for that call.
         for mode in 0 2; do

@@ -49,15 +49,15 @@ Both handle triangles and quads, on host and device.
 
 | mode | `NarrowPhaseMode` | kernel |
 |---|---|---|
-| 0 | `Fast` | scalar; codomain widths against domain tolerances |
+| 0 | `Relaxed` | scalar; codomain widths against domain tolerances |
 | 2 | `Tight` | lane-packed; domain widths against domain tolerances |
 
-Two modes, and both ship because neither dominates: `Fast` wins cloth-funnel on
+Two modes, and both ship because neither dominates: `Relaxed` wins cloth-funnel on
 speed, `Tight` wins cloth-ball, and `Tight` is 69× tighter at the median error.
 They differ in accuracy and speed, never in safety — every mode is conservative.
 
 Modes 1 and 3 used to exist and are gone. Mode 1 was the vectorised form of the
-`Fast` predicate and was the **slowest** kernel in the library on every scene
+`Relaxed` predicate and was the **slowest** kernel in the library on every scene
 measured — 15.9 ms against 6.4 and 8.1 on cloth-funnel, 90.9 against 19.4 and
 17.5 on armadillo-rollers. It is in `spikes/`. Mode 3 ran mode 1 and corrected
 each answer with TightInclusion; a hybrid of this library's kernel and the
