@@ -1,5 +1,5 @@
-#include "broadphase.hpp"
-#include "sccd_smesh_CCD.hpp"
+#include "sccd_broadphase_sweep.hpp"
+#include "sccd_smesh_ccd.hpp"
 #include "smesh_mesh.hpp"
 #include "smesh_path.hpp"
 #include "smesh_test.hpp"

@@ -19,9 +19,9 @@
 // the invariant the CPU modes are. Without CUDA that mode is absent and nothing
 // else changes.
 
-#include "narrowphase.hpp"
-#include "smath.hpp"
-#include "srootfinder.hpp"
+#include "sccd_narrowphase.hpp"
+#include "sccd_math.hpp"
+#include "sccd_rootfinder.hpp"
 
 #ifdef SCCD_ENABLE_CUDA
 #include "sccd_narrowphase.cuh"

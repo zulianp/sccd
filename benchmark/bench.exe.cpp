@@ -1,5 +1,5 @@
 #include "sccd_narrowphase_mode.hpp"
-#include "sccd_smesh_CCD.hpp"
+#include "sccd_smesh_ccd.hpp"
 #include "smesh_buffer.hpp"
 #include "smesh_context.hpp"
 #include "smesh_device_buffer.hpp"

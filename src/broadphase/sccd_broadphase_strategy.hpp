@@ -2,7 +2,7 @@
 #define SCCD_BROADPHASE_STRATEGY_HPP
 
 #include "sccd_base.hpp"
-#include "smath.hpp"
+#include "sccd_math.hpp"
 
 #include <chrono>
 #include <cstdlib>

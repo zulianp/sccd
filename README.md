@@ -56,7 +56,7 @@ Three entry points, in decreasing order of how much they do for you.
 `SCCD_ENABLE_SMESH=ON`.
 
 ```cpp
-#include "sccd_smesh_CCD.hpp"
+#include "sccd_smesh_ccd.hpp"
 
 sccd::CCD<double> ccd(mesh);
 double toi;

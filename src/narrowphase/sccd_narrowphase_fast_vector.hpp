@@ -1,16 +1,16 @@
-#ifndef SCCD_VNARROWPHASE_HPP
-#define SCCD_VNARROWPHASE_HPP
+#ifndef SCCD_NARROWPHASE_FAST_VECTOR_HPP
+#define SCCD_NARROWPHASE_FAST_VECTOR_HPP
 
 #include "sccd_base.hpp"
 #include "sccd_narrowphase_mode.hpp"
-#include "smath.hpp"
-#include "snumerical_error.hpp"
-#include "snumtol.hpp"
-#include "sparallel.hpp"
+#include "sccd_math.hpp"
+#include "sccd_numerical_error.hpp"
+#include "sccd_tolerance.hpp"
+#include "sccd_parallel.hpp"
 // correct_vf_with_tight_inclusion() calls find_root_tight_inclusion_vf(), which
 // lives in srootfinder.hpp. narrowphase.hpp includes this header first, so the
 // declaration has to be pulled in here rather than left to include order.
-#include "srootfinder.hpp"
+#include "sccd_rootfinder.hpp"
 
 #include <algorithm>
 #include <array>

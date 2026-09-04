@@ -21,7 +21,7 @@
 // but nothing calls it: the dispatch that did is gone, and reviving it means
 // putting that branch back.
 
-#include "srootfinder.hpp"
+#include "sccd_rootfinder.hpp"
 
 namespace sccd {
 

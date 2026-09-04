@@ -1,5 +1,5 @@
-#ifndef S_ROOT_FINDER_HPP
-#define S_ROOT_FINDER_HPP
+#ifndef SCCD_ROOTFINDER_HPP
+#define SCCD_ROOTFINDER_HPP
 
 #include <algorithm>
 #include <cmath>
@@ -10,11 +10,11 @@
 #include <utility>
 #include <vector>
 
-#include "vaabb.hpp"
+#include "sccd_aabb.hpp"
 
-#include "roots.hpp"
-#include "snumerical_error.hpp"
-#include "snumtol.hpp"
+#include "sccd_objective.hpp"
+#include "sccd_numerical_error.hpp"
+#include "sccd_tolerance.hpp"
 
 // #define SCCD_ENABLE_TIGHT_INCLUSION
 #ifdef SCCD_ENABLE_TIGHT_INCLUSION
@@ -1676,4 +1676,4 @@ namespace sccd {
 
 }  // namespace sccd
 
-#endif  // S_ROOT_FINDER_HPP
+#endif  // SCCD_ROOTFINDER_HPP

@@ -23,7 +23,7 @@
 
 #include "sccd_config.hpp"
 #include "sccd_narrowphase_mode.hpp"
-#include "sccd_smesh_CCD.hpp"
+#include "sccd_smesh_ccd.hpp"
 
 #include <algorithm>
 #include <cstdio>

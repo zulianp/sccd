@@ -1,8 +1,8 @@
-#ifndef SCCD_SNUMERICAL_ERROR_HPP
-#define SCCD_SNUMERICAL_ERROR_HPP
+#ifndef SCCD_NUMERICAL_ERROR_HPP
+#define SCCD_NUMERICAL_ERROR_HPP
 
 #include "sccd_base.hpp"
-#include "smath.hpp"
+#include "sccd_math.hpp"
 
 #include <cmath>
 #include <limits>

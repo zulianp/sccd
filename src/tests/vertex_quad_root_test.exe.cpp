@@ -24,8 +24,8 @@
 //     safe direction and the whole design leans on it, which is also why the
 //     obvious reference does not work; see the note above planted_query.
 
-#include "narrowphase_vertex_quad.hpp"
-#include "srootfinder_vertex_quad.hpp"
+#include "sccd_narrowphase_quad.hpp"
+#include "sccd_rootfinder_quad.hpp"
 
 #include <cmath>
 #include <cstdio>

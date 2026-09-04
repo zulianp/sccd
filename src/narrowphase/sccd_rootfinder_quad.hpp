@@ -1,7 +1,7 @@
-#ifndef S_ROOT_FINDER_VERTEX_QUAD_HPP
-#define S_ROOT_FINDER_VERTEX_QUAD_HPP
+#ifndef SCCD_ROOTFINDER_QUAD_HPP
+#define SCCD_ROOTFINDER_QUAD_HPP
 
-#include "srootfinder.hpp"
+#include "sccd_rootfinder.hpp"
 
 namespace sccd {
 

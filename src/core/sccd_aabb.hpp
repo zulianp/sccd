@@ -1,5 +1,5 @@
-#ifndef VAABB_H
-#define VAABB_H
+#ifndef SCCD_AABB_HPP
+#define SCCD_AABB_HPP
 
 #include <assert.h>
 #include <float.h>
@@ -7,8 +7,8 @@
 #include <stdlib.h>
 
 #include "sccd_base.hpp"
-#include "smath.hpp"
-#include "sparallel.hpp"
+#include "sccd_math.hpp"
+#include "sccd_parallel.hpp"
 
 #if defined(__AVX512F__) || defined(__AVX2__)
 #include <immintrin.h>
@@ -777,4 +777,4 @@ namespace sccd {
     }
 }  // namespace sccd
 
-#endif  // VAABB_H
+#endif  // SCCD_AABB_HPP

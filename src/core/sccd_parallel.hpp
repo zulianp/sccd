@@ -21,7 +21,7 @@
 #include <cstddef>
 #include <vector>
 
-#include "smath.hpp"
+#include "sccd_math.hpp"
 
 namespace sccd {
     template <typename F>

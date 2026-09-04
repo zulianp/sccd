@@ -1,9 +1,9 @@
 // VF
 /* Auto-generated with SymPy (CSE + pow expansion) */
-#ifndef ROOTS_HPP
-#define ROOTS_HPP
+#ifndef SCCD_OBJECTIVE_HPP
+#define SCCD_OBJECTIVE_HPP
 
-#include "smath.hpp"
+#include "sccd_math.hpp"
 
 template <typename T>
 static inline void vf_objective(const T sv[3],
@@ -277,7 +277,7 @@ static inline void vf_all(const T sv[3],
 // EE
 /* Auto-generated with SymPy (CSE + pow expansion) */
 
-#include "smath.hpp"
+#include "sccd_math.hpp"
 
 template <typename T>
 static inline void ee_objective(const T sv[3],

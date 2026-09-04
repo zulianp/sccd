@@ -12,7 +12,7 @@ using namespace scalable_ccd;
 
 #include "broadphase_lb.hpp"
 #include "cell_broadphase.hpp"
-#include "narrowphase.hpp"
+#include "sccd_narrowphase.hpp"
 
 /// Geometry scalar type used for coordinates and AABB values.
 using geom_t = float;
