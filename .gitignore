@@ -51,15 +51,17 @@ data/
 csv/
 benchmark/alps/
 benchmark/reports/
-benchmark/figures/
-figures/
-!figures/README.md
+# Ignore the contents rather than the directory itself, so a README explaining
+# what lands there can still be tracked -- git does not descend into an ignored
+# directory, and a negation inside one never fires.
+**/figures/*
+!**/figures/README.md
 *.csv
 # Two exceptions: CSVs that are inputs or evidence rather than output -- the
 # oracle's query sets, and the measurement tables their write-ups cite.
 !benchmark/oracle/*.csv
 !benchmark/assessment/*.csv
-!notebook/**/*.csv
+!research/notebook/**/*.csv
 *.pdf
 *.aux
 *.log
@@ -101,7 +103,6 @@ benchmark/oracle/postfix/
 
 # Figures rendered by the analysis scripts.
 *.png
-!figures/*.png
 
 # Build trees, wherever they are dropped.
 build*/

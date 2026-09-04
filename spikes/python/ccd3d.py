@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
+# Demoted to spikes/ -- no caller anywhere in the repository.
+#
+# Three pass-through wrappers over python/sccd_reference.py, adding a docstring
+# each and nothing else. Its only importer, the cross-check script, bound
+# find_root_vf from here and then never called it -- it uses the C ABI binding
+# instead. Needs python/ on sys.path to run.
+
 
 from typing import Tuple, Optional
 
-from numeric_roots import (
+from sccd_reference import (
     find_root_vf_3d as _find_root_vf_3d_impl,
     visualize_Fvf_uv_norm_3d as _visualize_Fvf_uv_norm_3d_impl,
     visualize_scene_vf_3d as _visualize_scene_vf_3d_impl,

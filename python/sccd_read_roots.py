@@ -155,7 +155,7 @@ if __name__ == "__main__":
     import sys
 
     if len(sys.argv) != 2:
-        print("Usage: python read_wxf.py <path_to_wxf_file>")
+        print("Usage: python sccd_read_roots.py <path_to_wxf_file>")
         sys.exit(1)
 
     roots = read_wxf_roots(sys.argv[1])

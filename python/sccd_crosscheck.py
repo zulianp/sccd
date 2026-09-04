@@ -1,13 +1,32 @@
-# Read query and root files and test the CCD algorithm
-# use read_queries.py and read_wxf.py to read the files
-# use ccd3D.py to test the CCD algorithm
-# use the results to test the CCD algorithm
+#!/usr/bin/env python3
+"""Cross-check the C ABI against the datasets' exact roots.
 
-import read_queries
-import read_wxf
-from ccd3D import find_root_vf
-from numeric_roots import vf_F_3d, ee_F_3d, find_root_dfs_3D
-import read_mma
+    python3 sccd_crosscheck.py <dataset-dir> <vf|ee>
+
+Reads three files per frame from a benchmark dataset -- the query CSV, the
+Mathematica root archive, and the hit/miss booleans -- runs every query through
+the ctypes binding, and compares. It writes `<dataset>_<vf|ee>_table.csv`, which
+sccd_plot_toi_error.py and sccd_plot_fp_fn.py render.
+
+This is not a unit test and is not registered with ctest: it needs the datasets,
+which are gigabytes and not in the repository. sccd_binding_test.py is the test.
+
+What counts as a failure here is the conservativeness invariant, and only that:
+
+  a missed collision, or a time of impact later than the exact root, fails and
+  the script exits non-zero;
+
+  a false positive, or a time of impact earlier than the exact root, is reported
+  and is not a failure -- reporting a contact that is not there, or one before it
+  happens, costs work and never safety.
+
+Requires sympy, for reading the root archives. See README.md.
+"""
+
+import sccd_read_queries
+import sccd_read_roots
+from sccd_reference import vf_F_3d, ee_F_3d, find_root_dfs_3D
+import sccd_read_mma
 import sccd
 
 import time
@@ -85,6 +104,12 @@ if __name__ == "__main__":
     mismatches = 0
     false_positives = 0
     false_negatives = 0
+    # Late is the failure the whole design exists to prevent, and it is invisible
+    # to an unsigned error: a query can agree on hit-versus-miss and still report
+    # a time of impact after the true one. Count it separately from `mismatches`,
+    # which lumps early and late together.
+    late = 0
+    worst_late = 0.0
     
     funs = {
         "vf" : (sccd.find_root_vf, vf_F_3d, 40, 1e-14),
@@ -104,9 +129,9 @@ if __name__ == "__main__":
         
         print(f"Dataset {key}:")
         
-        query_data = read_queries.read_queries(query_file)
-        root_map   = read_wxf.read_wxf_roots(root_file)  # Dict[int] -> {t,a,b}
-        mma_bool   = read_mma.read_mma_bool(mma_file)    # List[bool]
+        query_data = sccd_read_queries.read_queries(query_file)
+        root_map   = sccd_read_roots.read_wxf_roots(root_file)  # Dict[int] -> {t,a,b}
+        mma_bool   = sccd_read_mma.read_mma_bool(mma_file)    # List[bool]
 
         n = len(query_data["s0"][0])
         if len(mma_bool) != n:
@@ -175,6 +200,11 @@ if __name__ == "__main__":
                     b_diff = abs(ret[3] - gt["b"])
                     expected_toi = gt["t"]
                     min_toi_expected = min(min_toi_expected, expected_toi)
+                    if ret[1] > gt["t"]:
+                        late += 1
+                        worst_late = max(worst_late, ret[1] - gt["t"])
+                        print(f'  {key}:{i}/{n}) LATE: toi={ret[1]} after the exact '
+                              f'root {gt["t"]} by {ret[1] - gt["t"]:.3e}')
                     if t_diff > tol_t or a_diff > tol_uv or b_diff > tol_uv:
                         print("-"*80)
                         print(f'  {key}:{i}/{n}) root_mismatch: ret={ret[1:]}, gt=({gt["t"]}, {gt["a"]}, {gt["b"]})')
@@ -199,4 +229,13 @@ if __name__ == "__main__":
     print(f"Summary: {total_cases} cases, {mismatches} mismatches, {false_positives} false positives, {false_negatives} false negatives.")
 
     table.save(f"{os.path.basename(base_folder)}_{prefix}_table.csv")
+
+    if late or false_negatives:
+        print(f"FAIL: {false_negatives} missed collisions, {late} times of impact "
+              f"after the exact root (worst by {worst_late:.3e}). "
+              f"Both break the conservativeness invariant.")
+        raise SystemExit(1)
+    print(f"OK: no missed collisions and no late times of impact over "
+          f"{total_cases} cases. {false_positives} false positives, which are allowed.")
+    raise SystemExit(0)
 
