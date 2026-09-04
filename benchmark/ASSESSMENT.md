@@ -596,6 +596,97 @@ is the same failure as a miss — and `fn` cannot see that. The
 conservative-to-conservative comparison is the mode-2 pair, which the device
 loses everywhere.
 
+## The full matrix: modes, strides, host and device
+
+Everything above measures one axis at a time. This is all of them crossed: two
+kernels, both `toi_stride` values, host and device, three scenes, 16 cases, three
+repeats, medians. Spread under 10% on every cell. Evidence is
+`benchmark/assessment/mode-stride-matrix.csv`, 576 rows, one per
+(repeat, scene, mode, space, case).
+
+`toi_stride=0` is `find_earliest_impact_time` — one time of impact for the step,
+so every query prunes against the running minimum. `toi_stride=1` is
+`find_impact_times` — one result per candidate, no shared bound, and on the device
+a different kernel entirely.
+
+### Timing
+
+Narrow-phase milliseconds, summed over 16 cases:
+
+| scene | mode | broad host/dev | stride 0 host/dev | stride 1 host/dev | S1÷S0 host/dev |
+|---|---|---:|---:|---:|---:|
+| cloth-funnel | 0 | 22.4 / **17.4** | **6.2** / 23.1 | **9.7** / 56.3 | 1.6× / 2.4× |
+| cloth-funnel | 2 | 22.5 / **17.4** | **7.1** / 36.5 | **12.3** / 789.9 | 1.7× / 21.6× |
+| armadillo-rollers | 0 | 30.1 / **15.7** | **18.0** / 31.7 | **62.8** / 218.8 | 3.5× / 6.9× |
+| armadillo-rollers | 2 | 30.3 / **15.8** | **17.4** / 56.3 | **77.3** / 3126.7 | 4.4× / 55.5× |
+| cloth-ball | 0 | 291.3 / **59.5** | 184.1 / **102.1** | **308.4** / 612.2 | 1.7× / 6.0× |
+| cloth-ball | 2 | 294.4 / **58.9** | 114.9 / **107.9** | **241.2** / 902.8 | 2.1× / 8.4× |
+
+**What the stride ratio measures.** On the host, asking for a result per candidate
+costs 1.6× to 4.4× — that is the value of the shared running minimum, paid back.
+On the device it costs 2.4× to 55×, because it is not the same kernel: stride 1
+runs the block-per-query path with its 128-way seeding dice, the one measured at
+2.58 million boxes per query against the host's 1,844. The stride ratio is the
+cleanest single number for that defect.
+
+### Accuracy, which had never been quantified
+
+Signed error against the datasets' exact roots, over queries with a real
+collision. **Zero late times of impact and zero missed collisions in all twelve
+configurations**, across 101,164 roots — so the invariant holds and what is left
+is how much accuracy each mode gives up.
+
+| scene | roots | mode 0 host | mode 0 device | mode 2 host | mode 2 device |
+|---|---:|---:|---:|---:|---:|
+| cloth-funnel | 104 | 1.18e-01 | 1.60e-01 | **1.72e-03** | 9.40e-02 |
+| armadillo-rollers | 5,636 | 4.04e-04 | 5.56e-04 | **1.83e-05** | **1.83e-05** |
+| cloth-ball | 95,424 | 4.08e-07 | 1.69e-06 | 3.85e-07 | **1.72e-07** |
+
+Median earliness; times of impact are in [0, 1] over the step. Worst cases run
+9.41e-01, 4.16e-02 and 1.29e-04 for mode 0 on the three scenes.
+
+**This is what the two modes are for, and the number was missing until now.** The
+TightInclusion-exact kernel is 69× tighter at the median than the scalar reference
+on cloth-funnel and 22× tighter on armadillo-rollers. Mode 0 buys its speed by
+accepting boxes much earlier, and on grazing contacts that costs nearly the whole
+step: a worst case of 0.94 hands the solver a time of impact near zero for a
+contact that happens near the end. On cloth-ball every configuration is within
+2.7e-04 and the choice does not matter.
+
+The device is consistently looser than the host at the same mode — the safe
+direction, but it means smaller solver steps and more false positives.
+
+**Modes 1 and 3 are absent** because they are validation-only and fall back to
+mode 0 without `SCCD_ENABLE_TIGHT_INCLUSION=ON`.
+
+**Do not divide the two stride-1 columns into each other.** The timings run the
+CCD narrow phase over every broad-phase pair; the errors run over the datasets'
+curated query sets, which are the queries that ship exact roots — 7 to 519 per
+case, against 843k to 33M pairs.
+
+## Retracted: every `fn=0` in this document before the matrix above
+
+Every measurement in this branch before the matrix reported `fn=0`, cited as
+evidence that no configuration missed a collision. **Those readings were vacuous.**
+
+The data tree they ran against has no exact roots and no `mma_bool`: the
+`roots/<key>/` directories contain only the benchmark's own output
+(`sccd_toi.float64`, `sccd_fp.uint8`, …) and not the `toi.float64` the oracle
+documents as ground truth. `write_case_outputs` sets `expected` from `mma_bool`
+if present and from the roots otherwise, so with neither it is false for every
+query — a false negative was impossible by construction, and `fp` was simply a
+count of collisions reported.
+
+What survives: `fp` remained a genuine *agreement* check. Identical `fp` across
+host, device and mode does show the configurations agreeing with each other,
+which is what it was used for when comparing kernels before and after a change.
+What does not survive is any claim that a kernel was checked against truth.
+
+The matrix above runs against a tree that does ship exact roots, so its zeros are
+measured. A dataset without `roots/<key>/toi.float64` cannot support a
+conservativeness claim, and the benchmark does not currently say so — it reports
+`fn=0` either way. That is worth fixing.
+
 ## Quads
 
 **Quads had no device narrow phase when this ran.** The three `hopper/refine-quad`
@@ -720,3 +811,6 @@ the timings stand.
 | device narrow phase | keep; the "loses by up to 87×" reading is retracted | mode for mode: 2.0× ahead on cloth-ball, 2.2–3.6× behind on the others |
 | device conservative kernel | **optimise** | being conservative costs the host 1.15× and the device 26× |
 | quads | ship; gaps are scheduled work | device path aborted at the time of this run |
+| narrow-phase mode 2 accuracy | **quantified** | 69× tighter median than mode 0 on cloth-funnel, 22× on armadillo |
+| conservativeness, all 12 configs | **holds** | 0 late and 0 missed over 101,164 exact roots |
+| `fn=0` before the matrix | **retracted** | that data tree ships no roots; the column was vacuous |

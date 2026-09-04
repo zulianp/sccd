@@ -640,6 +640,31 @@ namespace {
         }
     }
 
+    /**
+     * \brief Time the CCD narrow phase writing one time of impact per candidate.
+     *
+     * The zero-stride call below reduces to a single earliest time and can prune
+     * every query against the running minimum; this one has to finish each
+     * candidate, so the pair is what shows what that pruning is worth. Same
+     * geometry, same broad-phase output, same kernel -- only `toi_stride` differs.
+     */
+    double time_narrowphase_per_query(const bool is_vf, CCDRun& ccd_run, int& err) {
+        scalar_t toi = scalar_t(1);
+        smesh::SharedBuffer<scalar_t> vf_tois;
+        smesh::SharedBuffer<scalar_t> ee_tois;
+
+        const auto start = std::chrono::steady_clock::now();
+        if (is_vf) {
+            err = ccd_run.ccd->narrow_phase_fv(toi, vf_tois, narrowphase_max_depth, narrowphase_tol, 1);
+        } else {
+            err = ccd_run.ccd->narrow_phase_ee(toi, ee_tois, narrowphase_max_depth, narrowphase_tol, 1);
+        }
+        const auto stop = std::chrono::steady_clock::now();
+        static volatile scalar_t toi_sink;
+        toi_sink = toi;
+        return std::chrono::duration<double, std::milli>(stop - start).count();
+    }
+
     double time_narrowphase_zero_stride(const bool is_vf, CCDRun& ccd_run, int& err) {
         scalar_t toi = scalar_t(1);
         smesh::SharedBuffer<scalar_t> vf_tois;
@@ -791,6 +816,7 @@ namespace {
                             const double prep_ms,
                             const double broad_ms,
                             const double narrow_ms,
+                            const double narrow_ms_s1,
                             const smesh::ExecutionSpace execution_space,
                             BroadphaseResult& broadphase,
                             std::vector<double>& timings_ms) {
@@ -829,6 +855,17 @@ namespace {
         fp_broad_c0.reserve(static_cast<std::size_t>(broadphase.false_positives));
         fp_broad_c1.reserve(static_cast<std::size_t>(broadphase.false_positives));
 
+        // Signed error against the exact roots. Unsigned error would hide the
+        // only failure that matters: a time of impact *after* the true one lets a
+        // solver step through the contact, and is as bad as missing it. Early is
+        // the safe direction and is reported separately as accuracy.
+        std::uint64_t toi_n = 0;
+        std::uint64_t toi_late = 0;
+        double toi_max_late = 0.0;
+        double toi_max_early = 0.0;
+        std::vector<double> toi_early;
+        toi_early.reserve(q0.size());
+
         std::uint64_t fp_count = 0;
         std::uint64_t fn_count = 0;
         for (std::size_t i = 0; i < q0.size(); ++i) {
@@ -847,6 +884,20 @@ namespace {
             fn[i] = static_cast<std::uint8_t>(!found && expected);
             fp_count += fp[i];
             fn_count += fn[i];
+
+            if (i < root_toi.size() && sccd::is_finite_bits(root_toi[i]) && found) {
+                const double ref = static_cast<double>(root_toi[i]);
+                const double got = static_cast<double>(sccd_toi[i]);
+                ++toi_n;
+                if (got > ref) {
+                    ++toi_late;
+                    if (got - ref > toi_max_late) toi_max_late = got - ref;
+                } else {
+                    const double early = ref - got;
+                    toi_early.push_back(early);
+                    if (early > toi_max_early) toi_max_early = early;
+                }
+            }
 
             const bool broad_found = contains_pair(broadphase.pairs, pair_key(c0[i], c1[i]));
             if (!broad_found) {
@@ -885,10 +936,18 @@ namespace {
         // The narrow-phase mode is read from the environment per call, so it is
         // recorded per row: a sweep runs the binary once per mode and the rows
         // stay distinguishable when the results are concatenated.
+        double toi_med_early = 0.0;
+        if (!toi_early.empty()) {
+            std::nth_element(toi_early.begin(), toi_early.begin() + toi_early.size() / 2, toi_early.end());
+            toi_med_early = toi_early[toi_early.size() / 2];
+        }
+
         std::cout << dataset << ',' << sccd::narrow_phase_mode_name(sccd::narrow_phase_mode()) << ','
                   << case_file.key << ',' << (case_file.is_vf ? "vf" : "ee") << ',' << narrow_queries
                   << ',' << prep_ms << ',' << broad_ms << ',' << narrow_ms << ',' << query_narrow_ms << ','
-                  << fp_count << ',' << fn_count << ',' << broadphase.false_positives << ',' << broad_fn_count << '\n';
+                  << fp_count << ',' << fn_count << ',' << broadphase.false_positives << ',' << broad_fn_count
+                  << ',' << narrow_ms_s1 << ',' << toi_n << ',' << toi_late << ',' << toi_max_late << ','
+                  << toi_max_early << ',' << toi_med_early << '\n';
         return wrote;
     }
 
@@ -973,6 +1032,14 @@ namespace {
             return false;
         }
 
+        narrow_err = SCCD_SUCCESS;
+        const double narrow_ms_s1 = time_narrowphase_per_query(case_file.is_vf, ccd_run, narrow_err);
+        if (narrow_err != SCCD_SUCCESS) {
+            std::cerr << "error: CCD per-query narrowphase failed for " << dataset << "/" << case_file.key
+                      << "\n";
+            return false;
+        }
+
         return write_case_outputs(dataset_dir,
                                   dataset,
                                   case_file,
@@ -986,6 +1053,7 @@ namespace {
                                   prep_ms,
                                   broad_ms,
                                   narrow_ms,
+                                  narrow_ms_s1,
                                   execution_space,
                                   broadphase,
                                   timings_ms);
@@ -1014,7 +1082,8 @@ int main(int argc, char** argv) {
     if (using_global_missing_pairs_report) {
         ok = initialize_missing_pairs_report(data_dir) && ok;
     }
-    std::cout << "dataset,mode,case,type,queries,prep_ms,broad_ms,narrow_ms,query_narrow_ms,fp,fn,broad_fp,broad_fn\n";
+    std::cout << "dataset,mode,case,type,queries,prep_ms,broad_ms,narrow_ms,query_narrow_ms,fp,fn,broad_fp,broad_fn,"
+              "narrow_ms_s1,toi_n,toi_late,toi_max_late,toi_max_early,toi_med_early\n";
     for (int i = 2; i < argc; ++i) {
         const std::string dataset = argv[i];
         const fs::path dataset_dir = data_dir / dataset;
