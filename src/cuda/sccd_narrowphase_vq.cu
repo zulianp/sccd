@@ -5,6 +5,7 @@
 
 #include <cfloat>
 #include <cstdint>
+#include <cstdio>
 
 namespace sccd {
     namespace device {
@@ -52,13 +53,37 @@ namespace sccd {
             //     cap 128 -> 0.6666666238   (the host's answer)
             //     cap 512 -> 0.6666666238
             //
-            // The cap is tied to the depth limit below so the tightness of the
-            // answer is a property of the search depth rather than of an array
-            // size that happens to be too small.
-#ifndef SCCD_VQ_STACK_CAP
-#define SCCD_VQ_STACK_CAP 140
+            // ## Why this array is large, and why that is free
+            //
+            // 257 entries is a 14.7 KB per-thread stack frame, which looks
+            // alarming and measures as nothing. Only the first few entries are
+            // ever touched -- the rest is address space, not traffic -- and on
+            // GH200, 400k queries at depth 69:
+            //
+            //     cap   frame     registers  spill      stride 1   stride 0
+            //     140   8128 B    255        112/216    7.589 ms   0.904 ms
+            //     257  14688 B    255        112/216    7.441 ms   0.893 ms
+            //     513  29024 B    255        112/216    7.355 ms   0.922 ms
+            //
+            // The register count and the spill are the inclusion function's
+            // working set -- 30 coordinates, two Frames, eight corner triples --
+            // and do not move with this array at all: they are 255 and 112/216
+            // from cap 4 to cap 513.
+            //
+            // What the cap does change is the depth limit derived from it, and
+            // that is worth a great deal: at a matched depth the array size is
+            // invisible (cap 140 and cap 32 both run 3.7 ms at depth 15, to the
+            // same answer), while cap 32's implied depth of 15 costs 5.5e-5 of
+            // mean accuracy and cap 8's implied depth of 3 collapses the shared
+            // minimum to zero.
+            //
+            // So the cap buys search depth and headroom costs nothing. It is
+            // sized for depth 128 rather than for the default 69, which is what
+            // lets a caller raise SCCD_MAX_DEPTH and actually get it.
+#ifndef SCCD_VQ_MAX_DEPTH
+#define SCCD_VQ_MAX_DEPTH 128
 #endif
-            constexpr int kStackCap = SCCD_VQ_STACK_CAP;
+            constexpr int kStackCap = 1 + kSplits * SCCD_VQ_MAX_DEPTH;
 
             // The deepest search this stack can hold without overflowing.
             constexpr int kMaxDeviceDepth = (kStackCap - 1) / kSplits;
@@ -565,6 +590,26 @@ namespace sccd {
             SCCD_CHECK_CUDA(cudaMalloc(&d_shared, sizeof(double)));
             const double h_shared = (double)max_toi;
             SCCD_CHECK_CUDA(cudaMemcpy(d_shared, &h_shared, sizeof(double), cudaMemcpyHostToDevice));
+
+            // A depth the device cannot reach must not pass unremarked. The
+            // clamp itself is safe -- exhaustion accepts at the box's t lower
+            // bound, so a shallower search reports an earlier time of impact and
+            // never a later one -- but it is an accuracy divergence from the
+            // host, which honours whatever depth it is given, and a silent one
+            // is the kind nobody finds. SCCD_VQ_MAX_DEPTH sizes the stack, and
+            // the measurements above say raising it is free.
+            if (max_depth > kMaxDeviceDepth) {
+                static bool warned = false;
+                if (!warned) {
+                    warned = true;
+                    std::fprintf(stderr,
+                                 "SCCD: device vertex-quad narrow phase clamps max_depth %d to %d "
+                                 "(the compiled stack holds %d boxes). The reported time of impact "
+                                 "will be earlier than the host's, never later. Rebuild with "
+                                 "-DSCCD_VQ_MAX_DEPTH=%d to match.\n",
+                                 max_depth, kMaxDeviceDepth, kStackCap, max_depth);
+                }
+            }
 
             const int block = 128;
             const int grid = (int)((noverlaps + block - 1) / block);
