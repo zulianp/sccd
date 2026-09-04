@@ -469,8 +469,45 @@ distinguishable by one look:
    broad-phase candidates. That would make 2.31× and 2,852× both correct and
    about different things.
 
-**Check what `max_toi` reaches each side's stride-1 call.** It is one print, and
-it decides between a bug and a population difference.
+**Checked. Possibility 1 is dead.** `time_narrowphase_per_query` and
+`time_narrowphase_zero_stride` in `bench.exe.cpp` both open with
+`scalar_t toi = scalar_t(1)`. Both sides receive `max_toi = 1`; nothing is carried
+over from the zero-stride call.
+
+So it is a population difference, and the shape of it resolves the paradox. Put
+the four numbers together:
+
+| | host | device |
+|---|---:|---:|
+| curated query files (hard) | 559.88 | 1,291.39 |
+| broad-phase candidates (easy) | **1.22** | **3,480** |
+
+The device appears to do *more* work on the easy population than on the hard one,
+which cannot be true of a per-query average unless the average is not describing
+the population. It is not. Most broad-phase candidates are pairs whose swept boxes
+overlap and which never come close; the host rejects them at the root, 1.22 boxes,
+and the device spends its 128-box dice on them. If 99.9% of the 510,098 queries
+cost 128, that is 65 M of the 1.78 G, and **the remaining ~510 queries carry 3.4
+million boxes each**.
+
+That matches the per-call figures directly: one call ran 3 queries at 2,060,321
+boxes each, another 15 at 8,482,418. The mean of 3,480 describes nothing.
+
+### The target, finally specific
+
+A few hundred queries per scene cost the device millions of boxes each. The host's
+per-query path costs 1,844 boxes on its own hardest queries. Nothing measured so
+far explains a query that costs 3.4 million on one machine and thousands on the
+other, and the curated query files do not contain such a query — their worst
+device query is 4,462 boxes.
+
+**The next step is to get one of them.** `sccd_bench` already has the per-query
+counter (`g_np_perq`) and prints a log2 histogram of it; what it does not do is
+say *which* query, or let its geometry be dumped. Adding "write the worst N
+queries' eight points to a CSV" makes them loadable by `sccd_np_trace`, which can
+then run one of them on both machines with a per-box trace. That is the box-by-box
+diff the original step 0 called for, now aimed at a query that will actually show
+something.
 
 **C2. Bound the search by `t` before refining `u` and `v`.** A 1D pass over `t`
 with `u` and `v` at full width is cheap and its rejections are sound; it can
