@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# DEMOTED to spikes/ -- not run by the build, by ctest, or by any script.
+#
+# Seeded src/stuv.hpp, which was deleted in 2c7e657 (2025-12-08). It has had no
+# output target since. See README.md in this directory.
+
 
 import sympy as sp
 

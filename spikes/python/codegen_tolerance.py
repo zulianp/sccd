@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# DEMOTED to spikes/ -- not run by the build, by ctest, or by any script.
+#
+# Seeded src/narrowphase/sccd_tolerance.hpp. It emits the two SoA functions; the
+# header now has five. Running it is a derivation, not a regeneration.
+# See README.md in this directory.
+
 
 import sympy as sp
 

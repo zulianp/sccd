@@ -29,6 +29,7 @@ its job. Where several compete, the best one stays and the rest come here.
 | `src/cuda/sccd_broadphase_warp.*` | `count_overlaps_warp` is defined and explicitly instantiated, and called by nothing repository-wide. |
 | `src/cuda/sccd_lower_bound_all_to_all.*` | Reachable only from its own demo; no path from the public API. |
 | `external/json/` | Never `add_subdirectory`'d, so it was not in the build at all. |
+| `python/` | The SymPy code generators and the demoted analysis scripts. See [`python/README.md`](python/README.md) — the generators no longer reproduce the headers they seeded, which is why they are here rather than in `python/`. |
 | `src/uniform_split.hpp` | Uniform interval splitting, extracted from `sccd_rootfinder.hpp`. A complete second implementation of the splitting job for both vertex-face and edge-edge, ~550 lines, reachable only through `SCCD_ADAPTIVE_SPLIT=0`, and ahead of the adaptive splitter on no real scene. |
 
 ## Building them

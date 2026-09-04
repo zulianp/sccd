@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# DEMOTED to spikes/ -- not run by the build, by ctest, or by any script.
+#
+# Never wired to an output. It emits three midpoint splitters, mid = (l + u) / 2
+# per axis, and no shipped code resembles them. See README.md in this directory.
+
 
 import sympy as sp
 from sympy.printing.c import C99CodePrinter

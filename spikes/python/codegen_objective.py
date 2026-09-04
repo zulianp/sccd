@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# DEMOTED to spikes/ -- not run by the build, by ctest, or by any script.
+#
+# Seeded src/narrowphase/sccd_objective.hpp. It emits all ten objective, gradient
+# and Hessian functions; eight have no caller and live in spikes/src/dead.hpp, and
+# the emitted #include names a header that was renamed. Running it is a
+# derivation, not a regeneration. See README.md in this directory.
+
 
 import sympy as sp
 from sympy.codegen.rewriting import optimize, create_expand_pow_optimization

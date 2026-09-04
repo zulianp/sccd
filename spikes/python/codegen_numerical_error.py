@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# DEMOTED to spikes/ -- not run by the build, by ctest, or by any script.
+#
+# Seeded src/narrowphase/sccd_numerical_error.hpp. It no longer reproduces it:
+# this emits max(max_abs, 1)^3 where the header computes min(max_abs, 1)^3, the
+# certified TightInclusion bound. Running it is a derivation, not a regeneration.
+# See README.md in this directory.
+
 
 import sympy as sp
 from sympy.printing.c import C99CodePrinter
