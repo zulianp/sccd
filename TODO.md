@@ -82,6 +82,18 @@ fetches them and a user who wants the library does not.
 
 ## Done
 
+- ~~Mode 2's earliest-impact answer may be late on armadillo-rollers~~ —
+  **withdrawn, the reference was wrong.** smesh stores coordinates as `float`
+  (`typedef float geom_t`), so `find_earliest_impact_time` runs on float32-rounded
+  geometry, while the exact roots are computed for the dyadic rationals in
+  `queries/*.csv`. Only armadillo's coordinates need more than 24 mantissa bits,
+  and armadillo is the only scene the check fired on. SCCD's own
+  mode-2 answers on the two geometries scatter apart by 5e-8 to 4.6e-5 in *both*
+  directions, and on the CSV geometry the kernel is conservative on 16 of 16
+  cases. An unsound kernel would err one way and would show on the CSV path too.
+  Checking the mesh path needs exact roots for the mesh geometry, which the
+  datasets do not ship.
+
 - ~~The device global queue deadlocks under sustained overflow~~ — **fixed**. The
   queue is double-buffered: a launch reads one buffer and writes the other, so
   neither the writer's `atomicCAS` spin nor the reader's commit spin exists any
@@ -96,41 +108,6 @@ fetches them and a user who wants the library does not.
   twice: the worst is 9.4×, none exceeds 10×, and mode 2 is 10% faster over the
   trajectory. Written up under "Withdrawn: mode 2 is about 100× slower on
   armadillo edge-edge" in `benchmark/ASSESSMENT.md`.
-
-### Mode 2's earliest-impact answer may be late on armadillo-rollers edge-edge
-
-**Possible conservativeness violation. Unresolved, and it is the one open item
-that touches the invariant directly.**
-
-`find_earliest_impact_time` (`toi_stride = 0`) at `SCCD_NARROWPHASE_MODE=2`
-reports a time of impact *later* than the smallest exact root in the case's query
-set, on 5 of 16 armadillo-rollers cases on the host and 6 of 16 on the device.
-All five are edge-edge. Mode 0 is clean on the same cases, as is every scene at
-either mode on cloth-funnel and cloth-ball.
-
-| case | mode 2 | true earliest | over by | mode 0 |
-|---|---|---|---|---|
-| 100ee | 0.00103297 | 0.001031 | +2.0e-6 | 0.00101829 |
-| 123ee | 0.0110207 | 0.0109835 | +3.7e-5 | 0.0109409 |
-| 25ee | 0.00726114 | 0.00725506 | +6.1e-6 | 0.00724742 |
-| 304ee | 0.000270735 | 0.000269097 | +1.6e-6 | 0.000263057 |
-| 370ee | 0.00220261 | 0.00220123 | +1.4e-6 | 0.00218988 |
-
-Reproduce with `sccd_bench` against a dataset that ships exact roots and read the
-`s0_late` / `s0_toi` / `gt_earliest` columns.
-
-**Two candidate explanations, and they need separating before anything is
-concluded.** Either the TightInclusion-exact kernel's zero-stride path really can
-report late — which the per-query path does not, since `toi_late` is 0 for the
-same mode on the same queries — or the reference is wrong for these cases,
-because the curated query set contains a pair that SCCD's broad phase never
-examines. `broad_fn` is 0, but that is computed against a set built from the same
-query list through `edge_id_map`, so a pair that fails to map could be missing
-from both sides and leave the count clean. Checking whether the pair achieving
-`gt_earliest` is in SCCD's broad-phase output settles it.
-
-Until it is settled, do not claim the earliest-impact path is verified
-conservative at mode 2.
 
 ### The benchmark reports `fn=0` on datasets that have no ground truth
 
