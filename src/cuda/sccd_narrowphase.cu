@@ -52,23 +52,6 @@
 // is not resolvable (see wip/CUDA_NARROWPHASE_PLAN.md), so that is an unexplained
 // sample rather than a result. Left as a knob for when there is a workload big
 // enough to tune against.
-#if defined(SCCD_NP_WARP_STACK) && defined(SCCD_NP_BEST_FIRST)
-// promote_min_tlower is a block-wide reduction with its own __syncthreads(); a
-// warp-scoped stack would deadlock on it. One or the other.
-#error "SCCD_NP_WARP_STACK and SCCD_NP_BEST_FIRST cannot both be defined"
-#endif
-
-// Barrier and ballot at the work-sharing unit's scope. Macros rather than
-// lambdas: the ballot needs the shared reduction scratch, and a __shared__ array
-// has static storage duration and cannot be captured.
-#ifdef SCCD_NP_WARP_STACK
-#define SCCD_NP_UNIT_SYNC() __syncwarp(0xffffffffu)
-#define SCCD_NP_UNIT_POPC(pred, sums) __popc(__ballot_sync(0xffffffffu, (pred) != 0))
-#else
-#define SCCD_NP_UNIT_SYNC() __syncthreads()
-#define SCCD_NP_UNIT_POPC(pred, sums) block_popc<N>((pred), (sums))
-#endif
-
 #ifndef SCCD_NP_BEST_FIRST_MIN_TOP
 #define SCCD_NP_BEST_FIRST_MIN_TOP 1
 #endif
@@ -1761,59 +1744,25 @@ namespace sccd {
                           "SCCD_NP_THREADS_PER_BLOCK must be one of 32/64/128/256");
             using Vec4 = typename device::Vec4Type<TC>::type;
             constexpr int S_CAP = SharedStackCap<T>::value;
-
-            // The work-sharing unit. With SCCD_NP_WARP_STACK the block is only a
-            // launch container: each warp owns a stack segment, a bound and a
-            // refill loop of its own, synchronises with __syncwarp() instead of
-            // __syncthreads(), and never waits on another warp. Without it, one
-            // stack and one bound for the whole block, as before.
-            //
-            // The measurement this exists to test: at block scope, 20-22% of the
-            // 128 threads hold a box on a typical iteration and the rest wait at
-            // one of three barriers. A thread should not have to wait for the
-            // deepest thread in the block, only for the deepest in its warp.
-#ifdef SCCD_NP_WARP_STACK
-            constexpr int UNITS = N >> 5;   // one unit per warp
-            constexpr int UNIT_N = 32;
-#else
-            constexpr int UNITS = 1;        // one unit per block
-            constexpr int UNIT_N = N;
-#endif
-            __shared__ TC s_tlower[S_CAP * UNITS];
-            __shared__ TC s_tupper[S_CAP * UNITS];
-            __shared__ TC s_ulower[S_CAP * UNITS];
-            __shared__ TC s_uupper[S_CAP * UNITS];
-            __shared__ TC s_vlower[S_CAP * UNITS];
-            __shared__ TC s_vupper[S_CAP * UNITS];
-            __shared__ int s_level[S_CAP * UNITS];
-            __shared__ int s_qid[S_CAP * UNITS];
-            __shared__ int s_top_[UNITS];
-            __shared__ TC s_toi_[UNITS];
+            __shared__ TC s_tlower[S_CAP];
+            __shared__ TC s_tupper[S_CAP];
+            __shared__ TC s_ulower[S_CAP];
+            __shared__ TC s_uupper[S_CAP];
+            __shared__ TC s_vlower[S_CAP];
+            __shared__ TC s_vupper[S_CAP];
+            __shared__ int s_level[S_CAP];
+            __shared__ int s_qid[S_CAP];
+            __shared__ int s_top;
+            __shared__ TC s_toi;
             __shared__ int warp_sums[N >> 5];
 
             const int tid = threadIdx.x;
-#ifdef SCCD_NP_WARP_STACK
-            const int unit = tid >> 5;          // this thread's warp
-            const int unit_lead = (tid & 31) == 0;
-            const unsigned unit_mask = 0xffffffffu;
-#else
-            const int unit = 0;
-            const int unit_lead = (tid == 0);
-            const unsigned unit_mask = 0xffffffffu;
-            (void)unit_mask;
-#endif
-            const int base = unit * S_CAP;      // this unit's slice of the stack
-            int& s_top = s_top_[unit];
-            TC& s_toi = s_toi_[unit];
 
-            (void)UNIT_N;
-            (void)unit_mask;
-
-            if (unit_lead) {
+            if (tid == 0) {
                 s_top = 0;
                 s_toi = (TC)toi[0];
             }
-            SCCD_NP_UNIT_SYNC();
+            __syncthreads();
 
             // With per_query the bound is per thread: a thread prunes only
             // against its own query's best, because another query's answer says
@@ -1833,14 +1782,14 @@ namespace sccd {
                 if (per_query && q >= 0) atomic_min_toi<T>(&toi[q], my_toi);
             };
 
-            Stack<TC> s_stack = {s_tlower + base,
-                                s_tupper + base,
-                                s_ulower + base,
-                                s_uupper + base,
-                                s_vlower + base,
-                                s_vupper + base,
-                                s_level + base,
-                                s_qid + base,
+            Stack<TC> s_stack = {s_tlower,
+                                s_tupper,
+                                s_ulower,
+                                s_uupper,
+                                s_vlower,
+                                s_vupper,
+                                s_level,
+                                s_qid,
                                 &s_top,
                                 /*request=*/(int*)nullptr,
                                 S_CAP};
@@ -1872,11 +1821,11 @@ namespace sccd {
                 // cloth-funnel at 256 -- because the pruning a fresh bound buys is
                 // worth more than the atomic costs. See wip/ASSESSMENT.md.
                 if (!per_query) {
-                    if (unit_lead) {
+                    if (tid == 0) {
                         const TC g = atomic_min_toi<T>(&toi[0], s_toi);
                         if (g < s_toi) s_toi = g;
                     }
-                    SCCD_NP_UNIT_SYNC();
+                    __syncthreads();
                 }
 
                 if (active && cur.tlower >= bound()) active = 0;
@@ -1987,18 +1936,16 @@ namespace sccd {
                     }
                 }
 
-                SCCD_NP_UNIT_SYNC();
+                __syncthreads();
 
 #ifdef SCCD_NP_BEST_FIRST
                 // Best-first refill: put the smallest-t box in front before the
                 // claims run. See promote_min_tlower.
                 {
-                    const int n_idle = SCCD_NP_UNIT_POPC(!active, warp_sums);
+                    const int n_idle = block_popc<N>(!active, warp_sums);
                     if (n_idle > 0) {
-                        promote_min_tlower<N, TC>(s_tlower + base, s_tupper + base,
-                                                  s_ulower + base, s_uupper + base,
-                                                  s_vlower + base, s_vupper + base,
-                                                  s_level + base, s_qid + base,
+                        promote_min_tlower<N, TC>(s_tlower, s_tupper, s_ulower, s_uupper,
+                                                  s_vlower, s_vupper, s_level, s_qid,
                                                   atomicAdd(&s_top, 0), warp_sums);
                     }
                 }
@@ -2048,9 +1995,9 @@ namespace sccd {
                     }
                 }
 
-                SCCD_NP_UNIT_SYNC();
+                __syncthreads();
 
-                const int n_active = SCCD_NP_UNIT_POPC(active, warp_sums);
+                const int n_active = block_popc<N>(active, warp_sums);
                 SCCD_NP_ACTIVE_TICK(n_active);
                 if (n_active == 0) {
                     const int s_now = atomicAdd(&s_top, 0);
@@ -2060,7 +2007,7 @@ namespace sccd {
 
             if (per_query) {
                 flush_bound(qid);
-            } else if (unit_lead) {
+            } else if (tid == 0) {
                 atomic_min_toi<T>(&toi[0], s_toi);
             }
         }
