@@ -3,6 +3,15 @@
 Split out of `benchmark/oracle/README.md`, which now carries only the
 invariant and how to run the gate. This is the measurement history.
 
+> **Mode names.** The tables below record what was measured, under the names the
+> oracle emitted at the time: `scalar`, `vector`, `ti-vec`, `device`, `device-ti`.
+> The oracle now emits `fast`, `tight`, `device-fast`, `device-tight`, matching
+> `NarrowPhaseMode`. `scalar` is `fast`, `ti-vec` is `tight`, `device` is
+> `device-fast`, `device-ti` is `device-tight`. The `vector` row was pinned to
+> `SCCD_NARROWPHASE_MODE=1`, which no longer exists, so it was a second
+> measurement of `fast`; it has been removed rather than renamed.
+
+
 ## Build and run
 
 ```sh
@@ -16,7 +25,7 @@ Options: `--phase vf|ee|both`, `--max-files N`, `--tol T`, `--max-depth N`,
 CUDA `--device-float` and `--bench N` (see "Throughput"). `--float-geometry` narrows the input for every mode; see
 "Why there is no float row to gate on".
 
-`--gate ti-vec` restricts the exit code to the conservative kernel, which is
+`--gate tight` restricts the exit code to the `tight` kernel, which is
 what a CI check should use: modes 0 and 1 are known to violate the invariant, so
 the default `--gate all` always fails while they are still present.
 

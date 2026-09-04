@@ -542,20 +542,23 @@ namespace {
     // does not honour SCCD_NARROWPHASE_MODE at all -- the device has one kernel
     // -- so unlike the host rows its name describes the hardware, not the
     // algorithm.
-    enum class Mode { Scalar, Vector, TiVector, Device, DeviceTi };
+    // The names are the shipped mode names: SCCD_NARROWPHASE_MODE 0 is Fast and 2
+    // is Tight. There used to be a third host row, "vector", pinned to mode 1;
+    // mode 1 no longer exists, so that row was measuring Fast a second time under
+    // a different name.
+    enum class Mode { Fast, Tight, DeviceFast, DeviceTight };
 #ifdef SCCD_ENABLE_CUDA
-    constexpr int N_MODES = 5;
+    constexpr int N_MODES = 4;
 #else
-    constexpr int N_MODES = 3;
+    constexpr int N_MODES = 2;
 #endif
 
     const char* mode_name(const Mode m) {
         switch (m) {
-            case Mode::Scalar: return "scalar";
-            case Mode::Vector: return "vector";
-            case Mode::TiVector: return "ti-vec";
-            case Mode::Device: return "device";
-            case Mode::DeviceTi: return "device-ti";
+            case Mode::Fast: return "fast";
+            case Mode::Tight: return "tight";
+            case Mode::DeviceFast: return "device-fast";
+            case Mode::DeviceTight: return "device-tight";
         }
         return "?";
     }
@@ -574,11 +577,10 @@ namespace {
     void select_mode(const Mode m) {
         const char* value = "0";
         switch (m) {
-            case Mode::Scalar: value = "0"; break;
-            case Mode::Vector: value = "1"; break;
-            case Mode::TiVector: value = "2"; break;
-            case Mode::Device: value = "0"; break;
-            case Mode::DeviceTi: value = "2"; break;
+            case Mode::Fast: value = "0"; break;
+            case Mode::Tight: value = "2"; break;
+            case Mode::DeviceFast: value = "0"; break;
+            case Mode::DeviceTight: value = "2"; break;
         }
         setenv("SCCD_NARROWPHASE_MODE", value, 1);
         setenv("SCCD_USE_VNARROW_PHASE", value, 1);
@@ -637,15 +639,14 @@ int main(int argc, char** argv) {
                      "impact later than the dataset's exact root; both break\n"
                      "conservativeness. Pass --no-strict to report without failing.\n"
                      "\n"
-                     "--gate MODE restricts the exit code to one mode: scalar, vector,\n"
-                     "ti-vec"
+                     "--gate MODE restricts the exit code to one mode: fast, tight"
 #ifdef SCCD_ENABLE_CUDA
-                     ", device, device-ti"
+                     ", device-fast, device-tight"
 #endif
                      ", or all (the default).\n"
 #ifdef SCCD_ENABLE_CUDA
                      "\n"
-                     "Built with CUDA: the 'device' row is the GPU narrow phase, run over\n"
+                     "Built with CUDA: the 'device-*' rows are the GPU narrow phase, run\n"
                      "the same queries and held to the same gate. --device-float runs it\n"
                      "in single precision instead of double.\n"
 #endif
@@ -721,11 +722,11 @@ int main(int argc, char** argv) {
             std::printf("%-12s %12s %12s %10s\n", "mode", "stride1_ms", "stride0_ms", "ratio");
             for (int m = 0; m < N_MODES; ++m) {
                 const Mode mode = mode_of(m);
-                const bool is_device = (mode == Mode::Device || mode == Mode::DeviceTi);
+                const bool is_device = (mode == Mode::DeviceFast || mode == Mode::DeviceTight);
                 // Every mode, host and device, at both strides. The host rows are
-                // what make a device row readable: `ti-vec` and `device-ti` run the
-                // identical conservative search, and `scalar`/`vector` are the host
-                // counterparts of `device`. Without a like-for-like pair there is
+                // what make a device row readable: `tight` and `device-tight` run
+                // the identical search, and `fast` is the host counterpart of
+                // `device-fast`. Without a like-for-like pair there is
                 // no way to tell "this kernel is inefficient" from "this search is
                 // expensive on this geometry".
                 select_mode(mode);
@@ -843,7 +844,7 @@ int main(int argc, char** argv) {
                 std::vector<scalar_t> toi(qs.n_queries, 1.0);
                 const double t0 = now_seconds();
 #ifdef SCCD_ENABLE_CUDA
-                if (mode_of(m) == Mode::Device || mode_of(m) == Mode::DeviceTi) {
+                if (mode_of(m) == Mode::DeviceFast || mode_of(m) == Mode::DeviceTight) {
                     if (opt.device_float) {
                         run_device_narrow_phase<float>(qs, phase.is_vf, opt.max_depth, opt.tol, toi);
                     } else {
@@ -978,15 +979,14 @@ int main(int argc, char** argv) {
                     "  relerr over the %zu/%zu queries with TI toi >= %g; the rest are covered by abserr.\n",
                     stats[0].rel_err.size(), stats[0].rel_err.size() + stats[0].near_zero_ref, REL_ERR_FLOOR);
 #ifdef SCCD_ENABLE_CUDA
-        std::printf("  device rows: CUDA narrow phase in %s. 'device' is the mode-0\n"
-                    "  kernel; 'device-ti' is the conservative one, with TightInclusion's\n"
+        std::printf("  device rows: CUDA narrow phase in %s. 'device-fast' is the\n"
+                    "  mode-0 kernel; 'device-tight' is mode 2, with TightInclusion's\n"
                     "  predicate, split rule and numerical error bound.\n",
                     opt.device_float ? "single precision (--device-float)" : "double precision");
 #endif
         if (gt_available) {
-            std::printf("  (ground truth available for %zu queries; gt_FN: scalar=%zu vector=%zu ti-vec=%zu)\n",
-                        gt_available, stats[0].gt_false_negative, stats[1].gt_false_negative,
-                        stats[2].gt_false_negative);
+            std::printf("  (ground truth available for %zu queries; gt_FN: fast=%zu tight=%zu)\n",
+                        gt_available, stats[0].gt_false_negative, stats[1].gt_false_negative);
         }
 
         for (int m = 0; m < N_MODES; ++m) {
@@ -1057,7 +1057,7 @@ int main(int argc, char** argv) {
                 "\nNOT GATED: the geometry was narrowed to float (--device-float or\n"
                 "--float-geometry). The dataset's exact roots belong to the original\n"
                 "rational geometry, so narrowing the input moves the true root and every\n"
-                "correct kernel looks late against them. Control: the host ti-vec kernel,\n"
+                "correct kernel looks late against them. Control: the host tight kernel,\n"
                 "which is bit-identical to TightInclusion and computes in double, reports\n"
                 "~4500 'late' queries on armadillo-rollers under --float-geometry and zero\n"
                 "without it. Use the double-geometry run to gate.\n");
