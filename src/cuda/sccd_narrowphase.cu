@@ -1205,6 +1205,93 @@ namespace sccd {
             static constexpr int NV = 8;
         };
 
+        /**
+         * \brief Move the block-shared stack's smallest-t box to the top.
+         *
+         * The search wants the *earliest* time of impact, and the box that could
+         * contain it is the one with the smallest `tlower`. A LIFO refill hands an
+         * idle thread the most recently pushed box instead, which is whatever the
+         * last split produced -- often a deep box of some other query whose t
+         * interval starts far above the answer. Expanding that box cannot tighten
+         * the bound, and until the bound tightens nothing else prunes.
+         *
+         * One argmin over at most SCCD_NP_SHARED_STACK_CAP entries, then one swap,
+         * makes the next claim take the minimum. It does not make the block fully
+         * best-first -- the second and later claimers in the same round still take
+         * LIFO order -- but it puts the most promising box in front on every
+         * refill, which is the part that moves the bound.
+         *
+         * Costs one block reduction per refill round against eight corner
+         * evaluations per box, so it is cheap in the units that matter here.
+         */
+        template <int N, typename TC>
+        static inline __device__ void promote_min_tlower(TC* SCCD_RESTRICT s_tlower,
+                                                         TC* SCCD_RESTRICT s_tupper,
+                                                         TC* SCCD_RESTRICT s_ulower,
+                                                         TC* SCCD_RESTRICT s_uupper,
+                                                         TC* SCCD_RESTRICT s_vlower,
+                                                         TC* SCCD_RESTRICT s_vupper,
+                                                         int* SCCD_RESTRICT s_level,
+                                                         int* SCCD_RESTRICT s_qid,
+                                                         const int top,
+                                                         int* SCCD_RESTRICT warp_sums) {
+            if (top <= 1) return;
+
+            // Argmin over the live entries, one per thread, reduced across the
+            // block. Ties break on the lower index so the choice is deterministic.
+            int best = -1;
+            TC best_t = TC(0);
+            for (int i = (int)threadIdx.x; i < top; i += N) {
+                const TC t = s_tlower[i];
+                if (best < 0 || t < best_t) {
+                    best = i;
+                    best_t = t;
+                }
+            }
+
+            const int lane = threadIdx.x & 31;
+            for (int o = 16; o > 0; o >>= 1) {
+                const TC other_t = __shfl_xor_sync(0xffffffffu, best_t, o);
+                const int other = __shfl_xor_sync(0xffffffffu, best, o);
+                if (other >= 0 && (best < 0 || other_t < best_t || (other_t == best_t && other < best))) {
+                    best = other;
+                    best_t = other_t;
+                }
+            }
+            // warp_sums doubles as the cross-warp scratch; it is sized N/32 and is
+            // free at this point in the loop.
+            const int warp = threadIdx.x >> 5;
+            if (lane == 0) warp_sums[warp] = best;
+            __syncthreads();
+            if (threadIdx.x == 0) {
+                int win = -1;
+                TC win_t = TC(0);
+                for (int w = 0; w < (N >> 5); ++w) {
+                    const int cand = warp_sums[w];
+                    if (cand < 0) continue;
+                    const TC t = s_tlower[cand];
+                    if (win < 0 || t < win_t || (t == win_t && cand < win)) {
+                        win = cand;
+                        win_t = t;
+                    }
+                }
+                const int last = top - 1;
+                if (win >= 0 && win != last) {
+                    TC tmp;
+                    int itmp;
+                    tmp = s_tlower[win]; s_tlower[win] = s_tlower[last]; s_tlower[last] = tmp;
+                    tmp = s_tupper[win]; s_tupper[win] = s_tupper[last]; s_tupper[last] = tmp;
+                    tmp = s_ulower[win]; s_ulower[win] = s_ulower[last]; s_ulower[last] = tmp;
+                    tmp = s_uupper[win]; s_uupper[win] = s_uupper[last]; s_uupper[last] = tmp;
+                    tmp = s_vlower[win]; s_vlower[win] = s_vlower[last]; s_vlower[last] = tmp;
+                    tmp = s_vupper[win]; s_vupper[win] = s_vupper[last]; s_vupper[last] = tmp;
+                    itmp = s_level[win]; s_level[win] = s_level[last]; s_level[last] = itmp;
+                    itmp = s_qid[win];   s_qid[win]   = s_qid[last];   s_qid[last]   = itmp;
+                }
+            }
+            __syncthreads();
+        }
+
         template <int N>
         static inline __device__ int block_popc(const int pred, int* SCCD_RESTRICT warp_sums) {
             const int lane = threadIdx.x & 31;
@@ -1773,6 +1860,19 @@ namespace sccd {
                 }
 
                 __syncthreads();
+
+#ifdef SCCD_NP_BEST_FIRST
+                // Best-first refill: put the smallest-t box in front before the
+                // claims run. See promote_min_tlower.
+                {
+                    const int n_idle = block_popc<N>(!active, warp_sums);
+                    if (n_idle > 0) {
+                        promote_min_tlower<N, TC>(s_tlower, s_tupper, s_ulower, s_uupper,
+                                                  s_vlower, s_vupper, s_level, s_qid,
+                                                  atomicAdd(&s_top, 0), warp_sums);
+                    }
+                }
+#endif
 
                 if (!active) {
                     int t = atomicAdd(&s_top, 0);

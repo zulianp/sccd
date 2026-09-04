@@ -297,8 +297,50 @@ or bucketed priority structure rather than a heap: bucket by `tlower`, drain the
 lowest non-empty bucket. The double-buffered queue already gives the launch
 structure this needs; the buckets replace the single FIFO.
 
-This is the strongest candidate in the document, and it is also the one step 0
-can most cleanly confirm or kill.
+This is the strongest candidate in the document.
+
+### First cut, measured: 2.2x where the search is deep, and it removes the variance
+
+The cheapest form of C1 is in `sccd_narrowphase.cu` behind `SCCD_NP_BEST_FIRST`,
+off by default. The block already descends into the child with the smaller
+`tlower` and pushes the sibling, so the *descent* is best-first already; what is
+not is the **refill**. An idle thread claims the top of the block-shared stack,
+which is the most recently pushed box — often a deep box of some other query
+whose `t` interval starts far above the answer. `promote_min_tlower` runs one
+block-wide argmin over the stack and swaps the minimum to the top before the
+claims run, so the next claim takes the most promising box.
+
+GH200, device batched `toi_stride=0`, mode 2, three repeats, medians:
+
+| scene | file | queries | DFS | spread | best-first | spread | boxes |
+|---|---|---:|---:|---:|---:|---:|---:|
+| cloth-funnel | 317vf | 24 | 1,411.4 | 33% | **646.4** | 1% | **−54%** |
+| armadillo-rollers | 326vf | 4,652 | 171.3 | 11% | 162.8 | 4% | −5.0% |
+| cloth-funnel | 227vf | 92 | 219.3 | 34% | 211.8 | 0% | −3.4% |
+| cloth-ball | 92vf | 19,034 | 152.1 | 1% | 151.8 | 1% | −0.2% |
+
+**Two results, and the second was not the one being looked for.**
+
+The search shrinks by 2.2× where it is deep — 317vf averages 1,411 boxes per
+query — and by nothing where the bound already collapses fast. That is the
+expected shape: reordering the frontier only matters when there is a frontier.
+
+And **it removes the run-to-run variance**. DFS spreads 33–34% across three
+identical runs on the two cloth-funnel files; best-first spreads 0–1% on every
+file. Which box a block picks up next currently depends on the order blocks
+happened to finish in, and that decides how fast the bound arrives. Ordering the
+frontier makes it deterministic. For a project whose retractions are mostly
+differences read off inside the noise, that may be worth more than the 2.2×.
+
+`sccd_narrowphase_cuda_test` passes on the best-first build: all 20
+configurations conservative, `missed=0 late=0`.
+
+**Not measured: time.** These query files are 24 to 19,034 queries and the kernel
+is a small fraction of a 0.7 s process, so wall clock shows nothing at this scale
+— all three files time identically on both builds. Whether one block-wide argmin
+per refill round pays for itself needs `sccd_bench` on the broad-phase set. Until
+that exists the switch stays off by default, because a 54% box reduction on one
+file is not a reason to ship a change whose cost has not been measured.
 
 **C2. Bound the search by `t` before refining `u` and `v`.** A 1D pass over `t`
 with `u` and `v` at full width is cheap and its rejections are sound; it can
