@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Turn assessment.csv into the tables ASSESSMENT.md cites.
+"""Turn assessment.csv into the tables wip/ASSESSMENT.md cites.
 
 Every keep-or-demote call in the cleanup has to point at a row of the CSV, so
 this deliberately does very little: it takes the median over repeats, puts
