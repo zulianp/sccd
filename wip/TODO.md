@@ -55,7 +55,7 @@ shared history, clone the URL and measure that.
   against Fast's 6.4 / 19.4 / 190.7) and is now in
   `spikes/src/sccd_narrowphase_fast_vector.hpp`. Mode 3 corrected mode 1 with
   TightInclusion; `SCCD_USE_TI=1` calls the library directly instead. The enum is
-  `Fast` and `Tight`.
+  `Relaxed` and `Tight`.
 
 
 - ~~Device dead code in the shipped CUDA build~~ — **done**, in

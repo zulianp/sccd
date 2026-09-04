@@ -29,7 +29,7 @@ SERIES_LIGHT = ["#0E8AA0", "#C07C10", "#8A3C74"]
 SERIES_DARK = ["#0096AE", "#B8862F", "#9C5A88"]
 REFERENCE_INK = "#7C8894"
 
-MODE_ORDER = ["fast", "tight", "device-fast", "device-tight", "tight-inclusion"]
+MODE_ORDER = ["relaxed", "tight", "device-relaxed", "device-tight", "tight-inclusion"]
 
 # Historical CSVs use the names the driver and the oracle emitted before the two
 # shipped modes were named for their trade-off. Reading them is the only reason
@@ -40,33 +40,35 @@ MODE_ORDER = ["fast", "tight", "device-fast", "device-tight", "tight-inclusion"]
 # names are a second measurement of `fast`, and are labelled as such rather than
 # folded into it.
 MODE_ALIASES = {
-    "scalar": "fast",
+    "scalar": "relaxed",
+    "fast": "relaxed",
     "conservative": "tight",
     "ti-vec": "tight",
-    "vector": "fast (retired mode 1)",
-    "fast-vector": "fast (retired mode 1)",
-    "ti-compat": "fast (retired mode 3)",
-    "device": "device-fast",
+    "vector": "relaxed (retired mode 1)",
+    "fast-vector": "relaxed (retired mode 1)",
+    "ti-compat": "relaxed (retired mode 3)",
+    "device": "device-relaxed",
+    "device-fast": "device-relaxed",
     "device-ti": "device-tight",
     "ti-reference": "tight-inclusion",
 }
 
 MODE_BLURB = {
-    "fast": "SCCD's scalar search with the looser acceptance test.",
+    "relaxed": "SCCD's scalar search with the looser acceptance test.",
     "tight": "SCCD's scalar search, comparing domain widths against domain tolerances. "
              "Tighter times of impact for more work.",
-    "device-fast": "The CUDA narrow phase running the Fast predicate.",
+    "device-relaxed": "The CUDA narrow phase running the Relaxed predicate.",
     "device-tight": "The CUDA narrow phase running the Tight predicate.",
     "tight-inclusion": "The external TightInclusion library, the reference this is measured against.",
-    "fast (retired mode 1)": "A historical row. Mode 1 no longer exists, so this is a second "
-                             "measurement of Fast under the name the vectorised kernel used.",
-    "fast (retired mode 3)": "A historical row. Mode 3 no longer exists, so this is a second "
-                             "measurement of Fast under the name the corrected oracle used.",
+    "relaxed (retired mode 1)": "A historical row. Mode 1 no longer exists, so this is a second "
+                                "measurement of Relaxed under the name the vectorised kernel used.",
+    "relaxed (retired mode 3)": "A historical row. Mode 3 no longer exists, so this is a second "
+                                "measurement of Relaxed under the name the corrected oracle used.",
 }
 
 # Which SCCD_NARROWPHASE_MODE selects each shipped mode. The device rows take the
 # same value; the reference is not a mode at all.
-MODE_ENV = {"fast": "0", "tight": "2", "device-fast": "0", "device-tight": "2"}
+MODE_ENV = {"relaxed": "0", "tight": "2", "device-relaxed": "0", "device-tight": "2"}
 
 
 def canonical_mode(name):
@@ -552,7 +554,7 @@ def build_report(oracle_rows, agg_rows, toi_rows, title):
 
     # --- pipeline timing from the benchmark driver -------------------------
     if agg_rows:
-        agg_modes = sorted({r.get("mode") or "fast" for r in agg_rows}, key=mode_sort_key)
+        agg_modes = sorted({r.get("mode") or "relaxed" for r in agg_rows}, key=mode_sort_key)
         agg_groups = []
         for r in agg_rows:
             g = r.get("dataset_name") or r["dataset"]
@@ -561,7 +563,7 @@ def build_report(oracle_rows, agg_rows, toi_rows, title):
         vals = {}
         for r in agg_rows:
             g = r.get("dataset_name") or r["dataset"]
-            vals[(g, r.get("mode") or "fast")] = as_float(r, "narrow_ms_median")
+            vals[(g, r.get("mode") or "relaxed")] = as_float(r, "narrow_ms_median")
         parts.append('<section><h2>Narrow phase in the full pipeline</h2>')
         parts.append("<p>Median narrow-phase time per step from the benchmark driver, over the "
                      "broadphase output rather than a fixed query list.</p>")

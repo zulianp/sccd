@@ -16,7 +16,7 @@ that band is not a result.
 | armadillo-rollers | 3,205,151 | 5,636 |
 | cloth-ball | 33,329,729 | 95,424 |
 
-**Modes.** `Fast` (0) is the scalar search with the looser acceptance test.
+**Modes.** `Relaxed` (0) is the scalar search with the looser acceptance test.
 `Tight` (2) compares domain widths against domain tolerances. Both ship; modes 1
 and 3 are validation-only and need `SCCD_ENABLE_TIGHT_INCLUSION=ON`.
 
@@ -75,10 +75,10 @@ would be a correctness failure; early only costs a solver step size.
 | cloth-ball | 95,424 | 4.08e-07 | 1.69e-06 | 3.85e-07 | **1.72e-07** |
 
 Median earliness; times of impact are in `[0, 1]` over the step. Worst cases for
-`Fast` are 9.41e-01, 4.16e-02 and 1.29e-04.
+`Relaxed` are 9.41e-01, 4.16e-02 and 1.29e-04.
 
-`Tight` is **69× tighter** than `Fast` at the median on cloth-funnel and **22×**
-on armadillo-rollers. That is what the two modes trade: `Fast` accepts boxes
+`Tight` is **69× tighter** than `Relaxed` at the median on cloth-funnel and **22×**
+on armadillo-rollers. That is what the two modes trade: `Relaxed` accepts boxes
 sooner, and on grazing contacts that costs most of the step.
 
 Accuracy is measured on the datasets' curated query sets, which carry exact
@@ -92,7 +92,7 @@ Measured with `-Xptxas=-v` on CUDA 12.6 for sm_90, zero-stride kernel:
 
 | | registers | shared memory | blocks/SM |
 |---|---:|---:|---:|
-| `Fast` | 224 / 255 | 3,584 B | 2 |
+| `Relaxed` | 224 / 255 | 3,584 B | 2 |
 | `Tight` | 238 / 255 | 3,584 B | 2 |
 
 No spills. Registers bind occupancy at roughly 12.5%, not shared memory, so
