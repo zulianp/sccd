@@ -844,6 +844,51 @@ longer has an anomaly hiding in it. Making it the primary source of work rather
 than an overflow target is the one structural change left with a measured reason
 behind it.
 
+## Warp-owned stacks: worse, and it corrects what F's number meant
+
+F measured 20–22% of a block's threads holding a box at a typical iteration, with
+three `__syncthreads()` per loop. The natural reading is that the other 78% are
+*waiting at barriers*, and the fix is to stop making them wait: give each warp its
+own stack segment, its own bound and its own refill loop, and replace every
+`__syncthreads()` with `__syncwarp()`. A thread then waits for the slowest of 32
+rather than the slowest of 128, and the four warps run independently.
+
+Built behind `SCCD_NP_WARP_STACK`. Mode 2, device, three repeats, medians:
+
+| scene | | block stack | warp stack | |
+|---|---|---:|---:|---:|
+| cloth-funnel | s0 | 27.2 | 28.7 | +5.5% |
+| cloth-funnel | s1 | 34.4 | 33.7 | −2.1% |
+| armadillo-rollers | s0 | 35.9 | **45.6** | **+27.0%** |
+| armadillo-rollers | s1 | 62.8 | **103.6** | **+64.8%** |
+| cloth-ball | s0 | 104.9 | 100.5 | −4.2% |
+| cloth-ball | s1 | 159.9 | 158.7 | −0.7% |
+
+False positives 260 / 5,637 / 95,424 and `fn=0` on both, gate green on both.
+
+**Removing the barriers made it worse.** So the barriers were not the cost, and
+F's 20% is not a synchronisation measurement — it is a **work-starvation**
+measurement. Those threads are not idle because they are waiting for a barrier;
+they are idle because there is nothing in the stack to give them, and the barrier
+is merely where the idleness becomes visible.
+
+Which is why shrinking the sharing pool hurts. A warp-owned stack is a 32-thread
+pool where there was a 128-thread one: an idle lane can only steal from its own
+warp's entries. armadillo-rollers has the heavy queries whose subtrees most need
+spreading, and it is the scene that suffers most — the same scene, and the same
+direction, as F's block-size sweep, where 32 threads per block was 1.5× worse than
+128 on the same path.
+
+**Two independent experiments now say the sharing pool wants to be bigger, not
+smaller.** That is D1, and it is no longer a guess: an idle lane should be able to
+take a new query from a global cursor, because there is provably nothing left for
+it in any pool the size of a block.
+
+The switch is kept, off, alongside `SCCD_NP_BEST_FIRST`. It is the evidence for
+this conclusion and it is how anyone re-checks it. It cannot be combined with
+`SCCD_NP_BEST_FIRST` — that path's promotion step is a block-wide reduction with
+its own barrier — and the build errors if both are set.
+
 ## What must not change
 
 - **Conservativeness.** A reported time of impact is at or before the true one,
