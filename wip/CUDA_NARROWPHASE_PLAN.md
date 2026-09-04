@@ -759,10 +759,44 @@ Still outstanding: the end-to-end table, whose GPU column sums prep, broad phase
 and narrow phase. Refreshing it needs the broad-phase timings from the same run,
 which this one did not capture.
 
-**3. Re-price B1 on the post-fix device.** `Relaxed` against `Tight` was 1.6–3.4×
-on curated files; after the fix `Tight` does 13.8× fewer boxes on the per-query
-path, so the gap B1 exploits may have closed entirely. One run of
-`sccd_np_trace --device --batch` in both modes answers it.
+### ~~3. Re-price B1 on the post-fix device~~ — closed. The prize is gone
+
+B1 culls queries with a cheap `Relaxed` pass before running `Tight` on the
+survivors, so it is worth exactly the ratio between the two modes' cost. Measured
+on the device over the real broad-phase candidate sets, post-fix:
+
+| scene | stride | `Relaxed` | `Tight` | `Tight`/`Relaxed` |
+|---|---|---:|---:|---:|
+| cloth-funnel | 0 | 2,771,806 | 3,758,494 | 1.36× |
+| cloth-funnel | 1 | 134,673,458 | 153,543,274 | 1.14× |
+| armadillo-rollers | 0 | 11,645,472 | 17,770,366 | 1.53× |
+| armadillo-rollers | 1 | 792,280,816 | 532,188,788 | **0.67×** |
+| cloth-ball | 0 | 65,927,052 | 73,512,752 | 1.12× |
+| cloth-ball | 1 | 6,346,807,782 | 6,042,530,180 | **0.95×** |
+
+`Tight` costs 1.12–1.53× `Relaxed` on the earliest-impact path, and on the
+per-query path it is **cheaper than `Relaxed` on two of three scenes**. A prepass
+would therefore cost about what it saves and roughly double the work.
+
+**B1's entire economics were the tolerance defect.** Before the fix `Tight` was
+doing an order of magnitude more work than it needed on the per-query path, and
+that inflated gap is what made a cheap prepass look worth 30×, then 1.6×. With the
+defect gone the two modes cost about the same and there is nothing to arbitrage.
+
+### `Relaxed` is no longer the cheaper mode on the device
+
+Worth stating on its own, because the documentation still describes the modes as
+a speed-for-tightness trade. On the device that is now false: `Relaxed` costs
+**1.5× more** boxes than `Tight` on armadillo-rollers at stride 1, and about the
+same on cloth-ball, and the timing table agrees — GPU s1 is 234.5 ms for `Relaxed`
+against 188.1 for `Tight`.
+
+The reason is the same asymmetry the whole design rests on. `Relaxed` accepts a
+box on a looser test, which ends *that* box sooner but reports a time of impact
+further before the true one — and a looser bound prunes less, so the queries that
+follow do more work. `Tight` pays more per box and buys a bound that kills more
+boxes. On the host, where the bound collapses within a few chunks anyway, the
+trade still runs the documented way; on the device it does not.
 
 **4. The per-query path is still 3× the earliest-impact path in time** — 37.62 ms
 against 12.07 on cloth-funnel after the fix, on comparable query counts. Smaller
