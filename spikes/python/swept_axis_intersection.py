@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# Demoted to spikes/ -- no caller anywhere in the repository.
+#
+# A one-off SymPy derivation: align a swept triangle to the x-axis, then solve
+# for the roots of its intersection with that axis.
+
 """
 Align a swept triangle to the x-axis and extract intersection roots.
 Steps:

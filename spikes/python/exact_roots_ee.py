@@ -1,3 +1,9 @@
+# Demoted to spikes/ -- no caller anywhere in the repository.
+#
+# A SymPy solver for exact edge-edge roots, the Python half of the pair whose
+# other half is exact_roots_vf.wls. Both were superseded by the ground truth
+# committed as roots/<key>/toi.float64, which the benchmark reads directly.
+
 from __future__ import annotations
 
 import json

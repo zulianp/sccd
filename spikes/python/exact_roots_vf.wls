@@ -1,3 +1,13 @@
+(* Demoted to spikes/ -- no caller anywhere in the repository.
+
+   Mathematica, not Python. This was tracked as python/root_vf.py, where it
+   raised SyntaxError for as long as it existed; it is renamed here to the
+   extension that matches its language.
+
+   It computes exact vertex-face roots, and is the original of which
+   exact_roots_ee.py is the SymPy port. Both were superseded by the ground
+   truth committed as roots/<key>/toi.float64. *)
+
 roots[data_, outfile_ : ""] :=
     Module[ {
          ps, t0s, t1s, t2s,
