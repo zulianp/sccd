@@ -678,18 +678,32 @@ the drain loop is not understood, and D1 tunes exactly that machinery.
 
 ## Order
 
-Rewritten after the edge-edge tolerance fix, which invalidated most of what was
-here. Struck items are closed with a measurement, not abandoned.
+Every numbered item below the line has been closed with a measurement. What
+remains is listed first.
+
+### Open, largest first
 
 | | | |
 |---|---|---|
-| 0 | Establish the cause | **done** — the scene-level gap was the bound schedule; the per-query search was a tolerance on the wrong axis |
-| ~~1~~ | ~~B1, `Relaxed` prepass~~ | **needs re-pricing.** It was 1.6× when `Tight` cost 152 boxes per query on the device. `Tight` now costs a fraction of that, so the ratio B1 trades on has moved and the old estimate means nothing |
-| ~~2~~ | ~~C1, best-first~~ | **closed.** A no-op on the broad-phase set: stride-0 boxes within 2%, time within 5%, on a path averaging 7.6 boxes per query. Kept behind `SCCD_NP_BEST_FIRST`, off |
-| ~~4~~ | ~~C4, the seeding dice~~ | **closed.** Costs 127 boxes per query, 3.2% of the total, and buys the block. Removing it is 1.5–2× slower |
-| 3 | The per-query residual | **open, and smaller.** On the three worst queries the device is now 5.0×, 3.3× and 1.6× the host, down from 964,000×. Start with whether the two counters count the same unit — the device ticks both children of every split including ones discarded at once |
-| 5 | D2, the capacity-1024 anomaly | **open, untouched.** 4,059 ms against the old queue's 634 at a setting that is no longer the default |
-| — | A1/A2, per-box cost | still demoted, but less firmly. The device's stride-0 path is now 2.5 boxes per query against the host's 0.72, so arithmetic per box is a larger share of what is left than it was |
+| **A** | **Stride 1 on the thread-per-query kernel** | The per-query path costs 151–694 ms against the earliest-impact path's 28–105 on the same queries, and it is not the search: 843,414 blocks each doing half a box per thread. Run it one thread per query — that kernel already carries `toi_idx = qid * toi_stride` — and give a query a block only once it is proven hard. The largest change left, and the only one with a whole code path's cost behind it. |
+| **B** | **D2, the capacity-1024 anomaly** | Under the double-buffered queue, `SCCD_NP_SHARED_STACK_CAP=1024` measured 4,059 ms on cloth-funnel against the old queue's 634 at the same capacity. Untouched. It blocks D1, which tunes exactly that machinery. |
+| **C** | **Refresh the end-to-end table** | `docs/BENCHMARKS.md`'s end-to-end row sums prep, broad phase and narrow phase, and its narrow term has changed. Needs broad-phase timings from the same run, which the narrow-phase re-measurement did not capture. |
+| **D** | **The per-query residual** | On `worst-query-w{1,2,3}ee` the device is 5.0×, 3.3× and 1.6× the host, down from 964,000×. Start with whether the two counters count the same unit: the device ticks both children of every split, including ones discarded immediately. |
+| **E** | **A1/A2, per-box cost** | Still last. The stride-1 path is scheduling-bound, so 4× of arithmetic buys nothing there either. |
+| — | *Loose end* | The host's mode 0 increments the box counter and nothing prints it — the `fprintf` lives in `narrow_phase_tight_*` and the scalar path has none. Host `Relaxed` box counts are not obtainable from a run. |
+
+### Closed
+
+| | | |
+|---|---|---|
+| 0 | Establish the cause | The scene-level gap was the bound schedule; the per-query gap was a tolerance on the wrong axis |
+| 1 | Check the vertex-face tolerance | Clean. 26,423 vertex-face and 125,525 edge-edge queries against TightInclusion's source; worst relative difference 5.8e-13 and 0 |
+| 2 | Re-measure `docs/BENCHMARKS.md` | Done, and it corrected two of my own numbers — the wrong column and an instrumented build |
+| 3 | B1, `Relaxed` prepass | The prize is gone. `Tight` costs 1.12–1.53× `Relaxed`, and less on two scenes |
+| 4 | The per-query path | Root pre-test landed: 2.9–5.6× less work, no time change. The non-result identified the real bound |
+| C1 | Best-first | A no-op on the broad-phase set. Kept behind `SCCD_NP_BEST_FIRST`, off |
+| C3 | Per-query bound | Dropped: the device's bound is already tighter than the host's |
+| C4 | The seeding dice | Not a work multiplier; it fills the block. Removing it is 1.5–2× slower |
 
 ### What the fix put at the top instead
 
