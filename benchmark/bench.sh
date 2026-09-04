@@ -8,12 +8,13 @@ set -euo pipefail
 # 3) Number of false positives (should be as low as possible for the narrow-phase) and negatives (should be 0)
 # For cuda on Alps: OMP_NUM_THREADS=72 SCCD_BENCH_EXECUTION_SPACE=device srun ./bench.sh 
 
-# Narrow-phase modes to sweep (see src/sccd_narrowphase_mode.hpp):
-#   0 scalar   1 fast-vector   2 conservative   3 ti-compat
-# The binary is run once per mode and the rows are concatenated; every row
-# carries its mode, so the postprocessor keeps the series apart.
-# Mode 3 is an oracle and is very slow -- add it only when you want it.
-export SCCD_BENCH_MODES="${SCCD_BENCH_MODES:-0 1 2}"
+# Narrow-phase modes to sweep (see src/narrowphase/sccd_narrowphase_mode.hpp):
+#   0 fast   2 tight
+# Those are the two that exist. The binary is run once per mode and the rows are
+# concatenated; every row carries its mode, so the postprocessor keeps the series
+# apart. 1 and 3 were retired: setting either warns and runs Fast, so a sweep
+# that included them measured mode 0 twice under two different names.
+export SCCD_BENCH_MODES="${SCCD_BENCH_MODES:-0 2}"
 
 # Datasets to run. Overridable from the environment so a quick check can target
 # a single dataset without editing this file.
@@ -176,10 +177,8 @@ BENCH_HEADER='dataset,mode,case,type,queries,prep_ms,broad_ms,narrow_ms,query_na
 
 mode_label() {
     case "$1" in
-        0) echo "scalar" ;;
-        1) echo "fast-vector" ;;
-        2) echo "conservative" ;;
-        3) echo "ti-compat" ;;
+        0) echo "fast" ;;
+        2) echo "tight" ;;
         *) echo "mode$1" ;;
     esac
 }

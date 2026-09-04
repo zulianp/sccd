@@ -29,20 +29,48 @@ SERIES_LIGHT = ["#0E8AA0", "#C07C10", "#8A3C74"]
 SERIES_DARK = ["#0096AE", "#B8862F", "#9C5A88"]
 REFERENCE_INK = "#7C8894"
 
-MODE_ORDER = ["scalar", "fast-vector", "vector", "conservative", "ti-vec", "ti-compat", "ti-reference"]
-# The oracle and the benchmark driver name the same kernels differently.
-MODE_ALIASES = {"vector": "fast-vector", "ti-vec": "conservative"}
-MODE_BLURB = {
-    "scalar": "Scalar reference search.",
-    "fast-vector": "Lane-packed vectorized kernel, vertex-face only.",
-    "conservative": "Lane-packed kernel reproducing TightInclusion exactly.",
-    "ti-compat": "Fast kernel corrected by TightInclusion. An oracle, not a code path.",
-    "ti-reference": "TightInclusion itself, the reference implementation.",
+MODE_ORDER = ["fast", "tight", "device-fast", "device-tight", "tight-inclusion"]
+
+# Historical CSVs use the names the driver and the oracle emitted before the two
+# shipped modes were named for their trade-off. Reading them is the only reason
+# this table exists; nothing writes these names any more.
+#
+# "vector" and "ti-compat" were pinned to SCCD_NARROWPHASE_MODE 1 and 3, which no
+# longer exist -- setting either warns and runs Fast -- so rows carrying those
+# names are a second measurement of `fast`, and are labelled as such rather than
+# folded into it.
+MODE_ALIASES = {
+    "scalar": "fast",
+    "conservative": "tight",
+    "ti-vec": "tight",
+    "vector": "fast (retired mode 1)",
+    "fast-vector": "fast (retired mode 1)",
+    "ti-compat": "fast (retired mode 3)",
+    "device": "device-fast",
+    "device-ti": "device-tight",
+    "ti-reference": "tight-inclusion",
 }
-CONSERVATIVE_MODES = {"conservative", "ti-compat", "ti-reference"}
+
+MODE_BLURB = {
+    "fast": "SCCD's scalar search with the looser acceptance test.",
+    "tight": "SCCD's scalar search, comparing domain widths against domain tolerances. "
+             "Tighter times of impact for more work.",
+    "device-fast": "The CUDA narrow phase running the Fast predicate.",
+    "device-tight": "The CUDA narrow phase running the Tight predicate.",
+    "tight-inclusion": "The external TightInclusion library, the reference this is measured against.",
+    "fast (retired mode 1)": "A historical row. Mode 1 no longer exists, so this is a second "
+                             "measurement of Fast under the name the vectorised kernel used.",
+    "fast (retired mode 3)": "A historical row. Mode 3 no longer exists, so this is a second "
+                             "measurement of Fast under the name the corrected oracle used.",
+}
+
+# Which SCCD_NARROWPHASE_MODE selects each shipped mode. The device rows take the
+# same value; the reference is not a mode at all.
+MODE_ENV = {"fast": "0", "tight": "2", "device-fast": "0", "device-tight": "2"}
 
 
 def canonical_mode(name):
+    """Map a name from a historical CSV onto the vocabulary above."""
     return MODE_ALIASES.get(name, name)
 
 
@@ -366,7 +394,7 @@ def git_revision():
 def build_report(oracle_rows, agg_rows, toi_rows, title):
     # --- accuracy, from the oracle -----------------------------------------
     modes = sorted({canonical_mode(r["mode"]) for r in oracle_rows}, key=mode_sort_key)
-    compare_modes = [m for m in modes if m != "ti-reference"]
+    compare_modes = [m for m in modes if m != "tight-inclusion"]
     groups = []
     for r in oracle_rows:
         g = f"{r['dataset']} {r['phase']}"
@@ -524,7 +552,7 @@ def build_report(oracle_rows, agg_rows, toi_rows, title):
 
     # --- pipeline timing from the benchmark driver -------------------------
     if agg_rows:
-        agg_modes = sorted({r.get("mode") or "scalar" for r in agg_rows}, key=mode_sort_key)
+        agg_modes = sorted({r.get("mode") or "fast" for r in agg_rows}, key=mode_sort_key)
         agg_groups = []
         for r in agg_rows:
             g = r.get("dataset_name") or r["dataset"]
@@ -533,7 +561,7 @@ def build_report(oracle_rows, agg_rows, toi_rows, title):
         vals = {}
         for r in agg_rows:
             g = r.get("dataset_name") or r["dataset"]
-            vals[(g, r.get("mode") or "scalar")] = as_float(r, "narrow_ms_median")
+            vals[(g, r.get("mode") or "fast")] = as_float(r, "narrow_ms_median")
         parts.append('<section><h2>Narrow phase in the full pipeline</h2>')
         parts.append("<p>Median narrow-phase time per step from the benchmark driver, over the "
                      "broadphase output rather than a fixed query list.</p>")
@@ -544,12 +572,16 @@ def build_report(oracle_rows, agg_rows, toi_rows, title):
 
     # --- mode reference ----------------------------------------------------
     parts.append('<section><h2>The modes</h2>')
+    parts.append("<p>Every mode is conservative by construction: the inclusion function's "
+                 "hull over a box is exact, so accepting a box is safe however loose the "
+                 "test, refining preserves acceptance, and an exhausted search accepts at "
+                 "the box's lower bound. What the modes trade is how early they accept, "
+                 "which costs tightness and not safety. Whether a run actually met the "
+                 "invariant is measured above, not asserted here.</p>")
     parts.append('<div class="modes">')
-    for i, m in enumerate(modes or list(MODE_BLURB)):
-        pill = ('<span class="pill ref">reference</span>' if m == "ti-reference"
-                else '<span class="pill ok">conservative</span>' if m in CONSERVATIVE_MODES
-                else '<span class="pill no">not conservative</span>')
-        env = {"scalar": "0", "fast-vector": "1", "conservative": "2", "ti-compat": "3"}.get(m)
+    for m in (modes or list(MODE_BLURB)):
+        pill = ('<span class="pill ref">reference</span>' if m == "tight-inclusion" else "")
+        env = MODE_ENV.get(m)
         code = f"<code>SCCD_NARROWPHASE_MODE={env}</code>" if env else "<code>&mdash;</code>"
         parts.append(f'<div class="mode">{code}<p>{html.escape(MODE_BLURB.get(m, ""))}</p>{pill}</div>')
     parts.append("</div></section>")

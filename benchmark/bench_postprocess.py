@@ -69,7 +69,7 @@ def read_rows(bench_csv):
                 "dataset": row["dataset"],
                 "dataset_name": row["dataset"],
                 # Older bench.csv files predate the narrow-phase mode sweep.
-                "mode": row.get("mode") or "scalar",
+                "mode": row.get("mode") or "fast",
                 "case": row["case"],
                 "type": row["type"],
                 "queries": float(row["queries"]),
@@ -132,7 +132,7 @@ def pair_rows(rows):
 
         pair = {
             "dataset_name": by_type["vf"].get("dataset_name", dataset),
-            "mode": by_type["vf"].get("mode", "scalar"),
+            "mode": by_type["vf"].get("mode", "fast"),
             "dataset": dataset,
             "step": step,
             "ee_case": by_type["ee"]["case"],
@@ -272,7 +272,7 @@ def write_aggregate_csv(agg_csv, by_dataset):
         for key in ("fp", "fn", "broad_fp", "broad_fn"):
             out[f"{key}_sum"] = sum(value[key] for value in values)
         out["dataset_name"] = values[0].get("dataset_name", dataset)
-        out["mode"] = values[0].get("mode", "scalar")
+        out["mode"] = values[0].get("mode", "fast")
         agg_rows.append(out)
 
     with agg_csv.open("w", newline="") as f:
