@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Render the figures from the cross-check tables produced by scripts/crosscheck.sh.
-# Reads research/csv/*_table.csv and writes research/figures.
+# Reads the tables crosscheck.sh wrote and renders the figures beside them.
 
 set -e
 
@@ -11,8 +11,9 @@ PROJECT_DIR="$( cd -- "${SCRIPTPATH}/../.." >/dev/null 2>&1 ; pwd -P )"
 # shellcheck source=/dev/null
 source "${SCRIPTPATH}/venv.sh"
 
-CSV_DIR="${PROJECT_DIR}/research/csv"
-FIG_DIR="${PROJECT_DIR}/research/figures"
+OUT_DIR="${SCCD_BENCH_OUT_DIR:-${PROJECT_DIR}/benchmark/out}/crosscheck"
+CSV_DIR="${OUT_DIR}"
+FIG_DIR="${OUT_DIR}/figures"
 mkdir -p "${FIG_DIR}"
 
 set -x

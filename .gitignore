@@ -53,17 +53,13 @@ benchmark/alps/
 benchmark/reports/
 # Everything benchmark/scripts/bench.sh produces, in one place.
 benchmark/out/
-# Ignore the contents rather than the directory itself, so a README explaining
-# what lands there can still be tracked -- git does not descend into an ignored
-# directory, and a negation inside one never fires.
-**/figures/*
-!**/figures/README.md
+**/figures/
 *.csv
 # Two exceptions: CSVs that are inputs or evidence rather than output -- the
 # oracle's query sets, and the measurement tables their write-ups cite.
 !benchmark/oracle/*.csv
 !benchmark/assessment/*.csv
-!research/notebook/**/*.csv
+!spikes/research/**/*.csv
 *.pdf
 *.aux
 *.log

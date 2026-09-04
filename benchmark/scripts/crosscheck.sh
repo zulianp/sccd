@@ -19,7 +19,7 @@ BUILD_DIR="${BUILD_DIR:-${PROJECT_DIR}/build}"
 cmake --build "${BUILD_DIR}" -j
 
 DB_DIR="${PROJECT_DIR}/data"
-CSV_DIR="${PROJECT_DIR}/research/csv"
+CSV_DIR="${SCCD_BENCH_OUT_DIR:-${PROJECT_DIR}/benchmark/out}/crosscheck"
 mkdir -p "${CSV_DIR}"
 
 datasets=(armadillo-rollers n-body-simulation puffer-ball)

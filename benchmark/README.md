@@ -33,8 +33,8 @@ are distilled in [`../docs/BENCHMARKS.md`](../docs/BENCHMARKS.md).
 |---|---|
 | `bench.sh` | The sweep. Downloads the data, builds, runs every mode over every scene, post-processes, writes the report. |
 | `download_datasets.sh` | Fetches the NYU CCD benchmark sets into `../data`. |
-| `crosscheck.sh` | Every query of every dataset through the C ABI, against its exact roots. |
-| `plot.sh` | Figures from the tables `crosscheck.sh` writes. |
+| `crosscheck.sh` | Every query of every dataset through the C ABI, against its exact roots. Writes `out/crosscheck/`. |
+| `plot.sh` | Figures from the tables `crosscheck.sh` writes, into `out/crosscheck/figures/`. |
 | `assess.sbatch.sh` | The variant sweep behind `../wip/ASSESSMENT.md`, as one Slurm job. |
 | `launch.sbatch.sh` | `bench.sh` as a Slurm job. |
 | `armadillo_ee_full.sh` | Every armadillo-rollers case, mode 0 against mode 2, per case. |
