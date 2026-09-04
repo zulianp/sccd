@@ -1155,10 +1155,6 @@ namespace sccd {
             return stack;
         }
 
-        __global__ void reset_batch_narrow_phase_kernel(int* SCCD_RESTRICT g_top, int* SCCD_RESTRICT g_request) {
-            *g_top = 0;
-            *g_request = 0;
-        }
 
         static inline __device__ int reserve_slots(int* SCCD_RESTRICT counter, int k, int capacity) {
             int old = atomicAdd(counter, 0);
@@ -1170,15 +1166,6 @@ namespace sccd {
             }
         }
 
-        static inline __device__ int release_slot(int* SCCD_RESTRICT counter) {
-            int old = atomicAdd(counter, 0);
-            while (true) {
-                if (old <= 0) return -1;
-                const int prev = atomicCAS(counter, old, old - 1);
-                if (prev == old) return old - 1;
-                old = prev;
-            }
-        }
 
 
         template <int N>

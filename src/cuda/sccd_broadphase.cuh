@@ -81,37 +81,7 @@ namespace sccd {
                               I* SCCD_RESTRICT foverlap,
                               I* SCCD_RESTRICT noverlap);
 
-        template <int first_nxe, int second_nxe, typename T, typename I>
-        void count_overlaps_with_starts(const int sort_axis,
-                                        const ptrdiff_t first_count,
-                                        T** const SCCD_RESTRICT first_aabbs,
-                                        I* const SCCD_RESTRICT first_idx,
-                                        const ptrdiff_t first_stride,
-                                        I** const SCCD_RESTRICT first_elements,
-                                        const ptrdiff_t second_count,
-                                        T** const SCCD_RESTRICT second_aabbs,
-                                        I* const SCCD_RESTRICT second_idx,
-                                        const ptrdiff_t second_stride,
-                                        I** const SCCD_RESTRICT second_elements,
-                                        ptrdiff_t* const SCCD_RESTRICT ccdptr,
-                                        const I* const SCCD_RESTRICT starts);
 
-        template <int first_nxe, int second_nxe, typename T, typename I>
-        void collect_overlaps_with_starts(const int sort_axis,
-                                          const ptrdiff_t first_count,
-                                          T** const SCCD_RESTRICT first_aabbs,
-                                          I* const SCCD_RESTRICT first_idx,
-                                          const ptrdiff_t first_stride,
-                                          I** SCCD_RESTRICT const first_elements,
-                                          const ptrdiff_t second_count,
-                                          T** const SCCD_RESTRICT second_aabbs,
-                                          I* const SCCD_RESTRICT second_idx,
-                                          const ptrdiff_t second_stride,
-                                          I** SCCD_RESTRICT const second_elements,
-                                          const ptrdiff_t* const SCCD_RESTRICT ccdptr,
-                                          const I* const SCCD_RESTRICT starts,
-                                          I* SCCD_RESTRICT foverlap,
-                                          I* SCCD_RESTRICT noverlap);
 
     }  // namespace device
 }  // namespace sccd
