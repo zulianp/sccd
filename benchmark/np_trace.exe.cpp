@@ -29,6 +29,11 @@
 //   --max-depth D   depth cap (default 69)
 //   --mode M        SCCD_NARROWPHASE_MODE for the host side (default 2)
 //   --csv PATH      write every query's counts, for offline analysis
+//   --device        also run every query on the GPU, one query per call, so the
+//                   device's isolated per-query cost can be compared with the
+//                   host's. Needs a CUDA build; each call prints its own
+//                   "sccd-np-count" line to stderr, preceded by a marker naming
+//                   the query, so the two streams can be joined.
 //   --batch         also run the whole file as ONE toi_stride=0 call, which is
 //                   how the library is actually used, and report the same counts.
 //                   The difference between the two is the value of the collapsing
@@ -185,6 +190,66 @@ struct BatchScene {
     }
 };
 
+#ifdef SCCD_ENABLE_CUDA
+#define NPT_CUDA(call)                                                                     \
+    do {                                                                                   \
+        const cudaError_t err_ = (call);                                                   \
+        if (err_ != cudaSuccess) {                                                         \
+            std::fprintf(stderr, "cuda error %s at %s:%d\n", cudaGetErrorString(err_),     \
+                         __FILE__, __LINE__);                                              \
+            std::exit(2);                                                                  \
+        }                                                                                  \
+    } while (0)
+
+template <typename T>
+T* npt_dup(const std::vector<T>& h) {
+    T* d = nullptr;
+    NPT_CUDA(cudaMalloc(&d, sizeof(T) * (h.empty() ? 1 : h.size())));
+    if (!h.empty()) NPT_CUDA(cudaMemcpy(d, h.data(), sizeof(T) * h.size(), cudaMemcpyHostToDevice));
+    return d;
+}
+
+// The whole file's geometry uploaded once; each query is then a one-candidate
+// call into it, so nothing is re-uploaded per query and the isolation is exact.
+struct DeviceFile {
+    scalar_t* rows0[3] = {};
+    scalar_t* rows1[3] = {};
+    idx_t* elem_rows[3] = {};
+    scalar_t** d_p0 = nullptr;
+    scalar_t** d_p1 = nullptr;
+    idx_t** d_elem = nullptr;
+    idx_t* d_a = nullptr;
+    idx_t* d_b = nullptr;
+    scalar_t* d_toi = nullptr;
+    int nxe = 0;
+
+    DeviceFile(const BatchScene& s, const bool is_vf, const std::size_t nq) {
+        nxe = is_vf ? 3 : 2;
+        for (int d = 0; d < 3; ++d) {
+            rows0[d] = npt_dup(s.c0[d]);
+            rows1[d] = npt_dup(s.c1[d]);
+        }
+        NPT_CUDA(cudaMalloc(&d_p0, sizeof(scalar_t*) * 3));
+        NPT_CUDA(cudaMalloc(&d_p1, sizeof(scalar_t*) * 3));
+        NPT_CUDA(cudaMemcpy(d_p0, rows0, sizeof(scalar_t*) * 3, cudaMemcpyHostToDevice));
+        NPT_CUDA(cudaMemcpy(d_p1, rows1, sizeof(scalar_t*) * 3, cudaMemcpyHostToDevice));
+        for (int v = 0; v < nxe; ++v) elem_rows[v] = npt_dup(s.e[v]);
+        NPT_CUDA(cudaMalloc(&d_elem, sizeof(idx_t*) * 3));
+        NPT_CUDA(cudaMemcpy(d_elem, elem_rows, sizeof(idx_t*) * (std::size_t)nxe, cudaMemcpyHostToDevice));
+        d_a = npt_dup(s.a);
+        d_b = npt_dup(s.b);
+        NPT_CUDA(cudaMalloc(&d_toi, sizeof(scalar_t) * (nq ? nq : 1)));
+    }
+
+    ~DeviceFile() {
+        for (int d = 0; d < 3; ++d) { cudaFree(rows0[d]); cudaFree(rows1[d]); }
+        for (int v = 0; v < nxe; ++v) cudaFree(elem_rows[v]);
+        cudaFree(d_p0); cudaFree(d_p1); cudaFree(d_elem);
+        cudaFree(d_a); cudaFree(d_b); cudaFree(d_toi);
+    }
+};
+#endif  // SCCD_ENABLE_CUDA
+
 struct Row {
     std::size_t index = 0;
     unsigned long long host_boxes = 0;
@@ -231,6 +296,7 @@ int main(int argc, char** argv) {
     int mode = 2;
     std::string csv_path;
     bool batch = false;
+    bool device = false;
 
     for (int i = 3; i < argc; ++i) {
         const std::string a = argv[i];
@@ -243,6 +309,7 @@ int main(int argc, char** argv) {
         else if (a == "--mode") mode = std::stoi(next());
         else if (a == "--csv") csv_path = next();
         else if (a == "--batch") batch = true;
+        else if (a == "--device") device = true;
         else { usage(argv[0]); return 1; }
     }
 
@@ -325,6 +392,45 @@ int main(int argc, char** argv) {
     std::printf("%8s %12s %16s\n", "query", "host_boxes", "host_toi");
     for (int i = 0; i < top && i < (int)rows.size(); ++i) {
         std::printf("%8zu %12llu %16.9f\n", rows[i].index, rows[i].host_boxes, (double)rows[i].host_toi);
+    }
+
+    if (device) {
+#ifndef SCCD_ENABLE_CUDA
+        std::fprintf(stderr, "error: --device needs a CUDA build\n");
+        return 1;
+#else
+        std::printf("\n# device, one query per call, max_toi = 1, toi_stride = 1\n");
+        std::printf("# each call's box count is on stderr, after its marker\n");
+        std::size_t idx = 0;
+        for (const auto& file : files) {
+            std::vector<Query> queries;
+            if (!read_queries(file, queries)) continue;
+            BatchScene scene(queries, is_vf);
+            DeviceFile df(scene, is_vf, queries.size());
+            for (std::size_t q = 0; q < queries.size(); ++q, ++idx) {
+                if (only_query >= 0 && (long)q != only_query) continue;
+                scalar_t one = 1.0;
+                NPT_CUDA(cudaMemcpy(df.d_toi, &one, sizeof(scalar_t), cudaMemcpyHostToDevice));
+                // The marker goes to the same stream as the kernel's own count
+                // line, immediately before it, so a reader can join them.
+                std::fflush(stdout);
+                std::fprintf(stderr, "np_trace-query %zu %s\n", idx, file.filename().c_str());
+                std::fflush(stderr);
+                if (is_vf) {
+                    sccd::device::narrow_phase_vf<3, scalar_t, idx_t>(
+                        1, df.d_a + q, df.d_b + q, df.d_p0, df.d_p1, 1, df.d_elem,
+                        /*max_toi=*/1.0, df.d_toi, max_depth, tol, /*toi_stride=*/1);
+                } else {
+                    sccd::device::narrow_phase_ee<scalar_t, idx_t>(
+                        1, df.d_a + q, df.d_b + q, df.d_p0, df.d_p1, 1, df.d_elem,
+                        /*max_toi=*/1.0, df.d_toi, max_depth, tol, /*toi_stride=*/1);
+                }
+                scalar_t dt = 1.0;
+                NPT_CUDA(cudaMemcpy(&dt, df.d_toi, sizeof(scalar_t), cudaMemcpyDeviceToHost));
+                std::printf("device query %zu toi %.9f\n", idx, (double)dt);
+            }
+        }
+#endif
     }
 
     if (batch) {
