@@ -8,11 +8,11 @@
 
 #include <cuda_runtime.h>
 
-#ifndef MIN
-#define MIN(a, b) ((a) < (b) ? (a) : (b))
+#ifndef SCCD_MIN
+#define SCCD_MIN(a, b) ((a) < (b) ? (a) : (b))
 #endif
-#ifndef MAX
-#define MAX(a, b) ((a) > (b) ? (a) : (b))
+#ifndef SCCD_MAX
+#define SCCD_MAX(a, b) ((a) > (b) ? (a) : (b))
 #endif
 
 #define SCCD_WARP_SIZE 32
@@ -140,8 +140,20 @@ namespace sccd {
     }  // namespace device
 }  // namespace sccd
 
-#define SCCD_CHECK_CUDA(error) \
-    cudaDeviceSynchronize();   \
+// The synchronize is a debugging aid, not part of the check: cudaGetLastError
+// and the API return codes are meaningful without it. Leaving it in release
+// builds put a full device sync after every launch, which on the narrow phase's
+// drain loop doubled the per-round cost of the very loop that turned out to
+// dominate a hard edge-edge run. Define SCCD_CUDA_SYNC_CHECKS to get it back
+// when chasing an async fault to its launch.
+#if defined(SCCD_CUDA_SYNC_CHECKS) || !defined(NDEBUG)
+#define SCCD_CUDA_SYNC_FOR_CHECK() cudaDeviceSynchronize()
+#else
+#define SCCD_CUDA_SYNC_FOR_CHECK() ((void)0)
+#endif
+
+#define SCCD_CHECK_CUDA(error)   \
+    SCCD_CUDA_SYNC_FOR_CHECK();  \
     cuda_check(error, __FILE__, __LINE__)
 
 #define SCCD_CUDA_LAST_ERROR() SCCD_CHECK_CUDA(cudaGetLastError())

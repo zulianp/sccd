@@ -7,7 +7,15 @@ if(SCCD_ENABLE_TBB)
 endif()
 
 if(SCCD_ENABLE_CUDA)
+    # Must precede enable_language(CUDA): CMake fixes the default architecture
+    # while enabling the language, and a later assignment is ignored for the
+    # compiler test.
+    if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+      set(CMAKE_CUDA_ARCHITECTURES "${SCCD_CUDA_ARCHITECTURES}")
+    endif()
+
     enable_language(CUDA)
+    message(STATUS "SCCD: building CUDA for architectures ${CMAKE_CUDA_ARCHITECTURES}")
 
     if(NOT DEFINED CMAKE_CUDA_STANDARD)
       set(CMAKE_CUDA_STANDARD 17)
@@ -82,7 +90,6 @@ if(SCCD_ENABLE_TIGHT_INCLUSION)
     "$<$<CONFIG:Release>:${SCCD_TIGHT_INCLUSION_CXX_RELEASE_FLAGS}>"
   )
 
-  add_compile_definitions(SCCD_ENABLE_TIGHT_INCLUSION=1)
   list(APPEND SCCD_DEP_LIBRARIES "$<BUILD_INTERFACE:tight_inclusion::tight_inclusion>")
 
 endif()

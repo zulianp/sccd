@@ -7,7 +7,7 @@
 #include "smesh_tracer.hpp"
 
 #include "sccd_config.hpp"
-#include "sccd_smesh_CCD.hpp"
+#include "sccd_smesh_ccd.hpp"
 
 #include <algorithm>
 #include <limits>

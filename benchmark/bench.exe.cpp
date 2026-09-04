@@ -1,4 +1,5 @@
-#include "sccd_smesh_CCD.hpp"
+#include "sccd_narrowphase_mode.hpp"
+#include "sccd_smesh_ccd.hpp"
 #include "smesh_buffer.hpp"
 #include "smesh_context.hpp"
 #include "smesh_device_buffer.hpp"
@@ -201,6 +202,23 @@ namespace {
         }
 
         std::sort(cases.begin(), cases.end(), [](const CaseFile& a, const CaseFile& b) { return a.key < b.key; });
+
+        // A full dataset is 372 to 1996 cases, which is the right thing when the
+        // question is accuracy over the whole trajectory. A variant sweep asks a
+        // different question -- is A faster than B -- and has to run every variant
+        // on the same cases within one allocation, so it needs a bounded, evenly
+        // spread subsample rather than a prefix. SCCD_BENCH_MAX_CASES picks that
+        // many cases spread across the trajectory; unset, everything runs.
+        int SCCD_BENCH_MAX_CASES = 0;
+        SCCD_READ_ENV(SCCD_BENCH_MAX_CASES, atoi);
+        if (SCCD_BENCH_MAX_CASES > 0 && (int)cases.size() > SCCD_BENCH_MAX_CASES) {
+            std::vector<CaseFile> subset;
+            subset.reserve(SCCD_BENCH_MAX_CASES);
+            for (int k = 0; k < SCCD_BENCH_MAX_CASES; ++k) {
+                subset.push_back(cases[(std::size_t)((double)k * cases.size() / SCCD_BENCH_MAX_CASES)]);
+            }
+            cases.swap(subset);
+        }
         return cases;
     }
 
@@ -622,7 +640,32 @@ namespace {
         }
     }
 
-    double time_narrowphase_zero_stride(const bool is_vf, CCDRun& ccd_run, int& err) {
+    /**
+     * \brief Time the CCD narrow phase writing one time of impact per candidate.
+     *
+     * The zero-stride call below reduces to a single earliest time and can prune
+     * every query against the running minimum; this one has to finish each
+     * candidate, so the pair is what shows what that pruning is worth. Same
+     * geometry, same broad-phase output, same kernel -- only `toi_stride` differs.
+     */
+    double time_narrowphase_per_query(const bool is_vf, CCDRun& ccd_run, int& err) {
+        scalar_t toi = scalar_t(1);
+        smesh::SharedBuffer<scalar_t> vf_tois;
+        smesh::SharedBuffer<scalar_t> ee_tois;
+
+        const auto start = std::chrono::steady_clock::now();
+        if (is_vf) {
+            err = ccd_run.ccd->narrow_phase_fv(toi, vf_tois, narrowphase_max_depth, narrowphase_tol, 1);
+        } else {
+            err = ccd_run.ccd->narrow_phase_ee(toi, ee_tois, narrowphase_max_depth, narrowphase_tol, 1);
+        }
+        const auto stop = std::chrono::steady_clock::now();
+        static volatile scalar_t toi_sink;
+        toi_sink = toi;
+        return std::chrono::duration<double, std::milli>(stop - start).count();
+    }
+
+    double time_narrowphase_zero_stride(const bool is_vf, CCDRun& ccd_run, int& err, scalar_t* out_toi = nullptr) {
         scalar_t toi = scalar_t(1);
         smesh::SharedBuffer<scalar_t> vf_tois;
         smesh::SharedBuffer<scalar_t> ee_tois;
@@ -634,6 +677,18 @@ namespace {
             err = ccd_run.ccd->narrow_phase_ee(toi, ee_tois, narrowphase_max_depth, narrowphase_tol, 0);
         }
         const auto stop = std::chrono::steady_clock::now();
+        if (out_toi != nullptr) {
+            // From the buffer, not the parameter: the two entry points disagreed
+            // about whether they write it back, and reading the buffer is true of
+            // both regardless.
+            auto& buf = is_vf ? vf_tois : ee_tois;
+            if (buf && buf->size() > 0) {
+                auto host_toi = smesh::to_host(buf);
+                *out_toi = host_toi->data()[0];
+            } else {
+                *out_toi = toi;
+            }
+        }
         static volatile scalar_t toi_sink;
         toi_sink = toi;
         return std::chrono::duration<double, std::milli>(stop - start).count();
@@ -773,6 +828,8 @@ namespace {
                             const double prep_ms,
                             const double broad_ms,
                             const double narrow_ms,
+                            const double narrow_ms_s1,
+                            const scalar_t earliest_toi,
                             const smesh::ExecutionSpace execution_space,
                             BroadphaseResult& broadphase,
                             std::vector<double>& timings_ms) {
@@ -811,6 +868,17 @@ namespace {
         fp_broad_c0.reserve(static_cast<std::size_t>(broadphase.false_positives));
         fp_broad_c1.reserve(static_cast<std::size_t>(broadphase.false_positives));
 
+        // Signed error against the exact roots. Unsigned error would hide the
+        // only failure that matters: a time of impact *after* the true one lets a
+        // solver step through the contact, and is as bad as missing it. Early is
+        // the safe direction and is reported separately as accuracy.
+        std::uint64_t toi_n = 0;
+        std::uint64_t toi_late = 0;
+        double toi_max_late = 0.0;
+        double toi_max_early = 0.0;
+        std::vector<double> toi_early;
+        toi_early.reserve(q0.size());
+
         std::uint64_t fp_count = 0;
         std::uint64_t fn_count = 0;
         for (std::size_t i = 0; i < q0.size(); ++i) {
@@ -818,7 +886,10 @@ namespace {
             if (i < mma.size()) {
                 expected = mma[i] != 0;
             } else if (i < root_toi.size()) {
-                expected = std::isfinite(root_toi[i]);
+                // Bitwise, not std::isfinite: the roots file encodes "no
+                // collision" as NaN, and -ffast-math folds isfinite to true,
+                // which would turn every correct miss into a reported fn.
+                expected = sccd::is_finite_bits(root_toi[i]);
             }
 
             const bool found = sccd_toi[i] < scalar_t(1);
@@ -826,6 +897,20 @@ namespace {
             fn[i] = static_cast<std::uint8_t>(!found && expected);
             fp_count += fp[i];
             fn_count += fn[i];
+
+            if (i < root_toi.size() && sccd::is_finite_bits(root_toi[i]) && found) {
+                const double ref = static_cast<double>(root_toi[i]);
+                const double got = static_cast<double>(sccd_toi[i]);
+                ++toi_n;
+                if (got > ref) {
+                    ++toi_late;
+                    if (got - ref > toi_max_late) toi_max_late = got - ref;
+                } else {
+                    const double early = ref - got;
+                    toi_early.push_back(early);
+                    if (early > toi_max_early) toi_max_early = early;
+                }
+            }
 
             const bool broad_found = contains_pair(broadphase.pairs, pair_key(c0[i], c1[i]));
             if (!broad_found) {
@@ -861,9 +946,49 @@ namespace {
         }
 
         timings_ms.push_back(narrow_ms);
-        std::cout << dataset << ',' << case_file.key << ',' << (case_file.is_vf ? "vf" : "ee") << ',' << narrow_queries
+        // The narrow-phase mode is read from the environment per call, so it is
+        // recorded per row: a sweep runs the binary once per mode and the rows
+        // stay distinguishable when the results are concatenated.
+        // The earliest-impact call returns one number for the whole step, so a
+        // miss there is not a per-query false negative -- it is a reported time
+        // *after* the true earliest contact. SCCD's broad phase is a superset of
+        // the reference's (broad_fn is 0 throughout), and its extra pairs carry no
+        // real contact, so the smallest finite exact root is the truth to compare
+        // against.
+        double gt_earliest = 1.0;
+        for (std::size_t i = 0; i < root_toi.size(); ++i) {
+            if (sccd::is_finite_bits(root_toi[i])) {
+                const double r = static_cast<double>(root_toi[i]);
+                if (r < gt_earliest) gt_earliest = r;
+            }
+        }
+        // The same kernel's answer over the curated queries, whose coordinates come
+        // from the CSV, against its answer over the mesh, whose coordinates come
+        // from the PLY. If those disagree the two paths are not being given the
+        // same geometry, and gt_earliest is not a reference for the mesh path.
+        double s1_min = 1.0;
+        for (std::size_t i = 0; i < sccd_toi.size(); ++i) {
+            const double v = static_cast<double>(sccd_toi[i]);
+            if (v < s1_min) s1_min = v;
+        }
+
+        const int s0_late = (static_cast<double>(earliest_toi) > gt_earliest) ? 1 : 0;
+        const double s0_margin = gt_earliest - static_cast<double>(earliest_toi);
+
+        double toi_med_early = 0.0;
+        if (!toi_early.empty()) {
+            std::nth_element(toi_early.begin(), toi_early.begin() + toi_early.size() / 2, toi_early.end());
+            toi_med_early = toi_early[toi_early.size() / 2];
+        }
+
+        std::cout << dataset << ',' << sccd::narrow_phase_mode_name(sccd::narrow_phase_mode()) << ','
+                  << case_file.key << ',' << (case_file.is_vf ? "vf" : "ee") << ',' << narrow_queries
                   << ',' << prep_ms << ',' << broad_ms << ',' << narrow_ms << ',' << query_narrow_ms << ','
-                  << fp_count << ',' << fn_count << ',' << broadphase.false_positives << ',' << broad_fn_count << '\n';
+                  << fp_count << ',' << fn_count << ',' << broadphase.false_positives << ',' << broad_fn_count
+                  << ',' << narrow_ms_s1 << ',' << toi_n << ',' << toi_late << ',' << toi_max_late << ','
+                  << toi_max_early << ',' << toi_med_early << ',' << s0_late << ',' << s0_margin << ','
+                  << static_cast<double>(earliest_toi) << ',' << gt_earliest << ',' << root_toi.size() << ','
+                  << s1_min << '\n';
         return wrote;
     }
 
@@ -942,9 +1067,19 @@ namespace {
             }
         }
         narrow_err = SCCD_SUCCESS;
-        const double narrow_ms = time_narrowphase_zero_stride(case_file.is_vf, ccd_run, narrow_err);
+        scalar_t earliest_toi = scalar_t(1);
+        const double narrow_ms =
+            time_narrowphase_zero_stride(case_file.is_vf, ccd_run, narrow_err, &earliest_toi);
         if (narrow_err != SCCD_SUCCESS) {
             std::cerr << "error: CCD narrowphase failed for " << dataset << "/" << case_file.key << "\n";
+            return false;
+        }
+
+        narrow_err = SCCD_SUCCESS;
+        const double narrow_ms_s1 = time_narrowphase_per_query(case_file.is_vf, ccd_run, narrow_err);
+        if (narrow_err != SCCD_SUCCESS) {
+            std::cerr << "error: CCD per-query narrowphase failed for " << dataset << "/" << case_file.key
+                      << "\n";
             return false;
         }
 
@@ -961,6 +1096,8 @@ namespace {
                                   prep_ms,
                                   broad_ms,
                                   narrow_ms,
+                                  narrow_ms_s1,
+                                  earliest_toi,
                                   execution_space,
                                   broadphase,
                                   timings_ms);
@@ -989,7 +1126,9 @@ int main(int argc, char** argv) {
     if (using_global_missing_pairs_report) {
         ok = initialize_missing_pairs_report(data_dir) && ok;
     }
-    std::cout << "dataset,case,type,queries,prep_ms,broad_ms,narrow_ms,query_narrow_ms,fp,fn,broad_fp,broad_fn\n";
+    std::cout << "dataset,mode,case,type,queries,prep_ms,broad_ms,narrow_ms,query_narrow_ms,fp,fn,broad_fp,broad_fn,"
+              "narrow_ms_s1,toi_n,toi_late,toi_max_late,toi_max_early,toi_med_early,s0_late,s0_margin,"
+              "s0_toi,gt_earliest,root_n,s1_min\n";
     for (int i = 2; i < argc; ++i) {
         const std::string dataset = argv[i];
         const fs::path dataset_dir = data_dir / dataset;
