@@ -889,6 +889,58 @@ this conclusion and it is how anyone re-checks it. It cannot be combined with
 `SCCD_NP_BEST_FIRST` — that path's promotion step is a block-wide reduction with
 its own barrier — and the build errors if both are set.
 
+## D1: a global work cursor, built, measured, reverted
+
+Two experiments said the sharing pool wants to be bigger, so this made it the
+whole launch: a persistent grid capped at `SMs x blocks_per_SM` instead of one
+thread per query, and a global cursor that a thread claims its next query from
+whenever it runs out — its first one included. Claims are chunked, because one
+query per `atomicAdd` turns a 33-million-query scene into 33 million atomics on
+one word.
+
+Mode 2, device, three repeats, medians, `SCCD_NP_CLAIM_CHUNK` swept:
+
+| scene | | none | 1 | 2 | 4 | 8 |
+|---|---|---:|---:|---:|---:|---:|
+| cloth-funnel | s0 | **26.9** | 28.3 | 28.6 | 29.4 | 34.8 |
+| cloth-funnel | s1 | 34.4 | **32.9** | 38.2 | 42.7 | 51.4 |
+| armadillo-rollers | s0 | **37.3** | 38.5 | 42.5 | 53.4 | 66.9 |
+| armadillo-rollers | s1 | 71.8 | **67.1** | 79.5 | 104.6 | 122.1 |
+| cloth-ball | s0 | **116.8** | 132.8 | 133.8 | 138.6 | 142.9 |
+| cloth-ball | s1 | **162.6** | 193.2 | 207.2 | 208.8 | 226.4 |
+| **sum** | | **449.8** | 492.9 | 529.8 | 577.6 | 644.4 |
+| | | | +10% | +18% | +28% | +43% |
+
+False positives 260 / 5,637 / 95,424 and `fn=0` at every setting; gate green.
+Chunk 32 was tried first and is 2–5× worse — it hands one thread 32 queries to
+work through serially, which is the imbalance the cursor exists to remove.
+
+**No setting wins.** The best is chunk 1, which buys 4% and 7% on the two smaller
+scenes at stride 1 and loses 19% on cloth-ball and 3–14% everywhere at stride 0.
+
+### What the three failures have in common
+
+Smaller blocks: worse. Warp-owned stacks: worse. A global cursor: worse. All three
+give an idle lane more places to look for work, and all three lose.
+
+The reading that survives is that **the lanes are not starved, they are
+finished.** Most queries take two to seven boxes. With one thread per query, a
+thread that completes its query has done its job and the block is winding down —
+that is not recoverable idleness, and F's 20%-active figure counts it as though it
+were. Handing such a thread another query does not fill a bubble; it extends the
+block's life, adds an atomic, and gives up the perfectly balanced
+one-thread-one-query mapping that the fixed grid had for free.
+
+What is left is the tail of genuinely deep queries, and the machinery for
+spreading those — the global queue — already exists and already fires for exactly
+them.
+
+**So there is no scheduling win left on this kernel**, and that is now three
+independent measurements rather than an opinion. The code was reverted rather than
+kept behind a switch: unlike `SCCD_NP_BEST_FIRST` and the warp variant it changes
+the seeding path, and a measured loss on the shipped path is not worth the risk of
+carrying.
+
 ## What must not change
 
 - **Conservativeness.** A reported time of impact is at or before the true one,
@@ -933,7 +985,7 @@ remains is listed first.
 | ~~**D**~~ | ~~The per-query residual~~ | **Gone.** The device now matches the host box-for-box on two of the three worst queries and is 1.30× on the third. The counting asymmetry it was blamed on is 0.011–0.025%. Detail below. |
 | ~~**E**~~ | ~~A1/A2, per-box cost~~ | **Closed, not worth doing.** The kernel is neither arithmetic-bound (0.11% of fp64 peak) nor occupancy-bound (4× the blocks per SM buys 2–5%). Both premises measured false. Detail below. |
 | ~~**F**~~ | ~~What the kernel is bound by~~ | **Divergence, measured.** 20–22% of a block's threads have a box in hand on a typical iteration at stride 0. Smaller blocks do not fix it. The fix is D1. Detail below. |
-| **D1** | **Feed idle lanes from a global source** | Now the only structural item left, and F says why. A thread whose query finishes waits at the barrier because its block's stack is empty; it should pull a new query from a global cursor instead. |
+| ~~**D1**~~ | ~~Feed idle lanes from a global source~~ | **Built and reverted.** A global work cursor costs 10% at its best setting and 43% at its worst. Together with the block-size sweep and the warp stacks it says the kernel is not starved — it is *finished*, in most lanes, most of the time. Detail below. |
 | — | *Loose end* | The host's mode 0 increments the box counter and nothing prints it — the `fprintf` lives in `narrow_phase_tight_*` and the scalar path has none. Host `Relaxed` box counts are not obtainable from a run. |
 
 ### Closed
