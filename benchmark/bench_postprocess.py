@@ -67,6 +67,9 @@ def read_rows(bench_csv):
                 continue
             converted = {
                 "dataset": row["dataset"],
+                "dataset_name": row["dataset"],
+                # Older bench.csv files predate the narrow-phase mode sweep.
+                "mode": row.get("mode") or "relaxed",
                 "case": row["case"],
                 "type": row["type"],
                 "queries": float(row["queries"]),
@@ -82,6 +85,16 @@ def read_rows(bench_csv):
             match = re.match(r"^(\d+)", converted["case"])
             converted["step"] = int(match.group(1)) if match else len(rows)
             rows.append(converted)
+
+    # When a run sweeps several narrow-phase modes, every (dataset, mode) pair is
+    # treated as its own series so nothing downstream has to know about modes.
+    # A single-mode run keeps the plain dataset name, so existing outputs and
+    # figure filenames are unchanged.
+    modes = {row["mode"] for row in rows}
+    if len(modes) > 1:
+        for row in rows:
+            row["dataset"] = f"{row['dataset_name']}@{row['mode']}"
+
     return rows
 
 
@@ -118,6 +131,8 @@ def pair_rows(rows):
             continue
 
         pair = {
+            "dataset_name": by_type["vf"].get("dataset_name", dataset),
+            "mode": by_type["vf"].get("mode", "relaxed"),
             "dataset": dataset,
             "step": step,
             "ee_case": by_type["ee"]["case"],
@@ -195,6 +210,8 @@ def write_paired_csv(paired_csv, paired_rows):
 def write_aggregate_csv(agg_csv, by_dataset):
     fields = [
         "dataset",
+        "dataset_name",
+        "mode",
         "cases",
         "queries_mean",
         "queries_sum",
@@ -254,6 +271,8 @@ def write_aggregate_csv(agg_csv, by_dataset):
         )
         for key in ("fp", "fn", "broad_fp", "broad_fn"):
             out[f"{key}_sum"] = sum(value[key] for value in values)
+        out["dataset_name"] = values[0].get("dataset_name", dataset)
+        out["mode"] = values[0].get("mode", "relaxed")
         agg_rows.append(out)
 
     with agg_csv.open("w", newline="") as f:

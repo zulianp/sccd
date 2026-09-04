@@ -1,0 +1,18 @@
+name,calls,total,avg
+Broadphase,1,0.0150084,0.0150084
+Broadphase: E2E,1,0.00293231,0.00293231
+Broadphase: F2V,1,0.00130439,0.00130439
+Mesh::node_to_node_graph_upper_triangular,1,0.0125775,0.0125775
+Mesh::read,2,0.0309753,0.0154877
+Narrow phase,1,0.0440879,0.0440879
+Narrow phase: E2E,1,0.018791,0.018791
+Narrow phase: F2V,1,0.0252695,0.0252695
+Sorting AABBs,1,0.0020895,0.0020895
+collect_overlaps,1,0.000439882,0.000439882
+collect_self_overlaps,1,0.00128651,0.00128651
+count_overlaps,1,0.000433922,0.000433922
+count_self_overlaps,1,0.00128603,0.00128603
+create_crs_graph_upper_triangular_from_element,1,0.0125337,0.0125337
+create_n2e,1,0.00220251,0.00220251
+cummax,1,8.15392e-05,8.15392e-05
+mesh_sccd_cuda.exe,1,2.38469,2.38469
