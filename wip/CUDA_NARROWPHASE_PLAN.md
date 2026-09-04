@@ -104,10 +104,38 @@ Two supporting measurements, and one caveat:
 - **`tight_toi >= relaxed_toi` held on all 92 queries**, with zero violations.
   That ordering is what B1's culling argument needs, and it is now measured rather
   than assumed.
-- **Not yet established:** the device half. If the device costs ~560 boxes on an
-  isolated query too, the search is fine and this is settled. If it costs far
-  more, there is a second, per-query problem underneath. `sccd_np_trace` needs its
-  device path and a run on Alps; that is the next thing.
+## Step 0, second result: in isolation the device is 2.3x the host, not 94x
+
+`sccd_np_trace --device` on a GH200, the same 92 queries, one query per call,
+`max_toi = 1`, `toi_stride = 1` — nothing another query found available to prune
+either side:
+
+| | boxes | per query |
+|---|---:|---:|
+| host `Tight` | 51,509 | 559.88 |
+| device `Tight` | 118,808 | **1,291.39** |
+| | | **2.31×** |
+
+Worst single query 5.0×; the ratio is 3–5× across the costliest few and lower
+elsewhere. Not 94×, and not 1397×.
+
+**Step 0 is answered.** The device's per-query search is about twice the host's.
+Everything above that in the scene-level numbers is the bound: the host's
+sequencing collapses it to the scene minimum within a few chunks and the device
+never gets that head start.
+
+That settles the priorities. The per-box work — corner inheritance at 12
+evaluations per split against 48, family A — is a 4× arithmetic factor sitting
+behind a 2.3× box factor, on a problem whose remaining 40× is somewhere else
+entirely. **The lever is the bound collapse rate, and B1 and C1 are the two ways
+to pull it.**
+
+The 2.3× residual is still worth one careful look, and it is a small, contained
+question rather than an architectural one. The first thing to check is the
+counting convention: the device ticks once per `evaluate_cell_3d_policy` call,
+which happens for *both* children of every split including ones discarded
+immediately, while the host ticks once per box taken off its work list. Some of
+2.3× may be that and not real work.
 
 ## What is still worth tracing box by box
 
@@ -247,15 +275,17 @@ the drain loop is not understood, and D1 tunes exactly that machinery.
 
 ## Order
 
-0. **Done for the host half.** The 12.6× above says the bound schedule dominates.
-1. **Finish step 0:** give `sccd_np_trace` its device path and run it on Alps. One
-   isolated query, host and device, same data. This decides whether there is a
-   per-query problem at all underneath the bound-schedule one.
-2. **B1**, which directly attacks the mechanism step 0 found.
-3. **C1**, which attacks the same mechanism from the other side: best-first makes
-   the bound arrive early *within* the launch.
+0. **Done.** The scene-level gap is the bound schedule; the per-query search is
+   2.3×.
+1. **B1.** It manufactures the collapsed bound in one cheap pass, with no
+   sequence to wait for. Directly on the mechanism.
+2. **C1.** The same mechanism from the other side: best-first makes the bound
+   arrive early *within* the launch.
+3. **The 2.3× residual**, starting with whether the two counters count the same
+   thing. Small and contained.
 4. D2, because D1 cannot be tuned honestly until it is understood.
-5. A1, if and only if a B or C has already shrunk the search.
+5. **A1/A2 are demoted.** 4× of arithmetic behind a 2.3× box factor is not where
+   the time is.
 
 Also outstanding, and cheap: **the host box counter only covers the `Tight`
 kernel.** `SCCD_NP_HOST_BOX_TICK` lives in `sccd_narrowphase_tight.hpp`, so mode 0

@@ -53,3 +53,29 @@ through a pipe is block-buffered, and a run that has already finished can look
 like a hang for want of a flush. That is a separate trap from the one above, and
 it is what made the first `ctest` attempt look like it had got further than it
 had.
+
+## CMake picks GCC 7.5, not the uenv's compiler
+
+Inside `uenv run --view=default prgenv-gnu/24.11:v2`, `which g++` is GCC 13.3 —
+and CMake still configures with `/usr/bin/c++`, which is **GCC 7.5.0**. It is
+first on the default search path and CMake has no reason to prefer the other one.
+
+Most of this repository does not notice. `<filesystem>` does: GCC 7.5 has it only
+as `<experimental/filesystem>`, so a target that includes it fails with
+
+    fatal error: filesystem: No such file or directory
+
+which reads like a missing package and is not one. `benchmark/np_trace.exe.cpp`
+and `benchmark/ti_oracle.exe.cpp` both include it.
+
+Pass the compiler explicitly:
+
+```sh
+uenv run --view=default prgenv-gnu/24.11:v2 -- bash -lc '
+  cmake -S . -B build-hopper -DCMAKE_CXX_COMPILER=$(which g++) \
+        -DSCCD_ENABLE_CUDA=ON -DSCCD_CUDA_ARCHITECTURES=90 -DCMAKE_CUDA_ARCHITECTURES=90'
+```
+
+Worth knowing that the CUDA verification runs recorded before this was noticed
+were built with GCC 7.5 as the host compiler. They passed, so nothing is in
+doubt, but "the same compiler as the uenv advertises" was not what was measured.
