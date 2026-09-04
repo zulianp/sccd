@@ -21,18 +21,10 @@ supported configuration.
 
 ### Why modes 1 and 3 need TightInclusion
 
-Both are entries into the same vectorised kernel, and neither is a mode to ship.
-Mode 3 runs that kernel and then corrects its answers with TightInclusion, which
-makes it an oracle rather than a code path; without TightInclusion it used to
-return `-1` at the point of use, so it was already unavailable, just later and
-less clearly. Mode 1 is a duplicate that loses — the assessment measured it
-behind the scalar reference on all three real scenes, by 5.2x on
-armadillo-rollers, and it is vertex-face only. What it is still good for is
-reproducing that comparison, which needs TightInclusion in the build anyway.
-
-Asking for either in a build without TightInclusion gets mode 0 rather than an
-error: the caller wants a time of impact, and the scalar path is the supported
-way to get one.
+Both enter the same vectorised kernel. Mode 3 then corrects its answers with the
+external library, which makes it an oracle rather than a code path; mode 1 is a
+duplicate that lost every scene the assessment measured, and is vertex-face only.
+Asking for either without the library gets mode 0 rather than an error.
 
 ### The three cases that used to be silent
 
@@ -52,10 +44,8 @@ surprise to report. The mode is re-read from the environment on every call, so a
 caller that switches it between calls keeps working -- the warnings are one-shot
 flags rather than a resolved-once decision.
 
-`SCCD_ADAPTIVE_SPLIT` is gone. It selected uniform interval splitting instead of
-the Gauss–Newton splitters, which was a complete second implementation of the
-splitting job and never won on any real scene, so it was demoted to
-`spikes/src/uniform_split.hpp`. Setting it now does nothing.
+**Removed variables.** `SCCD_ADAPTIVE_SPLIT` (uniform splitting, demoted to a
+spike) and `SCCD_GSTACK_CAP_INIT` (never read). Setting either does nothing.
 
 ## Search parameters
 

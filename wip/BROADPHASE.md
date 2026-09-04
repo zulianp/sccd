@@ -117,7 +117,7 @@ problem from scaling -- a pathological input where the conservative kernel runs
 scene does not make it less worth fixing. See `oracle/README.md` for what has
 been ruled out so far.
 
-## Implemented: `src/cell2d_broadphase.hpp`
+## Implemented: `src/broadphase/sccd_broadphase_cell2d.hpp`
 
 Both passes now have a cell-list path, selected by `SCCD_BROADPHASE=cell2d`. The
 sweep remains the default. No sorting is done on this path at all -- vertices,
@@ -166,7 +166,7 @@ sharing one would save a binning pass. `prep_ms` improved only 1.23x because
 binning replaces sorting rather than removing work outright.
 
 The device kernels exist and are tested, but are **not yet wired into**
-`sccd_smesh_CCD.hpp`'s device path -- `broad_phase_prep_device_` and friends still
+`sccd_smesh_ccd.hpp`'s device path -- `broad_phase_prep_device_` and friends still
 sort and sweep. Connecting them is the same edit already made on the host side.
 
 ## Caveats
