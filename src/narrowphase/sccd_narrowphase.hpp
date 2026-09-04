@@ -51,18 +51,6 @@ namespace sccd {
         return expected;
     }
 
-    template <int nxe, typename T, typename I>
-    int narrow_phase_newton_pass_vf(const size_t noverlaps,
-                                    const I* const SCCD_RESTRICT voveralp,
-                                    const I* const SCCD_RESTRICT foveralp,
-                                    T** const SCCD_RESTRICT v0,
-                                    T** const SCCD_RESTRICT v1,
-                                    const size_t face_stride,
-                                    I** const SCCD_RESTRICT faces,
-                                    const T max_toi,
-                                    T* const SCCD_RESTRICT toi,
-                                    const T tol,
-                                    const int toi_stride = 0);
 
     template <int nxe, typename T, typename I>
     int narrow_phase_vf(const size_t noverlaps,
