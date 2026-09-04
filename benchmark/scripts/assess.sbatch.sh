@@ -133,11 +133,12 @@ run_refine() { # hardware topology component variant repeat  [env assignments...
            timeout "$ASSESS_TIMEOUT" "$build/sccd_refine_scaling" "$ASSESS_REFINE_LEVELS" 2>>"$LOG" )
     local rc=$?
     echo "$out" >> "$LOG"
-    # A failure here is a result, not an accident to be swallowed. The device
-    # narrow phase raises SMESH_ERROR for QUADSHELL4 -- it is simply not
-    # implemented -- so the hopper quad rows are expected to land here, and an
-    # explicit row is what puts that gap in the data instead of leaving it as an
-    # unexplained absence.
+    # A failure here is a result, not an accident to be swallowed: an explicit
+    # row puts the gap in the data instead of leaving it as an unexplained
+    # absence. Any hopper quad rows already in assessment.csv reading
+    # "FAILED rc=134" predate the device vertex-quad narrow phase and should be
+    # re-run rather than trusted -- quads now dispatch on the device for both
+    # phases.
     if [ "$rc" -ne 0 ]; then
         local why="FAILED rc=$rc"
         [ "$rc" -eq 124 ] && why="TIMEOUT after ${ASSESS_TIMEOUT}s"

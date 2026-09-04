@@ -530,6 +530,12 @@ namespace sccd {
         // machine epsilon instead, roughly 30x too small for unit-scale
         // geometry, which let it discard boxes that contained a root.)
 
+        // The quad search has no Newton polish, so `refine` is accepted for
+        // signature parity with the vertex-face and edge-edge root finders and
+        // then ignored -- as edge-edge also ignores it. narrow_phase_vq used to
+        // read SCCD_REFINE from the environment and thread it down to this line,
+        // which advertised a knob that could not be turned; it now passes false
+        // explicitly.
         (void)refine;
 
         const T lo = domain.tuv[SplitDim].lower;

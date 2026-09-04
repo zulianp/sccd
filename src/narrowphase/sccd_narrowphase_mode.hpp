@@ -209,4 +209,22 @@ namespace sccd {
 
 }  // namespace sccd
 
+/**
+ * \brief Scale the split-axis choice by the per-axis codomain widths.
+ *
+ * Defined here because all three narrow phases -- triangle host, quad host and
+ * the device kernels -- consume it, and they previously each defined it for
+ * themselves in a different spelling. The triangle header defined it
+ * unconditionally and tested it with #ifndef, so -DSCCD_ENABLE_CODOMAIN_SCALING=0
+ * both provoked a non-identical macro redefinition and left the scaling ON for
+ * triangles while turning it OFF for quads: the same flag, opposite effects on
+ * the two paths.
+ *
+ * Guarded, and tested by VALUE (`#if SCCD_ENABLE_CODOMAIN_SCALING`), so setting
+ * it to 0 on the command line does what it says everywhere.
+ */
+#ifndef SCCD_ENABLE_CODOMAIN_SCALING
+#define SCCD_ENABLE_CODOMAIN_SCALING 1
+#endif
+
 #endif  // SCCD_NARROWPHASE_MODE_HPP
