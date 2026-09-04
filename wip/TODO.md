@@ -7,6 +7,13 @@ deleted, so it is not retried.
 
 ---
 
+## Notes that are not work items
+
+* [`wip/ALPS.md`](ALPS.md) — how to run the tests on the CSCS Alps cluster.
+  `ctest` under `srun` stalls after the first test; run the binaries directly.
+
+---
+
 ## High
 
 ### ~~Shrink the clone: 4.6 GiB of history~~ — withdrawn, the measurement was wrong
