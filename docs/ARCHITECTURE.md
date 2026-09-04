@@ -47,24 +47,24 @@ Both handle triangles and quads, on host and device.
 
 ## Narrow phase
 
-| mode | `NarrowPhaseMode` | kernel | status |
-|---|---|---|---|
-| 0 | `Fast` | scalar; codomain widths against domain tolerances | **ships** |
-| 2 | `Tight` | lane-packed; domain widths against domain tolerances | **ships** |
-| 1 | `FastVectorized` | the `Fast` predicate, lane-packed, vertex-face only | validation build only |
-| 3 | `TightInclusionCorrected` | mode 1 corrected by the external library | validation build only |
+| mode | `NarrowPhaseMode` | kernel |
+|---|---|---|
+| 0 | `Fast` | scalar; codomain widths against domain tolerances |
+| 2 | `Tight` | lane-packed; domain widths against domain tolerances |
 
-Modes 0 and 2 both ship because neither dominates: `Fast` wins cloth-funnel on
+Two modes, and both ship because neither dominates: `Fast` wins cloth-funnel on
 speed, `Tight` wins cloth-ball, and `Tight` is 69× tighter at the median error.
 They differ in accuracy and speed, never in safety — every mode is conservative.
 
-Modes 1 and 3 exist **only** in a build with `SCCD_ENABLE_TIGHT_INCLUSION=ON`.
-The enum does not name them otherwise, so a caller cannot write
-`NarrowPhaseMode::FastVectorized` in a default build and silently get `Fast` —
-it does not compile. `SCCD_NARROWPHASE_MODE=1` still falls back to mode 0 with a
-warning, because an environment variable is a string, not a symbol. Mode 3 is the
-only mode that calls the external library, which is why it is the only one named
-after it.
+Modes 1 and 3 used to exist and are gone. Mode 1 was the vectorised form of the
+`Fast` predicate and was the **slowest** kernel in the library on every scene
+measured — 15.9 ms against 6.4 and 8.1 on cloth-funnel, 90.9 against 19.4 and
+17.5 on armadillo-rollers. It is in `spikes/`. Mode 3 ran mode 1 and corrected
+each answer with TightInclusion; a hybrid of this library's kernel and the
+reference is neither, so it is gone too. **To get TightInclusion's answer, call
+TightInclusion**: `SCCD_USE_TI=1` dispatches straight to it, and the
+`sccd_find_root_tight_inclusion_*` entry points are in the C ABI. Both need
+`SCCD_ENABLE_TIGHT_INCLUSION=ON`.
 
 Splitting is Gauss–Newton adaptive. Uniform splitting was a complete second
 implementation, roughly 550 lines, that never won on any real scene; it is a

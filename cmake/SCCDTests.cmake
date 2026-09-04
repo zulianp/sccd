@@ -93,15 +93,9 @@ endif()
 
 # Tests that need neither smesh nor TightInclusion, so they run in any build.
 #
-# sccd_tight_inclusion_corrected_test is here despite the name: it guards its body with
-# #ifndef SCCD_ENABLE_TIGHT_INCLUSION and returns success without it, and it
-# never touches smesh. It used to be registered by the smesh glob below, so a
-# TightInclusion build without smesh silently did not run the one test that
-# checks the vectorised kernel against TightInclusion.
 set(SCCD_STANDALONE_TESTS
   sccd_broadphase_cell2d_test
   sccd_rootfinder_quad_test
-  sccd_tight_inclusion_corrected_test
   sccd_c_abi_test
   sccd_aabb_test)
 foreach(SCCD_TEST IN LISTS SCCD_STANDALONE_TESTS)

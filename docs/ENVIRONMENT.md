@@ -13,18 +13,18 @@ supported configuration.
 
 | Variable | Values | Default | Effect |
 |---|---|---|---|
-| `SCCD_NARROWPHASE_MODE` | `0`, `1`, `2`, `3` | `0` | Narrow-phase kernel: `0` `Fast`, `1` `FastVectorized`, `2` `Tight`, `3` `TightInclusionCorrected`. Modes `1` and `3` are **validation-only**: the enum does not name them unless the build has TightInclusion, and setting them here falls back to `0` with a warning — see below. **Ignored for quads**, which have one root-finder variant. |
+| `SCCD_NARROWPHASE_MODE` | `0`, `2` | `0` | Narrow-phase kernel: `0` `Fast`, `2` `Tight`. `1` and `3` were removed; setting either warns and runs `0`. **Ignored for quads**, which have one root-finder variant. |
 | `SCCD_BROADPHASE` | `sweep`, `cell2d` | auto | Forces a broad phase instead of letting `choose_broadphase_strategy` decide. Both produce identical pair sets, so this only changes speed. |
 | `SCCD_USE_VNARROW_PHASE` | `0`, `1` | build option | Older, narrower switch for the vectorised vertex-face kernel. `SCCD_NARROWPHASE_MODE` supersedes it. |
 | `SCCD_VNARROWPHASE_TI_COMPAT` | `0`, `1` | build option | Corrects vectorised vertex-face output against TightInclusion. Requires a TightInclusion build. |
 | `SCCD_USE_TI` | `0`, `1` | `0` | Calls TightInclusion directly. Requires a TightInclusion build. Oracle use only. |
 
-### Why modes 1 and 3 need TightInclusion
+### Getting TightInclusion's answer
 
-Both enter the same vectorised kernel. Mode 3 then corrects its answers with the
-external library, which makes it an oracle rather than a code path; mode 1 is a
-duplicate that lost every scene the assessment measured, and is vertex-face only.
-Asking for either without the library gets mode 0 rather than an error.
+`SCCD_USE_TI=1` dispatches every query straight to the external library, for both
+vertex-face and edge-edge. That replaces the old mode 3, which ran SCCD's
+vectorised kernel and then corrected each result -- a hybrid that was neither this
+library nor the reference. Needs `SCCD_ENABLE_TIGHT_INCLUSION=ON`.
 
 ### The three cases that used to be silent
 

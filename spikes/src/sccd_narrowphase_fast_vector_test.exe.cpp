@@ -38,7 +38,7 @@ int main() {
     I face_ids[nqueries] = {0, 0};
     double vector_toi[nqueries] = {1, 1};
 
-    setenv("SCCD_VNARROWPHASE_TI_COMPAT", "1", 1);
+    setenv("SCCD_SPIKE_CORRECT_WITH_TI", "1", 1);
     const int status = sccd::v_narrow_phase_vf<3, double, I>(nqueries,
                                                               vertices,
                                                               face_ids,
@@ -79,7 +79,7 @@ int main() {
     }
 
     double global_toi = 1;
-    setenv("SCCD_VNARROWPHASE_TI_COMPAT", "1", 1);
+    setenv("SCCD_SPIKE_CORRECT_WITH_TI", "1", 1);
     const int global_status = sccd::v_narrow_phase_vf<3, double, I>(nqueries,
                                                                      vertices,
                                                                      face_ids,
