@@ -14,12 +14,11 @@ Both take `--help`, or explain themselves in the comment block at the top.
 `mesh_sccd.sh` needs a build with `-DSCCD_ENABLE_SMESH=ON` and the scene frames
 under `data/`, which `../benchmark/scripts/download_datasets.sh` fetches.
 
-## Everything else moved
+## Elsewhere
 
 The benchmark harness and its drivers are in
 [`../benchmark/scripts/`](../benchmark/README.md) — `bench.sh`, `crosscheck.sh`,
-`plot.sh`, the Slurm jobs and the dataset download. They live with the benchmark
-because that is what they measure and where their output belongs.
+`plot.sh`, the Slurm jobs and the dataset download.
 
 Building and running on Alps is in [`../wip/ALPS.md`](../wip/ALPS.md), including
 why `ctest` does not work there under `srun`.

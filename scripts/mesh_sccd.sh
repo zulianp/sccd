@@ -25,11 +25,8 @@
 #             --gpus-per-task=1 --time=00:10:00" \
 #         scripts/mesh_sccd.sh cloth-ball cloth_ball92 cloth_ball93 --cuda
 #
-# This replaces mesh_sccd_test.sh and mesh_sccd_cuda_test.sh, which were the same
-# script twice with the scene selection commented in and out by hand, and which
-# read their frames from a checkout of Scalable-CCD on one particular machine.
-# The frames here come from this repository's own data/, which
-# benchmark/scripts/download_datasets.sh populates with the same files.
+# Frames come from this repository's own data/, which
+# benchmark/scripts/download_datasets.sh populates.
 
 set -euo pipefail
 

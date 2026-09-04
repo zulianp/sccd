@@ -56,25 +56,24 @@ Two modes, and both ship because neither dominates: `Relaxed` wins cloth-funnel 
 speed, `Tight` wins cloth-ball, and `Tight` is 69× tighter at the median error.
 They differ in accuracy and speed, never in safety — every mode is conservative.
 
-Modes 1 and 3 used to exist and are gone. Mode 1 was the vectorised form of the
-`Relaxed` predicate and was the **slowest** kernel in the library on every scene
-measured — 15.9 ms against 6.4 and 8.1 on cloth-funnel, 90.9 against 19.4 and
-17.5 on armadillo-rollers. It is in `spikes/`. Mode 3 ran mode 1 and corrected
-each answer with TightInclusion; a hybrid of this library's kernel and the
-reference is neither, so it is gone too. **To get TightInclusion's answer, call
-TightInclusion**: `SCCD_USE_TI=1` dispatches straight to it, and the
-`sccd_find_root_tight_inclusion_*` entry points are in the C ABI. Both need
-`SCCD_ENABLE_TIGHT_INCLUSION=ON`.
+`SCCD_NARROWPHASE_MODE` selects between them and takes `0` or `2`; any other
+value warns and runs `0`. The gap in the numbering is deliberate — the enum
+reserves it rather than renumbering, so a value recorded in an old CSV or script
+never silently means a different kernel.
 
-Splitting is Gauss–Newton adaptive. Uniform splitting was a complete second
-implementation, roughly 550 lines, that never won on any real scene; it is a
-spike now.
+**To get TightInclusion's answer, call TightInclusion.** `SCCD_USE_TI=1`
+dispatches each query straight to the library, and the
+`sccd_find_root_tight_inclusion_*` entry points are in the C ABI. Both need
+`SCCD_ENABLE_TIGHT_INCLUSION=ON`. SCCD ships no kernel that is part its own
+search and part the reference; such a hybrid is neither.
+
+Splitting is Gauss–Newton adaptive, and that is the only splitter in the library.
 
 **Quads** have their own path throughout, not a triangle path adapted: their own
 inclusion function over the quad's own parameter domain, their own optimised host
-root finder, and their own device kernel. `SCCD_NARROWPHASE_MODE` is still
-ignored for quads — there is one root-finder variant, so the enum has nothing to
-select between.
+root finder, and their own device kernel. `SCCD_NARROWPHASE_MODE` is ignored for
+quads — there is one root-finder variant, so the enum has nothing to select
+between.
 
 ## CUDA
 
@@ -85,14 +84,16 @@ The device broad phase is a clear win, 1.3× to 4.8× over 72 Grace cores — it
 the phase whose shape suits a GPU, being count, prefix sum and scatter with no
 sequential window walk.
 
-The device **narrow** phase depends entirely on which kernel you ask for, and an
-earlier reading of the assessment got this wrong. Mode for mode against 72 Grace
-cores, the default kernel is 2.0× *ahead* on cloth-ball and 2.2–3.6× behind on
-the two smaller scenes; end to end, the whole pipeline on the GPU beats the whole
-pipeline on the host by 3.2× on cloth-ball and is within 35% on the others. The
-retracted claim — that it loses on every scene by up to 87× — came from a sweep
-that set `SCCD_NARROWPHASE_MODE=2` on both sides, which is not the same kernel on
-both sides: mode 2 is the host's *fastest* path and the device's *slowest* one.
+The device **narrow** phase depends entirely on which kernel you ask for. Mode for
+mode against 72 Grace cores, the default kernel is 2.0× *ahead* on cloth-ball and
+2.2–3.6× behind on the two smaller scenes; end to end, the whole pipeline on the
+GPU beats the whole pipeline on the host by 3.2× on cloth-ball and is within 35%
+on the others.
+
+**Setting the same `SCCD_NARROWPHASE_MODE` on both sides does not compare like
+with like.** Mode 2 is the host's fastest path and the device's slowest, so a
+sweep that pins it on both races the host's best kernel against the device's
+worst. Compare a mode against itself across hardware only when you mean to.
 
 What the numbers do show is a device-internal gap. Being conservative costs the
 host 1.15× and the device 26×, on the same scene with the same tolerances. Part
@@ -127,11 +128,10 @@ non-zero on a missed collision or a late time of impact. It runs as part of
 whose time of impact is known -- the primitive stays in a plane and the vertex
 descends through it, so the contact time is one division, solved in `long double`
 and rounded up -- then requires every kernel, host and device, triangle and quad,
-to report a contact at or before it. It found that the device quad entry point
-dereferenced device pointers on the host, which had never been called.
+to report a contact at or before it.
 
-Twelve test executables. Test counts by configuration: 5 default, 7 with smesh,
-9 with TightInclusion, 9 with CUDA. The default build needs no options and no
+Test counts by configuration: 6 with no options, 7 with smesh and spikes, 13 with
+smesh and TightInclusion, 8 with CUDA. The default build needs no options and no
 network.
 
 ## Building

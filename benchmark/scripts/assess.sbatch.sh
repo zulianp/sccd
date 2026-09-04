@@ -5,11 +5,11 @@
 # Grace and Hopper are the same node on Alps (GH200), which is convenient rather
 # than a compromise: the whole sweep runs inside one allocation, and that is a
 # hard requirement here rather than a nicety. Between srun allocations this
-# harness varies by about 40%, and several conclusions in this project were
-# retracted after being measured across allocations at differences smaller than
-# that. Variants are therefore interleaved -- the outer loop is the repeat, the
-# inner loop the variant -- so any drift over the job's lifetime lands on every
-# variant equally instead of on whichever one ran last.
+# harness varies by about 40%, so a difference measured across two of them means
+# nothing unless it is larger than that. Variants are therefore interleaved --
+# the outer loop is the repeat, the inner loop the variant -- so any drift over
+# the job's lifetime lands on every variant equally instead of on whichever one
+# ran last.
 #
 # Usage:
 #   sbatch benchmark/assess.sbatch.sh
@@ -194,11 +194,8 @@ for rep in $(seq 1 "$ASSESS_REPEATS"); do
         # Narrow-phase mode. Mode 0 is a duplicate of mode 2's job but is not
         # dominated by it, so both ship and both are measured here.
         #
-        # Mode 1 used to be swept alongside them, so that demoting it would cite a
-        # number. It did -- it was the slowest kernel on every scene -- and it is
-        # gone: SCCD_NARROWPHASE_MODE=1 now warns and runs Relaxed, so sweeping it
-        # would measure mode 0 twice under two names. Its rows are kept in
-        # benchmark/assessment/assessment.csv as the evidence for that call.
+        # Only 0 and 2. SCCD_NARROWPHASE_MODE=1 warns and runs Relaxed, so
+        # sweeping it would measure mode 0 twice under two names.
         for mode in 0 2; do
             run_bench grace "$scene" narrowphase "mode$mode" "$rep" \
                 SCCD_NARROWPHASE_MODE="$mode"
@@ -210,11 +207,6 @@ for rep in $(seq 1 "$ASSESS_REPEATS"); do
             run_bench grace "$scene" broadphase "$bp" "$rep" \
                 SCCD_BROADPHASE="$bp" SCCD_NARROWPHASE_MODE=2
         done
-
-        # The split-rule rows are gone: they decided that question, uniform lost
-        # on all three scenes, and it has since been demoted to a spike. The rows
-        # are kept in benchmark/assessment/assessment.csv as the evidence for
-        # that call; SCCD_ADAPTIVE_SPLIT no longer exists to reproduce them.
 
         # Host versus device, same scene and same cases.
         run_bench hopper "$scene" device "cuda" "$rep" \
