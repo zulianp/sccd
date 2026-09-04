@@ -720,11 +720,44 @@ So the edge-edge device defect was a transcription failure in one place, not a b
 expression propagated from the generator. Nothing else in the tolerance path is
 carrying the same class of error.
 
-**2. Re-measure `docs/BENCHMARKS.md` on all three scenes.** Its GPU columns
-predate the fix and now carry a note saying so. A first attempt at refreshing them
-produced CPU numbers 2.4× off the table's on a path that has not changed, so the
-table's methodology has to be re-derived before anything is swapped in — which of
-the 16 cases, vf and ee separately or together, median over cases or over repeats.
+### ~~2. Re-measure `docs/BENCHMARKS.md`~~ — done, and it corrects two of my own numbers
+
+The methodology was recovered from `benchmark/assessment/mode-stride-matrix.csv`
+by reproducing the published table from it: **sum `narrow_ms_s0` (or
+`narrow_ms_s1`) over the scene's 16 cases within one repeat, then take the median
+over the three repeats**, vertex-face and edge-edge summed together. That
+reproduces all 24 published cells exactly. My first attempt took a median over all
+48 rows, which is a different statistic and is where the 2.4× came from.
+
+Two errors of mine fall out of getting this right, and both were in numbers I
+reported earlier in this investigation:
+
+- **I was reading the wrong column.** `sccd_bench` emits `narrow_ms` at field 7
+  and `query_narrow_ms` at field 8; the stride-1 timing is `narrow_ms_s1` at field
+  **13**. `query_narrow_ms` is the accuracy-check pass, not the stride-1 narrow
+  phase. Every "stride-1 ms" I quoted was field 8.
+- **I was timing an instrumented build.** All of it ran under
+  `-DSCCD_NP_COUNT_BOXES`, which this document already warns puts a global atomic
+  on the hot path. Measured now: it makes the host 20× slower. So the "172.90 →
+  49.69 ms, 3.5×" figure was the wrong column measured on a build whose timings
+  are meaningless.
+
+The real table, clean build, correct reduction:
+
+| | was | now | |
+|---|---:|---:|---:|
+| armadillo-rollers, GPU s1 | 3126.7 | **188.1** | **16.6×** |
+| cloth-funnel, GPU s1 | 789.9 | **155.7** | 5.1× |
+| armadillo-rollers, GPU s0 | 56.3 | **37.1** | 1.5× |
+| cloth-funnel, GPU s0 | 36.5 | **28.3** | 1.3× |
+| cloth-ball, GPU s1 | 902.8 | **695.7** | 1.3× |
+
+The CPU columns reproduce the old measurement to within 1–7%, which is the check
+that the clean build and the recovered reduction are both right.
+
+Still outstanding: the end-to-end table, whose GPU column sums prep, broad phase
+and narrow phase. Refreshing it needs the broad-phase timings from the same run,
+which this one did not capture.
 
 **3. Re-price B1 on the post-fix device.** `Relaxed` against `Tight` was 1.6–3.4×
 on curated files; after the fix `Tight` does 13.8× fewer boxes on the per-query
