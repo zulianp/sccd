@@ -676,6 +676,34 @@ cannot be resolved is the exact mistake this project's decision record is full
 of. If someone wants it, the measurement to make is many more repeats at 16, 32
 and 64 in one allocation — not this one again.
 
+## C: the end-to-end table, and what it shows
+
+The reduction was recovered from `mode-stride-matrix.csv` the same way as the
+narrow-phase one: **`broad_ms + narrow_ms_s0`, summed over the 16 cases within a
+repeat, median over repeats, minimum over the two modes.** No `prep_ms` — that
+was the first thing tried and it overshoots by 25 ms on cloth-funnel.
+
+Freshly measured, and split by stride because the two now say different things:
+
+| | scene | CPU | GPU | |
+|---|---|---:|---:|---|
+| `find_earliest_impact_time` | cloth-funnel | **29.1** | 41.2 | 1.4× CPU |
+| | armadillo-rollers | **47.9** | 48.7 | parity |
+| | cloth-ball | 421.6 | **162.8** | 2.6× GPU |
+| `find_impact_times` | cloth-funnel | **32.6** | 39.2 | 1.2× CPU |
+| | armadillo-rollers | 95.6 | **79.3** | 1.2× GPU |
+| | cloth-ball | 547.7 | **215.7** | 2.5× GPU |
+
+**The earliest-impact row has not moved** — 29.1 against a published 29.2, 47.9
+against 47.8, 162.8 against 159.4. Everything this branch fixed was on the
+per-query path, and a pipeline built on `find_earliest_impact_time` sees none of
+it. That is worth saying plainly rather than letting a reader infer a
+speedup that is not there.
+
+The per-query row is the one that moved: the GPU went from losing on all three
+scenes to winning on two. The broad-phase table is unchanged and reproduces to
+within 2%, which is the control that says this run is comparable to the old one.
+
 ## What must not change
 
 - **Conservativeness.** A reported time of impact is at or before the true one,
@@ -716,7 +744,7 @@ remains is listed first.
 |---|---|---|
 | ~~**A**~~ | ~~Stride 1 on the thread-per-query kernel~~ | **Done, and it is the default.** 4.47×, 2.76× and 4.43× on the three scenes, identical false positives, `fn=0`, gate green both ways. Detail below. |
 | ~~**B**~~ | ~~D2, the capacity-1024 anomaly~~ | **Gone.** It no longer reproduces; the curve is smooth and shallow from 4 to 1024, and no capacity in that range differs from another by more than the run-to-run spread. D1 is unblocked. Detail below. |
-| **C** | **Refresh the end-to-end table** | `docs/BENCHMARKS.md`'s end-to-end row sums prep, broad phase and narrow phase, and its narrow term has changed. Needs broad-phase timings from the same run, which the narrow-phase re-measurement did not capture. |
+| ~~**C**~~ | ~~Refresh the end-to-end table~~ | **Done.** The reduction is `broad_ms + narrow_ms`, no prep, min over modes — recovered the same way as the narrow-phase table. It now has a row per stride, because only one of them moved. |
 | **D** | **The per-query residual** | On `worst-query-w{1,2,3}ee` the device is 5.0×, 3.3× and 1.6× the host, down from 964,000×. Start with whether the two counters count the same unit: the device ticks both children of every split, including ones discarded immediately. |
 | **E** | **A1/A2, per-box cost** | Still last. The stride-1 path is scheduling-bound, so 4× of arithmetic buys nothing there either. |
 | — | *Loose end* | The host's mode 0 increments the box counter and nothing prints it — the `fprintf` lives in `narrow_phase_tight_*` and the scalar path has none. Host `Relaxed` box counts are not obtainable from a run. |
