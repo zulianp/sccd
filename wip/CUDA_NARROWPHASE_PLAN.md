@@ -640,12 +640,41 @@ double-buffered, and the shared stack is 64 entries. The remaining question is
 whether the shared stack should be a cache in front of the queue rather than the
 first-class store it still is.
 
-**D2. Understand the capacity-1024 anomaly first.** Under the new queue,
-`SCCD_NP_SHARED_STACK_CAP=1024` measures 4,059 ms on cloth-funnel against the old
-queue's 634 ms at the same capacity — a 6.4× regression at a setting that is no
-longer the default. Every capacity at or below 256 is faster than the old code on
-every scene, so the shipped configuration is strictly better, but something about
-the drain loop is not understood, and D1 tunes exactly that machinery.
+**~~D2. Understand the capacity-1024 anomaly.~~ It no longer exists.** It was
+recorded as 4,059 ms on cloth-funnel against the old queue's 634 at the same
+capacity — a 6.4× cliff. Re-measured after the tolerance fix and the
+thread-per-query change, on a clean build, mode 2, device, three repeats,
+medians, `SCCD_NP_SHARED_STACK_CAP` being a compile-time constant so each is its
+own build:
+
+| scene | | 4 | 8 | 16 | 32 | 64 | 256 | 1024 |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| cloth-funnel | s0 | 26.5 | **25.3** | 26.8 | 27.4 | 31.1 | 30.3 | 32.0 |
+| cloth-funnel | s1 | 33.8 | 32.2 | **28.3** | 30.4 | 33.5 | 38.5 | 38.8 |
+| armadillo-rollers | s0 | 34.5 | 32.9 | **31.8** | 34.3 | 37.2 | 47.2 | 46.7 |
+| armadillo-rollers | s1 | 79.1 | 70.3 | **60.6** | 64.6 | 68.4 | 108.4 | 134.6 |
+| cloth-ball | s0 | 114.7 | 106.3 | 103.8 | **102.7** | 104.5 | — | — |
+| cloth-ball | s1 | 170.8 | 182.0 | 172.9 | **158.5** | 159.9 | — | — |
+
+No cliff anywhere. 1024 is 1.2× and 2.0× the shipped capacity on the two smaller
+scenes, which is a gentle penalty for hoarding work in a block instead of
+spilling it, not a 6.4× regression. False positives are 260 / 5,637 / 95,424 at
+every capacity, `fn=0` throughout.
+
+**Why it went away.** The anomaly was almost certainly a symptom of the
+edge-edge tolerance defect. That made single queries generate subtrees of
+millions of boxes, and a large shared stack keeps such a subtree inside the one
+block that started it instead of spilling it to the global queue for every other
+block to help with — so the bigger the stack, the more completely one block
+starved while the rest idled. With the subtrees three to fourteen times smaller
+there is nothing left to hoard.
+
+**The shipped capacity stays at 64.** 16 and 32 look 2–3% better on the sum of
+all six cells, and the repeat-to-repeat spread on that same sum is 1–3%: the
+gap is the size of the noise. Changing a shipped default on a difference that
+cannot be resolved is the exact mistake this project's decision record is full
+of. If someone wants it, the measurement to make is many more repeats at 16, 32
+and 64 in one allocation — not this one again.
 
 ## What must not change
 
@@ -686,7 +715,7 @@ remains is listed first.
 | | | |
 |---|---|---|
 | ~~**A**~~ | ~~Stride 1 on the thread-per-query kernel~~ | **Done, and it is the default.** 4.47×, 2.76× and 4.43× on the three scenes, identical false positives, `fn=0`, gate green both ways. Detail below. |
-| **B** | **D2, the capacity-1024 anomaly** | Under the double-buffered queue, `SCCD_NP_SHARED_STACK_CAP=1024` measured 4,059 ms on cloth-funnel against the old queue's 634 at the same capacity. Untouched. It blocks D1, which tunes exactly that machinery. |
+| ~~**B**~~ | ~~D2, the capacity-1024 anomaly~~ | **Gone.** It no longer reproduces; the curve is smooth and shallow from 4 to 1024, and no capacity in that range differs from another by more than the run-to-run spread. D1 is unblocked. Detail below. |
 | **C** | **Refresh the end-to-end table** | `docs/BENCHMARKS.md`'s end-to-end row sums prep, broad phase and narrow phase, and its narrow term has changed. Needs broad-phase timings from the same run, which the narrow-phase re-measurement did not capture. |
 | **D** | **The per-query residual** | On `worst-query-w{1,2,3}ee` the device is 5.0×, 3.3× and 1.6× the host, down from 964,000×. Start with whether the two counters count the same unit: the device ticks both children of every split, including ones discarded immediately. |
 | **E** | **A1/A2, per-box cost** | Still last. The stride-1 path is scheduling-bound, so 4× of arithmetic buys nothing there either. |
