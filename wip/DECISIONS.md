@@ -18,7 +18,7 @@ The full argument and the numbers behind each sit in
 
 ## What kept going wrong
 
-Four distinct failures, all of the same shape: a measurement that answered a
+Five distinct failures, all of the same shape: a measurement that answered a
 different question than the one being asked.
 
 1. **Comparing across code paths.** "The device narrow phase loses by 87x" raced
@@ -38,6 +38,28 @@ different question than the one being asked.
 Two independent instruments agreeing is not enough — in (2) they agreed because
 both were making the same mistake. The check that has actually caught things is
 asking what the number would look like if the code were wrong.
+
+## 5. Measuring the wrong object entirely
+
+Added after the fact, because it nearly cost a history rewrite across 12
+branches.
+
+"`git clone` of this repository transfers 4.6 GiB" was recorded as the
+top-priority item, with a filter-repo plan and a force-push sequence. It came
+from `git count-objects -vH` on a local working clone and from
+`git clone --local .`, which hardlinks the whole local object store whether or not
+it is reachable. A real clone from the URL is **24 MB**; the remote history holds
+2 `data/` objects against 24,963 locally.
+
+The 4.56 GiB was local, and nearly all of it was pinned by one stale
+`refs/codex/...` ref left by tooling. Dropping it and running `git gc` gave
+24.03 MiB with every branch intact.
+
+Same shape as the other four: a number that answered a different question than
+the one being asked. It survived longer than the others because it was never
+challenged — it was measured once, written down with a table of largest blobs
+that made it look thoroughly established, and cited unchallenged for several
+turns.
 
 ## A note on the C ABI
 
