@@ -1,5 +1,5 @@
-#ifndef SCCD_VNARROWPHASE_TI_HPP
-#define SCCD_VNARROWPHASE_TI_HPP
+#ifndef SCCD_NARROWPHASE_TIGHT_HPP
+#define SCCD_NARROWPHASE_TIGHT_HPP
 
 // A vectorized narrow phase that reproduces TightInclusion's semantics exactly,
 // for both vertex-face and edge-edge queries.
@@ -32,10 +32,10 @@
 // to be packed with boxes from different queries.
 
 #include "sccd_base.hpp"
-#include "smath.hpp"
-#include "snumerical_error.hpp"
-#include "snumtol.hpp"
-#include "sparallel.hpp"
+#include "sccd_math.hpp"
+#include "sccd_numerical_error.hpp"
+#include "sccd_tolerance.hpp"
+#include "sccd_parallel.hpp"
 
 #include <atomic>
 #include <cassert>
@@ -943,4 +943,4 @@ namespace sccd {
 
 }  // namespace sccd
 
-#endif  // SCCD_VNARROWPHASE_TI_HPP
+#endif  // SCCD_NARROWPHASE_TIGHT_HPP

@@ -1,8 +1,8 @@
 #ifndef CELL_BROADPHASE_HPP
 #define CELL_BROADPHASE_HPP
 
-#include "broadphase.hpp"
-#include "sparallel.hpp"
+#include "sccd_broadphase_sweep.hpp"
+#include "sccd_parallel.hpp"
 
 namespace sccd {
     namespace sccd_detail {

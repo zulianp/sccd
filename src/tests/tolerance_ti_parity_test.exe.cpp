@@ -8,7 +8,7 @@
 #ifndef SCCD_ENABLE_TIGHT_INCLUSION
 int main() { return 0; }
 #else
-#include "snumtol.hpp"
+#include "sccd_tolerance.hpp"
 #include "tight_inclusion/ccd.hpp"
 
 #include <cmath>

@@ -135,12 +135,26 @@ target_link_libraries(sccd PUBLIC ${SCCD_DEP_LIBRARIES})
 
 include(GNUInstallDirs)
 
-configure_file("${CMAKE_CURRENT_SOURCE_DIR}/src/sccd_config.hpp.in" "${CMAKE_CURRENT_BINARY_DIR}/sccd_config.hpp")
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/src/core/sccd_config.hpp.in" "${CMAKE_CURRENT_BINARY_DIR}/sccd_config.hpp")
+# Includes are written flat -- `#include "sccd_narrowphase.hpp"`, not
+# `#include "narrowphase/sccd_narrowphase.hpp"` -- so every directory holding a
+# header goes on the path, in the build tree and after install alike. The
+# `sccd_` prefix plus one descriptive name per file keeps basenames unique,
+# which is what makes flat includes safe.
+set(_sccd_header_dirs core broadphase narrowphase cuda integrations/smesh)
+set(_sccd_build_includes
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
+set(_sccd_install_includes $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+foreach(_d IN LISTS _sccd_header_dirs)
+  list(APPEND _sccd_build_includes $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/${_d}>)
+  list(APPEND _sccd_install_includes $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/${_d}>)
+endforeach()
+
 target_include_directories(sccd
   PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    ${_sccd_build_includes}
+    ${_sccd_install_includes}
 )
 
 # Installation
@@ -179,32 +193,32 @@ install(TARGETS sccd
 # too: a consumer of narrowphase.hpp needs everything it includes.
 set(SCCD_PUBLIC_HEADERS
   # Entry points.
-  src/narrowphase.hpp
-  src/narrowphase_vertex_quad.hpp
-  src/broadphase.hpp
-  src/cell2d_broadphase.hpp
-  src/broadphase_strategy.hpp
+  src/narrowphase/sccd_narrowphase.hpp
+  src/narrowphase/sccd_narrowphase_quad.hpp
+  src/broadphase/sccd_broadphase_sweep.hpp
+  src/broadphase/sccd_broadphase_cell2d.hpp
+  src/broadphase/sccd_broadphase_strategy.hpp
   # Configuration and shared vocabulary.
-  src/sccd_base.hpp
-  src/sccd_narrowphase_mode.hpp
+  src/core/sccd_base.hpp
+  src/narrowphase/sccd_narrowphase_mode.hpp
   # Implementation headers, public because the entry points include them.
-  src/roots.hpp
-  src/srootfinder.hpp
-  src/srootfinder_vertex_quad.hpp
-  src/sccd_vnarrowphase_ti.hpp
-  src/vaabb.hpp
-  src/smath.hpp
-  src/snumtol.hpp
-  src/snumerical_error.hpp
-  src/sparallel.hpp
+  src/narrowphase/sccd_objective.hpp
+  src/narrowphase/sccd_rootfinder.hpp
+  src/narrowphase/sccd_rootfinder_quad.hpp
+  src/narrowphase/sccd_narrowphase_tight.hpp
+  src/core/sccd_aabb.hpp
+  src/core/sccd_math.hpp
+  src/narrowphase/sccd_tolerance.hpp
+  src/narrowphase/sccd_numerical_error.hpp
+  src/core/sccd_parallel.hpp
 )
 if(SCCD_ENABLE_SMESH)
-  list(APPEND SCCD_PUBLIC_HEADERS src/integrations/smesh/sccd_smesh_CCD.hpp)
+  list(APPEND SCCD_PUBLIC_HEADERS src/integrations/smesh/sccd_smesh_ccd.hpp)
 endif()
 if(SCCD_ENABLE_TIGHT_INCLUSION)
   # The vectorised kernel is validation-only: narrowphase.hpp only includes it,
   # and narrow_phase_mode() only selects it, when TightInclusion is built in.
-  list(APPEND SCCD_PUBLIC_HEADERS src/sccd_vnarrowphase.hpp)
+  list(APPEND SCCD_PUBLIC_HEADERS src/narrowphase/sccd_narrowphase_fast_vector.hpp)
 endif()
 
 # Fail configure if a header exists that nobody has classified. Without this the
@@ -216,7 +230,7 @@ if(NOT SCCD_ENABLE_SMESH)
   list(FILTER _sccd_all_headers EXCLUDE REGEX "^src/integrations/smesh/")
 endif()
 if(NOT SCCD_ENABLE_TIGHT_INCLUSION)
-  list(FILTER _sccd_all_headers EXCLUDE REGEX "^src/sccd_vnarrowphase\\.hpp$")
+  list(FILTER _sccd_all_headers EXCLUDE REGEX "^src/narrowphase/sccd_narrowphase_fast_vector\\.hpp$")
 endif()
 foreach(_hdr IN LISTS _sccd_all_headers)
   if(NOT _hdr IN_LIST SCCD_PUBLIC_HEADERS)

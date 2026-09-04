@@ -1,13 +1,13 @@
-#ifndef SCCD_BROADPHASE_HPP
-#define SCCD_BROADPHASE_HPP
+#ifndef SCCD_BROADPHASE_SWEEP_HPP
+#define SCCD_BROADPHASE_SWEEP_HPP
 
 #include <algorithm>
 #include <cfloat>
 #include <cstring>
 #include <vector>
 
-#include "sparallel.hpp"
-#include "vaabb.hpp"
+#include "sccd_parallel.hpp"
+#include "sccd_aabb.hpp"
 
 namespace sccd {
 

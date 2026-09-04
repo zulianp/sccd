@@ -1,7 +1,7 @@
 // Simple C exports for SCCD narrowphase vertex-face root finder
-// #include "narrowphase.hpp"
+// #include "sccd_narrowphase.hpp"
 
-#include "srootfinder.hpp"
+#include "sccd_rootfinder.hpp"
 
 #ifdef SCCD_NP_COUNT_BOXES
 namespace sccd {

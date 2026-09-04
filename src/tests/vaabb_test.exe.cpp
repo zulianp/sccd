@@ -17,7 +17,7 @@
 // boundary wrong would do the same, so it is exercised deliberately rather than
 // left to chance in random data.
 
-#include "vaabb.hpp"
+#include "sccd_aabb.hpp"
 
 #include <algorithm>
 #include <cstdint>

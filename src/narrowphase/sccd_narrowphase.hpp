@@ -1,23 +1,23 @@
-#ifndef NARROWPHASE_HPP
-#define NARROWPHASE_HPP
+#ifndef SCCD_NARROWPHASE_HPP
+#define SCCD_NARROWPHASE_HPP
 // #include <tbb/blocked_range.h>
 // #include <tbb/parallel_for.h>
 
 #include "assert.h"
 
-#include "roots.hpp"
-#include "sparallel.hpp"
+#include "sccd_objective.hpp"
+#include "sccd_parallel.hpp"
 #include "sccd_base.hpp"
 #include "sccd_narrowphase_mode.hpp"
 // The vectorised kernel is validation-only; see narrow_phase_mode_available in
 // sccd_narrowphase_mode.hpp for why. Without TightInclusion no mode reaches it,
 // so it is not compiled in either.
 #ifdef SCCD_ENABLE_TIGHT_INCLUSION
-#include "sccd_vnarrowphase.hpp"
+#include "sccd_narrowphase_fast_vector.hpp"
 #endif
-#include "sccd_vnarrowphase_ti.hpp"
-#include "srootfinder.hpp"
-#include "vaabb.hpp"
+#include "sccd_narrowphase_tight.hpp"
+#include "sccd_rootfinder.hpp"
+#include "sccd_aabb.hpp"
 
 #include <atomic>
 

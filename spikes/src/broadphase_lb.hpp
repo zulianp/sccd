@@ -1,7 +1,7 @@
 #ifndef SCCC_BROADPHASE_LB_HPP
 #define SCCC_BROADPHASE_LB_HPP
 
-#include "broadphase.hpp"
+#include "sccd_broadphase_sweep.hpp"
 
 namespace sccd {
     template <int first_nxe, int second_nxe, typename T, typename I>

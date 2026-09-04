@@ -3,11 +3,11 @@
 
 #include "sccd_config.hpp"
 
-#include "broadphase.hpp"
-#include "broadphase_strategy.hpp"
-#include "cell2d_broadphase.hpp"
-#include "narrowphase.hpp"
-#include "narrowphase_vertex_quad.hpp"
+#include "sccd_broadphase_sweep.hpp"
+#include "sccd_broadphase_strategy.hpp"
+#include "sccd_broadphase_cell2d.hpp"
+#include "sccd_narrowphase.hpp"
+#include "sccd_narrowphase_quad.hpp"
 #include "smesh_device_buffer.hpp"
 #include "smesh_elem_type.hpp"
 #include "smesh_graph.hpp"

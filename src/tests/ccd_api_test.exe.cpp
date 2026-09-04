@@ -11,7 +11,7 @@
 // the property under test: reported at or before the true value, never after,
 // and never a miss.
 
-#include "sccd_smesh_CCD.hpp"
+#include "sccd_smesh_ccd.hpp"
 #include "smesh_mesh.hpp"
 #include "smesh_test.hpp"
 

@@ -7,7 +7,7 @@
 #ifndef SCCD_ENABLE_TIGHT_INCLUSION
 int main() { return 0; }
 #else
-#include "snumerical_error.hpp"
+#include "sccd_numerical_error.hpp"
 #include "tight_inclusion/interval_root_finder.hpp"
 #include <cstdio>
 #include <cmath>

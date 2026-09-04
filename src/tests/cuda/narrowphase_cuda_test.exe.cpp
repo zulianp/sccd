@@ -79,8 +79,8 @@
 #include "sccd_narrowphase.cuh"
 #include "sccd_narrowphase_vq.cuh"
 
-#include "narrowphase.hpp"
-#include "narrowphase_vertex_quad.hpp"
+#include "sccd_narrowphase.hpp"
+#include "sccd_narrowphase_quad.hpp"
 #include "sccd_narrowphase_mode.hpp"
 
 #include <cuda_runtime.h>

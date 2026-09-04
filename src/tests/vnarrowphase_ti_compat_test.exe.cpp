@@ -1,4 +1,4 @@
-#include "sccd_vnarrowphase.hpp"
+#include "sccd_narrowphase_fast_vector.hpp"
 
 #include <algorithm>
 #include <cmath>

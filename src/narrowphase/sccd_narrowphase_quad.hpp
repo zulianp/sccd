@@ -1,5 +1,5 @@
-#ifndef NARROWPHASE_VERTEX_QUAD_HPP
-#define NARROWPHASE_VERTEX_QUAD_HPP
+#ifndef SCCD_NARROWPHASE_QUAD_HPP
+#define SCCD_NARROWPHASE_QUAD_HPP
 
 /**
  * \file
@@ -26,7 +26,7 @@
 
 #include "sccd_base.hpp"
 #include "sccd_narrowphase_mode.hpp"
-#include "srootfinder_vertex_quad.hpp"
+#include "sccd_rootfinder_quad.hpp"
 
 #include <atomic>
 #include <cassert>

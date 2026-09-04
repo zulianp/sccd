@@ -1,9 +1,9 @@
-#ifndef SCCD_CELL2D_BROADPHASE_HPP
-#define SCCD_CELL2D_BROADPHASE_HPP
+#ifndef SCCD_BROADPHASE_CELL2D_HPP
+#define SCCD_BROADPHASE_CELL2D_HPP
 
-#include "broadphase.hpp"
-#include "sparallel.hpp"
-#include "vaabb.hpp"
+#include "sccd_broadphase_sweep.hpp"
+#include "sccd_parallel.hpp"
+#include "sccd_aabb.hpp"
 
 #include <cmath>
 #include <cstring>
@@ -550,4 +550,4 @@ namespace sccd {
 
 }  // namespace sccd
 
-#endif  // SCCD_CELL2D_BROADPHASE_HPP
+#endif  // SCCD_BROADPHASE_CELL2D_HPP

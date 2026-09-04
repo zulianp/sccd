@@ -10,8 +10,8 @@
 // shared cell), boxes outside the grid (where clamping must stay consistent
 // between the binning and the duplicate check), and degenerate extents.
 
-#include "broadphase.hpp"
-#include "cell2d_broadphase.hpp"
+#include "sccd_broadphase_sweep.hpp"
+#include "sccd_broadphase_cell2d.hpp"
 
 #include <algorithm>
 #include <cstdio>
