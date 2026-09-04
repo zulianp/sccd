@@ -9,12 +9,12 @@ A spike is:
   which is `OFF`;
 - **not installed** — no spike header reaches the install tree;
 - **not covered by the correctness gate** — `ctest` does not run it, and nothing
-  in `benchmark/ASSESSMENT.md` depends on it;
+  in `wip/ASSESSMENT.md` depends on it;
 - **deletable without notice** — nothing in the shipped library may include a
   spike header or call a spike symbol. That is the property that makes this
   directory worth having, and it is the one to check when adding to it.
 
-The bar it failed is in `benchmark/ASSESSMENT.md`: a component ships if it
+The bar it failed is in `wip/ASSESSMENT.md`: a component ships if it
 satisfies the conservativeness invariant **and** it is the only implementation of
 its job. Where several compete, the best one stays and the rest come here.
 

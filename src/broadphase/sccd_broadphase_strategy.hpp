@@ -57,7 +57,7 @@
  *    refutes that too, and in the wrong direction: across three real scenes the
  *    cell list wins the *smallest* (cloth-funnel) and loses the *largest*
  *    (cloth-ball, where the sweep is 1.36x faster) and the middle one
- *    (armadillo-rollers, 1.59x). See `benchmark/ASSESSMENT.md`.
+ *    (armadillo-rollers, 1.59x). See `wip/ASSESSMENT.md`.
  *
  * ## So: Auto measures, it does not guess
  *
@@ -67,7 +67,7 @@
  * wins by 4-7x and where the worst case for choosing it is 1.8 ms on a broad
  * phase costing 1.3 ms. On real scenes that argument does not hold: the sweep
  * wins two of three, by 1.36x on cloth-ball and 1.59x on armadillo-rollers,
- * which is 13 ms and 78 ms rather than 1.8 ms (`benchmark/ASSESSMENT.md`).
+ * which is 13 ms and 78 ms rather than 1.8 ms (`wip/ASSESSMENT.md`).
  *
  * Neither constant is right and no cheap statistic has separated the cases. But
  * the two produce **identical pair sets**, so they can simply be raced: run one

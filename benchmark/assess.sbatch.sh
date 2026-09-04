@@ -1,6 +1,6 @@
 #!/bin/bash
 # One batch job, one CSV: the measurements every keep-or-demote call in
-# benchmark/ASSESSMENT.md has to cite.
+# wip/ASSESSMENT.md has to cite.
 #
 # Grace and Hopper are the same node on Alps (GH200), which is convenient rather
 # than a compromise: the whole sweep runs inside one allocation, and that is a

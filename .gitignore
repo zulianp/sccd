@@ -102,3 +102,14 @@ benchmark/oracle/postfix/
 # Figures rendered by the analysis scripts.
 *.png
 !figures/*.png
+
+# Build trees, wherever they are dropped.
+build*/
+
+# Stray output at the repository root: rendered reports, plots, logs, traces.
+/*.html
+/*.log
+/*.png
+/*.csv
+/*.tar.gz
+.DS_Store

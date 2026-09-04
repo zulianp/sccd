@@ -11,7 +11,7 @@
  *
  * The host version is `src/cell2d_broadphase.hpp`; the reasoning for two axes
  * rather than three, and for binning rather than sorting, is written up there and
- * in `benchmark/BROADPHASE.md`. On the host it took the broad phase from 4,467 ms
+ * in `wip/BROADPHASE.md`. On the host it took the broad phase from 4,467 ms
  * to 1,063 ms at 1.5M triangles.
  *
  * The shape suits a GPU better than the sweep does. Binning is count, prefix sum,

@@ -1,9 +1,9 @@
-# What SCCD ships
+# Architecture
 
 The surface that survived the cleanup, and what each part is for. The keep bar
 was: a component ships if it satisfies the conservativeness invariant **and** it
 is the only implementation of its job. Where several competed, the assessment in
-`benchmark/ASSESSMENT.md` decided; everything demoted is in `spikes/` with the
+`wip/ASSESSMENT.md` decided; everything demoted is in `spikes/` with the
 reason recorded.
 
 ## The guarantee
@@ -91,7 +91,7 @@ What the numbers do show is a device-internal gap. Being conservative costs the
 host 1.15× and the device 26×, on the same scene with the same tolerances. Part
 of that is the price of the guarantee, which the host pays too; part of it is
 that the device re-evaluates all eight corners of both children at every split
-where the host inherits four of them from the parent. `benchmark/ASSESSMENT.md`
+where the host inherits four of them from the parent. `wip/ASSESSMENT.md`
 has the measurement and the decomposition.
 
 Root finding computes in double regardless of the storage type: in single
@@ -104,7 +104,7 @@ toward negative infinity.
 - **`CCD<T>`** (`src/integrations/smesh/sccd_smesh_CCD.hpp`) — the main interface.
   `find_earliest_impact_time` and `find_impact_times` for one-shot use, or the
   staged broad/narrow calls to interleave your own logic. Needs smesh.
-- **C ABI** (`src/sccd.cpp`, documented in `docs/C_API.md`) — seven exports for
+- **C ABI** (`src/sccd.cpp`, documented in `docs/API.md`) — seven exports for
   single queries, and the basis for `python/sccd_py.py`.
 - **Headers** — sixteen installed, listed explicitly in `CMakeLists.txt`. A
   configure-time check fails on any header under `src/` that nobody classified,
@@ -138,13 +138,8 @@ Options: `SCCD_ENABLE_SMESH`, `SCCD_ENABLE_CUDA`, `SCCD_ENABLE_TIGHT_INCLUSION`
 `docs/ENVIRONMENT.md` lists every environment variable; none is needed to use the
 library.
 
-## What was demoted, and where it went
+## Where the numbers are
 
-`spikes/` — not built by default, not installed, not covered by the gate,
-deletable without notice. Nothing shipped may include a spike header.
-
-`hacks/` (an out-of-tree Scalable-CCD adapter that cannot configure, plus the
-three headers only it used), a 3D cell list superseded by the 2D one, a
-lower-bound broad phase with no caller, a warp broad phase called by nothing, an
-all-to-all lower-bound kernel reachable only from its own demo, uniform interval
-splitting, and an `external/json/` that was never in the build.
+This document describes the mechanism. Every measured figure lives in
+[`BENCHMARKS.md`](BENCHMARKS.md); the record of which alternatives were tried,
+kept, demoted or withdrawn lives in [`../wip/ASSESSMENT.md`](../wip/ASSESSMENT.md).

@@ -1,130 +1,86 @@
-# SCCD — Simple Continuous Collision Detection
+# SCCD
 
-Continuous collision detection for moving triangle and quad meshes, with a
-guarantee: a reported time of impact is **conservative** — at or before the true
-one, never after — and "no collision" means no collision exists. Reporting early,
-or reporting a contact that does not exist, costs work and never correctness.
+Continuous collision detection for moving triangle and quad meshes, on CPU and
+GPU.
+
+A reported time of impact is **conservative**: at or before the true one, never
+after. "No collision" means no collision exists. Reporting early, or reporting a
+contact that does not exist, costs work and never correctness.
+
+Measured across twelve configurations and 101,164 exact roots: zero missed
+collisions, zero late times of impact. See [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 
 ## Build
 
 ```sh
 cmake -S . -B build && cmake --build build -j
-```
-
-That is the whole thing. The default build has **no external dependencies** and
-needs no network, no options and no environment variables. `CMAKE_BUILD_TYPE`
-defaults to `Release` if you do not set it.
-
-To run the tests:
-
-```sh
 ctest --test-dir build
 ```
 
-To install:
+No external dependencies, no network, no options, no environment variables.
+`CMAKE_BUILD_TYPE` defaults to `Release`.
 
-```sh
-cmake -S . -B build -DCMAKE_INSTALL_PREFIX=/path/to/install
-cmake --build build -j && cmake --install build
-```
-
-### Options
-
-| Option | Default | What it does |
+| Option | Default | Effect |
 |---|---|---|
-| `SCCD_ENABLE_NATIVE_ARCH` | `ON` | Build for the host CPU (`-march=native`). See the warning below. |
-| `SCCD_ENABLE_OPENMP` | `ON` | Parallelise the host loops. |
-| `SCCD_ENABLE_TBB` | `OFF` | Use TBB instead of OpenMP. |
-| `SCCD_ENABLE_CUDA` | `OFF` | Build the device kernels. Needs a CUDA toolkit. |
-| `SCCD_CUDA_ARCHITECTURES` | `90` | Target architecture. 90 is GH200; **set this for your GPU.** |
-| `SCCD_ENABLE_SMESH` | `OFF` | Build the `CCD<T>` mesh interface and the demos. Needs [smesh](https://github.com/zulianp/smesh). |
-| `SCCD_ENABLE_TIGHT_INCLUSION` | `OFF` | Validation only — builds the oracle that checks the kernels. Not a performance option. |
-| `SCCD_ENABLE_SPIKES` | `OFF` | Build demoted code under `spikes/`. Not installed, not tested, deletable. |
+| `SCCD_ENABLE_NATIVE_ARCH` | `ON` | `-march=native`. Off, the AVX2/AVX-512/NEON AABB kernels fall back to scalar — in your translation units as well as ours. |
+| `SCCD_ENABLE_OPENMP` | `ON` | Parallelise host loops. |
+| `SCCD_ENABLE_TBB` | `OFF` | TBB instead of OpenMP. |
+| `SCCD_ENABLE_CUDA` | `OFF` | Device kernels. Set `SCCD_CUDA_ARCHITECTURES` for your GPU; it defaults to `90`. |
+| `SCCD_ENABLE_SMESH` | `OFF` | The `CCD<T>` mesh interface and demos. Needs [smesh](https://github.com/zulianp/smesh). |
+| `SCCD_ENABLE_TIGHT_INCLUSION` | `OFF` | Validation only — builds the accuracy oracle. Not a performance option. |
+| `SCCD_ENABLE_SPIKES` | `OFF` | Demoted and dead code under `spikes/`. Not installed. |
 
-**`SCCD_ENABLE_NATIVE_ARCH` matters more than it looks.** SCCD is mostly
-header-only and its AABB overlap kernels are guarded on `__AVX2__`, `__AVX512F__`
-and `__ARM_NEON`, so without a host-architecture flag the hottest broad-phase
-kernel silently falls back to scalar code — in your translation units as well as
-ours. Turn it off only for a portable binary, and then pass an explicit `-mavx2`
-(or similar) in `CMAKE_CXX_FLAGS`.
-
-## Using it
-
-Three entry points, in decreasing order of how much they do for you.
-
-**`CCD<T>`** — the mesh interface, and what most callers want. Needs
-`SCCD_ENABLE_SMESH=ON`.
+## Use
 
 ```cpp
 #include "sccd_smesh_ccd.hpp"
 
 sccd::CCD<double> ccd(mesh);
 double toi;
-ccd.find_earliest_impact_time(points_t0, points_t1, toi);   // one number for the step
+ccd.find_earliest_impact_time(points_t0, points_t1, toi);       // one value per step
 ccd.find_impact_times(points_t0, points_t1, vf_tois, ee_tois);  // one per candidate
 ```
 
-The broad and narrow phases are also callable separately if you want to
-interleave your own logic between them. See
-`src/integrations/smesh/sccd_smesh_CCD.hpp`.
+Broad and narrow phases are also callable separately. For a C ABI, or the
+kernels against your own data layout, see [`docs/API.md`](docs/API.md).
 
-**The C ABI** — seven functions, one query each, no broad phase and no batching.
-Use it from C, or from another language; `python/sccd_py.py` is a `ctypes`
-binding on top of it. Documented in [`docs/C_API.md`](docs/C_API.md).
-
-**The kernels** — `sccd::narrow_phase_vf`, `narrow_phase_ee`, `narrow_phase_vq`
-and the broad phases, if you have your own data layout. They take
-structure-of-arrays geometry; the signatures are in `src/narrowphase.hpp`,
-`src/narrowphase_vertex_quad.hpp` and `src/broadphase.hpp`.
+Includes are flat: `#include "sccd_narrowphase.hpp"`, whatever subdirectory the
+header lives in.
 
 ### Quads
 
-Quads are first class, not triangles with an extra node: their own inclusion
-function, their own host root finder, their own device kernel.
+Quads are first class — their own inclusion function, host root finder and
+device kernel.
 
-**The four nodes are in lexicographic order, not cyclic order.** The bilinear
-form weights node `k` by
+**Nodes are in lexicographic order, not cyclic.** The bilinear form weights node
+`k` by `(1-u)(1-v)`, `u(1-v)`, `(1-u)v`, `uv`, so the nodes are the corners
+`(0,0)`, `(1,0)`, `(0,1)`, `(1,1)`. Winding them around the quad swaps the last
+two and the solver searches a surface you did not mean — silently, since it still
+returns a valid time of impact for that surface.
+
+## Layout
 
 ```
-w1 = (1-u)(1-v)    w2 = u(1-v)    w3 = (1-u)v    w4 = uv
+src/core/          base, math, parallel, aabb
+src/broadphase/    sweep-and-prune, 2D cell list, run-time strategy
+src/narrowphase/   modes, root finders, tolerances, error bounds
+src/cuda/          device kernels
+src/api/           C ABI
+benchmark/         harnesses and committed result tables
+spikes/            demoted and dead code; not built, not installed
+wip/               open work, decision records, retractions
 ```
-
-so node 3 is the `(0,1)` corner and node 4 is `(1,1)`. Winding the nodes around
-the quad swaps the last two and puts the surface somewhere the solver is not
-looking, which shows up as contacts that are silently not found rather than as
-an error.
-
-## What is in the box
-
-- **Broad phase** — a sweep-and-prune and a 2D cell list, both kept because
-  neither wins everywhere; they produce identical pair sets.
-  `broadphase_strategy.hpp` picks between them by racing them at run time.
-  `SCCD_BROADPHASE=sweep|cell2d` forces one.
-- **Narrow phase** — branch and bound over boxes in `(t, u, v)` with Gauss–Newton
-  adaptive splitting. Two kernels ship: a scalar reference and a vectorised
-  TightInclusion-exact one. Root finding computes in double regardless of the
-  storage type, because in single precision the certified error bound and the
-  tolerances that terminate the search are too close together for the guarantee
-  to survive.
-- **CUDA** — broad phase (sweep and cell list), narrow phase (triangles and
-  quads), and AABB construction. The device broad phase beats 72 Grace cores by
-  1.3–4.8×.
 
 ## Documentation
 
 | | |
 |---|---|
-| [`docs/OVERVIEW.md`](docs/OVERVIEW.md) | What ships, what each part is for, and what was demoted with the reason. **Start here.** |
-| [`docs/C_API.md`](docs/C_API.md) | The C ABI. |
-| [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md) | Every environment variable SCCD reads. None is needed to use the library. |
-| [`benchmark/ASSESSMENT.md`](benchmark/ASSESSMENT.md) | The measurements behind the keep-or-demote decisions, including the ones that were retracted. |
-| [`spikes/README.md`](spikes/README.md) | Demoted code, and why each piece is there. |
-| [`TODO.md`](TODO.md) | Known open work, with the evidence for each. |
+| [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) | Full evaluation: timings, accuracy, occupancy, work counts. |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | How the guarantee is obtained. |
+| [`docs/API.md`](docs/API.md) | `CCD<T>`, the C ABI, the kernels. |
+| [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md) | Every environment variable. None is needed. |
+| [`wip/`](wip/) | Open items and the measurement record, including withdrawn claims. |
 
-## A note on the numbers
+## License
 
-Nothing in this repository claims a speedup that is not measured, and several
-claims have been withdrawn after being measured properly — a broad-phase default
-that a micro-benchmark supported and real scenes did not, and a host-versus-device
-comparison that turned out to be running different kernels on the two sides. The
-retractions are kept next to the claims rather than edited out.
+See [`LICENSE`](LICENSE).
