@@ -34,7 +34,7 @@ exec 3>&1
 exec 1>&2
 
 DATA_DIR="${SCCD_DATA_DIR:-"${BENCHMARK_DIR}/../data"}"
-JSON_PROJECT_DIR="${BENCHMARK_DIR}/../external/json"
+JSON_PROJECT_DIR="${BENCHMARK_DIR}/json"
 JSON_BUILD_DIR="${SCCD_JSON_BUILD_DIR:-"${BENCHMARK_DIR}/../build_json"}"
 SCCD_BUILD_DIR="${SCCD_BUILD_DIR:-"${BENCHMARK_DIR}/../build_benchmark"}"
 PYTHON_DIR="${BENCHMARK_DIR}/../python"
