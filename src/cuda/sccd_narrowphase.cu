@@ -10,6 +10,11 @@
 #include <algorithm>
 #include <vector>
 
+// For SCCD_MAX_TIME_TOL / SCCD_MAX_COORD_TOL, the caps the domain tolerances
+// share with the host. They must be the same numbers on both sides or the two
+// searches terminate at different depths.
+#include "sccd_tolerance.hpp"
+
 #include <thrust/device_ptr.h>
 #include <thrust/extrema.h>
 #include <thrust/functional.h>
@@ -316,6 +321,29 @@ namespace sccd {
             }
         }
 
+        /**
+         * \brief Per-axis domain tolerances for an edge-edge query.
+         *
+         * A direct transcription of the host's
+         * `compute_edge_edge_tolerance_soa`, which is itself written from
+         * TightInclusion's `compute_edge_edge_tolerances`. The three axes get
+         * three different denominators -- the maximum L-infinity displacement of
+         * the eight difference-function corners along t, along u, and along v --
+         * and each quotient is capped, because an axis with (near) no motion
+         * divides by ~0 and would otherwise yield an infinite tolerance that
+         * accepts the root box on sight.
+         *
+         * The version this replaces came from the SymPy generator and computed
+         * only two denominators, assigning them (dl, dl, edge0). So `tol1` was
+         * the *t* tolerance and `tol2` the *u* tolerance, and the v denominator
+         * was never computed at all. Measured on a cloth-funnel query, that made
+         * tol1 286x too large. Nothing unsafe follows -- a larger domain
+         * tolerance only accepts sooner, which is the conservative direction, and
+         * every gate stayed green -- but the split rule picks the axis with the
+         * largest width/tolerance ratio, so a u tolerance 286x too large starves
+         * the u axis of splits. The search then refines t and v against a u
+         * interval pinned at full width and never converges.
+         */
         template <typename T, typename Vec4>
         static inline __device__ void compute_edge_edge_tolerance(const T codomain_tol,
                                                                   const Vec4 sx,
@@ -327,80 +355,36 @@ namespace sccd {
                                                                   T* const SCCD_RESTRICT tol0,
                                                                   T* const SCCD_RESTRICT tol1,
                                                                   T* const SCCD_RESTRICT tol2) {
-            const T v0sx = sx.x;
-            const T v0sy = sy.x;
-            const T v0sz = sz.x;
-            const T v1sx = sx.y;
-            const T v1sy = sy.y;
-            const T v1sz = sz.y;
-            const T v2sx = sx.z;
-            const T v2sy = sy.z;
-            const T v2sz = sz.z;
-            const T v3sx = sx.w;
-            const T v3sy = sy.w;
-            const T v3sz = sz.w;
-            const T v0ex = ex.x;
-            const T v0ey = ey.x;
-            const T v0ez = ez.x;
-            const T v1ex = ex.y;
-            const T v1ey = ey.y;
-            const T v1ez = ez.y;
-            const T v2ex = ex.z;
-            const T v2ey = ey.z;
-            const T v2ez = ez.z;
-            const T v3ex = ex.w;
-            const T v3ey = ey.w;
-            const T v3ez = ez.w;
+            // The eight corners of the (t, u, v) cube through the difference
+            // function, named as in TightInclusion: p<t><u><v>.
+            const T p000[3] = {sx.x - sx.z, sy.x - sy.z, sz.x - sz.z};
+            const T p001[3] = {sx.x - sx.w, sy.x - sy.w, sz.x - sz.w};
+            const T p010[3] = {sx.y - sx.z, sy.y - sy.z, sz.y - sz.z};
+            const T p011[3] = {sx.y - sx.w, sy.y - sy.w, sz.y - sz.w};
+            const T p100[3] = {ex.x - ex.z, ey.x - ey.z, ez.x - ez.z};
+            const T p101[3] = {ex.x - ex.w, ey.x - ey.w, ez.x - ez.w};
+            const T p110[3] = {ex.y - ex.z, ey.y - ey.z, ez.y - ez.z};
+            const T p111[3] = {ex.y - ex.w, ey.y - ey.w, ez.y - ez.w};
 
-            const T ssa0 = v0ex - v0sx;
-            const T ssa1 = -v2ex + v2sx;
-            const T ssa2 = -v3ex + v3sx;
-            const T ssa3 = v0ey - v0sy;
-            const T ssa4 = -v2ey + v2sy;
-            const T ssa5 = -v3ey + v3sy;
-            const T ssa6 = v0ez - v0sz;
-            const T ssa7 = -v2ez + v2sz;
-            const T ssa8 = -v3ez + v3sz;
-            const T ssa9 = -v1sx;
-            const T ssa10 = ssa9 + v1ex;
-            const T ssa11 = -v1sy;
-            const T ssa12 = ssa11 + v1ey;
-            const T ssa13 = -v1sz;
-            const T ssa14 = ssa13 + v1ez;
-            const T ssa15 = T(1.0 / 3.0) * codomain_tol;
-            const T ssa16 =
-                ssa15 / device::max<T>(
-                            device::abs<T>(ssa0 + ssa1),
-                            device::max<T>(
-                                device::abs<T>(ssa0 + ssa2),
-                                device::max<T>(
-                                    device::abs<T>(ssa1 + ssa10),
-                                    device::max<T>(
-                                        device::abs<T>(ssa10 + ssa2),
-                                        device::max<T>(
-                                            device::abs<T>(ssa12 + ssa4),
-                                            device::max<T>(
-                                                device::abs<T>(ssa12 + ssa5),
-                                                device::max<T>(
-                                                    device::abs<T>(ssa14 + ssa7),
-                                                    device::max<T>(
-                                                        device::abs<T>(ssa14 + ssa8),
-                                                        device::max<T>(
-                                                            device::abs<T>(ssa3 + ssa4),
-                                                            device::max<T>(
-                                                                device::abs<T>(ssa3 + ssa5),
-                                                                device::max<T>(device::abs<T>(ssa6 + ssa7),
-                                                                               device::abs<T>(ssa6 + ssa8))))))))))));
-            *tol0 = ssa16;
-            *tol1 = ssa16;
-            *tol2 = ssa15 /
-                    device::max<T>(
-                        device::abs<T>(ssa11 + v0sy),
-                        device::max<T>(device::abs<T>(ssa13 + v0sz),
-                                       device::max<T>(device::abs<T>(ssa9 + v0sx),
-                                                      device::max<T>(device::abs<T>(v0ex - v1ex),
-                                                                     device::max<T>(device::abs<T>(v0ey - v1ey),
-                                                                                    device::abs<T>(v0ez - v1ez))))));
+            auto linf = [](const T a[3], const T b[3]) {
+                return device::max<T>(device::abs<T>(b[0] - a[0]),
+                                      device::max<T>(device::abs<T>(b[1] - a[1]),
+                                                     device::abs<T>(b[2] - a[2])));
+            };
+            auto max4 = [&](const T a0[3], const T a1[3], const T a2[3], const T a3[3],
+                            const T b0[3], const T b1[3], const T b2[3], const T b3[3]) {
+                return device::max<T>(device::max<T>(linf(a0, b0), linf(a1, b1)),
+                                      device::max<T>(linf(a2, b2), linf(a3, b3)));
+            };
+
+            const T dl = T(3) * max4(p000, p001, p011, p010, p100, p101, p111, p110);
+            const T edge0 = T(3) * max4(p000, p100, p101, p001, p010, p110, p111, p011);
+            const T edge1 = T(3) * max4(p000, p100, p110, p010, p001, p101, p111, p011);
+
+            auto clamp_tol = [](const T v, const T cap) { return (v < cap) ? v : cap; };
+            *tol0 = clamp_tol(codomain_tol / dl, T(SCCD_MAX_TIME_TOL));
+            *tol1 = clamp_tol(codomain_tol / edge0, T(SCCD_MAX_COORD_TOL));
+            *tol2 = clamp_tol(codomain_tol / edge1, T(SCCD_MAX_COORD_TOL));
         }
 
         template <typename T, typename Vec4>
