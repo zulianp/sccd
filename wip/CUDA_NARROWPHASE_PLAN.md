@@ -493,7 +493,68 @@ million boxes each**.
 That matches the per-call figures directly: one call ran 3 queries at 2,060,321
 boxes each, another 15 at 8,482,418. The mean of 3,480 describes nothing.
 
-### The target, finally specific
+## Found it: the device's edge-edge domain tolerances were on the wrong axes
+
+The host computes three denominators — the maximum L-infinity displacement of the
+eight difference-function corners along `t`, along `u`, and along `v` — and caps
+each quotient. The device, still carrying the SymPy generator's output while the
+host had been rewritten by hand from TightInclusion, computed **two** and assigned
+them `(dl, dl, edge0)`. So `tol1` was the *t* tolerance and `tol2` the *u*
+tolerance, and the `v` denominator was never computed at all.
+
+On `worst-query-w1ee`, `tol1` came out **286× too large**.
+
+Nothing unsafe follows. A larger domain tolerance only makes acceptance easier,
+which reports an earlier time of impact — the conservative direction — and every
+gate stayed green throughout. But **the split rule picks the axis with the largest
+width/tolerance ratio**, so a `u` tolerance 286× too large starves `u` of splits.
+The search then refines `t` and `v` against a `u` interval pinned at full width
+and never converges: 53 million boxes is a binary tree to depth 26, which is what
+running until the geometry stops you rather than until the tolerance does looks
+like.
+
+### The fix, measured
+
+The device's `compute_edge_edge_tolerance` is now a transcription of the host's,
+caps included. One query per call, `max_toi = 1`, stride 1:
+
+| | host | device before | device after | |
+|---|---:|---:|---:|---:|
+| `w1ee` | 55 | 53,015,756 | **274** | 193,000× fewer |
+| `w2ee` | 543 | 47,578,924 | **1,786** | 26,600× fewer |
+| `w3ee` | 645 | 2,466,808 | **1,056** | 2,336× fewer |
+
+The device goes from 964,000×, 87,600× and 3,800× the host to **5.0×, 3.3× and
+1.6×**.
+
+cloth-funnel, 4 cases, device, mode 2, the whole benchmark:
+
+| | before | after | |
+|---|---:|---:|---:|
+| stride-0 boxes | 4,082,926 | **1,354,372** | 3.0× fewer |
+| stride-0 ms | 12.39 | 12.07 | — |
+| stride-1 boxes | 1,775,276,978 | **128,546,876** | **13.8× fewer** |
+| stride-1 ms | 160.51 | **37.62** | **4.3× faster** |
+| narrow phase, total | 172.90 | **49.69** | **3.5× faster** |
+| false positives | 75 | 74 | one fewer |
+| false negatives | 0 | 0 | |
+
+`sccd_narrowphase_cuda_test` passes: all 20 configurations conservative. The one
+fewer false positive and `w3ee`'s time of impact moving 0.163146973 → 0.174438477
+are both the expected sign — a correct, smaller tolerance converges where the old
+one accepted early, so the answer is *later* and still at or before the truth.
+
+### Still open: the vertex-face tolerance has a milder version of the same problem
+
+Both sides use the generated expression there, with three distinct denominators,
+so the axes are right. What the device lacks is the **cap**: the host applies
+`clamp_domain_tol` to all three and the device applies none. An axis with near-zero
+motion divides by ~0 and yields an effectively infinite tolerance, which accepts
+the root box on sight. That is conservative and inaccurate rather than slow, and
+it is the opposite sign from the edge-edge defect — adding the cap will make the
+vertex-face search do *more* work, so it needs measuring rather than assuming.
+
+### The old target, now closed
 
 A few hundred queries per scene cost the device millions of boxes each. The host's
 per-query path costs 1,844 boxes on its own hardest queries. Nothing measured so
