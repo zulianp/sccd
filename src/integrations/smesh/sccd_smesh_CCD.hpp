@@ -324,8 +324,17 @@ namespace sccd {
             return err;
         }
 
-        // Run only the EE narrow_phase using the latest EE broad_phase result.
-        int narrow_phase_ee(const scalar_t max_toi,
+        /**
+         * \brief Run only the EE narrow phase, using the latest EE broad-phase result.
+         *
+         * `max_toi` is in/out exactly as in `narrow_phase_fv`: it bounds the
+         * search on the way in and, for `toi_stride == 0`, comes back holding the
+         * earliest time of impact. It used to be `const scalar_t` -- by value --
+         * so the caller's variable was never written and the answer was reachable
+         * only through `ee_tois`. Code written symmetrically against the two
+         * calls then read whatever it had initialised, silently, for edge-edge.
+         */
+        int narrow_phase_ee(scalar_t& max_toi,
                             smesh::SharedBuffer<scalar_t>& ee_tois,
                             const int max_depth,
                             const scalar_t tol,
@@ -748,7 +757,7 @@ namespace sccd {
             return SCCD_SUCCESS;
         }
 
-        int narrow_phase_ee_step_host_(const scalar_t max_toi,
+        int narrow_phase_ee_step_host_(scalar_t& max_toi,
                                        const int max_depth,
                                        const scalar_t tol,
                                        const ptrdiff_t toi_stride) {
@@ -772,6 +781,9 @@ namespace sccd {
                                                           tol,
                                                           toi_stride);
 
+            if (toi_stride == 0) {
+                max_toi = ee_tois_->data()[0];
+            }
             return SCCD_SUCCESS;
         }
 
@@ -1048,7 +1060,7 @@ namespace sccd {
 #endif
         }
 
-        int narrow_phase_ee_step_device_(const scalar_t max_toi,
+        int narrow_phase_ee_step_device_(scalar_t& max_toi,
                                          const int max_depth,
                                          const scalar_t tol,
                                          const ptrdiff_t toi_stride) {
@@ -1073,6 +1085,10 @@ namespace sccd {
                                           tol,
                                           toi_stride);
 
+            if (toi_stride == 0) {
+                auto host_toi = smesh::to_host(ee_tois_);
+                max_toi = host_toi->data()[0];
+            }
             return SCCD_SUCCESS;
 #else
             SMESH_UNUSED(max_toi);
