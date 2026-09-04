@@ -44,7 +44,7 @@ exec rsync -av --delete \
     --exclude '/benchmark/oracle/violations-*.csv' \
     --include '/benchmark/oracle/*.csv' \
     --include '/benchmark/assessment/*.csv' \
-    --include '/research/notebook/**/*.csv' \
+    --include '/spikes/research/**/*.csv' \
     --include '**/figures/README.md' \
     --filter='dir-merge,- .gitignore' \
     --exclude '/.git/' \

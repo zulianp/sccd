@@ -88,7 +88,7 @@ src/cuda/          device kernels
 src/api/           C ABI
 python/            ctypes binding and the analysis tools
 benchmark/         harness, drivers, and committed result tables
-spikes/            demoted and dead code; not built, not installed
+spikes/            demoted and dead code, and the research notes; not built, not installed
 wip/               open work, decision records, retractions
 ```
 
