@@ -164,6 +164,13 @@ namespace sccd {
         __device__ unsigned long long g_np_push_shared = 0;
         __device__ unsigned long long g_np_push_global = 0;
         __device__ unsigned long long g_np_push_lost = 0;
+        // Boxes this side evaluated and then discarded because the bound had
+        // already passed them. The host never counts these: it drops such a box
+        // in its refill loop, before it is classified and before its tick. So
+        // `corner_evals - bound_killed` is the count that means the same thing on
+        // both machines, and the raw `corner_evals` overstates the device.
+        __device__ unsigned long long g_np_bound_killed = 0;
+#define SCCD_NP_BOUND_KILL_TICK() atomicAdd(&g_np_bound_killed, 1ull)
 #define SCCD_NP_EVAL_TICK() atomicAdd(&g_np_evals, 1ull)
 #define SCCD_NP_PERQ_TICK(qid, n)                                             \
     do {                                                                      \
@@ -173,6 +180,7 @@ namespace sccd {
     } while (0)
 #else
 #define SCCD_NP_EVAL_TICK() ((void)0)
+#define SCCD_NP_BOUND_KILL_TICK() ((void)0)
 #define SCCD_NP_PERQ_TICK(qid, n) ((void)0)
 #endif
 
@@ -1856,10 +1864,12 @@ namespace sccd {
                         right, sx, sy, sz, ex, ey, ez, tol, atol, aerr, cr, ar);
 
                     if (!is_domain_valid<is_vf>(left, bound(), atol)) {
+                        if (cl || al) SCCD_NP_BOUND_KILL_TICK();
                         cl = 0;
                         al = 0;
                     }
                     if (!is_domain_valid<is_vf>(right, bound(), atol)) {
+                        if (cr || ar) SCCD_NP_BOUND_KILL_TICK();
                         cr = 0;
                         ar = 0;
                     }
@@ -2355,10 +2365,12 @@ namespace sccd {
                         right, sx, sy, sz, ex, ey, ez, tol, atol, aerr, cr, ar);
 
                     if (!is_domain_valid<is_vf>(left, s_toi, atol)) {
+                        if (cl || al) SCCD_NP_BOUND_KILL_TICK();
                         cl = 0;
                         al = 0;
                     }
                     if (!is_domain_valid<is_vf>(right, s_toi, atol)) {
+                        if (cr || ar) SCCD_NP_BOUND_KILL_TICK();
                         cr = 0;
                         ar = 0;
                     }
@@ -2704,6 +2716,7 @@ namespace sccd {
                 SCCD_CHECK_CUDA(cudaMemcpyToSymbol(g_np_push_shared, &zero, sizeof(zero)));
                 SCCD_CHECK_CUDA(cudaMemcpyToSymbol(g_np_push_global, &zero, sizeof(zero)));
                 SCCD_CHECK_CUDA(cudaMemcpyToSymbol(g_np_push_lost, &zero, sizeof(zero)));
+                SCCD_CHECK_CUDA(cudaMemcpyToSymbol(g_np_bound_killed, &zero, sizeof(zero)));
                 unsigned long long lvl_zero[80] = {0};
                 SCCD_CHECK_CUDA(cudaMemcpyToSymbol(g_np_level, lvl_zero, sizeof(lvl_zero)));
                 SCCD_CHECK_CUDA(cudaMalloc(&d_perq, noverlaps * sizeof(unsigned long long)));
@@ -2977,17 +2990,21 @@ namespace sccd {
 
 #ifdef SCCD_NP_COUNT_BOXES
             {
-                unsigned long long evals = 0;
+                unsigned long long evals = 0, bound_killed = 0;
                 SCCD_CHECK_CUDA(cudaDeviceSynchronize());
                 SCCD_CHECK_CUDA(cudaMemcpyFromSymbol(&evals, g_np_evals, sizeof(evals)));
+                SCCD_CHECK_CUDA(cudaMemcpyFromSymbol(&bound_killed, g_np_bound_killed, sizeof(bound_killed)));
                 fprintf(stderr,
-                        "sccd-np-count %s %s stride=%d queries=%zu corner_evals=%llu per_query=%.1f\n",
+                        "sccd-np-count %s %s stride=%d queries=%zu corner_evals=%llu per_query=%.1f "
+                        "bound_killed=%llu comparable=%llu\n",
                         is_vf ? "vf" : "ee",
                         conservative ? "conservative" : "mode0",
                         toi_stride,
                         noverlaps,
                         evals,
-                        noverlaps ? (double)evals / (double)noverlaps : 0.0);
+                        noverlaps ? (double)evals / (double)noverlaps : 0.0,
+                        bound_killed,
+                        evals - bound_killed);
 
                 std::vector<unsigned long long> perq(noverlaps, 0ull);
                 SCCD_CHECK_CUDA(cudaMemcpy(perq.data(),
