@@ -1688,7 +1688,20 @@ namespace sccd {
             }
         }
 
-        template <bool is_vf, bool conservative, int N, typename T, typename I>
+        /**
+         * \brief One thread per query, depth-first, with a block-shared work stack.
+         *
+         * \tparam per_query  false: every thread prunes against one shared
+         *                     minimum in `toi[0]`, which is what
+         *                     `find_earliest_impact_time` wants. true: each
+         *                     thread carries its own query's bound and writes
+         *                     `toi[qid]`, which is what `find_impact_times`
+         *                     wants -- and is the point of the variant, because
+         *                     the block-per-query kernel that path used costs
+         *                     one block per query and is bound by scheduling
+         *                     them rather than by the search.
+         */
+        template <bool is_vf, bool conservative, bool per_query, int N, typename T, typename I>
         static __device__ void narrow_phase_dfs_zero_stride_body(const I* const SCCD_RESTRICT overlap0,
                                                                  const I* const SCCD_RESTRICT overlap1,
                                                                  T** const SCCD_RESTRICT sp,
@@ -1727,6 +1740,24 @@ namespace sccd {
             }
             __syncthreads();
 
+            // With per_query the bound is per thread: a thread prunes only
+            // against its own query's best, because another query's answer says
+            // nothing about this one. The shared scalar is unused on that path.
+            TC my_toi = TC(0);
+            auto bound = [&]() -> TC { return per_query ? my_toi : s_toi; };
+            auto lower_bound_to = [&](const TC v) {
+                if (per_query) {
+                    if (v < my_toi) my_toi = v;
+                } else {
+                    device::atomic_min(&s_toi, v);
+                }
+            };
+            // Publish this thread's bound before it takes on another query, and
+            // once more on the way out.
+            auto flush_bound = [&](const int q) {
+                if (per_query && q >= 0) atomic_min_toi<T>(&toi[q], my_toi);
+            };
+
             Stack<TC> s_stack = {s_tlower,
                                 s_tupper,
                                 s_ulower,
@@ -1754,6 +1785,8 @@ namespace sccd {
                 load_query_and_tol<is_vf, conservative, T, Vec4, I>(
                     qid, overlap0, overlap1, sp, ep, element_stride, elements, tol, sx, sy, sz, ex, ey, ez, atol, aerr);
             }
+            // An inactive thread never reads its bound; any value is fine.
+            if (per_query) my_toi = (qid >= 0) ? (TC)toi[qid] : TC(1);
 
             while (true) {
                 // Refreshed every iteration, deliberately. Every resident block
@@ -1763,13 +1796,15 @@ namespace sccd {
                 // monotonically worse on all three scenes -- 638 -> 3377 ms on
                 // cloth-funnel at 256 -- because the pruning a fresh bound buys is
                 // worth more than the atomic costs. See wip/ASSESSMENT.md.
-                if (tid == 0) {
-                    const TC g = atomic_min_toi<T>(&toi[0], s_toi);
-                    if (g < s_toi) s_toi = g;
+                if (!per_query) {
+                    if (tid == 0) {
+                        const TC g = atomic_min_toi<T>(&toi[0], s_toi);
+                        if (g < s_toi) s_toi = g;
+                    }
+                    __syncthreads();
                 }
-                __syncthreads();
 
-                if (active && cur.tlower >= s_toi) active = 0;
+                if (active && cur.tlower >= bound()) active = 0;
 
 #ifdef SCCD_NP_COUNT_BOXES
                 if (active) atomicAdd(&g_np_level[level < 80 ? level : 79], 1ull);
@@ -1785,8 +1820,8 @@ namespace sccd {
                     // triangle. The test is already padded by the u and v
                     // tolerances, so it cannot reject a box that straddles the
                     // edge.
-                    if (is_domain_valid<is_vf>(cur, s_toi, atol)) {
-                        device::atomic_min(&s_toi, cur.tlower);
+                    if (is_domain_valid<is_vf>(cur, bound(), atol)) {
+                        lower_bound_to(cur.tlower);
                     }
                     active = 0;
                 }
@@ -1796,8 +1831,8 @@ namespace sccd {
                 // the depth cutoff and gets the same answer: accept the box at its
                 // t lower bound, which is early and therefore safe.
                 if (conservative && active && !tight_can_split<TC>(cur, atol)) {
-                    if (is_domain_valid<is_vf>(cur, s_toi, atol)) {
-                        device::atomic_min(&s_toi, cur.tlower);
+                    if (is_domain_valid<is_vf>(cur, bound(), atol)) {
+                        lower_bound_to(cur.tlower);
                     }
                     active = 0;
                 }
@@ -1809,7 +1844,7 @@ namespace sccd {
                 if (active) {
                     Domain<TC> left, right;
                     SCCD_NP_PERQ_TICK(qid, 2);
-                    cur.tupper = device::min<TC>(cur.tupper, s_toi);
+                    cur.tupper = device::min<TC>(cur.tupper, bound());
 
                     // Guarded by the tight_can_split check above, so this cannot fail.
                     split_cell_policy<is_vf, conservative, TC, Vec4>(
@@ -1820,21 +1855,21 @@ namespace sccd {
                     evaluate_cell_3d_policy<is_vf, conservative, TC, Vec4>(
                         right, sx, sy, sz, ex, ey, ez, tol, atol, aerr, cr, ar);
 
-                    if (!is_domain_valid<is_vf>(left, s_toi, atol)) {
+                    if (!is_domain_valid<is_vf>(left, bound(), atol)) {
                         cl = 0;
                         al = 0;
                     }
-                    if (!is_domain_valid<is_vf>(right, s_toi, atol)) {
+                    if (!is_domain_valid<is_vf>(right, bound(), atol)) {
                         cr = 0;
                         ar = 0;
                     }
 
                     if (al) {
-                        device::atomic_min(&s_toi, left.tlower);
+                        lower_bound_to(left.tlower);
                         cl = 0;
                     }
                     if (ar) {
-                        device::atomic_min(&s_toi, right.tlower);
+                        lower_bound_to(right.tlower);
                         cr = 0;
                     }
 
@@ -1906,7 +1941,9 @@ namespace sccd {
                                 cur.vupper = s_stack.vupper[slot];
                                 level = s_stack.level[slot];
                                 if (new_qid != qid) {
+                                    flush_bound(qid);
                                     qid = new_qid;
+                                    if (per_query) my_toi = (TC)toi[qid];
                                     load_query_and_tol<is_vf, conservative, T, Vec4, I>(qid,
                                                                           overlap0,
                                                                           overlap1,
@@ -1941,10 +1978,14 @@ namespace sccd {
                 }
             }
 
-            if (tid == 0) atomic_min_toi<T>(&toi[0], s_toi);
+            if (per_query) {
+                flush_bound(qid);
+            } else if (tid == 0) {
+                atomic_min_toi<T>(&toi[0], s_toi);
+            }
         }
 
-        template <bool is_vf, bool conservative, int N, typename T, typename I>
+        template <bool is_vf, bool conservative, bool per_query, int N, typename T, typename I>
         __global__ SCCD_NP_LAUNCH_BOUNDS(N)
         void narrow_phase_dfs_zero_stride_kernel(const I* const SCCD_RESTRICT overlap0,
                                                  const I* const SCCD_RESTRICT overlap1,
@@ -1991,7 +2032,7 @@ namespace sccd {
                 }
             }
 
-            narrow_phase_dfs_zero_stride_body<is_vf, conservative, N, T, I>(overlap0,
+            narrow_phase_dfs_zero_stride_body<is_vf, conservative, per_query, N, T, I>(overlap0,
                                                               overlap1,
                                                               sp,
                                                               ep,
@@ -2007,7 +2048,7 @@ namespace sccd {
                                                               active);
         }
 
-        template <bool is_vf, bool conservative, int N, typename T, typename I>
+        template <bool is_vf, bool conservative, bool per_query, int N, typename T, typename I>
         __global__ SCCD_NP_LAUNCH_BOUNDS(N)
         void narrow_phase_dfs_zero_stride_from_stack_kernel(const I* const SCCD_RESTRICT overlap0,
                                                             const I* const SCCD_RESTRICT overlap1,
@@ -2029,7 +2070,7 @@ namespace sccd {
                 active = 1;
             }
 
-            narrow_phase_dfs_zero_stride_body<is_vf, conservative, N, T, I>(overlap0,
+            narrow_phase_dfs_zero_stride_body<is_vf, conservative, per_query, N, T, I>(overlap0,
                                                               overlap1,
                                                               sp,
                                                               ep,
@@ -2573,7 +2614,7 @@ namespace sccd {
             {
                 int occ = 0;
                 if (cudaOccupancyMaxActiveBlocksPerMultiprocessor(
-                        &occ, (const void*)narrow_phase_dfs_zero_stride_from_stack_kernel<is_vf, conservative, N, T, I>, N, 0) ==
+                        &occ, (const void*)narrow_phase_dfs_zero_stride_from_stack_kernel<is_vf, conservative, false, N, T, I>, N, 0) ==
                         cudaSuccess &&
                     occ > 0) {
                     SCCD_BLOCKS_PER_SM = occ;
@@ -2731,10 +2772,31 @@ namespace sccd {
                     Stack<TC> g_out = make_buf(write_half, 0);
 
                     // Pass 1: seed-driven.
-                    if (toi_stride == 0) {
+                    //
+                    // toi_stride == 1 runs one thread per query, like stride 0,
+                    // with a per-thread bound and a per-query output slot.
+                    //
+                    // It used to give each query a whole block. That is bound by
+                    // scheduling the blocks rather than by the search -- 843,414
+                    // of them on cloth-funnel, each classifying 63 boxes across
+                    // 128 threads, half a box per thread. One thread per query
+                    // measured 4.47x, 2.76x and 4.43x faster on the three scenes
+                    // with identical false positives and no missed collisions.
+                    //
+                    // SCCD_NP_S1_BLOCK_PER_QUERY=1 restores the old kernel. It is
+                    // kept because the thread-per-query path has one session's
+                    // measurement behind it, and because a query heavy enough to
+                    // want a whole block is exactly what the global queue is for
+                    // -- if such a workload turns up, this is the switch to try.
+                    const bool s1_thread_per_query = [] {
+                        const char* e = getenv("SCCD_NP_S1_BLOCK_PER_QUERY");
+                        return !(e != nullptr && atoi(e) != 0);
+                    }();
+                    if (toi_stride == 0 || s1_thread_per_query) {
                         const int grid_blocks_zs = (this_batch + N - 1) / N;
                         dim3 grid_pass1_zs(grid_blocks_zs, 1, 1);
-                        narrow_phase_dfs_zero_stride_kernel<is_vf, conservative, N, T, I>
+                        if (toi_stride == 0) {
+                        narrow_phase_dfs_zero_stride_kernel<is_vf, conservative, false, N, T, I>
                             <<<grid_pass1_zs, block_pass1>>>(overlap0,
                                                              overlap1,
                                                              v0,
@@ -2747,6 +2809,21 @@ namespace sccd {
                                                              g_out,
                                                              (int)begin,
                                                              (int)end);
+                        } else {
+                            narrow_phase_dfs_zero_stride_kernel<is_vf, conservative, true, N, T, I>
+                                <<<grid_pass1_zs, block_pass1>>>(overlap0,
+                                                                 overlap1,
+                                                                 v0,
+                                                                 v1,
+                                                                 element_stride,
+                                                                 elements,
+                                                                 tol,
+                                                                 max_depth,
+                                                                 d_toi,
+                                                                 g_out,
+                                                                 (int)begin,
+                                                                 (int)end);
+                        }
                     } else {
                         dim3 grid_pass1(this_batch, 1, 1);
                         narrow_phase_dfs_kernel<is_vf, conservative, SCCD_NP_THREADS_PER_BLOCK, T, I>
@@ -2802,7 +2879,7 @@ namespace sccd {
                         // the swap instead, so the cap has to go. One thread per
                         // entry for the zero-stride kernel; the block-per-query
                         // kernel claims up to SCCD_NP_DRAIN_PER_BLOCK each.
-                        long long need = (toi_stride == 0)
+                        long long need = (toi_stride == 0 || s1_thread_per_query)
                                              ? ((long long)h_g_top + N - 1) / N
                                              : ((long long)h_g_top + SCCD_NP_DRAIN_PER_BLOCK - 1) /
                                                    SCCD_NP_DRAIN_PER_BLOCK;
@@ -2811,7 +2888,10 @@ namespace sccd {
                         dim3 grid_pass2((unsigned)need, 1, 1);
 
                         if (toi_stride == 0) {
-                            narrow_phase_dfs_zero_stride_from_stack_kernel<is_vf, conservative, N, T, I><<<grid_pass2, block_pass1>>>(
+                            narrow_phase_dfs_zero_stride_from_stack_kernel<is_vf, conservative, false, N, T, I><<<grid_pass2, block_pass1>>>(
+                                overlap0, overlap1, v0, v1, element_stride, elements, tol, max_depth, d_toi, g_in, g_out);
+                        } else if (s1_thread_per_query) {
+                            narrow_phase_dfs_zero_stride_from_stack_kernel<is_vf, conservative, true, N, T, I><<<grid_pass2, block_pass1>>>(
                                 overlap0, overlap1, v0, v1, element_stride, elements, tol, max_depth, d_toi, g_in, g_out);
                         } else {
                             narrow_phase_dfs_from_stack_kernel<is_vf, conservative, N, T, I>

@@ -35,12 +35,12 @@ is `find_impact_times` — one result per candidate, no shared bound.
 
 | scene | mode | CPU s0 | GPU s0 | CPU s1 | GPU s1 |
 |---|---|---:|---:|---:|---:|
-| cloth-funnel | Relaxed | **6.2** | 22.8 | **9.7** | 59.3 |
-| cloth-funnel | Tight | **7.1** | 28.3 | **12.2** | 155.7 |
-| armadillo-rollers | Relaxed | **18.0** | 32.5 | **62.8** | 234.5 |
-| armadillo-rollers | Tight | **17.5** | 37.1 | **77.1** | 188.1 |
-| cloth-ball | Relaxed | 186.5 | **106.5** | **309.8** | 670.1 |
-| cloth-ball | Tight | 122.6 | **105.2** | **241.4** | 695.7 |
+| cloth-funnel | Relaxed | **6.2** | 24.3 | 9.7 | **22.2** |
+| cloth-funnel | Tight | **7.2** | 27.2 | **12.2** | 33.4 |
+| armadillo-rollers | Relaxed | **17.9** | 32.4 | 62.9 | **66.8** |
+| armadillo-rollers | Tight | **17.5** | 37.5 | 77.1 | **65.2** |
+| cloth-ball | Relaxed | 185.9 | **105.6** | 309.6 | **154.8** |
+| cloth-ball | Tight | 115.2 | **103.0** | 241.6 | **158.4** |
 
 Each cell is the sum over the scene's 16 cases within one repeat, then the median
 over three repeats; vertex-face and edge-edge cases are summed together. Timings
@@ -51,16 +51,20 @@ Stride 1 costs the CPU 1.6–4.4× over stride 0 — the value of the shared run
 minimum. It costs the GPU 2.6–6.6×, because stride 1 runs a different kernel: one
 block per query, seeded with a 128-way dice.
 
-These GPU numbers improved substantially against the previous measurement of this
-table, all of it on `Tight`:
+The GPU stride-1 column improved by an order of magnitude against the previous
+measurement of this table, from two changes:
 
-| | was | now | |
+| `Tight`, GPU s1 | was | now | |
 |---|---:|---:|---:|
-| armadillo-rollers, GPU s1 | 3126.7 | **188.1** | **16.6×** |
-| cloth-funnel, GPU s1 | 789.9 | **155.7** | 5.1× |
-| armadillo-rollers, GPU s0 | 56.3 | **37.1** | 1.5× |
-| cloth-funnel, GPU s0 | 36.5 | **28.3** | 1.3× |
-| cloth-ball, GPU s1 | 902.8 | **695.7** | 1.3× |
+| armadillo-rollers | 3126.7 | **65.2** | **48×** |
+| cloth-funnel | 789.9 | **33.4** | **24×** |
+| cloth-ball | 902.8 | **158.4** | **5.7×** |
+
+**The per-query path now runs one thread per query**, as the earliest-impact path
+always has. It used to give each query a whole block, which is bound by scheduling
+the blocks rather than by the search — 843,414 of them on cloth-funnel, each
+classifying 63 boxes across 128 threads. On its own that change is 4.5×, 2.8× and
+4.4×. `SCCD_NP_S1_BLOCK_PER_QUERY=1` restores the old kernel.
 
 The device's edge-edge domain tolerances had been assigned to the wrong axes: `u`
 got the `t` tolerance, up to 286× too large, and the `v` denominator was never

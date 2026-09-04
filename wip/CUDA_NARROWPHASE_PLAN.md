@@ -685,7 +685,7 @@ remains is listed first.
 
 | | | |
 |---|---|---|
-| **A** | **Stride 1 on the thread-per-query kernel** | The per-query path costs 151–694 ms against the earliest-impact path's 28–105 on the same queries, and it is not the search: 843,414 blocks each doing half a box per thread. Run it one thread per query — that kernel already carries `toi_idx = qid * toi_stride` — and give a query a block only once it is proven hard. The largest change left, and the only one with a whole code path's cost behind it. |
+| ~~**A**~~ | ~~Stride 1 on the thread-per-query kernel~~ | **Done, and it is the default.** 4.47×, 2.76× and 4.43× on the three scenes, identical false positives, `fn=0`, gate green both ways. Detail below. |
 | **B** | **D2, the capacity-1024 anomaly** | Under the double-buffered queue, `SCCD_NP_SHARED_STACK_CAP=1024` measured 4,059 ms on cloth-funnel against the old queue's 634 at the same capacity. Untouched. It blocks D1, which tunes exactly that machinery. |
 | **C** | **Refresh the end-to-end table** | `docs/BENCHMARKS.md`'s end-to-end row sums prep, broad phase and narrow phase, and its narrow term has changed. Needs broad-phase timings from the same run, which the narrow-phase re-measurement did not capture. |
 | **D** | **The per-query residual** | On `worst-query-w{1,2,3}ee` the device is 5.0×, 3.3× and 1.6× the host, down from 964,000×. Start with whether the two counters count the same unit: the device ticks both children of every split, including ones discarded immediately. |
@@ -811,6 +811,37 @@ further before the true one — and a looser bound prunes less, so the queries t
 follow do more work. `Tight` pays more per box and buys a bound that kills more
 boxes. On the host, where the bound collapses within a few chunks anyway, the
 trade still runs the documented way; on the device it does not.
+
+## A: stride 1 runs one thread per query
+
+The zero-stride body is now templated on `per_query`. With it set, each thread
+carries its own query's bound in a register instead of pruning against a
+block-shared minimum, adopts the new query's bound when it pops another query's
+box off the shared stack, and publishes to `toi[qid]` on the way out and on every
+switch. Everything else — the search, the acceptance tests, the stack, the global
+queue — is the same code the earliest-impact path runs.
+
+`toi_stride=1`, mode 2, GH200, three repeats, medians:
+
+| scene | block per query | thread per query | |
+|---|---:|---:|---:|
+| cloth-funnel | 147.2 | **33.0** | **4.47×** |
+| armadillo-rollers | 199.8 | **72.4** | **2.76×** |
+| cloth-ball | 696.3 | **157.0** | **4.43×** |
+
+False positives 260 / 5,637 / 95,424 with `fn=0` on both variants, identical to
+each other and to the host. All 20 configurations conservative either way.
+Stride 0 is untouched — 27.3 against 27.6, 37.1 against 37.4, 110.2 against
+110.4 — which is the check that the change is confined to the path it targets.
+
+The per-query path now costs about what the earliest-impact path costs: 1.2×,
+1.9× and 1.4× of it, against 5.4×, 5.4× and 6.3× before. The host's own ratio is
+1.6–4.4×, so the anomaly is gone rather than reduced.
+
+`SCCD_NP_S1_BLOCK_PER_QUERY=1` restores the old kernel. It is kept for two
+reasons: the new default has one session's measurement behind it, and a query
+heavy enough to genuinely want a whole block is what the global queue exists for
+— if such a workload appears, that is the switch to try first.
 
 ### 4. The per-query path: its cost is not its work
 
