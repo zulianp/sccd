@@ -63,8 +63,9 @@
 // device's mode-0 rejection used to get wrong: it padded the origin-containment
 // test with the caller's tolerance instead of the bound, so a pad of 1e-16 was
 // narrower than the error in the corner values it was testing and a box holding
-// a root could be discarded. At the usual 3e-8 the pad was four hundred thousand
-// times *wider* than it needed to be, which is why no scene ever showed it.
+// a root could be discarded. At the usual 3e-8 the pad was four and a half
+// million times *wider* than it needed to be, which is why no scene ever showed
+// it.
 //
 // Be clear about what this pass does and does not establish: the pre-fix kernel
 // **passes** it. Reverting the pad to `tol` alone and re-running changes nothing,

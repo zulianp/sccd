@@ -559,7 +559,7 @@ found once". The triangle device kernel was the one still carrying it.
 
 **Severity: latent, and no case was found that trips it.** The kernel computes in
 double, so the bound is at most `30 * 2.22e-16 = 6.7e-15`, and every measurement
-here passes `tol = 3e-8`, four hundred thousand times wider. The pad was
+here passes `tol = 3e-8`, four and a half million times wider. The pad was
 therefore too wide rather than too narrow on every scene in this document.
 
 It was not reachable at `tol = 1e-16` either. `sccd_narrowphase_cuda_test` was written
