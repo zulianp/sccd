@@ -47,17 +47,20 @@ Both handle triangles and quads, on host and device.
 
 ## Narrow phase
 
-| mode | kernel | status |
-|---|---|---|
-| 0 | scalar reference | **ships** — wins cloth-funnel by 1.27× |
-| 2 | TightInclusion-exact, vectorised | **ships** — wins cloth-ball by 1.62× |
-| 1, 3 | fast-vector, TightInclusion-compat | validation only, require a TightInclusion build |
+| mode | `NarrowPhaseMode` | kernel | status |
+|---|---|---|---|
+| 0 | `Fast` | scalar; codomain widths against domain tolerances | **ships** |
+| 2 | `Tight` | lane-packed; domain widths against domain tolerances | **ships** |
+| 1 | `FastVectorized` | the `Fast` predicate, lane-packed, vertex-face only | validation only |
+| 3 | `TightInclusionCorrected` | mode 1 corrected by the external library | oracle only |
 
-Modes 0 and 2 are not duplicates in the sense the keep bar means: each wins on
-real scenes the other loses. Modes 1 and 3 both enter the same vectorised kernel;
-mode 3 corrects its own answers with TightInclusion, which makes it an oracle
-rather than a code path, and mode 1 is a duplicate that loses on every scene.
-Asking for either without TightInclusion gets mode 0.
+Modes 0 and 2 both ship because neither dominates: `Fast` wins cloth-funnel on
+speed, `Tight` wins cloth-ball, and `Tight` is 69× tighter at the median error.
+They differ in accuracy and speed, never in safety — every mode is conservative.
+
+Modes 1 and 3 need `SCCD_ENABLE_TIGHT_INCLUSION=ON`; asking for either without it
+gets mode 0. Mode 3 is the only one that calls the external library, which is why
+it is the only one named after it.
 
 Splitting is Gauss–Newton adaptive. Uniform splitting was a complete second
 implementation, roughly 550 lines, that never won on any real scene; it is a
