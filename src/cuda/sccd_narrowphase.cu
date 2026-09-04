@@ -754,7 +754,7 @@ namespace sccd {
         /**
          * \brief TightInclusion's acceptance test on one box.
          *
-         * Three conditions and nothing else, transcribed from ti_classify in
+         * Three conditions and nothing else, transcribed from tight_classify in
          * src/sccd_vnarrowphase_ti.hpp:
          *   reject  if the origin is outside the padded range on any axis;
          *   accept  if the whole range is inside the error box on every axis;
@@ -763,7 +763,7 @@ namespace sccd {
          *           the comparison the mode-0 test gets wrong.
          */
         template <bool is_vf, typename T, typename Vec4>
-        static inline __device__ void evaluate_cell_3d_ti(const Domain<T>& cell,
+        static inline __device__ void evaluate_cell_3d_tight(const Domain<T>& cell,
                                                           const Vec4 sx,
                                                           const Vec4 sy,
                                                           const Vec4 sz,
@@ -815,7 +815,7 @@ namespace sccd {
          * box must be accepted at its t lower bound, never dropped.
          */
         template <typename T>
-        static inline __device__ bool ti_can_split(const Domain<T>& in, const T* const SCCD_RESTRICT atol) {
+        static inline __device__ bool tight_can_split(const Domain<T>& in, const T* const SCCD_RESTRICT atol) {
             const T width[3] = {in.tupper - in.tlower, in.uupper - in.ulower, in.vupper - in.vlower};
             int axis = 0;
             T best = -T(1);
@@ -1560,7 +1560,7 @@ namespace sccd {
                                                               int& accept) {
             SCCD_NP_EVAL_TICK();
             if constexpr (conservative) {
-                evaluate_cell_3d_ti<is_vf, T, Vec4>(
+                evaluate_cell_3d_tight<is_vf, T, Vec4>(
                     cell, sx, sy, sz, ex, ey, ez, atol, aerr, contains_origin, accept);
             } else {
                 evaluate_cell_3d<is_vf, T, Vec4>(
@@ -1705,7 +1705,7 @@ namespace sccd {
                 // out of representable midpoints. That is the same situation as
                 // the depth cutoff and gets the same answer: accept the box at its
                 // t lower bound, which is early and therefore safe.
-                if (conservative && active && !ti_can_split<TC>(cur, atol)) {
+                if (conservative && active && !tight_can_split<TC>(cur, atol)) {
                     if (is_domain_valid<is_vf>(cur, s_toi, atol)) {
                         device::atomic_min(&s_toi, cur.tlower);
                     }
@@ -1721,7 +1721,7 @@ namespace sccd {
                     SCCD_NP_PERQ_TICK(qid, 2);
                     cur.tupper = device::min<TC>(cur.tupper, s_toi);
 
-                    // Guarded by the ti_can_split check above, so this cannot fail.
+                    // Guarded by the tight_can_split check above, so this cannot fail.
                     split_cell_policy<is_vf, conservative, TC, Vec4>(
                         cur, sx, sy, sz, ex, ey, ez, atol, left, right);
                     int cl = 0, cr = 0, al = 0, ar = 0;
@@ -2128,7 +2128,7 @@ namespace sccd {
                 // out of representable midpoints. That is the same situation as
                 // the depth cutoff and gets the same answer: accept the box at its
                 // t lower bound, which is early and therefore safe.
-                if (conservative && active && !ti_can_split<TC>(cur, atol)) {
+                if (conservative && active && !tight_can_split<TC>(cur, atol)) {
                     if (is_domain_valid<is_vf>(cur, s_toi, atol)) {
                         device::atomic_min(&s_toi, cur.tlower);
                     }
@@ -2144,7 +2144,7 @@ namespace sccd {
 
                     cur.tupper = device::min<TC>(cur.tupper, s_toi);
 
-                    // Guarded by the ti_can_split check above, so this cannot fail.
+                    // Guarded by the tight_can_split check above, so this cannot fail.
                     split_cell_policy<is_vf, conservative, TC, Vec4>(
                         cur, sx, sy, sz, ex, ey, ez, atol, left, right);
 
@@ -2820,7 +2820,7 @@ namespace sccd {
                             const int max_depth,
                             const T tol,
                             const int toi_stride) {
-            if (narrow_phase_mode_is_ti_exact(narrow_phase_mode())) {
+            if (narrow_phase_mode_is_tight(narrow_phase_mode())) {
                 return narrow_phase_generic<false, true, T, I>(
                     noverlaps, overlap0, overlap1, v0, v1, edge_stride, edges, max_toi, toi, max_depth, tol, toi_stride);
             }
@@ -2842,7 +2842,7 @@ namespace sccd {
                             const int max_depth,
                             const T tol,
                             const int toi_stride) {
-            if (narrow_phase_mode_is_ti_exact(narrow_phase_mode())) {
+            if (narrow_phase_mode_is_tight(narrow_phase_mode())) {
                 return narrow_phase_generic<true, true, T, I>(
                     noverlaps, voveralp, foveralp, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_stride);
             }

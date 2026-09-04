@@ -18,7 +18,7 @@
 //     "function box is inside the error box" case, and nothing else;
 //   * bisection on the axis with the largest width/tolerance ratio, with
 //     TightInclusion's u+v<=1 and t<toi pruning;
-//   * exact dyadic box endpoints (see ti_bisect below).
+//   * exact dyadic box endpoints (see tight_bisect below).
 //
 // Ordering: TightInclusion pops boxes from a priority queue ordered by ascending
 // t lower bound and returns the first box it accepts, which is therefore the
@@ -55,11 +55,11 @@
 //
 // The x86 values are the prior, not a measurement -- re-run
 // benchmark/ti_oracle and the cloth-funnel probe there before trusting them.
-#ifndef SCCD_VNARROWPHASE_TI_VSIZE
+#ifndef SCCD_NARROWPHASE_TIGHT_VSIZE
 #if defined(__AVX512F__) || defined(__AVX2__)
-#define SCCD_VNARROWPHASE_TI_VSIZE 8
+#define SCCD_NARROWPHASE_TIGHT_VSIZE 8
 #else
-#define SCCD_VNARROWPHASE_TI_VSIZE 4
+#define SCCD_NARROWPHASE_TIGHT_VSIZE 4
 #endif
 #endif
 
@@ -81,16 +81,16 @@
 //
 // x86 is left on the single value: it has never been measured, and guessing a
 // split there would repeat the mistake this comment block already warns about.
-#ifndef SCCD_VNARROWPHASE_TI_VSIZE_VF
-#if defined(__ARM_NEON) && SCCD_VNARROWPHASE_TI_VSIZE > 2
-#define SCCD_VNARROWPHASE_TI_VSIZE_VF (SCCD_VNARROWPHASE_TI_VSIZE / 2)
+#ifndef SCCD_NARROWPHASE_TIGHT_VSIZE_VF
+#if defined(__ARM_NEON) && SCCD_NARROWPHASE_TIGHT_VSIZE > 2
+#define SCCD_NARROWPHASE_TIGHT_VSIZE_VF (SCCD_NARROWPHASE_TIGHT_VSIZE / 2)
 #else
-#define SCCD_VNARROWPHASE_TI_VSIZE_VF SCCD_VNARROWPHASE_TI_VSIZE
+#define SCCD_NARROWPHASE_TIGHT_VSIZE_VF SCCD_NARROWPHASE_TIGHT_VSIZE
 #endif
 #endif
 
-#ifndef SCCD_VNARROWPHASE_TI_VSIZE_EE
-#define SCCD_VNARROWPHASE_TI_VSIZE_EE SCCD_VNARROWPHASE_TI_VSIZE
+#ifndef SCCD_NARROWPHASE_TIGHT_VSIZE_EE
+#define SCCD_NARROWPHASE_TIGHT_VSIZE_EE SCCD_NARROWPHASE_TIGHT_VSIZE
 #endif
 
 #include <cstdio>
@@ -149,12 +149,12 @@ namespace sccd {
      * \brief The (u, v) half of a corner evaluation, given the four points at t.
      *
      * Split out so a caller evaluating several corners that share a t value can
-     * compute the points once. The expressions are the ones ti_corner always
+     * compute the points once. The expressions are the ones tight_corner always
      * used, in the same order, so the values are bit-identical either way and
      * the error certificate is unaffected.
      */
     template <bool IsVertexFace, typename T>
-    static SCCD_ALWAYS_INLINE T ti_corner_at(const T p0, const T p1, const T p2, const T p3, const T u, const T v) {
+    static SCCD_ALWAYS_INLINE T tight_corner_at(const T p0, const T p1, const T p2, const T p3, const T u, const T v) {
         if constexpr (IsVertexFace) {
             // vertex minus the point (u, v) of the triangle
             const T face = (p2 - p1) * u + (p3 - p1) * v + p1;
@@ -168,7 +168,7 @@ namespace sccd {
     }
 
     template <bool IsVertexFace, typename T>
-    static SCCD_ALWAYS_INLINE T ti_corner(const T a0,
+    static SCCD_ALWAYS_INLINE T tight_corner(const T a0,
                                           const T a1,
                                           const T a2,
                                           const T a3,
@@ -187,7 +187,7 @@ namespace sccd {
         const T p2 = d2 * t + a2;
         const T p3 = d3 * t + a3;
 
-        return ti_corner_at<IsVertexFace, T>(p0, p1, p2, p3, u, v);
+        return tight_corner_at<IsVertexFace, T>(p0, p1, p2, p3, u, v);
     }
 
     /**
@@ -204,14 +204,14 @@ namespace sccd {
      * would risk losing a root.
      */
     template <typename T>
-    static SCCD_ALWAYS_INLINE bool ti_bisect(const T lo, const T hi, T& mid) {
+    static SCCD_ALWAYS_INLINE bool tight_bisect(const T lo, const T hi, T& mid) {
         mid = (lo + hi) * T(0.5);
         return lo < mid && mid < hi;
     }
 
     /** \brief Geometry for a block of queries, as structure-of-arrays. */
     template <typename T, int VSIZE>
-    struct TiQueryBlock {
+    struct TightQueryBlock {
         // [point][dim][lane]: points are (vertex, f0, f1, f2) or (ea0, ea1, eb0, eb1)
         T start[4][3][VSIZE];
         T delta[4][3][VSIZE];  // end - start, hoisted out of the corner loop
@@ -233,7 +233,7 @@ namespace sccd {
      * Corner c holds the upper bound of axis d when bit (1 << (2 - d)) is set.
      */
     template <typename I>
-    struct TiBox {
+    struct TightBox {
         I query;
         int depth;
         double lo[3];
@@ -242,17 +242,17 @@ namespace sccd {
     };
 
     /** \brief Bit of a corner index selecting the upper bound of axis \p d. */
-    static SCCD_ALWAYS_INLINE int ti_corner_bit(const int d) { return 1 << (2 - d); }
+    static SCCD_ALWAYS_INLINE int tight_corner_bit(const int d) { return 1 << (2 - d); }
 
     /**
      * \brief Corner indices of the mid face, per split axis.
      *
-     * ti_mid_corner[axis][k] is the k-th of the 4 corners that have `axis` at its
+     * tight_mid_corner[axis][k] is the k-th of the 4 corners that have `axis` at its
      * upper bound; k enumerates the other two axes' lo/hi combinations. Tabulated
      * because deriving it inline costs a nested loop with a branch, per lane, per
      * corner, on the hot path.
      */
-    static constexpr int ti_mid_corner[3][4] = {{4, 6, 5, 7}, {2, 6, 3, 7}, {1, 5, 3, 7}};
+    static constexpr int tight_mid_corner[3][4] = {{4, 6, 5, 7}, {2, 6, 3, 7}, {1, 5, 3, 7}};
 
     namespace detail {
 
@@ -274,7 +274,7 @@ namespace sccd {
          * feeds.
          */
         template <typename T, int VSIZE>
-        struct TiLaneGeometry {
+        struct TightLaneGeometry {
             T start[4][3][VSIZE];
             T delta[4][3][VSIZE];
             T tol[3][VSIZE];
@@ -282,10 +282,10 @@ namespace sccd {
         };
 
         template <typename T, int VSIZE>
-        static SCCD_ALWAYS_INLINE void ti_load_lane(const TiQueryBlock<T, VSIZE>& block,
+        static SCCD_ALWAYS_INLINE void tight_load_lane(const TightQueryBlock<T, VSIZE>& block,
                                                     const int q,
                                                     const int l,
-                                                    TiLaneGeometry<T, VSIZE>& lane) {
+                                                    TightLaneGeometry<T, VSIZE>& lane) {
             for (int k = 0; k < 4; ++k) {
                 for (int d = 0; d < 3; ++d) {
                     lane.start[k][d][l] = block.start[k][d][q];
@@ -300,7 +300,7 @@ namespace sccd {
 
         /** \brief Per-dimension min/max over a lane's 8 stored corner values. */
         template <typename T, int VSIZE>
-        static void ti_bounds_from_corners(const T (&corner)[3][8][VSIZE],
+        static void tight_bounds_from_corners(const T (&corner)[3][8][VSIZE],
                                            T (&fmin)[3][VSIZE],
                                            T (&fmax)[3][VSIZE]) {
             for (int d = 0; d < 3; ++d) {
@@ -329,7 +329,7 @@ namespace sccd {
          * axis.
          */
         template <bool IsVertexFace, typename T, int VSIZE>
-        static void ti_eval_mid_face(const TiLaneGeometry<T, VSIZE>& lane,
+        static void tight_eval_mid_face(const TightLaneGeometry<T, VSIZE>& lane,
                                      const T (&mt)[4][VSIZE],
                                      const T (&mu)[4][VSIZE],
                                      const T (&mv)[4][VSIZE],
@@ -353,12 +353,12 @@ namespace sccd {
                 const T* const SCCD_RESTRICT d3 = lane.delta[3][d];
 
                 // Corners k and k+2 of a mid face always share a t value, for
-                // every split axis: ti_mid_corner's four entries pair up as
+                // every split axis: tight_mid_corner's four entries pair up as
                 // (lo, hi, lo, hi) in the t bit, and a t-split pins all four to
                 // the midpoint. So the four points at t are computed twice per
                 // lane rather than four times, halving the FMA count of this
                 // loop. The corner expressions themselves are untouched, so the
-                // results stay bit-identical -- see ti_corner_at.
+                // results stay bit-identical -- see tight_corner_at.
                 for (int g = 0; g < 2; ++g) {
                     const int k0 = g;
                     const int k1 = g + 2;
@@ -388,8 +388,8 @@ namespace sccd {
                         const T p1 = d1[l] * t + a1[l];
                         const T p2 = d2[l] * t + a2[l];
                         const T p3 = d3[l] * t + a3[l];
-                        o0[l] = ti_corner_at<IsVertexFace, T>(p0, p1, p2, p3, u0[l], v0[l]);
-                        o1[l] = ti_corner_at<IsVertexFace, T>(p0, p1, p2, p3, u1[l], v1[l]);
+                        o0[l] = tight_corner_at<IsVertexFace, T>(p0, p1, p2, p3, u0[l], v0[l]);
+                        o1[l] = tight_corner_at<IsVertexFace, T>(p0, p1, p2, p3, u1[l], v1[l]);
                     }
                 }
             }
@@ -397,7 +397,7 @@ namespace sccd {
 
         /** \brief All 8 corners of one box, scalar; used only to seed a root. */
         template <bool IsVertexFace, typename T>
-        static void ti_eval_all_corners(const T start[4][3],
+        static void tight_eval_all_corners(const T start[4][3],
                                         const T delta[4][3],
                                         const T lo[3],
                                         const T hi[3],
@@ -407,7 +407,7 @@ namespace sccd {
                     const T t = (c & 4) ? hi[0] : lo[0];
                     const T u = (c & 2) ? hi[1] : lo[1];
                     const T v = (c & 1) ? hi[2] : lo[2];
-                    corner[d][c] = ti_corner<IsVertexFace, T>(
+                    corner[d][c] = tight_corner<IsVertexFace, T>(
                         start[0][d], start[1][d], start[2][d], start[3][d],
                         delta[0][d], delta[1][d], delta[2][d], delta[3][d], t, u, v);
                 }
@@ -419,11 +419,11 @@ namespace sccd {
          * \return False when the box provably contains no root and can be dropped.
          */
         template <typename T, int VSIZE>
-        static SCCD_ALWAYS_INLINE bool ti_classify(const T (&fmin)[3][VSIZE],
+        static SCCD_ALWAYS_INLINE bool tight_classify(const T (&fmin)[3][VSIZE],
                                                    const T (&fmax)[3][VSIZE],
                                                    const T (&box_lo)[3][VSIZE],
                                                    const T (&box_hi)[3][VSIZE],
-                                                   const TiLaneGeometry<T, VSIZE>& lane,
+                                                   const TightLaneGeometry<T, VSIZE>& lane,
                                                    const int l,
                                                    bool& accept) {
             bool box_in = true;
@@ -448,9 +448,9 @@ namespace sccd {
 
         /** \brief Axis with the largest width/tolerance ratio (TightInclusion's rule). */
         template <typename T, int VSIZE>
-        static SCCD_ALWAYS_INLINE int ti_split_axis(const T (&box_lo)[3][VSIZE],
+        static SCCD_ALWAYS_INLINE int tight_split_axis(const T (&box_lo)[3][VSIZE],
                                                     const T (&box_hi)[3][VSIZE],
-                                                    const TiLaneGeometry<T, VSIZE>& lane,
+                                                    const TightLaneGeometry<T, VSIZE>& lane,
                                                     const int l) {
             int best = 0;
             T best_ratio = -std::numeric_limits<T>::max();
@@ -480,7 +480,7 @@ namespace sccd {
      * \param toi_stride 0 writes one global minimum, 1 writes one value per query.
      */
     template <bool IsVertexFace, typename T, typename I>
-    static int v_narrow_phase_ti_impl(const size_t noverlaps,
+    static int narrow_phase_tight_impl(const size_t noverlaps,
                                       const I* const SCCD_RESTRICT overlap0,
                                       const I* const SCCD_RESTRICT overlap1,
                                       T** const SCCD_RESTRICT v0,
@@ -494,7 +494,7 @@ namespace sccd {
                                       const int toi_stride) {
         using T_HP = double;
         constexpr int VSIZE =
-            IsVertexFace ? SCCD_VNARROWPHASE_TI_VSIZE_VF : SCCD_VNARROWPHASE_TI_VSIZE_EE;
+            IsVertexFace ? SCCD_NARROWPHASE_TIGHT_VSIZE_VF : SCCD_NARROWPHASE_TIGHT_VSIZE_EE;
 
         assert(toi_stride == 0 || toi_stride == 1);
         if (noverlaps == 0) {
@@ -522,7 +522,7 @@ namespace sccd {
             // amortize it and the allocator reuses the block. thread_local would
             // trade that for a permanent ~250 KB per thread and an indirection
             // on every access.
-            std::vector<TiBox<int>> stack;
+            std::vector<TightBox<int>> stack;
             stack.reserve(1024);
 
             for (ptrdiff_t ib = rbegin; ib < rend; ++ib) {
@@ -531,7 +531,7 @@ namespace sccd {
                 const int block_size =
                     static_cast<int>(sccd::min<ptrdiff_t>(VSIZE, static_cast<ptrdiff_t>(noverlaps) - block_begin));
 
-                TiQueryBlock<T_HP, VSIZE> block;
+                TightQueryBlock<T_HP, VSIZE> block;
                 T_HP toi_q[VSIZE];
 
                 const T_HP seed = toi_stride == 0 ? global_min.load(std::memory_order_relaxed) : domain_toi;
@@ -599,7 +599,7 @@ namespace sccd {
 
                 stack.clear();
                 for (int q = block_size - 1; q >= 0; --q) {
-                    TiBox<int> root;
+                    TightBox<int> root;
                     root.query = q;
                     root.depth = 0;
                     root.lo[0] = T_HP(0);
@@ -616,7 +616,7 @@ namespace sccd {
                             rd[k][d] = block.delta[k][d][q];
                         }
                     }
-                    detail::ti_eval_all_corners<IsVertexFace, T_HP>(rs, rd, root.lo, root.hi, root.corner);
+                    detail::tight_eval_all_corners<IsVertexFace, T_HP>(rs, rd, root.lo, root.hi, root.corner);
 
                     // Pushed even when the time budget is already zero: a box of
                     // zero extent in t can still hold a contact at t == 0, and
@@ -636,7 +636,7 @@ namespace sccd {
                 int split_axis[VSIZE];
                 T_HP split_mid[VSIZE];
                 uint8_t will_split[VSIZE];
-                detail::TiLaneGeometry<T_HP, VSIZE> lane;
+                detail::TightLaneGeometry<T_HP, VSIZE> lane;
                 int lane_query[VSIZE];
                 int lane_depth[VSIZE];
                 uint8_t active[VSIZE];
@@ -657,7 +657,7 @@ namespace sccd {
                     will_split[l] = 0;
                     // Idle lanes evaluate a zero box over query 0's geometry;
                     // the result is finite and discarded.
-                    detail::ti_load_lane<T_HP, VSIZE>(block, 0, l, lane);
+                    detail::tight_load_lane<T_HP, VSIZE>(block, 0, l, lane);
                 }
 
                 while (true) {
@@ -670,13 +670,13 @@ namespace sccd {
                             continue;
                         }
                         while (!stack.empty()) {
-                            const TiBox<int> b = stack.back();
+                            const TightBox<int> b = stack.back();
                             stack.pop_back();
                             if (b.lo[0] >= toi_q[b.query]) {
                                 continue;
                             }
                             if (lane_query[l] != b.query) {
-                                detail::ti_load_lane<T_HP, VSIZE>(block, b.query, l, lane);
+                                detail::tight_load_lane<T_HP, VSIZE>(block, b.query, l, lane);
                             }
                             lane_query[l] = b.query;
                             lane_depth[l] = b.depth;
@@ -701,7 +701,7 @@ namespace sccd {
                         break;
                     }
 
-                    detail::ti_bounds_from_corners<T_HP, VSIZE>(corner, fmin, fmax);
+                    detail::tight_bounds_from_corners<T_HP, VSIZE>(corner, fmin, fmax);
 
                     // Phase 1: decide each lane's fate from the bounds it already
                     // carries. No function evaluation happens here.
@@ -726,7 +726,7 @@ namespace sccd {
                             ++g_np_host_level[lv < 80 ? lv : 79];
                         }
 #endif
-                        if (!detail::ti_classify<T_HP, VSIZE>(
+                        if (!detail::tight_classify<T_HP, VSIZE>(
                                 fmin, fmax, box_lo, box_hi, lane, l, accept)) {
                             continue;  // no root in this box
                         }
@@ -741,9 +741,9 @@ namespace sccd {
                             continue;
                         }
 
-                        const int axis = detail::ti_split_axis<T_HP, VSIZE>(box_lo, box_hi, lane, l);
+                        const int axis = detail::tight_split_axis<T_HP, VSIZE>(box_lo, box_hi, lane, l);
                         T_HP mid;
-                        if (!ti_bisect<T_HP>(box_lo[axis][l], box_hi[axis][l], mid)) {
+                        if (!tight_bisect<T_HP>(box_lo[axis][l], box_hi[axis][l], mid)) {
                             // Cannot subdivide further; accepting is conservative.
                             if (box_lo[0][l] < toi_q[q]) {
                                 toi_q[q] = box_lo[0][l];
@@ -767,14 +767,14 @@ namespace sccd {
                         const int axis = split_axis[l];
                         const T_HP mid = split_mid[l];
                         for (int k = 0; k < 4; ++k) {
-                            const int c = ti_mid_corner[axis][k];
+                            const int c = tight_mid_corner[axis][k];
                             mt[k][l] = (axis == 0) ? mid : ((c & 4) ? box_hi[0][l] : box_lo[0][l]);
                             mu[k][l] = (axis == 1) ? mid : ((c & 2) ? box_hi[1][l] : box_lo[1][l]);
                             mv[k][l] = (axis == 2) ? mid : ((c & 1) ? box_hi[2][l] : box_lo[2][l]);
                         }
                     }
 
-                    detail::ti_eval_mid_face<IsVertexFace, T_HP, VSIZE>(
+                    detail::tight_eval_mid_face<IsVertexFace, T_HP, VSIZE>(
                         lane, mt, mu, mv, will_split, mid_face);
 
                     // Phase 3: assemble both children from the parent's corners
@@ -785,7 +785,7 @@ namespace sccd {
                         }
                         const int q = lane_query[l];
                         const int axis = split_axis[l];
-                        const int bit = ti_corner_bit(axis);
+                        const int bit = tight_corner_bit(axis);
                         const T_HP mid = split_mid[l];
                         const T_HP other_lo = (axis == 1) ? box_lo[2][l] : box_lo[1][l];
 
@@ -798,7 +798,7 @@ namespace sccd {
                                       : (!IsVertexFace || (mid + other_lo <= T_HP(1)));
                         if (keep_upper) {
                             stack.emplace_back();
-                            TiBox<int>& child = stack.back();
+                            TightBox<int>& child = stack.back();
                             child.query = q;
                             child.depth = lane_depth[l] + 1;
                             for (int d = 0; d < 3; ++d) {
@@ -809,7 +809,7 @@ namespace sccd {
                             child.hi[axis] = box_hi[axis][l];
                             for (int d = 0; d < 3; ++d) {
                                 for (int k = 0; k < 4; ++k) {
-                                    const int c = ti_mid_corner[axis][k];
+                                    const int c = tight_mid_corner[axis][k];
                                     child.corner[d][c] = corner[d][c][l];
                                     child.corner[d][c & ~bit] = mid_face[d][k][l];
                                 }
@@ -833,7 +833,7 @@ namespace sccd {
                         if (keep_lower) {
                             for (int d = 0; d < 3; ++d) {
                                 for (int k = 0; k < 4; ++k) {
-                                    corner[d][ti_mid_corner[axis][k]][l] = mid_face[d][k][l];
+                                    corner[d][tight_mid_corner[axis][k]][l] = mid_face[d][k][l];
                                 }
                             }
                             box_hi[axis][l] = mid;
@@ -885,7 +885,7 @@ namespace sccd {
     }
 
     template <int nxe, typename T, typename I>
-    int v_narrow_phase_ti_vf(const size_t noverlaps,
+    int narrow_phase_tight_vf(const size_t noverlaps,
                              const I* const SCCD_RESTRICT voverlap,
                              const I* const SCCD_RESTRICT foverlap,
                              T** const SCCD_RESTRICT v0,
@@ -900,20 +900,20 @@ namespace sccd {
         static_assert(nxe == 3, "the TightInclusion-equivalent kernel handles triangles");
 #ifdef SCCD_NP_COUNT_BOXES
         const unsigned long long before_ = g_np_host_boxes;
-        const int rc_ = v_narrow_phase_ti_impl<true, T, I>(
+        const int rc_ = narrow_phase_tight_impl<true, T, I>(
             noverlaps, voverlap, foverlap, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_stride);
         fprintf(stderr, "sccd-np-count vf host-conservative stride=%d queries=%zu boxes=%llu per_query=%.1f\n",
                 toi_stride, noverlaps, g_np_host_boxes - before_,
                 noverlaps ? (double)(g_np_host_boxes - before_) / (double)noverlaps : 0.0);
         return rc_;
 #else
-        return v_narrow_phase_ti_impl<true, T, I>(
+        return narrow_phase_tight_impl<true, T, I>(
             noverlaps, voverlap, foverlap, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_stride);
 #endif
     }
 
     template <typename T, typename I>
-    int v_narrow_phase_ti_ee(const size_t noverlaps,
+    int narrow_phase_tight_ee(const size_t noverlaps,
                              const I* const SCCD_RESTRICT e0overlap,
                              const I* const SCCD_RESTRICT e1overlap,
                              T** const SCCD_RESTRICT v0,
@@ -927,14 +927,14 @@ namespace sccd {
                              const int toi_stride) {
 #ifdef SCCD_NP_COUNT_BOXES
         const unsigned long long before_ = g_np_host_boxes;
-        const int rc_ = v_narrow_phase_ti_impl<false, T, I>(
+        const int rc_ = narrow_phase_tight_impl<false, T, I>(
             noverlaps, e0overlap, e1overlap, v0, v1, edge_stride, edges, max_toi, toi, max_depth, tol, toi_stride);
         fprintf(stderr, "sccd-np-count ee host-conservative stride=%d queries=%zu boxes=%llu per_query=%.1f\n",
                 toi_stride, noverlaps, g_np_host_boxes - before_,
                 noverlaps ? (double)(g_np_host_boxes - before_) / (double)noverlaps : 0.0);
         return rc_;
 #else
-        return v_narrow_phase_ti_impl<false, T, I>(
+        return narrow_phase_tight_impl<false, T, I>(
             noverlaps, e0overlap, e1overlap, v0, v1, edge_stride, edges, max_toi, toi, max_depth, tol, toi_stride);
 #endif
     }

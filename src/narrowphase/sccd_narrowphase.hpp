@@ -90,8 +90,8 @@ namespace sccd {
 
         const NarrowPhaseMode mode = narrow_phase_mode();
 
-        if (mode == NarrowPhaseMode::TightInclusionExact) {
-            return v_narrow_phase_ti_vf<nxe, T, I>(
+        if (mode == NarrowPhaseMode::Tight) {
+            return narrow_phase_tight_vf<nxe, T, I>(
                 noverlaps, voveralp, foveralp, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_stride);
         }
 
@@ -99,7 +99,7 @@ namespace sccd {
         // FastVector and TightInclusionCompat both enter the vectorized kernel;
         // the compat mode then corrects its results inside v_narrow_phase_vf.
         // narrow_phase_mode() only returns these when TightInclusion is built in.
-        if (mode == NarrowPhaseMode::FastVector || mode == NarrowPhaseMode::TightInclusionCompat) {
+        if (mode == NarrowPhaseMode::FastVectorized || mode == NarrowPhaseMode::TightInclusionCorrected) {
             return v_narrow_phase_vf<nxe, T, I>(
                 noverlaps, voveralp, foveralp, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_stride);
         }
@@ -354,8 +354,8 @@ namespace sccd {
 
         // Edge-edge had no vectorized path at all; the conservative mode supplies
         // one. Every other mode falls through to the scalar search below.
-        if (narrow_phase_mode() == NarrowPhaseMode::TightInclusionExact) {
-            return v_narrow_phase_ti_ee<T, I>(noverlaps,
+        if (narrow_phase_mode() == NarrowPhaseMode::Tight) {
+            return narrow_phase_tight_ee<T, I>(noverlaps,
                                               e0overalp,
                                               e1overalp,
                                               v0,
