@@ -184,9 +184,8 @@ unbounded and would have to be capped.
 
 ## Family B — reduce the number of queries that need the tight search
 
-**B1. `Relaxed` prepass to cull queries.** *Now the highest-value item, given the
-step 0 result: it manufactures the collapsed bound the host gets from sequencing,
-in one cheap pass, with no sequence.* `Relaxed` averages 3.6 boxes per query
+**B1. `Relaxed` prepass to cull queries.** *Highest-value item, and the estimate
+below is why — but note carefully which machine it has to be estimated on.* `Relaxed` averages 3.6 boxes per query
 against `Tight`'s 944, and its answer is *at or before* the true time of impact.
 So for the earliest-impact query: if a query's `Relaxed` time of impact is later
 than the best `Tight` answer found so far, its true time of impact is later too,
@@ -194,9 +193,55 @@ and the query cannot hold the earliest impact — it can be discarded outright.
 That is sound, exploits the invariant's asymmetry rather than fighting it, and
 costs one cheap pass over the candidate set.
 
-The prize depends on how concentrated the earliest impact is. Worth a cheap
-offline estimate from existing benchmark output before writing any kernel: how
-many queries have `relaxed_toi` below the scene's global earliest impact?
+### The cull rate, measured
+
+How many queries have a `Relaxed` time of impact below the scene's `Tight`
+earliest impact — i.e. how many survive the cull. `sccd_np_trace`, vertex-face,
+the largest query file in each scene:
+
+| scene | file | queries | survivors | cull |
+|---|---|---:|---:|---:|
+| cloth-funnel | 227vf | 92 | 1 | 92× |
+| cloth-funnel | 317vf | 24 | 1 | 24× |
+| armadillo-rollers | 326vf | 4,652 | 1 | **4,652×** |
+| armadillo-rollers | 229vf | 1,597 | 1 | 1,597× |
+| cloth-ball | 92vf | 19,034 | 1 | **19,034×** |
+| cloth-ball | 91vf | 11,278 | 0 | 11,278× |
+
+One query, or none, survives. The earliest impact in a call is extremely
+concentrated, which is exactly the property B1 needs.
+
+### The cost side, and the trap in measuring it on the host
+
+The prepass has to pay for itself. Batched — the way the library runs — the two
+modes cost almost the same on the host:
+
+| scene | file | queries | `Relaxed` b/q | `Tight` b/q | |
+|---|---|---:|---:|---:|---:|
+| cloth-funnel | 227vf | 91 | 6.53 | 44.54 | 6.8× |
+| cloth-funnel | 317vf | 23 | 77.46 | 283.12 | 3.7× |
+| armadillo-rollers | 326vf | 4,651 | 13.14 | 16.04 | 1.22× |
+| armadillo-rollers | 229vf | 1,596 | 28.59 | 38.57 | 1.35× |
+| cloth-ball | 92vf | 19,033 | 7.75 | 7.85 | **1.01×** |
+| cloth-ball | 91vf | 11,277 | 8.03 | 8.47 | 1.05× |
+
+On the host a `Relaxed` prepass would roughly **double** the work: it costs what
+`Tight` costs, and `Tight` still has to run afterwards. The reason is the same
+mechanism as everything else here — once the shared bound has collapsed both
+modes reject at the root, and a root rejection costs the same in either mode.
+`Tight`'s extra cost only appears on the queries that survive the bound, and
+there is one of those.
+
+**That is not a refutation of B1, and it would be easy to read it as one.** The
+host does not have the problem B1 solves. On the device, where the bound does not
+collapse, the same two modes are 3.6 and 111 boxes per query on cloth-funnel's
+broad-phase set — **31× apart**. A prepass at 3.6 plus `Tight` on one surviving
+query is ~3.6 per query against 111, if the cull rate above carries over from the
+curated query sets to the broad-phase candidate sets.
+
+**So B1 must be estimated on the device, and that measurement has not been made.**
+It is the next thing: `sccd_np_trace --device --batch`, both modes, on a
+broad-phase-sized candidate set.
 
 ## Family C — reduce the size of the search
 

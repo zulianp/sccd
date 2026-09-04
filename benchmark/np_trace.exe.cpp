@@ -34,6 +34,8 @@
 //                   host's. Needs a CUDA build; each call prints its own
 //                   "sccd-np-count" line to stderr, preceded by a marker naming
 //                   the query, so the two streams can be joined.
+//   --no-isolated   skip the per-query pass; useful with --batch when only the
+//                   batched earliest time of impact is wanted
 //   --batch         also run the whole file as ONE toi_stride=0 call, which is
 //                   how the library is actually used, and report the same counts.
 //                   The difference between the two is the value of the collapsing
@@ -297,6 +299,7 @@ int main(int argc, char** argv) {
     std::string csv_path;
     bool batch = false;
     bool device = false;
+    bool no_isolated = false;
 
     for (int i = 3; i < argc; ++i) {
         const std::string a = argv[i];
@@ -310,6 +313,7 @@ int main(int argc, char** argv) {
         else if (a == "--csv") csv_path = next();
         else if (a == "--batch") batch = true;
         else if (a == "--device") device = true;
+        else if (a == "--no-isolated") no_isolated = true;
         else { usage(argv[0]); return 1; }
     }
 
@@ -355,7 +359,7 @@ int main(int argc, char** argv) {
             std::fprintf(stderr, "warning: could not read %s\n", file.c_str());
             continue;
         }
-        for (std::size_t q = 0; q < queries.size(); ++q) {
+        for (std::size_t q = 0; q < queries.size() && !no_isolated; ++q) {
             if (only_query >= 0 && (long)q != only_query) continue;
 
             SingleQueryScene scene(queries[q], is_vf);

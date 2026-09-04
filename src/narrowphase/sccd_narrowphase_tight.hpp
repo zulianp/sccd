@@ -107,7 +107,9 @@ namespace sccd {
     // atomic on the hot path of a parallel loop would change what it measures, and
     // an approximate count is enough to tell 10 million from 800 million.
     extern unsigned long long g_np_host_boxes;
+#ifndef SCCD_NP_HOST_BOX_TICK
 #define SCCD_NP_HOST_BOX_TICK() (++::sccd::g_np_host_boxes)
+#endif
 
     // Per-query counts, bucketed by log2 on the way out. 843k queries is too many
     // to print and the mean is the statistic that hides the answer: a mean of 944

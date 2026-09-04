@@ -32,6 +32,27 @@
 
 namespace sccd {
 
+#ifdef SCCD_NP_COUNT_BOXES
+    // The Relaxed kernel's box counter, sharing the symbol the Tight kernel uses
+    // so the two are directly comparable and so a run reports one number for the
+    // narrow phase whichever mode it selected. Without this, mode 0 reported zero
+    // boxes and the cost of a Relaxed pass -- what a Relaxed prepass would have to
+    // pay for -- could not be measured at all.
+    //
+    // One tick per codomain_acceptance call: one box whose inclusion function was
+    // evaluated and whose fate was decided, which is the unit the Tight kernel and
+    // the device kernel both count.
+    extern unsigned long long g_np_host_boxes;
+#ifndef SCCD_NP_HOST_BOX_TICK
+#define SCCD_NP_HOST_BOX_TICK() (++::sccd::g_np_host_boxes)
+#endif
+#else
+#ifndef SCCD_NP_HOST_BOX_TICK
+#define SCCD_NP_HOST_BOX_TICK() ((void)0)
+#endif
+#endif
+
+
 #ifdef SCCD_ENABLE_TIGHT_INCLUSION
     static bool barycentric_triangle_3d(const ticcd::Vector3 &A,
                                         const ticcd::Vector3 &B,
@@ -1118,6 +1139,7 @@ namespace sccd {
             carried_level = i + 1;
 
             bool accepted = false;
+            SCCD_NP_HOST_BOX_TICK();
             if (!codomain_acceptance<T>(fmin, fmax, tol, tols, numerical_error, accepted)) {
                 // Does not contain origin
                 continue;
@@ -1490,6 +1512,7 @@ namespace sccd {
             carried_level = i + 1;
 
             bool accepted = false;
+            SCCD_NP_HOST_BOX_TICK();
             if (!codomain_acceptance<T>(fmin, fmax, tol, tols, numerical_error, accepted)) {
                 continue;
             }
