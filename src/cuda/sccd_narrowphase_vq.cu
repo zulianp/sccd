@@ -1,6 +1,7 @@
 #include "sccd_narrowphase_vq.cuh"
 
 #include "sccd_cuda_base.cuh"
+#include "sccd_tolerance.hpp"
 
 #include <cfloat>
 #include <cstdint>
@@ -177,9 +178,22 @@ namespace sccd {
                 // it is exactly the unsound rejection this project has already
                 // found once.
                 const TC filter = TC(38) * eps;
+
+                // The same caps as the host's compute_vertex_quad_tolerance and
+                // vq_prepare: axis 0 is time, axes 1 and 2 are the quad's
+                // parameters. Without them the division grows without bound as
+                // the motion slows, and below epsilon it fell back to 1.0 -- a
+                // tolerance as wide as the whole domain.
+                // Spelled out rather than calling sccd::clamp_domain_tol, which
+                // is host-only; this is the same expression, and the same
+                // clamp_tol lambda the triangle kernel uses.
+                const TC caps[3] = {TC(SCCD_MAX_TIME_TOL), TC(SCCD_MAX_COORD_TOL),
+                                    TC(SCCD_MAX_COORD_TOL)};
+                auto clamp_tol = [](const TC v, const TC cap) { return (v < cap) ? v : cap; };
 #pragma unroll
                 for (int d = 0; d < 3; ++d) {
-                    tols[d] = lip[d] > eps ? axis_tol / lip[d] : TC(1);
+                    const TC raw = lip[d] > eps ? axis_tol / lip[d] : caps[d];
+                    tols[d] = clamp_tol(raw, caps[d]);
                     widths[d] = lip[d];
                     err[d] = maxc[d] * maxc[d] * maxc[d] * filter;
                 }

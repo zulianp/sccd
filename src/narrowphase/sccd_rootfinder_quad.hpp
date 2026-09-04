@@ -2,6 +2,7 @@
 #define SCCD_ROOTFINDER_QUAD_HPP
 
 #include "sccd_rootfinder.hpp"
+#include "sccd_tolerance.hpp"
 
 namespace sccd {
 
@@ -211,8 +212,24 @@ namespace sccd {
 
         const T axis_tol = codomain_tol / T(3);
         const T eps = std::numeric_limits<T>::epsilon();
+        const T caps[3] = {T(SCCD_MAX_TIME_TOL), T(SCCD_MAX_COORD_TOL), T(SCCD_MAX_COORD_TOL)};
+        // Axis 0 is time and axes 1 and 2 are the quad's parameters, so they
+        // take the same caps as the vertex-face and edge-edge tolerances in
+        // sccd_tolerance.hpp. Without a cap this division grows without bound as
+        // the motion slows, and below machine epsilon it was abandoned for a
+        // tolerance of 1.0 -- as wide as the whole domain.
+        //
+        // On this path the caps are hardening rather than a fix: the Relaxed
+        // acceptance test compares CODOMAIN widths against these tolerances and
+        // requires all three axes at once, so a slack tolerance on a
+        // low-Lipschitz axis is held in check by the other two, and no check in
+        // sccd_rootfinder_quad_test moves when they are applied. The triangle
+        // Tight predicate compares the DOMAIN width instead, where the same cap
+        // binds directly. Sharing the caps costs nothing and stops the two paths
+        // from drifting further apart.
         for (int d = 0; d < 3; ++d) {
-            tol[d] = lipschitz[d] > eps ? axis_tol / lipschitz[d] : T(1);
+            const T raw = lipschitz[d] > eps ? axis_tol / lipschitz[d] : caps[d];
+            tol[d] = sccd::clamp_domain_tol<T>(raw, caps[d]);
         }
     }
 
@@ -378,8 +395,12 @@ namespace sccd {
         const T axis_tol = codomain_tol / T(3);
         const T eps = std::numeric_limits<T>::epsilon();
         const T kFilter = T(38) * eps;
+        // The same caps as compute_vertex_quad_tolerance above; this is the
+        // one-pass form of it and the two must not diverge.
+        const T caps[3] = {T(SCCD_MAX_TIME_TOL), T(SCCD_MAX_COORD_TOL), T(SCCD_MAX_COORD_TOL)};
         for (int d = 0; d < 3; ++d) {
-            tols[d] = b.lipschitz[d] > eps ? axis_tol / b.lipschitz[d] : T(1);
+            const T raw = b.lipschitz[d] > eps ? axis_tol / b.lipschitz[d] : caps[d];
+            tols[d] = sccd::clamp_domain_tol<T>(raw, caps[d]);
             widths[d] = b.lipschitz[d];
             numerical_error[d] = sccd::pow3<T>(b.max_coord[d]) * kFilter;
         }
