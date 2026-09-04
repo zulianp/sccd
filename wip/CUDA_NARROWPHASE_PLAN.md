@@ -678,19 +678,42 @@ the drain loop is not understood, and D1 tunes exactly that machinery.
 
 ## Order
 
-0. **Done.** The scene-level gap is the bound schedule; the per-query search is
-   2.3×.
-1. **B1.** It manufactures the collapsed bound in one cheap pass, with no
-   sequence to wait for. Directly on the mechanism.
-2. **C1.** The same mechanism from the other side: best-first makes the bound
-   arrive early *within* the launch.
-3. **The 2.3× residual**, starting with whether the two counters count the same
-   thing. Small and contained.
-4. D2, because D1 cannot be tuned honestly until it is understood.
-5. **A1/A2 are demoted.** 4× of arithmetic behind a 2.3× box factor is not where
-   the time is.
+Rewritten after the edge-edge tolerance fix, which invalidated most of what was
+here. Struck items are closed with a measurement, not abandoned.
 
-Also outstanding, and cheap: **the host box counter only covers the `Tight`
-kernel.** `SCCD_NP_HOST_BOX_TICK` lives in `sccd_narrowphase_tight.hpp`, so mode 0
-reports zero boxes and `Relaxed`'s per-query cost — the thing B1's economics turn
-on — cannot currently be measured on the host at all.
+| | | |
+|---|---|---|
+| 0 | Establish the cause | **done** — the scene-level gap was the bound schedule; the per-query search was a tolerance on the wrong axis |
+| ~~1~~ | ~~B1, `Relaxed` prepass~~ | **needs re-pricing.** It was 1.6× when `Tight` cost 152 boxes per query on the device. `Tight` now costs a fraction of that, so the ratio B1 trades on has moved and the old estimate means nothing |
+| ~~2~~ | ~~C1, best-first~~ | **closed.** A no-op on the broad-phase set: stride-0 boxes within 2%, time within 5%, on a path averaging 7.6 boxes per query. Kept behind `SCCD_NP_BEST_FIRST`, off |
+| ~~4~~ | ~~C4, the seeding dice~~ | **closed.** Costs 127 boxes per query, 3.2% of the total, and buys the block. Removing it is 1.5–2× slower |
+| 3 | The per-query residual | **open, and smaller.** On the three worst queries the device is now 5.0×, 3.3× and 1.6× the host, down from 964,000×. Start with whether the two counters count the same unit — the device ticks both children of every split including ones discarded at once |
+| 5 | D2, the capacity-1024 anomaly | **open, untouched.** 4,059 ms against the old queue's 634 at a setting that is no longer the default |
+| — | A1/A2, per-box cost | still demoted, but less firmly. The device's stride-0 path is now 2.5 boxes per query against the host's 0.72, so arithmetic per box is a larger share of what is left than it was |
+
+### What the fix put at the top instead
+
+**1. Check the vertex-face tolerance against TightInclusion.** This is the same
+class of defect and it would be invisible to everything done so far. The host's
+*edge-edge* tolerance was rewritten by hand from TightInclusion's
+`compute_edge_edge_tolerances`; its *vertex-face* tolerance is still the SymPy
+generator's output, and so is the device's. The two machines therefore agree — and
+would agree just as well if the generated expression were wrong, because they are
+the same expression. Nobody has compared it to
+`compute_face_vertex_tolerances`. Given what the generator did to edge-edge, that
+comparison is overdue.
+
+**2. Re-measure `docs/BENCHMARKS.md` on all three scenes.** Its GPU columns
+predate the fix and now carry a note saying so. A first attempt at refreshing them
+produced CPU numbers 2.4× off the table's on a path that has not changed, so the
+table's methodology has to be re-derived before anything is swapped in — which of
+the 16 cases, vf and ee separately or together, median over cases or over repeats.
+
+**3. Re-price B1 on the post-fix device.** `Relaxed` against `Tight` was 1.6–3.4×
+on curated files; after the fix `Tight` does 13.8× fewer boxes on the per-query
+path, so the gap B1 exploits may have closed entirely. One run of
+`sccd_np_trace --device --batch` in both modes answers it.
+
+**4. The per-query path is still 3× the earliest-impact path in time** — 37.62 ms
+against 12.07 on cloth-funnel after the fix, on comparable query counts. Smaller
+than the 13× it was, and still the larger half of the narrow phase.
