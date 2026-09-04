@@ -7,7 +7,7 @@ measure it. Nothing here is required to build or use SCCD from C++.
 |---|---|
 | `sccd.py` | **Shipped.** `ctypes` binding over the C ABI. Installed to `<prefix>/python`. Standard library only. |
 | `sccd_binding_test.py` | The `sccd_binding_test` ctest. Checks the binding against the library it wraps. Standard library only. |
-| `sccd_reference.py` | A NumPy reference search, used to cross-check the C ABI's answers. |
+| `sccd_reference.py` | A NumPy reference search, used to cross-check the C ABI's answers. Needs NumPy; Numba is optional and makes it about 100x faster. |
 | `sccd_crosscheck.py` | Runs a whole dataset through the C ABI and compares against its exact roots. |
 | `sccd_read_queries.py` | Reads a dataset's query CSV. |
 | `sccd_read_roots.py` | Reads a dataset's exact-root archive (Wolfram `.wxf` inside a tarball). |
