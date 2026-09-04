@@ -35,45 +35,53 @@ namespace sccd {
      * and live with. See benchmark/oracle/README.md.
      */
     enum class NarrowPhaseMode : int {
-        /// Scalar reference search. Accepts on several conditions beyond
-        /// TightInclusion's, so it stops earlier and reports a less accurate
-        /// (earlier) time of impact.
-        ScalarReference = 0,
-        /// Lane-packed vectorized kernel, vertex-face only (edge-edge falls back
-        /// to the scalar search).
-        FastVector = 1,
-        /// Lane-packed vectorized kernel reproducing TightInclusion exactly, for
-        /// both vertex-face and edge-edge. The most accurate of the three, and
-        /// the reference the others are compared against.
-        TightInclusionExact = 2,
-        /// Runs the fast kernel and then corrects every result with
-        /// TightInclusion's own search. An oracle, not a code path to ship.
-        TightInclusionCompat = 3
-    };
+        /// Scalar search with the looser acceptance test: it compares codomain
+        /// widths against domain tolerances, so it accepts sooner and reports a
+        /// time of impact further before the true one. Median earliness 1.18e-01
+        /// on cloth-funnel. Ships.
+        Fast = 0,
+        /// The Fast predicate, lane-packed. Vertex-face only; edge-edge falls
+        /// back to the scalar search. Validation only -- it lost every scene the
+        /// assessment measured.
+        FastVectorized = 1,
+        /// Lane-packed search that compares *domain* widths against domain
+        /// tolerances, which is what makes it tight rather than merely
+        /// conservative: median earliness 1.72e-03 on cloth-funnel, 69x tighter
+        /// than Fast, and 22x tighter on armadillo-rollers. Ships.
+        Tight = 2,
+        /// Runs the FastVectorized kernel and then corrects every result with
+        /// the external TightInclusion library. An oracle, not a code path to
+        /// ship -- and the only mode here that touches that library, which is
+        /// why it is the only one still named after it.
+        TightInclusionCorrected = 3
 
-    /// Kept so existing callers and env values keep compiling and meaning the
-    /// same thing. The old name implied the other modes were not conservative.
-    static constexpr NarrowPhaseMode NarrowPhaseMode_Conservative = NarrowPhaseMode::TightInclusionExact;
+        // Reserved, deliberately unused: RationalMode. Nothing in SCCD computes
+        // with rational arithmetic -- the dependency's rational mode is forced
+        // OFF in cmake/SCCDDependencies.cmake, and the datasets' num/den
+        // coordinates are parsed straight to double. If an exact-arithmetic
+        // kernel is ever added it takes that name, so that no approximate kernel
+        // is ever called "exact" again.
+    };
 
     static inline const char* narrow_phase_mode_name(const NarrowPhaseMode mode) {
         switch (mode) {
-            case NarrowPhaseMode::ScalarReference: return "scalar";
-            case NarrowPhaseMode::FastVector: return "fast-vector";
-            case NarrowPhaseMode::TightInclusionExact: return "ti-exact";
-            case NarrowPhaseMode::TightInclusionCompat: return "ti-compat";
+            case NarrowPhaseMode::Fast: return "fast";
+            case NarrowPhaseMode::FastVectorized: return "fast-vectorized";
+            case NarrowPhaseMode::Tight: return "tight";
+            case NarrowPhaseMode::TightInclusionCorrected: return "tight-inclusion-corrected";
         }
         return "unknown";
     }
 
     /**
-     * \brief True when the mode runs TightInclusion's exact predicate and split.
+     * \brief True when the mode runs the tight predicate and split.
      *
      * This selects an *algorithm*, not a safety property -- every mode is
      * conservative, see the note on the enum. It is what the CUDA dispatch keys
      * on to choose between its two kernels.
      */
-    static inline bool narrow_phase_mode_is_ti_exact(const NarrowPhaseMode mode) {
-        return mode == NarrowPhaseMode::TightInclusionExact || mode == NarrowPhaseMode::TightInclusionCompat;
+    static inline bool narrow_phase_mode_is_tight(const NarrowPhaseMode mode) {
+        return mode == NarrowPhaseMode::Tight || mode == NarrowPhaseMode::TightInclusionCorrected;
     }
 
     /**
@@ -109,14 +117,14 @@ namespace sccd {
      * scalar path is the supported way to get one.
      */
     static inline bool narrow_phase_mode_is_validation_only(const NarrowPhaseMode mode) {
-        return mode == NarrowPhaseMode::FastVector || mode == NarrowPhaseMode::TightInclusionCompat;
+        return mode == NarrowPhaseMode::FastVectorized || mode == NarrowPhaseMode::TightInclusionCorrected;
     }
 
     static inline NarrowPhaseMode narrow_phase_mode_available(const NarrowPhaseMode mode) {
 #ifdef SCCD_ENABLE_TIGHT_INCLUSION
         return mode;
 #else
-        return narrow_phase_mode_is_validation_only(mode) ? NarrowPhaseMode::ScalarReference : mode;
+        return narrow_phase_mode_is_validation_only(mode) ? NarrowPhaseMode::Fast : mode;
 #endif
     }
 
@@ -176,16 +184,16 @@ namespace sccd {
         int SCCD_VNARROWPHASE_TI_COMPAT = SCCD_VNARROWPHASE_TI_COMPAT_DEFAULT;
         SCCD_READ_ENV(SCCD_VNARROWPHASE_TI_COMPAT, atoi);
         if (SCCD_VNARROWPHASE_TI_COMPAT) {
-            return narrow_phase_mode_available(NarrowPhaseMode::TightInclusionCompat);
+            return narrow_phase_mode_available(NarrowPhaseMode::TightInclusionCorrected);
         }
 
         int SCCD_USE_VNARROW_PHASE = SCCD_USE_VNARROW_PHASE_DEFAULT;
         SCCD_READ_ENV(SCCD_USE_VNARROW_PHASE, atoi);
         if (SCCD_USE_VNARROW_PHASE == 2) {
-            return NarrowPhaseMode::TightInclusionExact;
+            return NarrowPhaseMode::Tight;
         }
-        return SCCD_USE_VNARROW_PHASE ? narrow_phase_mode_available(NarrowPhaseMode::FastVector)
-                                      : NarrowPhaseMode::ScalarReference;
+        return SCCD_USE_VNARROW_PHASE ? narrow_phase_mode_available(NarrowPhaseMode::FastVectorized)
+                                      : NarrowPhaseMode::Fast;
     }
 
     /**

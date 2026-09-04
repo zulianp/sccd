@@ -1822,7 +1822,7 @@ namespace sccd {
                           const int max_depth,
                           const T tol,
                           const int toi_stride) {
-        if (narrow_phase_mode() == NarrowPhaseMode::TightInclusionCompat) {
+        if (narrow_phase_mode() == NarrowPhaseMode::TightInclusionCorrected) {
 #ifndef SCCD_ENABLE_TIGHT_INCLUSION
             return -1;
 #else
