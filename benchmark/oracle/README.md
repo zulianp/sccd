@@ -1,8 +1,10 @@
 # Narrow-phase accuracy oracle
 
 `ti_oracle` compares each narrow-phase mode against TightInclusion, query by
-query, on the CCD benchmark sets under `data/`. It is the acceptance gate for
-the TI-accurate vectorized kernel: no kernel change lands without a run here.
+query, on the CCD benchmark sets under `data/`. It is the acceptance gate for the
+narrow phase: no kernel change lands without a run here. The modes it reports are
+`fast` and `tight`, plus `device-fast` and `device-tight` in a CUDA build, and
+`TI(ref)` for the reference itself.
 
 ## The invariant it enforces
 

@@ -29,7 +29,7 @@
 # script twice with the scene selection commented in and out by hand, and which
 # read their frames from a checkout of Scalable-CCD on one particular machine.
 # The frames here come from this repository's own data/, which
-# benchmark/download_datasets.sh populates with the same files.
+# benchmark/scripts/download_datasets.sh populates with the same files.
 
 set -euo pipefail
 
@@ -89,7 +89,7 @@ fi
 frames="${data_dir}/${scene}/frames"
 if [ ! -d "${frames}" ]; then
     echo "error: no frames at ${frames}." >&2
-    echo "       ${PROJECT_DIR}/benchmark/download_datasets.sh fetches them." >&2
+    echo "       ${PROJECT_DIR}/benchmark/scripts/download_datasets.sh fetches them." >&2
     exit 1
 fi
 

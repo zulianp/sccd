@@ -2,7 +2,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DATA_DIR="${SCCD_DATA_DIR:-"${SCRIPT_DIR}/../data"}"
+PROJECT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+DATA_DIR="${SCCD_DATA_DIR:-"${PROJECT_DIR}/data"}"
 CACHE_DIR="${SCCD_DOWNLOAD_CACHE_DIR:-"${DATA_DIR}/.downloads"}"
 
 is_enabled() {

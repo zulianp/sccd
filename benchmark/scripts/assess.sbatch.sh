@@ -33,7 +33,11 @@
 
 set -uo pipefail
 
-: "${SCRATCH:=/capstor/scratch/cscs/zulianp}"
+if [ -z "${SCRATCH:-}" ]; then
+    echo "error: \$SCRATCH is not set. On Alps the environment sets it; elsewhere," >&2
+    echo "       set it to a directory holding the build trees and the datasets." >&2
+    exit 1
+fi
 : "${ASSESS_ROOT:=$SCRATCH/sccd-assess}"
 : "${ASSESS_OUT:=$ASSESS_ROOT/benchmark/assessment}"
 : "${ASSESS_DATA:=$ASSESS_ROOT/data}"
@@ -187,12 +191,15 @@ for rep in $(seq 1 "$ASSESS_REPEATS"); do
 
     for scene in $ASSESS_SCENES; do
 
-        # Narrow-phase mode. The question Phase 1 most needs to settle: mode 0 is
-        # a duplicate of mode 2's job, but is NOT dominated by it -- mode 2 has
-        # been measured about 100x slower on armadillo edge-edge -- so whether
-        # mode 0 stays as the fallback is decided here. Mode 1 is expected to
-        # lose badly and is included so the demotion cites a number.
-        for mode in 0 1 2; do
+        # Narrow-phase mode. Mode 0 is a duplicate of mode 2's job but is not
+        # dominated by it, so both ship and both are measured here.
+        #
+        # Mode 1 used to be swept alongside them, so that demoting it would cite a
+        # number. It did -- it was the slowest kernel on every scene -- and it is
+        # gone: SCCD_NARROWPHASE_MODE=1 now warns and runs Fast, so sweeping it
+        # would measure mode 0 twice under two names. Its rows are kept in
+        # benchmark/assessment/assessment.csv as the evidence for that call.
+        for mode in 0 2; do
             run_bench grace "$scene" narrowphase "mode$mode" "$rep" \
                 SCCD_NARROWPHASE_MODE="$mode"
         done

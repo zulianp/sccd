@@ -67,7 +67,7 @@ turns.
 `external/json` was demoted to `spikes/` in `e313109` on the stated grounds that
 it was "never `add_subdirectory`'d, so it was not in the build at all". That
 sentence is true and the conclusion drawn from it is not. The main
-`CMakeLists.txt` does not reference it, which is what I checked; `benchmark/bench.sh`
+`CMakeLists.txt` does not reference it, which is what I checked; `benchmark/scripts/bench.sh`
 configures it as a **standalone CMake project**, which I did not.
 
 Its two programs turn the datasets' `boxes/*.json` and `mma_bool/*.json` into the

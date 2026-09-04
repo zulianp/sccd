@@ -51,6 +51,8 @@ data/
 csv/
 benchmark/alps/
 benchmark/reports/
+# Everything benchmark/scripts/bench.sh produces, in one place.
+benchmark/out/
 # Ignore the contents rather than the directory itself, so a README explaining
 # what lands there can still be tracked -- git does not descend into an ignored
 # directory, and a negation inside one never fires.
@@ -90,7 +92,9 @@ __pycache__/
 # Nsight Compute profiles.
 *.ncu-rep
 
-# Mesh frames dropped next to the benchmarks, one directory per frame.
+# Raw mesh directories dropped next to the benchmarks, one per frame. Nothing
+# writes these any more -- scripts/mesh_sccd.sh converts into a temporary
+# directory and removes it -- but old ones may still be lying around.
 benchmark/[0-9]*/
 benchmark/cloth_ball[0-9]*/
 
@@ -98,8 +102,6 @@ benchmark/cloth_ball[0-9]*/
 # benchmark/oracle/README.md, which defines the correctness contract); the
 # violation dumps and per-run directories are regenerated on every gate run.
 benchmark/oracle/violations-*.csv
-benchmark/oracle/run/
-benchmark/oracle/postfix/
 
 # Figures rendered by the analysis scripts.
 *.png

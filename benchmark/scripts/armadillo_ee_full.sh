@@ -15,7 +15,11 @@
 #        --cpus-per-task=72 --time=00:29:00 --uenv=prgenv-gnu/24.11:v2 \
 #        --view=default benchmark/armadillo_ee_full.sh
 set -u
-: "${SCRATCH:=/capstor/scratch/cscs/zulianp}"
+if [ -z "${SCRATCH:-}" ]; then
+    echo "error: \$SCRATCH is not set. On Alps the environment sets it; elsewhere," >&2
+    echo "       set it to a directory holding the build trees and the datasets." >&2
+    exit 1
+fi
 : "${EE_ROOT:=$SCRATCH/sccd-npgap}"
 : "${BENCH:=$EE_ROOT/build-hopper/sccd_bench}"
 : "${DATA:=$EE_ROOT/data}"

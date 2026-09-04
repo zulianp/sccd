@@ -28,7 +28,8 @@ export SCCD_ENABLE_ROD_TWIST="${SCCD_ENABLE_ROD_TWIST:-0}"
 # Skip the dataset download when the data is already in place.
 export SCCD_SKIP_DOWNLOAD="${SCCD_SKIP_DOWNLOAD:-0}"
 
-BENCHMARK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BENCHMARK_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 exec 3>&1
 exec 1>&2
@@ -61,7 +62,20 @@ parallel_jobs() {
 if is_enabled "${SCCD_SKIP_DOWNLOAD}"; then
     printf 'note: SCCD_SKIP_DOWNLOAD is set; assuming %s is already populated\n' "${DATA_DIR}" >&2
 else
-    "${BENCHMARK_DIR}/download_datasets.sh"
+    "${SCRIPT_DIR}/download_datasets.sh"
+fi
+
+# A CMake cache remembers the source directory it was generated from and refuses
+# to be reused with another, which is a hard error rather than a reconfigure.
+# This project moved (external/json -> benchmark/json), so an existing build tree
+# from before that is stale; drop it rather than making the caller work it out
+# from "does not match the source used to generate cache".
+if [[ -f "${JSON_BUILD_DIR}/CMakeCache.txt" ]]; then
+    cached_home="$(sed -n 's/^CMAKE_HOME_DIRECTORY:INTERNAL=//p' "${JSON_BUILD_DIR}/CMakeCache.txt" | tail -n 1)"
+    if [[ -n "${cached_home}" && "${cached_home}" != "${JSON_PROJECT_DIR}" ]]; then
+        printf 'note: %s was configured from %s; reconfiguring\n' "${JSON_BUILD_DIR}" "${cached_home}" >&2
+        rm -rf "${JSON_BUILD_DIR}"
+    fi
 fi
 
 cmake -S "${JSON_PROJECT_DIR}" -B "${JSON_BUILD_DIR}" -DCMAKE_BUILD_TYPE=Release
@@ -84,7 +98,7 @@ is_enabled "${SCCD_ENABLE_N_BODY_SIMULATION}" && datasets+=("n-body-simulation")
 is_enabled "${SCCD_ENABLE_PUFFER_BALL}" && datasets+=("puffer-ball")
 is_enabled "${SCCD_ENABLE_ROD_TWIST}" && datasets+=("rod-twist")
 
-for dataset in "${datasets[@]}"; do
+for dataset in ${datasets[@]+"${datasets[@]}"}; do
     boxes_dir="${DATA_DIR}/${dataset}/boxes"
     [[ -d "${boxes_dir}" ]] || continue
     find "${boxes_dir}" -maxdepth 1 -name '*.json' -print0 | xargs -0 sh -c '
@@ -94,11 +108,11 @@ for dataset in "${datasets[@]}"; do
     ' "${BOXES_JSON_TO_RAW}"
 done
 
-"${PYTHON}" "${BENCHMARK_DIR}/roots_to_raw.py" "${DATA_DIR}" "${PYTHON_DIR}" "${datasets[@]}"
+"${PYTHON}" "${BENCHMARK_DIR}/roots_to_raw.py" "${DATA_DIR}" "${PYTHON_DIR}" ${datasets[@]+"${datasets[@]}"}
 
 is_enabled "${SCCD_ENABLE_CLOTH_FUNNEL}" && "${PYTHON}" "${PYTHON_DIR}"/sccd_strip_nonascii.py "${DATA_DIR}"/cloth-funnel/frames/*.ply
 
-for dataset in "${datasets[@]}"; do
+for dataset in ${datasets[@]+"${datasets[@]}"}; do
     mma_bool_dir="${DATA_DIR}/${dataset}/mma_bool"
     [[ -d "${mma_bool_dir}" ]] || continue
     find "${mma_bool_dir}" -maxdepth 1 -name '*_mma_bool.json' -print0 | xargs -0 sh -c '
@@ -151,8 +165,14 @@ fi
 
 exec 1>&3
 
-BENCH_CSV="${SCCD_BENCH_CSV:-"${BENCHMARK_DIR}/bench.csv"}"
-BENCH_AGG_CSV="${SCCD_BENCH_AGG_CSV:-"${BENCHMARK_DIR}/bench_aggregate.csv"}"
+# Everything this run produces lands in one directory, so it can be inspected,
+# archived or deleted as a unit and does not accumulate in the source tree
+# alongside the harness that wrote it. Every path below is still individually
+# overridable; SCCD_BENCH_OUT_DIR just moves the default set.
+BENCH_OUT_DIR="${SCCD_BENCH_OUT_DIR:-"${BENCHMARK_DIR}/out"}"
+
+BENCH_CSV="${SCCD_BENCH_CSV:-"${BENCH_OUT_DIR}/bench.csv"}"
+BENCH_AGG_CSV="${SCCD_BENCH_AGG_CSV:-"${BENCH_OUT_DIR}/bench_aggregate.csv"}"
 BENCH_PAIRED_CSV="${BENCH_AGG_CSV/_aggregate/_paired}"
 if [[ "${BENCH_PAIRED_CSV}" == "${BENCH_AGG_CSV}" ]]; then
     BENCH_PAIRED_CSV="$(dirname "${BENCH_AGG_CSV}")/$(basename "${BENCH_AGG_CSV%.*}")_paired.${BENCH_AGG_CSV##*.}"
@@ -169,8 +189,8 @@ BENCH_MISSING_PAIRS_CSV="${SCCD_MISSING_PAIRS_CSV:-"${BENCH_AGG_CSV/_aggregate/_
 if [[ "${BENCH_MISSING_PAIRS_CSV}" == "${BENCH_AGG_CSV}" ]]; then
     BENCH_MISSING_PAIRS_CSV="$(dirname "${BENCH_AGG_CSV}")/$(basename "${BENCH_AGG_CSV%.*}")_missing_pairs.${BENCH_AGG_CSV##*.}"
 fi
-BENCH_FIGURE_DIR="${SCCD_BENCH_FIGURE_DIR:-"${BENCHMARK_DIR}/figures"}"
-BENCH_REPORT_TEX="${SCCD_BENCH_REPORT_TEX:-"${BENCHMARK_DIR}/bench_report.tex"}"
+BENCH_FIGURE_DIR="${SCCD_BENCH_FIGURE_DIR:-"${BENCH_OUT_DIR}/figures"}"
+BENCH_REPORT_TEX="${SCCD_BENCH_REPORT_TEX:-"${BENCH_OUT_DIR}/bench_report.tex"}"
 mkdir -p "$(dirname "${BENCH_CSV}")" "$(dirname "${BENCH_AGG_CSV}")" "$(dirname "${BENCH_MISSING_PAIRS_CSV}")" "${BENCH_FIGURE_DIR}" "$(dirname "${BENCH_REPORT_TEX}")"
 
 BENCH_HEADER='dataset,mode,case,type,queries,prep_ms,broad_ms,narrow_ms,query_narrow_ms,fp,fn,broad_fp,broad_fn'
@@ -192,7 +212,7 @@ if [[ "${#datasets[@]}" -gt 0 ]]; then
         # cannot colour the next one's timings.
         SCCD_NARROWPHASE_MODE="${mode}" \
         SCCD_MISSING_PAIRS_CSV="${BENCH_MISSING_PAIRS_CSV}" \
-            "${SCCD_BENCH}" "${DATA_DIR}" "${datasets[@]}" | tail -n +2 >> "${BENCH_CSV}"
+            "${SCCD_BENCH}" "${DATA_DIR}" ${datasets[@]+"${datasets[@]}"} | tail -n +2 >> "${BENCH_CSV}"
     done
     cat "${BENCH_CSV}"
 else
@@ -214,13 +234,13 @@ if [[ ! -x "${TI_ORACLE}" && -x "${SCCD_BUILD_DIR}/Release/ti_oracle" ]]; then
     TI_ORACLE="${SCCD_BUILD_DIR}/Release/ti_oracle"
 fi
 
-ORACLE_DIR="${SCCD_BENCH_ORACLE_DIR:-"${BENCHMARK_DIR}/oracle/run"}"
+ORACLE_DIR="${SCCD_BENCH_ORACLE_DIR:-"${BENCH_OUT_DIR}/oracle"}"
 ORACLE_CSV="${ORACLE_DIR}/oracle.csv"
 if [[ -x "${TI_ORACLE}" ]]; then
     mkdir -p "${ORACLE_DIR}"
     : > "${ORACLE_CSV}"
     oracle_header_written=0
-    for dataset in "${datasets[@]}"; do
+    for dataset in ${datasets[@]+"${datasets[@]}"}; do
         [[ -d "${DATA_DIR}/${dataset}/queries" ]] || continue
         per_dataset="${ORACLE_DIR}/${dataset}.csv"
         # --no-strict: collect every dataset before deciding pass or fail.
@@ -243,7 +263,7 @@ else
 fi
 
 # --- HTML report ------------------------------------------------------------
-BENCH_REPORT_HTML="${SCCD_BENCH_REPORT_HTML:-"${BENCHMARK_DIR}/bench_report.html"}"
+BENCH_REPORT_HTML="${SCCD_BENCH_REPORT_HTML:-"${BENCH_OUT_DIR}/bench_report.html"}"
 "${PYTHON}" "${BENCHMARK_DIR}/bench_report_html.py" \
     --aggregate "${BENCH_AGG_CSV}" \
     --toi-error "${BENCH_TOI_ERROR_CSV}" \
@@ -251,7 +271,7 @@ BENCH_REPORT_HTML="${SCCD_BENCH_REPORT_HTML:-"${BENCHMARK_DIR}/bench_report.html
     --out "${BENCH_REPORT_HTML}" \
   && printf 'report: %s\n' "${BENCH_REPORT_HTML}" >&2
 
-BENCH_ARCHIVE="${BENCHMARK_DIR}/sccd-benchmark-$(date +%Y-%m-%d).tar.gz"
+BENCH_ARCHIVE="${BENCH_OUT_DIR}/sccd-benchmark-$(date +%Y-%m-%d).tar.gz"
 tar -czf "${BENCH_ARCHIVE}" \
     -C "$(dirname "${BENCH_CSV}")" "$(basename "${BENCH_CSV}")" \
     -C "$(dirname "${BENCH_AGG_CSV}")" "$(basename "${BENCH_AGG_CSV}")" \
