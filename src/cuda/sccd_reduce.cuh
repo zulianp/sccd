@@ -73,52 +73,7 @@ namespace sccd {
             return out;
         }
 
-        template <typename T>
-        __device__ void block_max_to_root(const int thIdx,
-                                          const int blDim,
-                                          const T val,
-                                          T* const SCCD_RESTRICT block_accumulator,
-                                          T* const SCCD_RESTRICT result) {
-            T acc = warp_max_32(val);
 
-            const unsigned int warp_id = thIdx / SCCD_WARP_SIZE;
-            const unsigned int lid = lane_id(thIdx);
-            const unsigned int n_warps = (blDim + SCCD_WARP_SIZE - 1) / SCCD_WARP_SIZE;
-
-            if (!lid) {
-                block_accumulator[warp_id] = acc;
-            }
-
-            __syncthreads();
-
-            if (!warp_id) {
-                assert(warp_id < n_warps);
-                acc = lid < n_warps ? block_accumulator[lid] : block_accumulator[0];
-                acc = warp_max_32(acc);
-
-                if (!thIdx) {
-                    assert(acc == acc);
-                    *result = acc;
-                }
-            }
-        }
-
-        template <typename T>
-        __device__ __forceinline__ T broadcast_to_block(const int root, const T val) {
-            const int thIdx = threadIdx.x + blockDim.x * (threadIdx.y + blockDim.y * threadIdx.z);
-            const int warp_id = thIdx / SCCD_WARP_SIZE;
-            const int lid = thIdx % SCCD_WARP_SIZE;
-            const int root_warp = root / SCCD_WARP_SIZE;
-            const int root_lid = root % SCCD_WARP_SIZE;
-
-            __shared__ T warp_value;
-            if (root == 0) {
-                warp_value = val;
-            }
-            __syncthreads();
-
-            return warp_value;
-        }
 
     }  // namespace device
 }  // namespace sccd
