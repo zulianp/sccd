@@ -145,7 +145,10 @@ namespace sccd {
                 T_HP codomain_widths[3];
                 T_HP tols[3];
                 T_HP numerical_error[3];
-                vq_prepare<T_HP>(tol, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4,
+                // t_upper, not 1: the split scale should follow the window the
+                // search is actually confined to, which the shared time of
+                // impact has already pruned. Same as the triangle path.
+                vq_prepare<T_HP>(tol, t_upper, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4,
                                  tols, codomain_widths, numerical_error);
 #endif
 

@@ -155,6 +155,7 @@ namespace sccd {
             // certified numerical error bound. One pass, as on the host.
             // ----------------------------------------------------------------
             static inline __device__ void prepare(const TC codomain_tol,
+                                                  const TC t_upper,
                                                   const TC sv[3],
                                                   const TC s[4][3],
                                                   const TC ev[3],
@@ -163,6 +164,10 @@ namespace sccd {
                                                   TC widths[3],
                                                   TC err[3]) {
                 TC lip[3] = {TC(0), TC(0), TC(0)};
+                // Over [0, t_upper] only, for the split-axis scale; `lip` stays
+                // over the whole step because it is the tolerance denominator.
+                // Mirrors VQBounds::split_widths on the host.
+                TC swid[3] = {TC(0), TC(0), TC(0)};
                 TC maxc[3];
 
 #pragma unroll
@@ -174,14 +179,30 @@ namespace sccd {
                     for (int k = 0; k < 4; ++k) {
                         l0 = fmax(l0, fabs(vt - (e[k][d] - s[k][d])));
                     }
-                    l1 = fmax(fmax(fabs(s[1][d] - s[0][d]), fabs(s[3][d] - s[2][d])),
-                              fmax(fabs(e[1][d] - e[0][d]), fabs(e[3][d] - e[2][d])));
-                    l2 = fmax(fmax(fabs(s[2][d] - s[0][d]), fabs(s[3][d] - s[1][d])),
-                              fmax(fabs(e[2][d] - e[0][d]), fabs(e[3][d] - e[1][d])));
+                    const TC u_a0 = s[1][d] - s[0][d], u_a1 = e[1][d] - e[0][d];
+                    const TC u_b0 = s[3][d] - s[2][d], u_b1 = e[3][d] - e[2][d];
+                    const TC v_a0 = s[2][d] - s[0][d], v_a1 = e[2][d] - e[0][d];
+                    const TC v_b0 = s[3][d] - s[1][d], v_b1 = e[3][d] - e[1][d];
+
+                    l1 = fmax(fmax(fabs(u_a0), fabs(u_b0)), fmax(fabs(u_a1), fabs(u_b1)));
+                    l2 = fmax(fmax(fabs(v_a0), fabs(v_b0)), fmax(fabs(v_a1), fabs(v_b1)));
 
                     lip[0] = fmax(lip[0], l0);
                     lip[1] = fmax(lip[1], l1);
                     lip[2] = fmax(lip[2], l2);
+
+                    // The edge vectors are linear in t, so the max over
+                    // [0, t_upper] sits at an endpoint.
+                    const TC u_at = u_a0 + (u_a1 - u_a0) * t_upper;
+                    const TC u_bt = u_b0 + (u_b1 - u_b0) * t_upper;
+                    const TC v_at = v_a0 + (v_a1 - v_a0) * t_upper;
+                    const TC v_bt = v_b0 + (v_b1 - v_b0) * t_upper;
+
+                    swid[0] = fmax(swid[0], l0);
+                    swid[1] = fmax(swid[1],
+                                   fmax(fmax(fabs(u_a0), fabs(u_b0)), fmax(fabs(u_at), fabs(u_bt))));
+                    swid[2] = fmax(swid[2],
+                                   fmax(fmax(fabs(v_a0), fabs(v_b0)), fmax(fabs(v_at), fabs(v_bt))));
 
                     TC m = fmax(fabs(sv[d]), fabs(ev[d]));
 #pragma unroll
@@ -219,7 +240,7 @@ namespace sccd {
                 for (int d = 0; d < 3; ++d) {
                     const TC raw = lip[d] > eps ? axis_tol / lip[d] : caps[d];
                     tols[d] = clamp_tol(raw, caps[d]);
-                    widths[d] = lip[d];
+                    widths[d] = swid[d];
                     err[d] = maxc[d] * maxc[d] * maxc[d] * filter;
                 }
 
@@ -383,8 +404,15 @@ namespace sccd {
                     e[k][2] = (TC)v1z[n[k]];
                 }
 
+                // The search window comes first: prepare() scales the split-axis
+                // choice by the codomain widths over [0, t_upper], so it needs to
+                // know what the shared time of impact has already pruned away.
+                TC t = (toi_stride == 0) ? *shared_toi : (TC)max_toi;
+                if (t > (TC)max_toi) t = (TC)max_toi;
+                const TC t_upper = fmin(t, TC(1));
+
                 TC tols[3], widths[3], err[3];
-                prepare(tol, sv, s, ev, e, tols, widths, err);
+                prepare(tol, t_upper, sv, s, ev, e, tols, widths, err);
 
                 // Clamp to what the stack can hold. Going deeper than this could
                 // only end in an overflow, and an overflow accepts, so the clamp
@@ -392,10 +420,6 @@ namespace sccd {
                 // the limit explicit and keeps the reported time of impact a
                 // property of the depth rather than of an array size.
                 const int depth_limit = max_depth < kMaxDeviceDepth ? max_depth : kMaxDeviceDepth;
-
-                TC t = (toi_stride == 0) ? *shared_toi : (TC)max_toi;
-                if (t > (TC)max_toi) t = (TC)max_toi;
-                const TC t_upper = fmin(t, TC(1));
 
                 Domain stack[kStackCap];
                 int top = 0;
