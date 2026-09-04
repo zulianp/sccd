@@ -81,9 +81,9 @@ unaffected.
 
 | scene | CPU | GPU | |
 |---|---:|---:|---|
-| cloth-funnel | 22.4 | **17.4** | 1.3× GPU |
-| armadillo-rollers | 30.1 | **15.7** | 1.9× GPU |
-| cloth-ball | 291.3 | **59.5** | 4.9× GPU |
+| cloth-funnel | 22.7 | **17.1** | 1.3× GPU |
+| armadillo-rollers | 30.3 | **15.3** | 2.0× GPU |
+| cloth-ball | 295.0 | **59.0** | 5.0× GPU |
 
 Two implementations ship — sweep-and-prune and a 2D cell list — and they produce
 identical pair sets. `sccd_broadphase_strategy.hpp` picks between them by racing
@@ -91,16 +91,29 @@ them at run time, because which one wins is not predictable from the geometry.
 
 ## End to end, each side at its best mode
 
+Broad phase plus narrow phase, at whichever mode is faster for that side.
+
+**`find_earliest_impact_time`:**
+
 | scene | CPU | GPU | |
 |---|---:|---:|---|
-| cloth-funnel | **29.2** | 38.4 | 1.3× CPU |
-| armadillo-rollers | 47.8 | 47.3 | parity |
-| cloth-ball | 408.8 | **159.4** | 2.6× GPU |
+| cloth-funnel | **29.1** | 41.2 | 1.4× CPU |
+| armadillo-rollers | **47.9** | 48.7 | parity |
+| cloth-ball | 421.6 | **162.8** | 2.6× GPU |
 
-> These predate the narrow-phase fix above. The GPU column is a sum of prep,
-> broad phase and narrow phase, and its narrow-phase term has fallen; refreshing
-> it needs the broad-phase timings measured in the same run, which the run behind
-> the table above did not capture.
+**`find_impact_times`:**
+
+| scene | CPU | GPU | |
+|---|---:|---:|---|
+| cloth-funnel | **32.6** | 39.2 | 1.2× CPU |
+| armadillo-rollers | 95.6 | **79.3** | 1.2× GPU |
+| cloth-ball | 547.7 | **215.7** | 2.5× GPU |
+
+The earliest-impact row is within a few percent of what it has always been: that
+path was never the one that was wrong. The per-query row is the one that moved —
+the GPU goes from losing on every scene to winning on two — and it is what
+`find_impact_times` callers see.
+
 
 ## Accuracy against exact roots
 
