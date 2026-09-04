@@ -489,6 +489,21 @@ namespace sccd {
                                                       device::max<T>(device::abs<T>(v1sx - v3sx),
                                                                      device::max<T>(device::abs<T>(v1sy - v3sy),
                                                                                     device::abs<T>(v1sz - v3sz))))));
+
+            // The caps the host applies and this side did not. Each tolerance is
+            // a codomain tolerance divided by a rate of change, so an axis with
+            // (near) no motion divides by ~0 and yields an effectively infinite
+            // tolerance. Every box then trivially satisfies "width <= tol" and the
+            // root box is accepted on sight: conservative, since accepting always
+            // is, and wrong by however far the root's t lower bound sits from the
+            // true contact.
+            //
+            // Unlike the edge-edge fix this makes the search do *more* work, and
+            // the point of it is accuracy rather than speed.
+            auto clamp_tol = [](const T v, const T cap) { return (v < cap) ? v : cap; };
+            *tol0 = clamp_tol(*tol0, T(SCCD_MAX_TIME_TOL));
+            *tol1 = clamp_tol(*tol1, T(SCCD_MAX_COORD_TOL));
+            *tol2 = clamp_tol(*tol2, T(SCCD_MAX_COORD_TOL));
         }
 
         template <typename T, typename Vec4>

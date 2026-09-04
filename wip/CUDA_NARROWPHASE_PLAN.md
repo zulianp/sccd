@@ -544,15 +544,37 @@ fewer false positive and `w3ee`'s time of impact moving 0.163146973 → 0.174438
 are both the expected sign — a correct, smaller tolerance converges where the old
 one accepted early, so the answer is *later* and still at or before the truth.
 
-### Still open: the vertex-face tolerance has a milder version of the same problem
+### The vertex-face caps: parity, not a win
 
 Both sides use the generated expression there, with three distinct denominators,
-so the axes are right. What the device lacks is the **cap**: the host applies
-`clamp_domain_tol` to all three and the device applies none. An axis with near-zero
-motion divides by ~0 and yields an effectively infinite tolerance, which accepts
-the root box on sight. That is conservative and inaccurate rather than slow, and
-it is the opposite sign from the edge-edge defect — adding the cap will make the
-vertex-face search do *more* work, so it needs measuring rather than assuming.
+so the axes are right. What the device lacked is the **cap**: the host applies
+`clamp_domain_tol` to all three and the device applied none.
+
+Added, and measured on armadillo-rollers, 4 cases, device, mode 2:
+
+| | no cap | with caps |
+|---|---:|---:|
+| vertex-face, stride 0 | 5,749,760 boxes (46.1/q) | **6,113,234 (49.0/q)** |
+| vertex-face, stride 1 | 54,131,944 | 53,207,216 |
+| narrow ms | 4.03 | 4.06 |
+| per-query ms | 36.08 | 33.44 |
+| false positives | 444 | **444** |
+| false negatives | 0 | 0 |
+
+**It costs 6.3% more stride-0 boxes and buys nothing measurable here.** The false
+positive count does not move, and I could not construct a query where the missing
+cap changes an answer: a static vertex-face query held clear of the triangle is
+rejected by origin containment before the tolerance is consulted at all — 128
+boxes and `toi = 1` on both builds.
+
+Kept anyway, and the reason is parity rather than a number. The two sides are
+meant to compute the same tolerance, and a divergence between them is exactly
+what produced the edge-edge defect above — which sat in every measurement this
+project recorded, undetected, because nothing compared the two functions. The
+failure mode the cap closes is also real even if these datasets do not reach it:
+the host's own note records a near-static query yielding `tol[0] = 1.0e+06`, which
+accepts the root box on sight and reports a contact at the root's `t` lower
+bound. 0.7% of the cheap path is a low price for removing that.
 
 ### The old target, now closed
 
