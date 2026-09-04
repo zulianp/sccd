@@ -13,6 +13,8 @@ every one of these was believed at the time on evidence that looked sufficient.
 - [Retracted: every `fn=0` in this document before the matrix above](ASSESSMENT.md)
 - [Resolved: the sweep dropped touching pairs](ASSESSMENT.md)
 - Reversed: demoting `external/json` to `spikes/` — see below
+- Withdrawn: "the quad device kernel's local stack costs it 255 registers and a
+  spill" — see below
 
 The full argument and the numbers behind each sit in
 [`ASSESSMENT.md`](ASSESSMENT.md).
@@ -85,6 +87,59 @@ configure time and the shipped library must build with nothing fetched.
 The shape is the same as the other five, one level up: the *check* answered a
 different question than the one being asked. "Is it in the build?" is not "does
 anything use it?", and a grep of `CMakeLists.txt` cannot tell them apart.
+
+## 7. Reading a symptom off the wrong line of the compiler's output
+
+`narrow_phase_vq_kernel` reported, at `-Xptxas -v`, an 8128-byte stack frame,
+112 bytes of spill stores, 216 of spill loads and 255 registers — the only
+kernel in the build that spilled. Its `Domain stack[140]` was 7840 of those
+8128 bytes, so the diagnosis wrote itself: the thread-local stack is the
+problem, move it to a block-shared pool with a global overflow queue the way
+the triangle kernel does. That was the plan, and it was approved.
+
+It was wrong on every count, and one compile settled it. Rebuilding at stack
+caps from 4 to 513 entries:
+
+    cap    frame      registers   spill
+      4      448 B    254           0/0
+      8      736 B    255       112/216
+     16     1184 B    255       112/216
+     32     2080 B    255       112/216
+    140     8128 B    255       112/216
+    513    29024 B    255       112/216
+
+The registers and the spill do not move with the array at all. They are the
+inclusion function's working set — thirty coordinates, two `Frame`s, eight
+corner triples — and no stack change touches them. The frame is the array, and
+the frame is not the spill; they had been read as one number.
+
+Nor does the frame cost time. Only the entries a search actually reaches are
+ever written; the rest is address space. On GH200, 400k queries at depth 69:
+cap 140 runs 7.589 ms, cap 257 runs 7.441 ms, cap 513 runs 7.355 ms — the
+largest is the fastest, which is to say it is noise.
+
+**The near-miss.** A first timing run appeared to confirm the restructure
+handsomely: cap 140 at 7.613 ms against cap 32 at 3.681 ms, a 2.07x win for the
+smaller stack. It measured the wrong thing. `kMaxDeviceDepth` is *derived* from
+the cap, so shrinking the array shortens the search: cap 32 means depth 15, not
+depth 69. Holding depth fixed at 15, cap 140 and cap 32 run 3.719 ms and
+3.680 ms to a bit-identical answer. This is failure mode 5 again, measuring the
+wrong object entirely, and it would have "validated" a rewrite that could not
+have delivered what it promised.
+
+What the exercise did produce is the opposite change from the one planned.
+Since depth is what costs and headroom for it is free, the stack is now sized
+*from* a depth (`SCCD_VQ_MAX_DEPTH`, 128) rather than being an entry count that
+a depth is derived from. The old 140 entries capped the device at 69, which
+happens to equal the host's default `SCCD_MAX_DEPTH` — so the two agreed by
+coincidence, and raising `SCCD_MAX_DEPTH` gave a host that searched deeper and
+a device that quietly did not. The clamp is safe, since exhaustion accepts at
+the box's `t` lower bound, but it is an accuracy divergence and it is now
+reported on stderr instead of being silent.
+
+The rule to carry forward: **when a plan rests on a number, re-derive the
+number before executing the plan, and check that the knob you are varying moves
+only the thing you think it moves.**
 
 ## A note on the C ABI
 
