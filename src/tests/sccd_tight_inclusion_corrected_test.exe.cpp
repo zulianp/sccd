@@ -1,4 +1,11 @@
+// The kernel this exercises is validation-only and is installed and compiled
+// only with SCCD_ENABLE_TIGHT_INCLUSION. main() already returns 0 without it;
+// the include has to be guarded too, or the default build compiles a header that
+// documents itself as unreachable there.
+#include "sccd_base.hpp"
+#ifdef SCCD_ENABLE_TIGHT_INCLUSION
 #include "sccd_narrowphase_fast_vector.hpp"
+#endif
 
 #include <algorithm>
 #include <cmath>
