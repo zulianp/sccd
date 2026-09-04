@@ -9,74 +9,35 @@ deleted, so it is not retried.
 
 ## High
 
-### Shrink the clone: 4.6 GiB of history for a 1.9 MB checkout
+### ~~Shrink the clone: 4.6 GiB of history~~ — withdrawn, the measurement was wrong
 
-**The problem.** `git clone` of this repository transfers **4.56 GiB**. The
-tracked checkout is **1.9 MB across 134 files**, and no tracked file exceeds
-132 KB. All of the weight is history: datasets and benchmark archives that were
-committed, then later covered by `.gitignore` in `e67d5105` without being removed
-from past commits. Ignoring a path stops new blobs; it does not shrink the ones
-already in the object store.
+**There was never 4.6 GiB to shrink.** A real `git clone` of this repository
+transfers **24 MB**.
 
-**Where it is.** Two path prefixes account for essentially all of it
-(uncompressed blob totals over all reachable commits):
+The claim came from running `git count-objects -vH` on a local working clone, and
+from `git clone --local .`, which hardlinks the *entire local object store*
+whether or not it is reachable. Neither measures what a clone from the remote
+costs. The check that settles it is a mirror clone from the URL, which nobody ran
+until the rewrite was about to happen:
 
-| Path | In history | Blobs |
-|---|---:|---:|
-| `data/` | 6,229 MB | 20,569 |
-| `benchmark/alps/` | 744 MB | 133 |
+| | |
+|---|---:|
+| real `git clone` from GitHub | 24 MB |
+| `data/` objects in remote history | 2 |
+| `data/` objects in the local store | 24,963 |
 
-The single largest objects:
+The 4.56 GiB was entirely local, and almost all of it was pinned by a single
+stale `refs/codex/turn-diffs/checkpoints/...` ref left behind by tooling. Dropping
+that ref and running `git gc --prune=now` took the local store from 4.56 GiB to
+**24.03 MiB** with every branch intact — no rewrite, no force-push, nothing for
+anyone else to re-clone.
 
-| Size | Object |
-|---:|---|
-| 190 MB | `data/n-body-simulation_ee_table.csv` |
-| 141 MB | `data/puffer-ball/queries/21ee.csv` |
-| 130 MB | `data/puffer-ball/queries/22ee.csv` |
-| 104 MB | `data/.downloads/cloth-funnel.tar.gz` |
-| 98 MB | `data/puffer-ball_ee_table.csv` |
-| 83 MB | `data/puffer-ball/roots/21ee_roots.tar.gz` |
-| 82 MB | `benchmark/alps/sccd-benchmark-2026-05-26.tar.gz` |
+What remains on the remote is 4 `csv/` blobs in no branch tip, worth perhaps 10 MB
+of a 24 MB clone. Not worth a force-push across 12 branches, and not planned.
 
-**Why it is worth doing.** This is the first thing a new user experiences, and it
-is a multi-gigabyte download before they can read the README. It is also paid
-again by every CI job, every fork, and every clone on a cluster. Nothing in those
-6.9 GB is needed to build, test or use the library: the default build has no
-dependencies and no data, and `ctest` skips the dataset-backed tests when the
-data is absent — which on a fresh clone it always is.
-
-**What it takes.**
-
-```sh
-git filter-repo --path data --path benchmark/alps --invert-paths
-```
-
-Both prefixes are already in `.gitignore`, so nothing that ships is touched, and
-the working tree after the rewrite is byte-identical to the one before it.
-
-**Why it is not done yet, and what the decision is.** This rewrites every commit
-hash on **12 published branches** (`clean-up`, `debugging`, `main`, `narrow`
-through `narrow8`, `perf-optimizations`) and needs a force-push. Everyone
-re-clones; any fork, open pull request, or CI pin against an old SHA breaks; the
-`Claude-Session` and commit references in existing messages still resolve, but
-SHAs quoted anywhere outside the repository will not.
-
-That is a coordination call, not a technical one. Suggested sequence when it is
-made:
-
-1. Tag the current tip of every branch (`pre-rewrite/<branch>`) and push the tags,
-   so the old history is recoverable by SHA for as long as anyone needs it.
-2. Confirm no open pull requests.
-3. Run `filter-repo` on a fresh mirror clone, not on a working checkout.
-4. Verify: `git count-objects -vH`, then a fresh clone builds and passes `ctest`.
-5. Force-push all branches and tell anyone with a clone to re-clone rather than
-   pull.
-
-**Where the data should live instead.** `data/README.md` already describes the
-datasets; the download step belongs there, so a user who wants the benchmarks
-fetches them and a user who wants the library does not.
-
----
+**The lesson, since it cost a planned history rewrite:** `git count-objects`
+measures a local object store, not a repository. Before proposing surgery on
+shared history, clone the URL and measure that.
 
 ---
 
