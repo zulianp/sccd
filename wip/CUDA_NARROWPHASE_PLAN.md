@@ -798,6 +798,48 @@ follow do more work. `Tight` pays more per box and buys a bound that kills more
 boxes. On the host, where the bound collapses within a few chunks anyway, the
 trade still runs the documented way; on the device it does not.
 
-**4. The per-query path is still 3× the earliest-impact path in time** — 37.62 ms
-against 12.07 on cloth-funnel after the fix, on comparable query counts. Smaller
-than the 13× it was, and still the larger half of the narrow phase.
+### 4. The per-query path: its cost is not its work
+
+Post-fix, `toi_stride=1` costs 5.1–6.6× `toi_stride=0` in time on the same
+candidate sets. In boxes it was 32–83× — and 128 of the 166–182 boxes per query
+were the seeding dice, **70–77% of everything that path did**. (The "3.2%" figure
+recorded earlier was measured before the tolerance fix, against a total inflated
+by it.)
+
+The block-per-query kernel never tested the root box: it went straight to dicing
+the root into 128 subboxes. The multilinear hull over a box is exact, so if the
+root does not contain the origin then no subbox of it does either — and most of a
+broad-phase candidate set is pairs that never come close. Testing the root first,
+**reject only** so no reported value can change, removes those 127 evaluations.
+
+| scene | s1 boxes/query before | after | | GPU s1 ms before | after |
+|---|---:|---:|---:|---:|---:|
+| cloth-funnel | 182.0 | **63.4** | 2.9× | 155.7 | 151.0 |
+| armadillo-rollers | 165.7 | **56.9** | 2.9× | 188.1 | 204.2 |
+| cloth-ball | 180.8 | **32.3** | 5.6× | 695.7 | 694.3 |
+
+**The work falls 2.9–5.6× and the time does not move.** False positives are
+260 / 5,637 / 95,424 with `fn=0`, identical to the host and to the previous build.
+
+That is the finding, and it is worth more than the optimisation. The dice's 128
+evaluations are done by 128 threads in one block-wide step, so removing them saves
+one step of latency, not 128 units of work. **The block-per-query kernel is not
+work-bound; it is bound by having one block per query** — 843,414 blocks on
+cloth-funnel, each doing 63 boxes spread over 128 threads, which is half a box per
+thread. The cost is scheduling them.
+
+Which explains the whole stride-0-versus-stride-1 gap without any reference to the
+search: the same queries cost 28.3 ms through a kernel that runs one *thread* per
+query and 151.0 ms through one that runs one *block* per query.
+
+**So the direction for stride 1 is fewer blocks, not less work.** Run the
+per-query path on the thread-per-query kernel — it already exists, it already
+carries a per-query `toi` index (`toi_idx = qid * toi_stride`), and its only
+missing piece is that it currently writes a single shared minimum — and hand a
+query to a whole block only once it has proven itself hard. That is the next
+piece of work and it is a larger change than anything else in this document.
+
+The root pre-test is kept. It buys no time today, but it costs one evaluation on
+a surviving query, it removes 70% of the path's arithmetic, and it makes the
+kernel's cost model legible: with it gone, the box count no longer flatters the
+kernel's real bottleneck.

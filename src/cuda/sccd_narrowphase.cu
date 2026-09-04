@@ -2085,6 +2085,7 @@ namespace sccd {
             __shared__ int s_defer_base;
             __shared__ int s_defer_cursor;
             __shared__ int warp_sums[N >> 5];
+            __shared__ int s_root_live;
 
             const int toi_idx = qid * toi_stride;
 
@@ -2116,6 +2117,37 @@ namespace sccd {
 
             load_query_and_tol<is_vf, conservative, T, Vec4, I>(
                 qid, overlap0, overlap1, sp, ep, element_stride, elements, tol, sx, sy, sz, ex, ey, ez, atol, aerr);
+
+            // Test the root box before dicing it.
+            //
+            // The dice below evaluates NT*NU*NV = 128 subboxes of the root
+            // unconditionally, which is the floor on what any query costs here:
+            // measured on the broad-phase candidate sets, this path averages
+            // 166-182 boxes per query, so the dice is 70-77% of all of it. Most
+            // of those queries are pairs whose swept boxes overlap and which
+            // never come close, and the multilinear hull over the root is exact,
+            // so if the root does not contain the origin then no subbox of it
+            // does either -- all 128 evaluations are spent proving something one
+            // evaluation already proved. The zero-stride kernel has always tested
+            // the root first; this one never has.
+            //
+            // Reject only, deliberately. The root also satisfies the acceptance
+            // test sometimes, and accepting it would report the root's t lower
+            // bound -- safe, and far earlier than the answer the dice refines to.
+            // Using this purely as a filter cannot change any reported value.
+            if (tid == 0) {
+                Domain<TC> root = {TC(0), TC(1), TC(0), TC(1), TC(0), TC(1)};
+                int rc = 0, ra = 0;
+                evaluate_cell_3d_policy<is_vf, conservative, TC, Vec4>(
+                    root, sx, sy, sz, ex, ey, ez, tol, atol, aerr, rc, ra);
+                SCCD_NP_PERQ_TICK(qid, 1);
+                s_root_live = (rc || ra) && is_domain_valid<is_vf>(root, s_toi, atol);
+            }
+            __syncthreads();
+            if (!s_root_live) {
+                if (tid == 0) atomic_min_toi<T>(&toi[toi_idx], s_toi);
+                return;
+            }
 
 #ifdef SCCD_NP_SINGLE_SEED
             // One seed, the root box, on thread 0. The dice below fills the block
