@@ -137,21 +137,6 @@ namespace sccd {
         }
     }
 
-    /**
-     * \brief Remap indices in-place through a permutation table.
-     * \param n Number of entries.
-     * \param idx Permutation table mapping old index -> new index.
-     * \param remapped Array of indices to update; each entry is replaced by
-     * idx[entry].
-     */
-    template <typename I>
-    static void remap_idx(const ptrdiff_t n, const I *const SCCD_RESTRICT idx, I *const SCCD_RESTRICT remapped) {
-        sccd::parallel_for_br(0, n, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
-            for (ptrdiff_t i = rbegin; i < rend; i++) {
-                remapped[i] = idx[remapped[i]];
-            }
-        });
-    }
 
     /**
      * \namespace detail
@@ -396,37 +381,6 @@ namespace sccd {
             }
         }
 
-        /**
-         * \brief Mark lanes where elements share a vertex in self-overlap path.
-         * \tparam N Number of vertices per element.
-         * \param dmask In/out lane mask; set to 1 when a vertex is shared.
-         * \param chunk_len Number of valid lanes.
-         * \param noffset Starting j index (j > i).
-         * \param ev Vertex indices of element i.
-         * \param idx Mapping from sorted position to element id.
-         * \param elements SoA vertex arrays.
-         * \param stride Stride between elements in the arrays.
-         */
-        template <int N, typename I>
-        static inline void mask_out_shared_self(uint32_t *const SCCD_RESTRICT dmask,
-                                                const ptrdiff_t chunk_len,
-                                                const ptrdiff_t noffset,
-                                                const I (&ev)[N],
-                                                const I *const SCCD_RESTRICT idx,
-                                                I **const SCCD_RESTRICT elements,
-                                                const ptrdiff_t stride) {
-            for (ptrdiff_t lane = 0; lane < chunk_len; ++lane) {
-                if (dmask[lane]) continue;
-
-                const ptrdiff_t j = noffset + lane;
-                const I jidx = idx[j];
-                I sev[N];
-                load_ev<N>(elements, jidx, stride, sev);
-                if (shares_vertex<N, N>(ev, sev)) {
-                    dmask[lane] = 1;
-                }
-            }
-        }
 
         /**
          * \brief Packed overlap mask of AABB \p fi against a block of the second list.
@@ -651,102 +605,7 @@ namespace sccd {
 
         // -----------------------------
 
-        /**
-         * \brief Scalar reference: count self-overlaps in [begin,end) for element
-         * i.
-         * \return Number of non-disjoint, non-shared-vertex candidates with j>i.
-         */
-        template <int N, typename T, typename I>
-        static inline ptrdiff_t scalar_count_range_self(T **const SCCD_RESTRICT aabbs,
-                                                        const ptrdiff_t fi,
-                                                        I **const SCCD_RESTRICT elements,
-                                                        const I *const SCCD_RESTRICT idx,
-                                                        const ptrdiff_t stride,
-                                                        const I (&ev)[N],
-                                                        const ptrdiff_t begin,
-                                                        const ptrdiff_t end) {
-            ptrdiff_t count = 0;
-            const T aminx = aabbs[0][fi];
-            const T aminy = aabbs[1][fi];
-            const T aminz = aabbs[2][fi];
-            const T amaxx = aabbs[3][fi];
-            const T amaxy = aabbs[4][fi];
-            const T amaxz = aabbs[5][fi];
-            for (ptrdiff_t j = begin; j < end; ++j) {
-                if (disjoint(aminx,
-                             aminy,
-                             aminz,
-                             amaxx,
-                             amaxy,
-                             amaxz,
-                             aabbs[0][j],
-                             aabbs[1][j],
-                             aabbs[2][j],
-                             aabbs[3][j],
-                             aabbs[4][j],
-                             aabbs[5][j])) {
-                    continue;
-                }
-                const I jidx = idx[j];
-                I sev[N];
-                load_ev<N>(elements, jidx, stride, sev);
-                const bool share = shares_vertex<N, N>(ev, sev);
-                count += share ? 0 : 1;
-            }
-            return count;
-        }
 
-        /**
-         * \brief Scalar reference: collect self-overlaps in [begin,end) for element
-         * i.
-         * \return Number of pairs written to outputs, with (min(idxi,jidx),
-         * max(...)).
-         */
-        template <int N, typename T, typename I>
-        static inline ptrdiff_t scalar_collect_range_self(T **const SCCD_RESTRICT aabbs,
-                                                          const ptrdiff_t fi,
-                                                          const I idxi,
-                                                          I **const SCCD_RESTRICT elements,
-                                                          const I *const SCCD_RESTRICT idx,
-                                                          const ptrdiff_t stride,
-                                                          const I (&ev)[N],
-                                                          const ptrdiff_t begin,
-                                                          const ptrdiff_t end,
-                                                          I *const SCCD_RESTRICT first_out,
-                                                          I *const SCCD_RESTRICT second_out) {
-            ptrdiff_t count = 0;
-            const T aminx = aabbs[0][fi];
-            const T aminy = aabbs[1][fi];
-            const T aminz = aabbs[2][fi];
-            const T amaxx = aabbs[3][fi];
-            const T amaxy = aabbs[4][fi];
-            const T amaxz = aabbs[5][fi];
-            for (ptrdiff_t j = begin; j < end; ++j) {
-                if (disjoint(aminx,
-                             aminy,
-                             aminz,
-                             amaxx,
-                             amaxy,
-                             amaxz,
-                             aabbs[0][j],
-                             aabbs[1][j],
-                             aabbs[2][j],
-                             aabbs[3][j],
-                             aabbs[4][j],
-                             aabbs[5][j])) {
-                    continue;
-                }
-                const I jidx = idx[j];
-                I sev[N];
-                load_ev<N>(elements, jidx, stride, sev);
-                if (!shares_vertex<N, N>(ev, sev)) {
-                    first_out[count] = sccd::min(idxi, jidx);
-                    second_out[count] = sccd::max(idxi, jidx);
-                    count += 1;
-                }
-            }
-            return count;
-        }
 
     }  // namespace detail
 
