@@ -17,7 +17,12 @@ that band is not a result.
 | cloth-ball | 33,329,729 | 95,424 |
 
 **Modes.** `Relaxed` (0) is the scalar search with the looser acceptance test.
-`Tight` (2) compares domain widths against domain tolerances. Both ship; modes 1
+`Tight` (2) compares domain widths against domain tolerances. On the CPU
+`Relaxed` is the cheaper of the two; **on the GPU it is not** — it costs 1.5×
+`Tight`'s boxes on armadillo-rollers at `toi_stride=1` and about the same on
+cloth-ball. A looser acceptance ends a box sooner but reports a time of impact
+further before the true one, and a looser bound prunes less, so the queries that
+follow do more work. Both ship; modes 1
 and 3 are validation-only and need `SCCD_ENABLE_TIGHT_INCLUSION=ON`.
 
 **Strides.** `toi_stride=0` is `find_earliest_impact_time` — one time of impact
