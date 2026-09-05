@@ -73,11 +73,6 @@ namespace {
 using scalar_t = double;
 using idx_t = int;
 
-#ifdef SCCD_NP_COUNT_BOXES
-extern "C" {
-}
-#endif
-
 // One query: four points at the start of the step and four at the end. For
 // vertex-face they are (vertex, f0, f1, f2); for edge-edge (ea0, ea1, eb0, eb1).
 struct Query {
