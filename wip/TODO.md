@@ -187,18 +187,42 @@ this right; `sccd_bench` does not.
 Cheap to fix and worth doing before the next accuracy claim is made from a
 benchmark run.
 
+## The benchmark harness spends far more time verifying than measuring
+
+Measured while bringing puffer-ball in. One case, `100ee`, on a GH200:
+
+    28,919,802 candidate pairs   prep 103 ms   broad 736 ms   narrow 50 ms
+
+so about 0.9 s of the work the benchmark exists to measure -- against
+**roughly 21 s of wall clock per case**, twenty times the measurement.
+
+The overhead is the driver's own bookkeeping, not the library. To report
+`broad_fp` it builds an `unordered_set<uint64_t>` of every candidate pair and
+looks each one up; at 28.9 M pairs a case that is seconds of hashing, and it
+happens outside every timed region so it never shows in a column. It goes
+unnoticed on the other scenes because their meshes are one to two orders of
+magnitude smaller -- cloth-ball is 92,230 triangles against puffer-ball's
+1,064,216.
+
+It is not a correctness problem, and the numbers it produces are worth having:
+the false-positive counts are how the broad phase is held to being a superset of
+the reference. But it decides how much can be swept inside a 30-minute job, and
+it is why puffer-ball is reported on a subsample. A sorted-array intersection, or
+counting only when a flag asks for it, would remove it.
+
 ## Benchmark coverage still missing
 
 The published sweep covers armadillo-rollers, cloth-ball and cloth-funnel. The
 other three scenes of the NYU set are not in it:
 
-- **puffer-ball** ships boxes, queries, `mma_bool` and roots but no extracted
-  frames, so `bench.exe.cpp` finds zero runnable cases. Its 240 root archives are
-  also unconverted. It is a frames download and a `prepare_data.sh` run away from
-  being the largest scene in the set -- 1.5 M queries, more than the other three
-  together. Alps scratch has 150 TB free; the workstation does not have the room.
+- **puffer-ball** is now in: frames downloaded and converted, all 240 root
+  archives converted, ground truth verified complete (1,486,790 of 1,514,172
+  queries carry a root, matching `mma_bool` exactly). Its accuracy is reported in
+  full. Its *timing* is on a stated 40-case subsample, because of the harness
+  overhead above rather than because of the library.
 - **n-body-simulation** and **rod-twist** were never downloaded.
-  `download_datasets.sh` already has a URL and an env gate for each.
+  `download_datasets.sh` already has a URL and an env gate for each. Note that
+  rod-twist ships its frames in four separate archives.
 
 Also not swept: the device execution space for the *broad* phase and the
 end-to-end timings. The device narrow phase is covered -- `ti_oracle` emits
