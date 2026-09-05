@@ -95,6 +95,45 @@ def _as_float(text: str) -> float | None:
         return None
 
 
+# The columns the driver emits. A CSV missing any of them was written by a
+# script that had its own idea of the schema, which is exactly how twelve
+# columns -- every accuracy column among them -- went unnamed and were filed
+# under the None key where nothing ever read them.
+EXPECTED_COLUMNS = [
+    "dataset", "mode", "case", "type", "queries",
+    "prep_ms", "broad_ms", "narrow_ms", "query_narrow_ms",
+    "fp", "fn", "broad_fp", "broad_fn", "narrow_ms_s1",
+    "toi_n", "toi_late", "toi_max_late", "toi_max_early", "toi_med_early",
+    "s0_late", "s0_margin", "s0_toi", "gt_earliest", "root_n", "s1_min",
+]
+
+# Columns that must actually carry values, not merely be named. These are the
+# accuracy and conservativeness data; a sweep where they are all empty looks
+# perfectly healthy and proves nothing.
+REQUIRED_NON_EMPTY = ["narrow_ms", "toi_late", "s0_late", "root_n"]
+
+
+def check_schema(csv_path: Path, rows: list[dict]) -> None:
+    """Raise if the CSV is not the schema the driver emits, or is empty where it matters."""
+    if not rows:
+        raise ValueError(f"{csv_path}: no data rows")
+
+    present = set(rows[0].keys())
+    missing = [c for c in EXPECTED_COLUMNS if c not in present]
+    if missing:
+        raise ValueError(
+            f"{csv_path}: missing {len(missing)} column(s): {', '.join(missing)}. "
+            f"The header does not match the driver's; regenerate the CSV with a "
+            f"header from `sccd_bench --header`.")
+
+    for column in REQUIRED_NON_EMPTY:
+        if not any((row.get(column) or "").strip() for row in rows):
+            raise ValueError(
+                f"{csv_path}: column '{column}' is empty on every row. The sweep "
+                f"produced no {column} data, so nothing computed from it means "
+                f"anything.")
+
+
 def read_rows(csv_path: Path) -> list[dict]:
     """Rows of a sweep CSV, with the mode name mapped onto its current spelling."""
     rows: list[dict] = []
