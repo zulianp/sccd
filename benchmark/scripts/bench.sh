@@ -121,26 +121,8 @@ exec 1>&3
 BENCH_OUT_DIR="${SCCD_BENCH_OUT_DIR:-"${BENCHMARK_DIR}/out"}"
 
 BENCH_CSV="${SCCD_BENCH_CSV:-"${BENCH_OUT_DIR}/bench.csv"}"
-BENCH_AGG_CSV="${SCCD_BENCH_AGG_CSV:-"${BENCH_OUT_DIR}/bench_aggregate.csv"}"
-BENCH_PAIRED_CSV="${BENCH_AGG_CSV/_aggregate/_paired}"
-if [[ "${BENCH_PAIRED_CSV}" == "${BENCH_AGG_CSV}" ]]; then
-    BENCH_PAIRED_CSV="$(dirname "${BENCH_AGG_CSV}")/$(basename "${BENCH_AGG_CSV%.*}")_paired.${BENCH_AGG_CSV##*.}"
-fi
-BENCH_NP_QUERY_TIMING_CSV="${BENCH_AGG_CSV/_aggregate/_np_query_timing}"
-if [[ "${BENCH_NP_QUERY_TIMING_CSV}" == "${BENCH_AGG_CSV}" ]]; then
-    BENCH_NP_QUERY_TIMING_CSV="$(dirname "${BENCH_AGG_CSV}")/$(basename "${BENCH_AGG_CSV%.*}")_np_query_timing.${BENCH_AGG_CSV##*.}"
-fi
-BENCH_TOI_ERROR_CSV="${BENCH_AGG_CSV/_aggregate/_toi_error}"
-if [[ "${BENCH_TOI_ERROR_CSV}" == "${BENCH_AGG_CSV}" ]]; then
-    BENCH_TOI_ERROR_CSV="$(dirname "${BENCH_AGG_CSV}")/$(basename "${BENCH_AGG_CSV%.*}")_toi_error.${BENCH_AGG_CSV##*.}"
-fi
-BENCH_MISSING_PAIRS_CSV="${SCCD_MISSING_PAIRS_CSV:-"${BENCH_AGG_CSV/_aggregate/_missing_pairs}"}"
-if [[ "${BENCH_MISSING_PAIRS_CSV}" == "${BENCH_AGG_CSV}" ]]; then
-    BENCH_MISSING_PAIRS_CSV="$(dirname "${BENCH_AGG_CSV}")/$(basename "${BENCH_AGG_CSV%.*}")_missing_pairs.${BENCH_AGG_CSV##*.}"
-fi
-BENCH_FIGURE_DIR="${SCCD_BENCH_FIGURE_DIR:-"${BENCH_OUT_DIR}/figures"}"
-BENCH_REPORT_TEX="${SCCD_BENCH_REPORT_TEX:-"${BENCH_OUT_DIR}/bench_report.tex"}"
-mkdir -p "$(dirname "${BENCH_CSV}")" "$(dirname "${BENCH_AGG_CSV}")" "$(dirname "${BENCH_MISSING_PAIRS_CSV}")" "${BENCH_FIGURE_DIR}" "$(dirname "${BENCH_REPORT_TEX}")"
+BENCH_MISSING_PAIRS_CSV="${SCCD_MISSING_PAIRS_CSV:-"${BENCH_OUT_DIR}/bench_missing_pairs.csv"}"
+mkdir -p "$(dirname "${BENCH_CSV}")" "$(dirname "${BENCH_MISSING_PAIRS_CSV}")"
 
 # The header comes from the driver, never from here.
 #
@@ -187,9 +169,6 @@ fi
 
 exec 1>&2
 
-"${PYTHON}" "${BENCHMARK_DIR}/bench_postprocess.py" \
-    "${BENCH_CSV}" "${BENCH_AGG_CSV}" "${BENCH_FIGURE_DIR}" "${BENCH_REPORT_TEX}" "${DATA_DIR}"
-
 # --- accuracy against TightInclusion, per mode -----------------------------
 # Timing alone cannot tell you whether a mode is safe to use. The oracle checks
 # every query against TightInclusion and fails when a mode misses a collision or
@@ -227,23 +206,21 @@ else
     printf 'note: ti_oracle was not built; skipping the accuracy comparison\n' >&2
 fi
 
-# --- HTML report ------------------------------------------------------------
-BENCH_REPORT_HTML="${SCCD_BENCH_REPORT_HTML:-"${BENCH_OUT_DIR}/bench_report.html"}"
-"${PYTHON}" "${BENCHMARK_DIR}/bench_report_html.py" \
-    --aggregate "${BENCH_AGG_CSV}" \
-    --toi-error "${BENCH_TOI_ERROR_CSV}" \
-    --oracle "${ORACLE_CSV}" \
-    --out "${BENCH_REPORT_HTML}" \
-  && printf 'report: %s\n' "${BENCH_REPORT_HTML}" >&2
+# --- report -----------------------------------------------------------------
+# One module over the two CSVs this run produced: figures as PDF and PNG,
+# booktabs tables, and the Markdown summary. It exits non-zero if any mode
+# reported a late time of impact, so a bad run fails here rather than being
+# read off a table by someone who did not think to look.
+( cd "${BENCHMARK_DIR}" && "${PYTHON}" -m report \
+    "${BENCH_CSV}" "${BENCH_OUT_DIR}/report" "${ORACLE_CSV}" ) \
+  && printf 'report: %s\n' "${BENCH_OUT_DIR}/report/summary.md" >&2
 
+# Everything needed to reproduce and to read the run: the two CSVs it was
+# computed from, and the report generated off them.
 BENCH_ARCHIVE="${BENCH_OUT_DIR}/sccd-benchmark-$(date +%Y-%m-%d).tar.gz"
 tar -czf "${BENCH_ARCHIVE}" \
     -C "$(dirname "${BENCH_CSV}")" "$(basename "${BENCH_CSV}")" \
-    -C "$(dirname "${BENCH_AGG_CSV}")" "$(basename "${BENCH_AGG_CSV}")" \
-    -C "$(dirname "${BENCH_PAIRED_CSV}")" "$(basename "${BENCH_PAIRED_CSV}")" \
-    -C "$(dirname "${BENCH_NP_QUERY_TIMING_CSV}")" "$(basename "${BENCH_NP_QUERY_TIMING_CSV}")" \
-    -C "$(dirname "${BENCH_TOI_ERROR_CSV}")" "$(basename "${BENCH_TOI_ERROR_CSV}")" \
     -C "$(dirname "${BENCH_MISSING_PAIRS_CSV}")" "$(basename "${BENCH_MISSING_PAIRS_CSV}")" \
-    -C "$(dirname "${BENCH_REPORT_TEX}")" "$(basename "${BENCH_REPORT_TEX}")" \
-    -C "$(dirname "${BENCH_FIGURE_DIR}")" "$(basename "${BENCH_FIGURE_DIR}")" \
-    -C "$(dirname "${BENCH_REPORT_HTML}")" "$(basename "${BENCH_REPORT_HTML}")"
+    -C "${BENCH_OUT_DIR}" "$(basename "${ORACLE_DIR}")" \
+    -C "${BENCH_OUT_DIR}" report
+printf 'archive: %s\n' "${BENCH_ARCHIVE}" >&2
