@@ -35,10 +35,7 @@ exec 3>&1
 exec 1>&2
 
 DATA_DIR="${SCCD_DATA_DIR:-"${BENCHMARK_DIR}/../data"}"
-JSON_PROJECT_DIR="${BENCHMARK_DIR}/json"
-JSON_BUILD_DIR="${SCCD_JSON_BUILD_DIR:-"${BENCHMARK_DIR}/../build_json"}"
 SCCD_BUILD_DIR="${SCCD_BUILD_DIR:-"${BENCHMARK_DIR}/../build_benchmark"}"
-PYTHON_DIR="${BENCHMARK_DIR}/../python"
 PYTHON="${PYTHON:-python3}"
 ROOT_DIR="${BENCHMARK_DIR}/.."
 
@@ -59,35 +56,12 @@ parallel_jobs() {
     fi
 }
 
-if is_enabled "${SCCD_SKIP_DOWNLOAD}"; then
-    printf 'note: SCCD_SKIP_DOWNLOAD is set; assuming %s is already populated\n' "${DATA_DIR}" >&2
-else
-    "${SCRIPT_DIR}/download_datasets.sh"
-fi
-
-# A CMake cache remembers the source directory it was generated from and refuses
-# to be reused with another -- a hard error, not a reconfigure. Drop a build tree
-# that points elsewhere rather than making the caller work that out from CMake's
-# "does not match the source used to generate cache".
-if [[ -f "${JSON_BUILD_DIR}/CMakeCache.txt" ]]; then
-    cached_home="$(sed -n 's/^CMAKE_HOME_DIRECTORY:INTERNAL=//p' "${JSON_BUILD_DIR}/CMakeCache.txt" | tail -n 1)"
-    if [[ -n "${cached_home}" && "${cached_home}" != "${JSON_PROJECT_DIR}" ]]; then
-        printf 'note: %s was configured from %s; reconfiguring\n' "${JSON_BUILD_DIR}" "${cached_home}" >&2
-        rm -rf "${JSON_BUILD_DIR}"
-    fi
-fi
-
-cmake -S "${JSON_PROJECT_DIR}" -B "${JSON_BUILD_DIR}" -DCMAKE_BUILD_TYPE=Release
-cmake --build "${JSON_BUILD_DIR}" --config Release --target boxes_json_to_raw mma_bool_json_to_raw --parallel "$(parallel_jobs)"
-
-BOXES_JSON_TO_RAW="${JSON_BUILD_DIR}/boxes_json_to_raw"
-if [[ ! -x "${BOXES_JSON_TO_RAW}" && -x "${JSON_BUILD_DIR}/Release/boxes_json_to_raw" ]]; then
-    BOXES_JSON_TO_RAW="${JSON_BUILD_DIR}/Release/boxes_json_to_raw"
-fi
-MMA_BOOL_JSON_TO_RAW="${JSON_BUILD_DIR}/mma_bool_json_to_raw"
-if [[ ! -x "${MMA_BOOL_JSON_TO_RAW}" && -x "${JSON_BUILD_DIR}/Release/mma_bool_json_to_raw" ]]; then
-    MMA_BOOL_JSON_TO_RAW="${JSON_BUILD_DIR}/Release/mma_bool_json_to_raw"
-fi
+# Downloading, converting and verifying the datasets is prepare_data.sh's job.
+# Every step there skips work that is already current, so this costs a few
+# seconds on a repeat run -- and it exits non-zero if the ground truth is
+# incomplete, which stops a benchmark from quietly scoring unconverted roots as
+# "no collision" the way cloth-funnel's half-converted oracle did.
+"${SCRIPT_DIR}/prepare_data.sh"
 
 datasets=()
 is_enabled "${SCCD_ENABLE_ARMADILLO_ROLLERS}" && datasets+=("armadillo-rollers")
@@ -96,30 +70,6 @@ is_enabled "${SCCD_ENABLE_CLOTH_FUNNEL}" && datasets+=("cloth-funnel")
 is_enabled "${SCCD_ENABLE_N_BODY_SIMULATION}" && datasets+=("n-body-simulation")
 is_enabled "${SCCD_ENABLE_PUFFER_BALL}" && datasets+=("puffer-ball")
 is_enabled "${SCCD_ENABLE_ROD_TWIST}" && datasets+=("rod-twist")
-
-for dataset in ${datasets[@]+"${datasets[@]}"}; do
-    boxes_dir="${DATA_DIR}/${dataset}/boxes"
-    [[ -d "${boxes_dir}" ]] || continue
-    find "${boxes_dir}" -maxdepth 1 -name '*.json' -print0 | xargs -0 sh -c '
-        if [ "$#" -gt 0 ]; then
-            "$0" "$@"
-        fi
-    ' "${BOXES_JSON_TO_RAW}"
-done
-
-"${PYTHON}" "${BENCHMARK_DIR}/roots_to_raw.py" "${DATA_DIR}" "${PYTHON_DIR}" ${datasets[@]+"${datasets[@]}"}
-
-is_enabled "${SCCD_ENABLE_CLOTH_FUNNEL}" && "${PYTHON}" "${PYTHON_DIR}"/sccd_strip_nonascii.py "${DATA_DIR}"/cloth-funnel/frames/*.ply
-
-for dataset in ${datasets[@]+"${datasets[@]}"}; do
-    mma_bool_dir="${DATA_DIR}/${dataset}/mma_bool"
-    [[ -d "${mma_bool_dir}" ]] || continue
-    find "${mma_bool_dir}" -maxdepth 1 -name '*_mma_bool.json' -print0 | xargs -0 sh -c '
-        if [ "$#" -gt 0 ]; then
-            "$0" "$@"
-        fi
-    ' "${MMA_BOOL_JSON_TO_RAW}"
-done
 
 cmake_bench_args=(-DCMAKE_BUILD_TYPE=Release -DSCCD_ENABLE_SMESH=ON -DSCCD_ENABLE_OPENMP=ON -DSCCD_ENABLE_TIGHT_INCLUSION=ON)
 if [[ -n "${SCCD_SMESH_DIR:-}" ]]; then
