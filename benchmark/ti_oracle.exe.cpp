@@ -719,7 +719,7 @@ int main(int argc, char** argv) {
             // 0's single shared toi lets every query prune against every other
             // query's progress. Timed side by side because production callers
             // choose between them.
-            std::printf("%-12s %12s %12s %10s\n", "mode", "stride1_ms", "stride0_ms", "ratio");
+            std::printf("%-12s %12s %12s %10s\n", "mode", "per_pair_ms", "earliest_ms", "ratio");
             for (int m = 0; m < N_MODES; ++m) {
                 const Mode mode = mode_of(m);
                 const bool is_device = (mode == Mode::DeviceRelaxed || mode == Mode::DeviceTight);
@@ -737,12 +737,13 @@ int main(int argc, char** argv) {
                 if (is_device) {
                     double ms_s[2] = {0.0, 0.0};
                     for (int k = 0; k < 2; ++k) {
-                        const int stride = (k == 0) ? 1 : 0;
+                        const sccd::ToiOutput toi_output =
+                            (k == 0) ? sccd::ToiOutput::PerPair : sccd::ToiOutput::Earliest;
                         ms_s[k] = opt.device_float
                                       ? bench_device<float>(batch, phase.is_vf, opt.max_depth, opt.tol,
-                                                            opt.bench_repeats, stride)
+                                                            opt.bench_repeats, toi_output)
                                       : bench_device<double>(batch, phase.is_vf, opt.max_depth, opt.tol,
-                                                             opt.bench_repeats, stride);
+                                                             opt.bench_repeats, toi_output);
                     }
                     std::printf("%-12s %12.3f %12.3f %9.2fx\n", mode_name(mode), ms_s[0], ms_s[1],
                                 ms_s[1] > 0 ? ms_s[0] / ms_s[1] : 0.0);
@@ -754,8 +755,10 @@ int main(int argc, char** argv) {
                 {
                     double ms_s[2] = {0.0, 0.0};
                     for (int k = 0; k < 2; ++k) {
-                        const int stride = (k == 0) ? 1 : 0;
-                        std::vector<scalar_t> toi(stride == 0 ? 1 : batch.n_queries, 1.0);
+                        const sccd::ToiOutput toi_output =
+                            (k == 0) ? sccd::ToiOutput::PerPair : sccd::ToiOutput::Earliest;
+                        std::vector<scalar_t> toi(
+                            toi_output == sccd::ToiOutput::Earliest ? 1 : batch.n_queries, 1.0);
                         double best = 1e30;
                         for (int r = 0; r < opt.bench_repeats; ++r) {
                             std::fill(toi.begin(), toi.end(), scalar_t(1));
@@ -763,11 +766,11 @@ int main(int argc, char** argv) {
                             if (phase.is_vf) {
                                 sccd::narrow_phase_vf<scalar_t, idx_t>(
                                     batch.n_queries, batch.q0.data(), batch.q1.data(), batch.p0_ptr, batch.p1_ptr, 1,
-                                    batch.prim_ptr, scalar_t(1), toi.data(), opt.max_depth, opt.tol, stride);
+                                    batch.prim_ptr, scalar_t(1), toi.data(), opt.max_depth, opt.tol, toi_output);
                             } else {
                                 sccd::narrow_phase_ee<scalar_t, idx_t>(
                                     batch.n_queries, batch.q0.data(), batch.q1.data(), batch.p0_ptr, batch.p1_ptr, 1,
-                                    batch.prim_ptr, scalar_t(1), toi.data(), opt.max_depth, opt.tol, stride);
+                                    batch.prim_ptr, scalar_t(1), toi.data(), opt.max_depth, opt.tol, toi_output);
                             }
                             best = std::min(best, (now_seconds() - t0) * 1e3);
                         }
