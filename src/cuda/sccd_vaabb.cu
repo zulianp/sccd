@@ -193,6 +193,16 @@ namespace sccd {
         aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabbs,         \
         const bool safe_inflate)
 
+// Only the diagonals, geom_t == aabb_t.
+//
+// The two are deliberately separate parameters: boxes narrower than the
+// geometry are a supported configuration, and `safe_inflate` exists for exactly
+// that case -- it rounds each bound outward by one ULP so a narrower box cannot
+// exclude a candidate the wider geometry would have found. Nothing in the
+// repository instantiates a mixed pair today, so none is listed; a caller who
+// wants float boxes over double geometry adds
+// SCCD_VAABB_INSTANTIATE(int, double, float) here and gets a link error until
+// they do, rather than a silently wrong answer.
 SCCD_VAABB_INSTANTIATE(int, float, float);
 SCCD_VAABB_INSTANTIATE(int, double, double);
 
