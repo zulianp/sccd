@@ -25,7 +25,9 @@ further before the true one, and a looser bound prunes less, so the queries that
 follow do more work. Both ship; modes 1
 and 3 are validation-only and need `SCCD_ENABLE_TIGHT_INCLUSION=ON`.
 
-**Strides.** `toi_stride=0` is `find_earliest_impact_time` — one time of impact
+**Strides.** The tables below use the names the runs were recorded under; the
+parameter is now the `ToiOutput` enum, `0` being `Earliest` and `1` `PerPair`.
+`toi_stride=0` is `find_earliest_impact_time` — one time of impact
 for the step, so every query prunes against the running minimum. `toi_stride=1`
 is `find_impact_times` — one result per candidate, no shared bound.
 

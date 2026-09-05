@@ -21,7 +21,7 @@ int sccd::narrow_phase_vf(size_t n_pairs,
                           size_t face_stride, I** faces,
                           T max_toi, T* toi,       // out
                           int max_depth, T tol,
-                          int toi_stride = 0);
+                          ToiOutput toi_output = ToiOutput::Earliest);
 ```
 
 `T** v0` is three row pointers — x, y and z — not a matrix type. `I** faces` is
@@ -35,9 +35,12 @@ std::vector<double> z0 = {0.0, 0.0, 0.0, 1.00};
 double* v0[3] = {x0.data(), y0.data(), z0.data()};
 ```
 
-`toi_stride` selects what comes back: `1` writes one time of impact per pair,
-`0` writes a single earliest time to `toi[0]` and lets every query prune against
-the running minimum, which is markedly cheaper.
+`toi_output` selects what comes back: `ToiOutput::PerPair` writes one time of
+impact per pair, `ToiOutput::Earliest` writes a single earliest time to `toi[0]`
+and lets every query prune against the running minimum, which is markedly
+cheaper. It was an `int` named for the output array's layout; the enum names the
+choice a caller is actually making, and the underlying values are unchanged, so
+a recorded `0` or `1` still means what it did.
 
 | call | header | query |
 |---|---|---|
@@ -189,11 +192,11 @@ The phases are callable separately, to interleave your own logic:
 ```cpp
 ccd.broad_phase_prep(points_t0, points_t1);
 ccd.broad_phase_fv_step(v_overlap, f_overlap);   // or broad_phase_ee_step
-ccd.narrow_phase_fv(toi, vf_tois, max_depth, tol, /*toi_stride=*/0);
+ccd.narrow_phase_fv(toi, vf_tois, max_depth, tol, sccd::ToiOutput::Earliest);
 ```
 
 `narrow_phase_fv` and `narrow_phase_ee` take `max_toi` by reference: it bounds
-the search on the way in and, for `toi_stride == 0`, comes back holding the
+the search on the way in and, for `ToiOutput::Earliest`, comes back holding the
 earliest time of impact.
 
 One caveat worth knowing: **smesh stores coordinates as `float`**

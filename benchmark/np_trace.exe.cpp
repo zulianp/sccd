@@ -9,7 +9,7 @@
 // whole scene mixes two effects that an aggregate cannot separate: how each
 // kernel searches a single query, and how the shared time-of-impact bound
 // collapses across queries as the run proceeds. This driver removes the second
-// entirely -- every query is a separate call with max_toi = 1 and toi_stride = 1,
+// entirely -- every query is a separate call with max_toi = 1 and ToiOutput::PerPair,
 // so nothing another query found can prune it.
 //
 // If the device still costs far more than the host on an isolated query, the
@@ -40,11 +40,11 @@
 //                   comparison of two binaries needs this to mean anything.
 //   --no-isolated   skip the per-query pass; useful with --batch when only the
 //                   batched earliest time of impact is wanted
-//   --device --batch  run the whole file as ONE device toi_stride=0 call, which is
+//   --device --batch  run the whole file as ONE device ToiOutput::Earliest call, which is
 //                   where a Relaxed prepass has to be priced: the device's bound
 //                   does not collapse the way the host's does, so the two modes
 //                   cost very different amounts there and the same amount here.
-//   --batch         also run the whole file as ONE toi_stride=0 call, which is
+//   --batch         also run the whole file as ONE ToiOutput::Earliest call, which is
 //                   how the library is actually used, and report the same counts.
 //                   The difference between the two is the value of the collapsing
 //                   shared bound, isolated on identical data.
@@ -375,12 +375,12 @@ int main(int argc, char** argv) {
                 sccd::narrow_phase_vf<scalar_t, idx_t>(1, scene.c0.data(), scene.c1.data(),
                                                           scene.p0, scene.p1, 1, scene.elem,
                                                           /*max_toi=*/1.0, &toi, max_depth, tol,
-                                                          /*toi_stride=*/1);
+                                                          sccd::ToiOutput::PerPair);
             } else {
                 sccd::narrow_phase_ee<scalar_t, idx_t>(1, scene.c0.data(), scene.c1.data(),
                                                        scene.p0, scene.p1, 1, scene.elem,
                                                        /*max_toi=*/1.0, &toi, max_depth, tol,
-                                                       /*toi_stride=*/1);
+                                                       sccd::ToiOutput::PerPair);
             }
             Row r;
             r.index = total;
@@ -411,7 +411,7 @@ int main(int argc, char** argv) {
         if (batch) {
             // One device call for the whole file, the way the library runs it.
             // The kernel prints its own count line to stderr.
-            std::printf("\n# device, batched: whole file in one toi_stride=0 call\n");
+            std::printf("\n# device, batched: whole file in one ToiOutput::Earliest call\n");
             for (const auto& file : files) {
                 std::vector<Query> queries;
                 if (!read_queries(file, queries)) continue;
@@ -440,11 +440,11 @@ int main(int argc, char** argv) {
                     if (is_vf) {
                         sccd::device::narrow_phase_vf<scalar_t, idx_t>(
                             queries.size(), df.d_a, df.d_b, df.d_p0, df.d_p1, 1, df.d_elem,
-                            /*max_toi=*/1.0, df.d_toi, max_depth, tol, /*toi_stride=*/0);
+                            /*max_toi=*/1.0, df.d_toi, max_depth, tol, sccd::ToiOutput::Earliest);
                     } else {
                         sccd::device::narrow_phase_ee<scalar_t, idx_t>(
                             queries.size(), df.d_a, df.d_b, df.d_p0, df.d_p1, 1, df.d_elem,
-                            /*max_toi=*/1.0, df.d_toi, max_depth, tol, /*toi_stride=*/0);
+                            /*max_toi=*/1.0, df.d_toi, max_depth, tol, sccd::ToiOutput::Earliest);
                     }
                     NPT_CUDA(cudaEventRecord(t1));
                     NPT_CUDA(cudaEventSynchronize(t1));
@@ -463,7 +463,7 @@ int main(int argc, char** argv) {
             return 0;
         }
 
-        std::printf("\n# device, one query per call, max_toi = 1, toi_stride = 1\n");
+        std::printf("\n# device, one query per call, max_toi = 1, ToiOutput::PerPair\n");
         std::printf("# each call's box count is on stderr, after its marker\n");
         std::size_t idx = 0;
         for (const auto& file : files) {
@@ -483,11 +483,11 @@ int main(int argc, char** argv) {
                 if (is_vf) {
                     sccd::device::narrow_phase_vf<scalar_t, idx_t>(
                         1, df.d_a + q, df.d_b + q, df.d_p0, df.d_p1, 1, df.d_elem,
-                        /*max_toi=*/1.0, df.d_toi, max_depth, tol, /*toi_stride=*/1);
+                        /*max_toi=*/1.0, df.d_toi, max_depth, tol, sccd::ToiOutput::PerPair);
                 } else {
                     sccd::device::narrow_phase_ee<scalar_t, idx_t>(
                         1, df.d_a + q, df.d_b + q, df.d_p0, df.d_p1, 1, df.d_elem,
-                        /*max_toi=*/1.0, df.d_toi, max_depth, tol, /*toi_stride=*/1);
+                        /*max_toi=*/1.0, df.d_toi, max_depth, tol, sccd::ToiOutput::PerPair);
                 }
                 scalar_t dt = 1.0;
                 NPT_CUDA(cudaMemcpy(&dt, df.d_toi, sizeof(scalar_t), cudaMemcpyDeviceToHost));
@@ -513,16 +513,16 @@ int main(int argc, char** argv) {
                 sccd::narrow_phase_vf<scalar_t, idx_t>(queries.size(), scene.a.data(), scene.b.data(),
                                                           scene.p0, scene.p1, 1, scene.elem,
                                                           /*max_toi=*/1.0, &batch_toi, max_depth, tol,
-                                                          /*toi_stride=*/0);
+                                                          sccd::ToiOutput::Earliest);
             } else {
                 sccd::narrow_phase_ee<scalar_t, idx_t>(queries.size(), scene.a.data(), scene.b.data(),
                                                        scene.p0, scene.p1, 1, scene.elem,
                                                        /*max_toi=*/1.0, &batch_toi, max_depth, tol,
-                                                       /*toi_stride=*/0);
+                                                       sccd::ToiOutput::Earliest);
             }
             batch_boxes += host_box_count() - before;
         }
-        std::printf("\n# batched: %zu queries in one toi_stride=0 call\n", nq);
+        std::printf("\n# batched: %zu queries in one ToiOutput::Earliest call\n", nq);
         std::printf("#   host boxes %llu, %.2f per query, earliest toi %.9f\n",
                     batch_boxes, nq ? (double)batch_boxes / (double)nq : 0.0, (double)batch_toi);
         std::printf("#   isolated / batched = %.1fx\n",

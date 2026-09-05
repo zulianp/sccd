@@ -32,6 +32,7 @@
 // to be packed with boxes from different queries.
 
 #include "sccd_base.hpp"
+#include "sccd_narrowphase_mode.hpp"
 #include "sccd_math.hpp"
 #include "sccd_numerical_error.hpp"
 #include "sccd_tolerance.hpp"
@@ -480,7 +481,7 @@ namespace sccd {
      * \param overlap0 vertex ids (VF) or first-edge ids (EE).
      * \param overlap1 face ids (VF) or second-edge ids (EE).
      * \param prims    faces[3] (VF) or edges[2] (EE).
-     * \param toi_stride 0 writes one global minimum, 1 writes one value per query.
+     * \param toi_output 0 writes one global minimum, 1 writes one value per query.
      */
     template <bool IsVertexFace, typename T, typename I>
     static int narrow_phase_tight_impl(const size_t noverlaps,
@@ -494,14 +495,12 @@ namespace sccd {
                                       T* const SCCD_RESTRICT toi,
                                       const int max_depth,
                                       const T tol,
-                                      const int toi_stride) {
+                                      const ToiOutput toi_output) {
         using T_HP = double;
         constexpr int VSIZE =
             IsVertexFace ? SCCD_NARROWPHASE_TIGHT_VSIZE_VF : SCCD_NARROWPHASE_TIGHT_VSIZE_EE;
-
-        assert(toi_stride == 0 || toi_stride == 1);
         if (noverlaps == 0) {
-            if (toi != nullptr && toi_stride == 0) {
+            if (toi != nullptr && toi_output == ToiOutput::Earliest) {
                 toi[0] = sccd::min<T>(T(1), max_toi);
             }
             return 0;
@@ -540,7 +539,7 @@ namespace sccd {
 #ifdef SCCD_NP_COUNT_BOXES
                 // Measurement knob, present only in an instrumented build.
                 //
-                // For toi_stride == 0 the host seeds each block of queries with
+                // For toi_output == ToiOutput::Earliest the host seeds each block of queries with
                 // the global minimum as it stands when the block starts, so a
                 // block scheduled late searches a t-window that earlier blocks
                 // have already collapsed. The device has no such sequence: one
@@ -555,11 +554,11 @@ namespace sccd {
                     const char* e = getenv("SCCD_NP_NO_GLOBAL_SEED");
                     return e != nullptr && atoi(e) != 0;
                 }();
-                const T_HP seed = (toi_stride == 0 && !no_global_seed_)
+                const T_HP seed = (toi_output == ToiOutput::Earliest && !no_global_seed_)
                                       ? global_min.load(std::memory_order_relaxed)
                                       : domain_toi;
 #else
-                const T_HP seed = toi_stride == 0 ? global_min.load(std::memory_order_relaxed) : domain_toi;
+                const T_HP seed = toi_output == ToiOutput::Earliest ? global_min.load(std::memory_order_relaxed) : domain_toi;
 #endif
 
                 for (int q = 0; q < VSIZE; ++q) {
@@ -870,7 +869,7 @@ namespace sccd {
                 }
 
                 for (int q = 0; q < block_size; ++q) {
-                    if (toi_stride == 1) {
+                    if (toi_output == ToiOutput::PerPair) {
                         toi[block_begin + q] = static_cast<T>(toi_q[q]);
                     } else {
                         T_HP current = global_min.load(std::memory_order_relaxed);
@@ -883,7 +882,7 @@ namespace sccd {
             }
         });
 
-        if (toi_stride == 0) {
+        if (toi_output == ToiOutput::Earliest) {
             toi[0] = static_cast<T>(global_min.load(std::memory_order_relaxed));
         }
 #ifdef SCCD_NP_COUNT_BOXES
@@ -899,7 +898,7 @@ namespace sccd {
                 }
             }
             fprintf(stderr, "sccd-np-hist host stride=%d queries=%zu worst=%llu at=%zu hist=",
-                    toi_stride, noverlaps, worst, worst_q);
+                    toi_output, noverlaps, worst, worst_q);
             for (int b = 0; b < 24; ++b) fprintf(stderr, "%llu%s", hist[b], b == 23 ? "\n" : ",");
             fprintf(stderr, "sccd-np-level host depth_accept=%llu levels=", g_np_host_depth_accept);
             for (int b = 0; b < 80; ++b) fprintf(stderr, "%llu%s", g_np_host_level[b], b == 79 ? "\n" : ",");
@@ -922,18 +921,18 @@ namespace sccd {
                              T* const SCCD_RESTRICT toi,
                              const int max_depth,
                              const T tol,
-                             const int toi_stride) {
+                             const ToiOutput toi_output) {
 #ifdef SCCD_NP_COUNT_BOXES
         const unsigned long long before_ = g_np_host_boxes;
         const int rc_ = narrow_phase_tight_impl<true, T, I>(
-            noverlaps, voverlap, foverlap, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_stride);
+            noverlaps, voverlap, foverlap, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_output);
         fprintf(stderr, "sccd-np-count vf host-conservative stride=%d queries=%zu boxes=%llu per_query=%.1f\n",
-                toi_stride, noverlaps, g_np_host_boxes - before_,
+                toi_output, noverlaps, g_np_host_boxes - before_,
                 noverlaps ? (double)(g_np_host_boxes - before_) / (double)noverlaps : 0.0);
         return rc_;
 #else
         return narrow_phase_tight_impl<true, T, I>(
-            noverlaps, voverlap, foverlap, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_stride);
+            noverlaps, voverlap, foverlap, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_output);
 #endif
     }
 
@@ -949,18 +948,18 @@ namespace sccd {
                              T* const SCCD_RESTRICT toi,
                              const int max_depth,
                              const T tol,
-                             const int toi_stride) {
+                             const ToiOutput toi_output) {
 #ifdef SCCD_NP_COUNT_BOXES
         const unsigned long long before_ = g_np_host_boxes;
         const int rc_ = narrow_phase_tight_impl<false, T, I>(
-            noverlaps, e0overlap, e1overlap, v0, v1, edge_stride, edges, max_toi, toi, max_depth, tol, toi_stride);
+            noverlaps, e0overlap, e1overlap, v0, v1, edge_stride, edges, max_toi, toi, max_depth, tol, toi_output);
         fprintf(stderr, "sccd-np-count ee host-conservative stride=%d queries=%zu boxes=%llu per_query=%.1f\n",
-                toi_stride, noverlaps, g_np_host_boxes - before_,
+                toi_output, noverlaps, g_np_host_boxes - before_,
                 noverlaps ? (double)(g_np_host_boxes - before_) / (double)noverlaps : 0.0);
         return rc_;
 #else
         return narrow_phase_tight_impl<false, T, I>(
-            noverlaps, e0overlap, e1overlap, v0, v1, edge_stride, edges, max_toi, toi, max_depth, tol, toi_stride);
+            noverlaps, e0overlap, e1overlap, v0, v1, edge_stride, edges, max_toi, toi, max_depth, tol, toi_output);
 #endif
     }
 

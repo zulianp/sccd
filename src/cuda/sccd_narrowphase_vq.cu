@@ -381,7 +381,7 @@ namespace sccd {
                                                    T* const SCCD_RESTRICT toi,
                                                    const int max_depth,
                                                    const TC tol,
-                                                   const int toi_stride) {
+                                                   const ToiOutput toi_output) {
                 const size_t i = blockIdx.x * (size_t)blockDim.x + threadIdx.x;
                 if (i >= noverlaps) return;
 
@@ -407,7 +407,7 @@ namespace sccd {
                 // The search window comes first: prepare() scales the split-axis
                 // choice by the codomain widths over [0, t_upper], so it needs to
                 // know what the shared time of impact has already pruned away.
-                TC t = (toi_stride == 0) ? *shared_toi : (TC)max_toi;
+                TC t = (toi_output == ToiOutput::Earliest) ? *shared_toi : (TC)max_toi;
                 if (t > (TC)max_toi) t = (TC)max_toi;
                 const TC t_upper = fmin(t, TC(1));
 
@@ -441,19 +441,20 @@ namespace sccd {
                     const TC dt = (box.thi - box.tlo) * widths[0];
                     const TC du = (box.uhi - box.ulo) * widths[1];
                     const TC dv = (box.vhi - box.vlo) * widths[2];
-                    const int dim = (du > dt && du >= dv) ? 1 : ((dv > dt && dv > du) ? 2 : 0);
+                    // Which of t, u, v to split -- not a spatial dimension.
+                    const int split_axis = (du > dt && du >= dv) ? 1 : ((dv > dt && dv > du) ? 2 : 0);
 
                     TC splitters[kSplits];
-                    if (dim == 0) {
+                    if (split_axis == 0) {
                         axis_splitters<0>(box, sv, s, ev, e, splitters);
-                    } else if (dim == 1) {
+                    } else if (split_axis == 1) {
                         axis_splitters<1>(box, sv, s, ev, e, splitters);
                     } else {
                         axis_splitters<2>(box, sv, s, ev, e, splitters);
                     }
 
-                    const TC lo = (dim == 0) ? box.tlo : (dim == 1 ? box.ulo : box.vlo);
-                    const TC hi = (dim == 0) ? box.thi : (dim == 1 ? box.uhi : box.vhi);
+                    const TC lo = (split_axis == 0) ? box.tlo : (split_axis == 1 ? box.ulo : box.vlo);
+                    const TC hi = (split_axis == 0) ? box.thi : (split_axis == 1 ? box.uhi : box.vhi);
                     TC samples[kSamples];
                     samples[0] = lo;
                     samples[kSamples - 1] = hi;
@@ -470,22 +471,22 @@ namespace sccd {
                     for (int k = 0; k < kSplits + 1; ++k) {
                         const TC smin = samples[k];
                         const TC smax = samples[k + 1];
-                        const TC tt_min = (dim == 0) ? smin : box.tlo;
+                        const TC tt_min = (split_axis == 0) ? smin : box.tlo;
                         if (tt_min >= t) { have_a = false; continue; }
 
                         // The four corners on each of the two bounding planes.
                         TC plane_b[4][3];
-                        const TC a_lo = (dim == 0) ? box.ulo : box.tlo;
-                        const TC a_hi = (dim == 0) ? box.uhi : box.thi;
-                        const TC b_lo = (dim == 2) ? box.ulo : box.vlo;
-                        const TC b_hi = (dim == 2) ? box.uhi : box.vhi;
+                        const TC a_lo = (split_axis == 0) ? box.ulo : box.tlo;
+                        const TC a_hi = (split_axis == 0) ? box.uhi : box.thi;
+                        const TC b_lo = (split_axis == 2) ? box.ulo : box.vlo;
+                        const TC b_hi = (split_axis == 2) ? box.uhi : box.vhi;
 
                         for (int pass = 0; pass < 2; ++pass) {
                             if (pass == 0 && have_a) continue;
                             const TC sample = (pass == 0) ? smin : smax;
                             TC (*dst)[3] = (pass == 0) ? plane_a : plane_b;
 
-                            if (dim == 0) {
+                            if (split_axis == 0) {
                                 Frame f;
                                 frame_at(sv, s, ev, e, sample, f);
 #pragma unroll
@@ -500,8 +501,8 @@ namespace sccd {
                                 for (int c = 0; c < 4; ++c) {
                                     const Frame& f = (c & 1) ? fhi : flo;
                                     const TC other = (c & 2) ? b_hi : b_lo;
-                                    const TC uu = (dim == 1) ? sample : other;
-                                    const TC vv = (dim == 1) ? other : sample;
+                                    const TC uu = (split_axis == 1) ? sample : other;
+                                    const TC vv = (split_axis == 1) ? other : sample;
                                     eval_frame(f, uu, vv, dst[c]);
                                 }
                             }
@@ -538,8 +539,8 @@ namespace sccd {
                         accepted = accepted && (tt_min > TC(0));
 
                         Domain sub = box;
-                        if (dim == 0) { sub.tlo = smin; sub.thi = smax; }
-                        else if (dim == 1) { sub.ulo = smin; sub.uhi = smax; }
+                        if (split_axis == 0) { sub.tlo = smin; sub.thi = smax; }
+                        else if (split_axis == 1) { sub.ulo = smin; sub.uhi = smax; }
                         else { sub.vlo = smin; sub.vhi = smax; }
                         sub.depth = box.depth + 1;
 
@@ -564,7 +565,7 @@ namespace sccd {
                 }
 
                 if (found) {
-                    if (toi_stride == 0) {
+                    if (toi_output == ToiOutput::Earliest) {
                         const double previous = atomic_min_double(shared_toi, (double)t);
                         (void)previous;
                     } else {
@@ -572,7 +573,7 @@ namespace sccd {
                         // is safe, a later one is the failure this exists to prevent.
                         toi[i] = sizeof(T) == sizeof(float) ? (T)__double2float_rd(t) : (T)t;
                     }
-                } else if (toi_stride == 1) {
+                } else if (toi_output == ToiOutput::PerPair) {
                     toi[i] = sizeof(T) == sizeof(float) ? (T)__double2float_rd((double)max_toi)
                                                         : (T)max_toi;
                 }
@@ -602,9 +603,9 @@ namespace sccd {
                             T* const SCCD_RESTRICT toi,
                             const int max_depth,
                             const T tol,
-                            const int toi_stride) {
+                            const ToiOutput toi_output) {
             if (noverlaps == 0) {
-                if (toi != nullptr && toi_stride == 0) {
+                if (toi != nullptr && toi_output == ToiOutput::Earliest) {
                     SCCD_CHECK_CUDA(cudaMemcpy(toi, &max_toi, sizeof(T), cudaMemcpyHostToDevice));
                 }
                 return 0;
@@ -664,10 +665,10 @@ namespace sccd {
                                                           toi,
                                                           max_depth,
                                                           (TC)tol,
-                                                          toi_stride);
+                                                          toi_output);
             SCCD_CUDA_LAST_ERROR();
 
-            if (toi_stride == 0) {
+            if (toi_output == ToiOutput::Earliest) {
                 if constexpr (sizeof(T) == sizeof(float)) {
                     write_shared_toi_kernel<<<1, 1>>>(d_shared, (float*)toi);
                 } else {
@@ -696,7 +697,7 @@ namespace sccd {
                                                      T* const,                           \
                                                      const int,                           \
                                                      const T,                            \
-                                                     const int);
+                                                     const sccd::ToiOutput);
 
 SCCD_VQ_INSTANTIATE(float, int32_t)
 SCCD_VQ_INSTANTIATE(double, int32_t)

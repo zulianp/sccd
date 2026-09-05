@@ -193,7 +193,7 @@ namespace {
         // ncells is not known until setup picks the axes, so size generously and
         // let setup memset what it needs; 4n is the cap setup itself enforces.
         SCCD_CUDA_CHECK(cudaMalloc(&cellptr, sizeof(ptrdiff_t) * (size_t)(4 * e.n + 2)));
-        sccd::device::cell2d_setup_and_count<scalar_t, idx_t>(3, e.n, e.aabbs, grid, cellptr, &spans);
+        sccd::device::cell2d_setup_and_count<scalar_t, idx_t>(e.n, e.aabbs, grid, cellptr, &spans);
 
         idx_t* cellidx = nullptr;
         ptrdiff_t* cursor = nullptr;
@@ -229,8 +229,8 @@ namespace {
     PairSet sweep_self(DeviceBoxes& e) {
         scalar_t* scratch = nullptr;
         SCCD_CUDA_CHECK(cudaMalloc(&scratch, sizeof(scalar_t) * (size_t)(2 * e.n)));
-        const int axis = sccd::device::choose_axis<scalar_t>(3, e.n, e.aabbs);
-        sccd::device::sort_along_axis<scalar_t, idx_t>(3, e.n, axis, e.aabbs, e.idx, scratch);
+        const int axis = sccd::device::choose_axis<scalar_t>(e.n, e.aabbs);
+        sccd::device::sort_along_axis<scalar_t, idx_t>(e.n, axis, e.aabbs, e.idx, scratch);
 
         ptrdiff_t* ccdptr = nullptr;
         SCCD_CUDA_CHECK(cudaMalloc(&ccdptr, sizeof(ptrdiff_t) * (size_t)(e.n + 1)));

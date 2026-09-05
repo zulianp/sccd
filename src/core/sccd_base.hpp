@@ -84,6 +84,52 @@
 #endif
 
 /*
+ * The spatial dimension SCCD works in. Three, and only three.
+ *
+ * An AABB table is 2 * SCCD_DIM rows of n -- the minima first, then the maxima,
+ * so the maximum of axis d is row `SCCD_DIM + d`.
+ *
+ * This is a constant rather than a parameter on purpose. The device broad phase
+ * used to take a runtime `dim` its host counterpart did not, and it could not
+ * honour any value but 3: the overlap predicate is structurally three
+ * dimensional -- sccd::disjoint and vaabb_overlap_one_to_many_bits take x, y and
+ * z as separate positional arguments, and their SIMD forms load three min rows
+ * and three max rows. A measured run at dim = 2 returns zero pairs, because the
+ * predicate reads row 2 (an x maximum) as a z minimum. An interface should not
+ * offer a value the code cannot honour, so it does not offer one.
+ *
+ * Supporting another dimension means generalising that predicate, not changing
+ * this constant.
+ */
+#define SCCD_DIM 3
+
+
+namespace sccd {
+    /**
+     * \brief Whether a computed box is rounded outward by one ULP.
+     *
+     * This was a bare `bool safe_inflate` with no explanation anywhere in this
+     * header -- its meaning lived in a comment in demo/sccd_minimal.exe.cpp, so
+     * a `true` at a call site said nothing about what it bought.
+     *
+     * It matters when the box type is narrower than the geometry: rounding a
+     * minimum down and a maximum up guarantees the box still encloses the
+     * trajectory after the narrowing, so the broad phase cannot drop a candidate
+     * the geometry would have found. When aabb_t and geom_t are the same type
+     * the bounds are already exact and it is a no-op -- which is why the demo,
+     * where they are the same, says so rather than leaving the reader guessing.
+     */
+    enum class BoxRounding : bool {
+        /// Bounds are the exact min and max of the endpoints. Correct when the
+        /// box type represents the geometry exactly.
+        Exact = false,
+        /// Minima rounded down and maxima up by one ULP, so a narrower box type
+        /// cannot exclude a candidate.
+        OutwardUlp = true
+    };
+}  // namespace sccd
+
+/*
  * Return convention for the C++ entry points.
  *
  * They return an int STATUS, zero on success -- the convention

@@ -225,7 +225,7 @@ namespace {
                                                               dev.d_toi,
                                                               max_depth,
                                                               T(tol),
-                                                              /*toi_stride=*/1);
+                                                              sccd::ToiOutput::PerPair);
         } else {
             sccd::device::narrow_phase_ee<T, idx_t>(qs.n_queries,
                                                            dev.d_q0,
@@ -238,7 +238,7 @@ namespace {
                                                            dev.d_toi,
                                                            max_depth,
                                                            T(tol),
-                                                           /*toi_stride=*/1);
+                                                           sccd::ToiOutput::PerPair);
         }
         ORACLE_CUDA_CHECK(cudaDeviceSynchronize());
         dev.download(toi_out);
@@ -288,7 +288,7 @@ namespace {
                         const int max_depth,
                         const scalar_t tol,
                         const int repeats,
-                        const int toi_stride) {
+                        const sccd::ToiOutput toi_output) {
         DeviceQuerySet<T> dev(qs);
         cudaEvent_t beg, end;
         ORACLE_CUDA_CHECK(cudaEventCreate(&beg));
@@ -298,11 +298,11 @@ namespace {
             if (is_vf) {
                 sccd::device::narrow_phase_vf<T, idx_t>(qs.n_queries, dev.d_q0, dev.d_q1, dev.d_p0, dev.d_p1, 1,
                                                            dev.d_prim, T(1), dev.d_toi, max_depth, T(tol),
-                                                           toi_stride);
+                                                           toi_output);
             } else {
                 sccd::device::narrow_phase_ee<T, idx_t>(qs.n_queries, dev.d_q0, dev.d_q1, dev.d_p0, dev.d_p1, 1,
                                                         dev.d_prim, T(1), dev.d_toi, max_depth, T(tol),
-                                                        toi_stride);
+                                                        toi_output);
             }
         };
 
@@ -863,8 +863,7 @@ int main(int argc, char** argv) {
                                                               scalar_t(1),
                                                               toi.data(),
                                                               opt.max_depth,
-                                                              opt.tol,
-                                                              1);
+                                                              opt.tol, sccd::ToiOutput::PerPair);
                 } else {
                     sccd::narrow_phase_ee<scalar_t, idx_t>(qs.n_queries,
                                                            qs.q0.data(),
@@ -876,8 +875,7 @@ int main(int argc, char** argv) {
                                                            scalar_t(1),
                                                            toi.data(),
                                                            opt.max_depth,
-                                                           opt.tol,
-                                                           1);
+                                                           opt.tol, sccd::ToiOutput::PerPair);
                 }
                 stats[m].seconds += now_seconds() - t0;
 

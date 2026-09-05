@@ -569,7 +569,7 @@ namespace {
     CCDRun make_ccd_run(const MeshPair& meshes, const smesh::ExecutionSpace execution_space) {
         CCDRun run;
         run.ccd = sccd::CCD<scalar_t>::create(meshes.t0, execution_space);
-        run.ccd->set_safe_inflate(true);
+        run.ccd->set_box_rounding(sccd::BoxRounding::OutwardUlp);
         run.points0 = smesh::astype<scalar_t>(meshes.t0->points());
         run.points1 = smesh::astype<scalar_t>(meshes.t1->points());
         if (execution_space == smesh::EXECUTION_SPACE_DEVICE) {
@@ -646,7 +646,7 @@ namespace {
      * The zero-stride call below reduces to a single earliest time and can prune
      * every query against the running minimum; this one has to finish each
      * candidate, so the pair is what shows what that pruning is worth. Same
-     * geometry, same broad-phase output, same kernel -- only `toi_stride` differs.
+     * geometry, same broad-phase output, same kernel -- only the ToiOutput differs.
      */
     double time_narrowphase_per_query(const bool is_vf, CCDRun& ccd_run, int& err) {
         scalar_t toi = scalar_t(1);
@@ -655,9 +655,9 @@ namespace {
 
         const auto start = std::chrono::steady_clock::now();
         if (is_vf) {
-            err = ccd_run.ccd->narrow_phase_fv(toi, vf_tois, narrowphase_max_depth, narrowphase_tol, 1);
+            err = ccd_run.ccd->narrow_phase_fv(toi, vf_tois, narrowphase_max_depth, narrowphase_tol, sccd::ToiOutput::PerPair);
         } else {
-            err = ccd_run.ccd->narrow_phase_ee(toi, ee_tois, narrowphase_max_depth, narrowphase_tol, 1);
+            err = ccd_run.ccd->narrow_phase_ee(toi, ee_tois, narrowphase_max_depth, narrowphase_tol, sccd::ToiOutput::PerPair);
         }
         const auto stop = std::chrono::steady_clock::now();
         static volatile scalar_t toi_sink;
@@ -672,9 +672,9 @@ namespace {
 
         const auto start = std::chrono::steady_clock::now();
         if (is_vf) {
-            err = ccd_run.ccd->narrow_phase_fv(toi, vf_tois, narrowphase_max_depth, narrowphase_tol, 0);
+            err = ccd_run.ccd->narrow_phase_fv(toi, vf_tois, narrowphase_max_depth, narrowphase_tol, sccd::ToiOutput::Earliest);
         } else {
-            err = ccd_run.ccd->narrow_phase_ee(toi, ee_tois, narrowphase_max_depth, narrowphase_tol, 0);
+            err = ccd_run.ccd->narrow_phase_ee(toi, ee_tois, narrowphase_max_depth, narrowphase_tol, sccd::ToiOutput::Earliest);
         }
         const auto stop = std::chrono::steady_clock::now();
         if (out_toi != nullptr) {
@@ -744,7 +744,7 @@ namespace {
                                                  toi->data(),
                                                  narrowphase_max_depth,
                                                  narrowphase_tol,
-                                                 1);
+                                                 sccd::ToiOutput::PerPair);
                 const auto stop = std::chrono::steady_clock::now();
                 query_narrow_ms = std::chrono::duration<double, std::milli>(stop - start).count();
             } else {
@@ -760,8 +760,7 @@ namespace {
                                               scalar_t(1),
                                               toi->data(),
                                               narrowphase_max_depth,
-                                              narrowphase_tol,
-                                              1);
+                                              narrowphase_tol, sccd::ToiOutput::PerPair);
                 const auto stop = std::chrono::steady_clock::now();
                 query_narrow_ms = std::chrono::duration<double, std::milli>(stop - start).count();
             }
@@ -794,7 +793,7 @@ namespace {
                                                       sccd_toi.data(),
                                                       narrowphase_max_depth,
                                                       narrowphase_tol,
-                                                      1);
+                                                      sccd::ToiOutput::PerPair);
         } else {
             idx_t* edges[2] = {query_geometry.edges[0].data(), query_geometry.edges[1].data()};
             sccd::narrow_phase_ee<scalar_t, idx_t>(query_geometry.q0.size(),
@@ -808,7 +807,7 @@ namespace {
                                                    sccd_toi.data(),
                                                    narrowphase_max_depth,
                                                    narrowphase_tol,
-                                                   1);
+                                                   sccd::ToiOutput::PerPair);
         }
         const auto stop = std::chrono::steady_clock::now();
         query_narrow_ms = std::chrono::duration<double, std::milli>(stop - start).count();

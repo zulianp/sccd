@@ -6,7 +6,7 @@ axis. They came out of cloth-funnel's broad-phase candidates via
 `SCCD_NP_WORST_CSV`, which dumps the geometry of the costliest queries by
 per-query box count.
 
-One query per call, `max_toi = 1`, `toi_stride = 1` — no shared bound on either
+One query per call, `max_toi = 1`, `ToiOutput::PerPair` — no shared bound on either
 side, nothing else in flight:
 
 | | host `Tight` | device `Tight` | | device reports |
