@@ -126,6 +126,24 @@ def check_schema(csv_path: Path, rows: list[dict]) -> None:
             f"The header does not match the driver's; regenerate the CSV with a "
             f"header from `sccd_bench --header`.")
 
+    # A row shorter than the header leaves its trailing keys as None, which is
+    # not an empty cell -- it means rows from a different schema were
+    # concatenated in. That is not hypothetical: a merge step once swept
+    # ti_oracle's 20-column output into the 25-column timing CSV, and its
+    # timings landed silently in the `toi_late` column, where they read as
+    # thousands of late times of impact.
+    for i, row in enumerate(rows):
+        missing_cells = [c for c in EXPECTED_COLUMNS if row.get(c) is None]
+        if missing_cells:
+            raise ValueError(
+                f"{csv_path}: row {i + 2} has fewer fields than the header "
+                f"({len(missing_cells)} column(s) unset, first "
+                f"'{missing_cells[0]}'). Rows from another schema look to have "
+                f"been concatenated in.")
+        if None in row:
+            raise ValueError(
+                f"{csv_path}: row {i + 2} has more fields than the header names.")
+
     for column in REQUIRED_NON_EMPTY:
         if not any((row.get(column) or "").strip() for row in rows):
             raise ValueError(
