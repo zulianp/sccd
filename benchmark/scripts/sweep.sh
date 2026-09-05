@@ -38,6 +38,7 @@ set -euo pipefail
 #   --account A      Slurm account           (default c40)
 #   --no-oracle      skip the accuracy stage (timings only)
 #   --pack N         chunks per Slurm job    (default 1)
+#   --max-cases N    sweep an evenly spread subsample of N cases (default: all)
 #
 # --pack matters more than it looks. The account runs one job at a time and
 # shares the queue with other work, so wall-clock time is dominated by waiting,
@@ -59,6 +60,7 @@ MERGE_ONLY=0
 LOCAL=0
 ORACLE=1
 PACK=1
+MAX_CASES=0
 TI_ORACLE=""
 
 while [[ $# -gt 0 ]]; do
@@ -78,6 +80,7 @@ while [[ $# -gt 0 ]]; do
         --local) LOCAL=1; shift ;;
         --no-oracle) ORACLE=0; shift ;;
         --pack) PACK="$2"; shift 2 ;;
+        --max-cases) MAX_CASES="$2"; shift 2 ;;
         -h|--help) sed -n '3,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) printf 'error: unknown argument %s\n' "$1" >&2; exit 2 ;;
     esac
@@ -167,6 +170,12 @@ for scene in ${SCENES}; do
     if [[ "${total}" -eq 0 ]]; then
         printf 'note: %s has no runnable case; skipping\n' "${scene}" >&2
         continue
+    fi
+    # SCCD_BENCH_MAX_CASES narrows the driver's list before the range is applied,
+    # so the chunking has to narrow with it. Without this, every range past N
+    # addresses cases that are no longer in the list and yields an empty chunk.
+    if [[ "${MAX_CASES}" -gt 0 && "${total}" -gt "${MAX_CASES}" ]]; then
+        total="${MAX_CASES}"
     fi
     span="${CHUNK}"
     [[ "${span}" -le 0 ]] && span="${total}"
@@ -299,6 +308,10 @@ run_oracle_body() {
     mv "${tmp}" "${out}"
 }
 
+# Empty means "every case", which is what the driver reads an unset variable as.
+MAX_CASES_ENV=""
+[[ "${MAX_CASES}" -gt 0 ]] && MAX_CASES_ENV="${MAX_CASES}"
+
 run_chunk_body() {
     local scene="$1" space="$2" begin="$3" end="$4" out="$5"
     local tmp="${out}.partial"
@@ -309,6 +322,7 @@ run_chunk_body() {
         SCCD_BENCH_EXECUTION_SPACE="${space}" \
         SCCD_BENCH_CASE_BEGIN="${begin}" \
         SCCD_BENCH_CASE_END="${end}" \
+        SCCD_BENCH_MAX_CASES="${MAX_CASES_ENV}" \
             "${SCCD_BENCH}" "${DATA_DIR}" "${scene}" | tail -n +2 >> "${tmp}"
     done
 
@@ -373,6 +387,7 @@ flush_pack() {
             --wrap="$(declare -f run_chunk_body); \
                      export SCCD_BENCH='${SCCD_BENCH}' DATA_DIR='${DATA_DIR}' MODES='${MODES}'; \
                      export SCCD_DB_TO_RAW='${SCCD_DB_TO_RAW}'; \
+                     export MAX_CASES_ENV='${MAX_CASES_ENV}'; \
                      export OMP_NUM_THREADS=\"\$(nproc)\"; \
                      header() { '${SCCD_BENCH}' --header; }; \
                      ${body}"; then
