@@ -224,30 +224,39 @@ def comparison_notes(summaries: dict[tuple[str, str], SceneSummary]) -> list[str
     written down as inside noise, not as a ratio.
     """
     notes: list[str] = []
-    scenes = sorted({scene for scene, _ in summaries})
-    for scene in scenes:
-        modes = {mode: s for (sc, mode), s in summaries.items() if sc == scene}
+    # Group by processor as well as scene. Ranking every mode of a scene together
+    # picks the best and worst overall, which on a scene measured on both
+    # processors compares host Relaxed against GPU Tight and reports the sum of
+    # two unrelated effects as if it were the mode trade.
+    groups: dict[tuple[str, str], dict[str, SceneSummary]] = {}
+    for (scene, mode), summary in summaries.items():
+        space = "GPU" if mode.startswith("device-") else "CPU"
+        groups.setdefault((scene, space), {})[mode] = summary
+
+    for (scene, space) in sorted(groups):
+        modes = groups[(scene, space)]
         if len(modes) < 2:
             continue
+        where = f"{SCENE_LABEL.get(scene, scene)} ({space})"
         ranked = sorted(modes.items(), key=lambda kv: kv[1].totals["narrow_ms"].median)
         (best_mode, best), (worst_mode, worst) = ranked[0], ranked[-1]
         b, w = best.totals["narrow_ms"], worst.totals["narrow_ms"]
         if b.n < 2 or w.n < 2:
             notes.append(
-                f"- **{SCENE_LABEL.get(scene, scene)}**: a single repeat gives no "
-                f"estimate of the noise, so {mode_label(best_mode)} and "
-                f"{mode_label(worst_mode)} are not separable here.")
+                f"- **{where}**: a single repeat gives no estimate of the noise, "
+                f"so {mode_label(best_mode)} and {mode_label(worst_mode)} are not "
+                f"separable here.")
             continue
         ok, ratio, noise = separable(b, w)
         if ok:
             notes.append(
-                f"- **{SCENE_LABEL.get(scene, scene)}**: {mode_label(best_mode)} is "
-                f"{ratio:.2f}× faster than {mode_label(worst_mode)} in the narrow "
-                f"phase ({b.median:.0f} ms against {w.median:.0f} ms; run-to-run "
-                f"spread {noise * 100:.1f}%).")
+                f"- **{where}**: {mode_label(best_mode)} is {ratio:.2f}× faster "
+                f"than {mode_label(worst_mode)} in the narrow phase "
+                f"({b.median:.0f} ms against {w.median:.0f} ms; run-to-run spread "
+                f"{noise * 100:.1f}%).")
         else:
             notes.append(
-                f"- **{SCENE_LABEL.get(scene, scene)}**: {mode_label(best_mode)} and "
+                f"- **{where}**: {mode_label(best_mode)} and "
                 f"{mode_label(worst_mode)} are inside noise "
                 f"({b.median:.0f} ms against {w.median:.0f} ms, spread "
                 f"{noise * 100:.1f}%); this does not separate them.")
