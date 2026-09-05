@@ -53,6 +53,9 @@ benchmark/alps/
 benchmark/reports/
 # Everything benchmark/scripts/bench.sh produces, in one place.
 benchmark/out/
+# And everything benchmark/scripts/sweep.sh produces: one CSV per chunk, the
+# merged CSV, the job logs, and the report generated from them.
+benchmark/sweep/
 **/figures/
 *.csv
 # Two exceptions: CSVs that are inputs or evidence rather than output -- the
