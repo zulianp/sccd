@@ -150,16 +150,16 @@ namespace sccd {
          * \tparam nxe Number of indices per element.
          * \param elements SoA arrays for element indices.
          * \param elem_idx Logical element index.
-         * \param stride Stride between consecutive elements in the arrays.
+         * \param element_stride Stride between consecutive elements in the arrays.
          * \param out Output array of size nxe.
          */
         template <int nxe, typename I>
         static inline void load_ev(I **const SCCD_RESTRICT elements,
                                    const I elem_idx,
-                                   const ptrdiff_t stride,
+                                   const ptrdiff_t element_stride,
                                    I (&out)[nxe]) {
             for (int v = 0; v < nxe; ++v) {
-                out[v] = elements[v][elem_idx * stride];
+                out[v] = elements[v][elem_idx * element_stride];
             }
         }
 
@@ -326,7 +326,7 @@ namespace sccd {
                                                               const I (&ev)[F],
                                                               const I *const SCCD_RESTRICT second_idx,
                                                               I **const SCCD_RESTRICT second_elements,
-                                                              const ptrdiff_t second_stride) {
+                                                              const ptrdiff_t second_element_stride) {
             uint32_t remaining = bits;
             while (remaining) {
                 const int lane = sccd::ctz32(remaining);
@@ -337,7 +337,7 @@ namespace sccd {
                 if constexpr (S > 1) {
                     I sev[S];
                     for (int v = 0; v < S; ++v) {
-                        sev[v] = second_elements[v][jidx * second_stride];
+                        sev[v] = second_elements[v][jidx * second_element_stride];
                     }
                     for (int a = 0; a < F; ++a) {
                         for (int b = 0; b < S; ++b) {
@@ -365,7 +365,7 @@ namespace sccd {
                                                          const I (&ev)[N],
                                                          const I *const SCCD_RESTRICT idx,
                                                          I **const SCCD_RESTRICT elements,
-                                                         const ptrdiff_t stride) {
+                                                         const ptrdiff_t element_stride) {
             uint32_t remaining = bits;
             while (remaining) {
                 const int lane = sccd::ctz32(remaining);
@@ -373,7 +373,7 @@ namespace sccd {
 
                 const I jidx = idx[noffset + lane];
                 I sev[N];
-                load_ev<N>(elements, jidx, stride, sev);
+                load_ev<N>(elements, jidx, element_stride, sev);
                 if (shares_vertex<N, N>(ev, sev)) {
                     bits &= ~(uint32_t(1) << lane);
                 }
@@ -393,7 +393,7 @@ namespace sccd {
                                                              T **const SCCD_RESTRICT second_aabbs,
                                                              const I *const SCCD_RESTRICT second_idx,
                                                              I **const SCCD_RESTRICT second_elements,
-                                                             const ptrdiff_t second_stride,
+                                                             const ptrdiff_t second_element_stride,
                                                              const I (&ev)[F],
                                                              const ptrdiff_t begin,
                                                              const ptrdiff_t end) {
@@ -424,7 +424,7 @@ namespace sccd {
                     const I jidx = second_idx[j];
                     I sev[S];
                     for (int v = 0; v < S; ++v) {
-                        sev[v] = second_elements[v][jidx * second_stride];
+                        sev[v] = second_elements[v][jidx * second_element_stride];
                     }
                     share = shares_vertex<F, S>(ev, sev);
                 } else {
@@ -452,7 +452,7 @@ namespace sccd {
                                                                T **const SCCD_RESTRICT second_aabbs,
                                                                const I *const SCCD_RESTRICT second_idx,
                                                                I **const SCCD_RESTRICT second_elements,
-                                                               const ptrdiff_t second_stride,
+                                                               const ptrdiff_t second_element_stride,
                                                                const I (&ev)[F],
                                                                const ptrdiff_t begin,
                                                                const ptrdiff_t end,
@@ -485,7 +485,7 @@ namespace sccd {
                 if constexpr (S > 1) {
                     I sev[S];
                     for (int v = 0; v < S; ++v) {
-                        sev[v] = second_elements[v][jidx * second_stride];
+                        sev[v] = second_elements[v][jidx * second_element_stride];
                     }
                     for (int a = 0; a < F; ++a) {
                         for (int b = 0; b < S; ++b) {
@@ -535,12 +535,12 @@ namespace sccd {
      * \param first_count Number of AABBs in the first list.
      * \param first_aabbs SoA arrays [6][first_count].
      * \param first_idx Mapping from sorted position to element id for the first
-     * list. \param first_stride Stride between elements in the first element
+     * list. \param first_element_stride Stride between elements in the first element
      * arrays. \param first_elements SoA element-vertex arrays for the first list.
      * \param second_count Number of AABBs in the second list.
      * \param second_aabbs SoA arrays [6][second_count].
      * \param second_idx Mapping from sorted position to element id for the second
-     * list. \param second_stride Stride between elements in the second element
+     * list. \param second_element_stride Stride between elements in the second element
      * arrays. \param second_elements SoA element-vertex arrays for the second list.
      * \param ccdptr Prefix sum array of size first_count+1. On return:
      *               ccdptr[i+1]-ccdptr[i] = candidates for first i, and
@@ -552,12 +552,12 @@ namespace sccd {
                         const ptrdiff_t first_count,
                         T **const SCCD_RESTRICT first_aabbs,
                         I *const SCCD_RESTRICT first_idx,
-                        const ptrdiff_t first_stride,
+                        const ptrdiff_t first_element_stride,
                         I **const SCCD_RESTRICT first_elements,
                         const ptrdiff_t second_count,
                         T **const SCCD_RESTRICT second_aabbs,
                         I *const SCCD_RESTRICT second_idx,
-                        const ptrdiff_t second_stride,
+                        const ptrdiff_t second_element_stride,
                         I **const SCCD_RESTRICT second_elements,
                         ptrdiff_t *const SCCD_RESTRICT ccdptr,
                         const T *const SCCD_RESTRICT second_xmax_running) {
@@ -581,7 +581,7 @@ namespace sccd {
 
                 I ev[first_nxe];
                 for (int v = 0; v < first_nxe; v++) {
-                    ev[v] = first_elements[v][first_idxi * first_stride];
+                    ev[v] = first_elements[v][first_idxi * first_element_stride];
                 }
 
                 ptrdiff_t end = ni;
@@ -609,7 +609,7 @@ namespace sccd {
                                                                         first_aabbs[5][fi]);
 
                     bits = detail::mask_out_shared_two_lists_bits<first_nxe, second_nxe>(
-                        bits, noffset, ev, second_idx, second_elements, second_stride);
+                        bits, noffset, ev, second_idx, second_elements, second_element_stride);
 
                     count += sccd::popcount32(bits);
                     noffset += chunk_len;
@@ -632,33 +632,33 @@ namespace sccd {
      * \param first_count Number of AABBs in the first list.
      * \param first_aabbs SoA arrays [6][first_count].
      * \param first_idx Mapping from sorted position to element id for the first
-     * list. \param first_stride Stride between elements in the first element
+     * list. \param first_element_stride Stride between elements in the first element
      * arrays. \param first_elements SoA element-vertex arrays for the first list.
      * \param second_count Number of AABBs in the second list.
      * \param second_aabbs SoA arrays [6][second_count].
      * \param second_idx Mapping from sorted position to element id for the second
-     * list. \param second_stride Stride between elements in the second element
+     * list. \param second_element_stride Stride between elements in the second element
      * arrays. \param second_elements SoA element-vertex arrays for the second list.
      * \param ccdptr Prefix offsets from the count pass (size first_count+1).
-     * \param foverlap Output array (size ccdptr[first_count]) for first indices.
-     * \param noverlap Output array (size ccdptr[first_count]) for second indices.
+     * \param first_out Output array (size ccdptr[first_count]) for first indices.
+     * \param second_out Output array (size ccdptr[first_count]) for second indices.
      */
     template <int first_nxe, int second_nxe, typename T, typename I>
     void collect_overlaps(const int sort_axis,
                           const ptrdiff_t first_count,
                           T **const SCCD_RESTRICT first_aabbs,
                           I *const SCCD_RESTRICT first_idx,
-                          const ptrdiff_t first_stride,
+                          const ptrdiff_t first_element_stride,
                           I **SCCD_RESTRICT const first_elements,
                           const ptrdiff_t second_count,
                           T **const SCCD_RESTRICT second_aabbs,
                           I *const SCCD_RESTRICT second_idx,
-                          const ptrdiff_t second_stride,
+                          const ptrdiff_t second_element_stride,
                           I **SCCD_RESTRICT const second_elements,
                           const ptrdiff_t *const SCCD_RESTRICT ccdptr,
                           const T *const SCCD_RESTRICT second_xmax_running,
-                          I *SCCD_RESTRICT foverlap,
-                          I *SCCD_RESTRICT noverlap) {
+                          I *SCCD_RESTRICT first_out,
+                          I *SCCD_RESTRICT second_out) {
         const T *const SCCD_RESTRICT first_xmin = first_aabbs[sort_axis];
         const T *const SCCD_RESTRICT first_xmax = first_aabbs[3 + sort_axis];
         const T *const SCCD_RESTRICT second_xmin = second_aabbs[sort_axis];
@@ -680,12 +680,12 @@ namespace sccd {
                 const T fimax = first_xmax[fi];
                 const I first_idxi = first_idx[fi];
 
-                I *SCCD_RESTRICT const first_local_elements = &foverlap[ccdptr[fi]];
-                I *SCCD_RESTRICT const second_local_elements = &noverlap[ccdptr[fi]];
+                I *SCCD_RESTRICT const first_local_elements = &first_out[ccdptr[fi]];
+                I *SCCD_RESTRICT const second_local_elements = &second_out[ccdptr[fi]];
 
                 I ev[first_nxe];
                 for (int v = 0; v < first_nxe; v++) {
-                    ev[v] = first_elements[v][first_idxi * first_stride];
+                    ev[v] = first_elements[v][first_idxi * first_element_stride];
                 }
 
                 ptrdiff_t end = ni;
@@ -712,7 +712,7 @@ namespace sccd {
                                                                         first_aabbs[5][fi]);
 
                     bits = detail::mask_out_shared_two_lists_bits<first_nxe, second_nxe>(
-                        bits, noffset, ev, second_idx, second_elements, second_stride);
+                        bits, noffset, ev, second_idx, second_elements, second_element_stride);
 
                     while (bits) {
                         const int lane = sccd::ctz32(bits);
@@ -744,7 +744,7 @@ namespace sccd {
      * \param element_count Number of AABBs/elements.
      * \param aabbs SoA arrays [6][element_count].
      * \param idx Mapping from sorted position to element id.
-     * \param stride Stride between elements in the vertex arrays.
+     * \param element_stride Stride between elements in the vertex arrays.
      * \param elements SoA element-vertex arrays.
      * \param ccdptr Prefix sum array size element_count+1; filled as in the
      * two-lists case. \return True if any candidates exist.
@@ -754,7 +754,7 @@ namespace sccd {
                              const ptrdiff_t element_count,
                              T **const SCCD_RESTRICT aabbs,
                              I *const SCCD_RESTRICT idx,
-                             const ptrdiff_t stride,
+                             const ptrdiff_t element_stride,
                              I **const SCCD_RESTRICT elements,
                              ptrdiff_t *const SCCD_RESTRICT ccdptr) {
         const T *const SCCD_RESTRICT xmin = aabbs[sort_axis];
@@ -773,7 +773,7 @@ namespace sccd {
 
                 I ev[nxe];
                 for (int v = 0; v < nxe; v++) {
-                    ev[v] = elements[v][idxi * stride];
+                    ev[v] = elements[v][idxi * element_stride];
                 }
 
                 ptrdiff_t noffset = fi + 1;
@@ -801,7 +801,7 @@ namespace sccd {
                                                                         aabbs[4][fi],
                                                                         aabbs[5][fi]);
 
-                    bits = detail::mask_out_shared_self_bits<nxe>(bits, noffset, ev, idx, elements, stride);
+                    bits = detail::mask_out_shared_self_bits<nxe>(bits, noffset, ev, idx, elements, element_stride);
 
                     count += sccd::popcount32(bits);
                     noffset += chunk_len;
@@ -824,22 +824,22 @@ namespace sccd {
      * \param element_count Number of elements/AABBs.
      * \param aabbs SoA arrays [6][element_count].
      * \param idx Mapping from sorted position to element id.
-     * \param stride Stride between elements in the vertex arrays.
+     * \param element_stride Stride between elements in the vertex arrays.
      * \param elements SoA element-vertex arrays.
      * \param ccdptr Prefix offsets from the self count pass (size element_count+1).
-     * \param foverlap Output array of first indices.
-     * \param noverlap Output array of second indices.
+     * \param first_out Output array of first indices.
+     * \param second_out Output array of second indices.
      */
     template <int nxe, typename T, typename I>
     void collect_self_overlaps(const int sort_axis,
                                const ptrdiff_t element_count,
                                T **const SCCD_RESTRICT aabbs,
                                I *const SCCD_RESTRICT idx,
-                               const ptrdiff_t stride,
+                               const ptrdiff_t element_stride,
                                I **const elements,
                                const ptrdiff_t *const SCCD_RESTRICT ccdptr,
-                               I *SCCD_RESTRICT foverlap,
-                               I *SCCD_RESTRICT noverlap) {
+                               I *SCCD_RESTRICT first_out,
+                               I *SCCD_RESTRICT second_out) {
         const T *const SCCD_RESTRICT xmin = aabbs[sort_axis];
         const T *const SCCD_RESTRICT xmax = aabbs[3 + sort_axis];
 
@@ -852,13 +852,13 @@ namespace sccd {
                 const T fimax = xmax[fi];
                 const I idxi = idx[fi];
 
-                I *SCCD_RESTRICT const first_local_elements = &foverlap[ccdptr[fi]];
+                I *SCCD_RESTRICT const first_local_elements = &first_out[ccdptr[fi]];
 
-                I *SCCD_RESTRICT const second_local_elements = &noverlap[ccdptr[fi]];
+                I *SCCD_RESTRICT const second_local_elements = &second_out[ccdptr[fi]];
 
                 I ev[nxe];
                 for (int v = 0; v < nxe; v++) {
-                    ev[v] = elements[v][idxi * stride];
+                    ev[v] = elements[v][idxi * element_stride];
                 }
 
                 ptrdiff_t noffset = fi + 1;
@@ -884,7 +884,7 @@ namespace sccd {
                                                                         aabbs[4][fi],
                                                                         aabbs[5][fi]);
 
-                    bits = detail::mask_out_shared_self_bits<nxe>(bits, noffset, ev, idx, elements, stride);
+                    bits = detail::mask_out_shared_self_bits<nxe>(bits, noffset, ev, idx, elements, element_stride);
 
                     while (bits) {
                         const int lane = sccd::ctz32(bits);

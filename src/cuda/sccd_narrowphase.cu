@@ -883,7 +883,7 @@ namespace sccd {
         template <typename T, typename Vec4, typename I>
         static inline __device__ void load_query_vf(const int qid,
                                                     const I* const SCCD_RESTRICT voverlap,
-                                                    const I* const SCCD_RESTRICT foverlap,
+                                                    const I* const SCCD_RESTRICT first_out,
                                                     T** const SCCD_RESTRICT sp,
                                                     T** const SCCD_RESTRICT ep,
                                                     const size_t element_stride,
@@ -895,7 +895,7 @@ namespace sccd {
                                                     Vec4& ey,
                                                     Vec4& ez) {
             const I va = voverlap[qid];
-            const I vb = foverlap[qid];
+            const I vb = first_out[qid];
 
             const auto i0 = elements[0][vb * element_stride];
             const auto i1 = elements[1][vb * element_stride];
@@ -1992,7 +1992,7 @@ namespace sccd {
             // never come close, and the multilinear hull over the root is exact,
             // so if the root does not contain the origin then no subbox of it
             // does either -- all 128 evaluations are spent proving something one
-            // evaluation already proved. The zero-stride kernel has always tested
+            // evaluation already proved. The earliest-impact kernel has always tested
             // the root first; this one never has.
             //
             // Reject only, deliberately. The root also satisfies the acceptance
@@ -2026,7 +2026,7 @@ namespace sccd {
             // 803 -> 871 ms on armadillo edge-edge, and was kept out on that
             // basis -- a time measurement, on a baseline since shown to swing
             // 28-48%, taken before anyone knew the path costs thousands of boxes
-            // per query. Re-measure with box counts, split by stride.
+            // per query. Re-measure with box counts, split by output mode.
             const int ti = 0;
             const int ui = 0;
             const int vi = 0;
@@ -2403,8 +2403,8 @@ namespace sccd {
             if (noverlaps == 0) return 0;
             assert(d_toi != nullptr);
 
-            // toi length: 1 when stride==0 (all candidates share toi[0]),
-            //             noverlaps when stride==1 (one toi per candidate).
+            // toi length: 1 for ToiOutput::Earliest (all candidates share toi[0]),
+            //             noverlaps for ToiOutput::PerPair (one per candidate).
             const size_t toi_n = (toi_output == ToiOutput::Earliest) ? 1 : noverlaps;
 
             // SCCD_READ_ENV stringifies the variable name, so this used to read a
@@ -2607,7 +2607,7 @@ namespace sccd {
 
                     // Pass 1: seed-driven.
                     //
-                    // toi_output == ToiOutput::PerPair runs one thread per query, like stride 0,
+                    // ToiOutput::PerPair runs one thread per query, as Earliest does,
                     // with a per-thread bound and a per-query output slot.
                     //
                     // It used to give each query a whole block. That is bound by
@@ -2711,7 +2711,7 @@ namespace sccd {
                         // relaunched against the same stack until it emptied; with
                         // two buffers the unread remainder would be discarded at
                         // the swap instead, so the cap has to go. One thread per
-                        // entry for the zero-stride kernel; the block-per-query
+                        // entry for the earliest-impact kernel; the block-per-query
                         // kernel claims up to SCCD_NP_DRAIN_PER_BLOCK each.
                         long long need = (toi_output == ToiOutput::Earliest || s1_thread_per_query)
                                              ? ((long long)h_g_top + N - 1) / N
@@ -2819,7 +2819,7 @@ namespace sccd {
                 SCCD_CHECK_CUDA(cudaMemcpyFromSymbol(&act, g_np_active_sum, sizeof(act)));
                 SCCD_CHECK_CUDA(cudaMemcpyFromSymbol(&iters, g_np_iters, sizeof(iters)));
                 fprintf(stderr,
-                        "sccd-np-active stride=%d threads_per_block=%d iters=%llu mean_active=%.2f occupancy=%.1f%%\n",
+                        "sccd-np-active per_pair=%d threads_per_block=%d iters=%llu mean_active=%.2f occupancy=%.1f%%\n",
                         toi_output, SCCD_NP_THREADS_PER_BLOCK, iters,
                         iters ? (double)act / (double)iters : 0.0,
                         iters ? 100.0 * (double)act / ((double)iters * SCCD_NP_THREADS_PER_BLOCK) : 0.0);
@@ -2982,7 +2982,7 @@ namespace sccd {
                             // Geometric data
                             T** const SCCD_RESTRICT v0,
                             T** const SCCD_RESTRICT v1,
-                            const size_t edge_stride,
+                            const size_t element_stride,
                             I** const SCCD_RESTRICT edges,
                             // Output
                             const T max_toi,
@@ -2992,20 +2992,20 @@ namespace sccd {
                             const ToiOutput toi_output) {
             if (narrow_phase_mode_is_tight(narrow_phase_mode())) {
                 return narrow_phase_generic<false, true, T, I>(
-                    noverlaps, overlap0, overlap1, v0, v1, edge_stride, edges, max_toi, toi, max_depth, tol, toi_output);
+                    noverlaps, overlap0, overlap1, v0, v1, element_stride, edges, max_toi, toi, max_depth, tol, toi_output);
             }
             return narrow_phase_generic<false, false, T, I>(
-                noverlaps, overlap0, overlap1, v0, v1, edge_stride, edges, max_toi, toi, max_depth, tol, toi_output);
+                noverlaps, overlap0, overlap1, v0, v1, element_stride, edges, max_toi, toi, max_depth, tol, toi_output);
         }
 
         template <typename T, typename I>
         int narrow_phase_vf(const size_t noverlaps,
-                            const I* const SCCD_RESTRICT voveralp,
-                            const I* const SCCD_RESTRICT foveralp,
+                            const I* const SCCD_RESTRICT voverlap,
+                            const I* const SCCD_RESTRICT first_out,
                             // Geometric data
                             T** const SCCD_RESTRICT v0,
                             T** const SCCD_RESTRICT v1,
-                            const size_t face_stride,
+                            const size_t element_stride,
                             I** const SCCD_RESTRICT faces,
                             const T max_toi,
                             T* const SCCD_RESTRICT toi,
@@ -3014,10 +3014,10 @@ namespace sccd {
                             const ToiOutput toi_output) {
             if (narrow_phase_mode_is_tight(narrow_phase_mode())) {
                 return narrow_phase_generic<true, true, T, I>(
-                    noverlaps, voveralp, foveralp, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_output);
+                    noverlaps, voverlap, first_out, v0, v1, element_stride, faces, max_toi, toi, max_depth, tol, toi_output);
             }
             return narrow_phase_generic<true, false, T, I>(
-                noverlaps, voveralp, foveralp, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_output);
+                noverlaps, voverlap, first_out, v0, v1, element_stride, faces, max_toi, toi, max_depth, tol, toi_output);
         }
 
         template <typename T>
@@ -3056,8 +3056,8 @@ namespace sccd {
 
 #define SCCD_NP_NARROW_PHASE_VF(T, I)                                                   \
     template int sccd::device::narrow_phase_vf<T, I>(const size_t noverlaps,                \
-                                                          const I* const SCCD_RESTRICT voveralp, \
-                                                          const I* const SCCD_RESTRICT foveralp, \
+                                                          const I* const SCCD_RESTRICT voverlap, \
+                                                          const I* const SCCD_RESTRICT first_out, \
                                                           T** const SCCD_RESTRICT v0,            \
                                                           T** const SCCD_RESTRICT v1,            \
                                                           const size_t element_stride,           \

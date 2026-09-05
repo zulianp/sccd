@@ -15,7 +15,7 @@ namespace sccd {
                                                           const I (&ev)[F],
                                                           const I *const SCCD_RESTRICT second_idx,
                                                           I **const SCCD_RESTRICT second_elements,
-                                                          const ptrdiff_t second_stride,
+                                                          const ptrdiff_t second_element_stride,
                                                           const I *const SCCD_RESTRICT cellidx) {
             for (ptrdiff_t lane = 0; lane < chunk_len; ++lane) {
                 if (dmask[lane]) continue;
@@ -26,7 +26,7 @@ namespace sccd {
                 if constexpr (S > 1) {
                     I sev[S];
                     for (int v = 0; v < S; ++v) {
-                        sev[v] = second_elements[v][jidx * second_stride];
+                        sev[v] = second_elements[v][jidx * second_element_stride];
                     }
                     for (int a = 0; a < F; ++a) {
                         for (int b = 0; b < S; ++b) {
@@ -48,7 +48,7 @@ namespace sccd {
                                                                   T **const SCCD_RESTRICT second_aabbs,
                                                                   const I *const SCCD_RESTRICT second_idx,
                                                                   I **const SCCD_RESTRICT second_elements,
-                                                                  const ptrdiff_t second_stride,
+                                                                  const ptrdiff_t second_element_stride,
                                                                   const I (&ev)[F],
                                                                   const ptrdiff_t begin_k,
                                                                   const ptrdiff_t end_k,
@@ -81,7 +81,7 @@ namespace sccd {
                     const I jidx = second_idx[j];
                     I sev[S];
                     for (int v = 0; v < S; ++v) {
-                        sev[v] = second_elements[v][jidx * second_stride];
+                        sev[v] = second_elements[v][jidx * second_element_stride];
                     }
                     share = shares_vertex<F, S>(ev, sev);
                 } else {
@@ -109,7 +109,7 @@ namespace sccd {
                                                                     T **const SCCD_RESTRICT second_aabbs,     // 3
                                                                     const I *const SCCD_RESTRICT second_idx,  // 4
                                                                     I **const SCCD_RESTRICT second_elements,  // 5
-                                                                    const ptrdiff_t second_stride,            // 6
+                                                                    const ptrdiff_t second_element_stride,            // 6
                                                                     const I (&ev)[F],                         // 7
                                                                     const ptrdiff_t begin_k,                  // 8
                                                                     const ptrdiff_t end_k,                    // 9
@@ -144,7 +144,7 @@ namespace sccd {
                 if constexpr (S > 1) {
                     I sev[S];
                     for (int v = 0; v < S; ++v) {
-                        sev[v] = second_elements[v][jidx * second_stride];
+                        sev[v] = second_elements[v][jidx * second_element_stride];
                     }
                     for (int a = 0; a < F; ++a) {
                         for (int b = 0; b < S; ++b) {
@@ -300,12 +300,12 @@ namespace sccd {
                              const ptrdiff_t first_count,
                              T **const SCCD_RESTRICT first_aabbs,
                              I *const SCCD_RESTRICT first_idx,
-                             const ptrdiff_t first_stride,
+                             const ptrdiff_t first_element_stride,
                              I **const SCCD_RESTRICT first_elements,
                              const ptrdiff_t second_count,
                              T **const SCCD_RESTRICT second_aabbs,
                              I *const SCCD_RESTRICT second_idx,
-                             const ptrdiff_t second_stride,
+                             const ptrdiff_t second_element_stride,
                              I **const SCCD_RESTRICT second_elements,
                              // Cell list
                              const int cell_list_axis,
@@ -337,7 +337,7 @@ namespace sccd {
 
                 I ev[first_nxe];
                 for (int v = 0; v < first_nxe; v++) {
-                    ev[v] = first_elements[v][first_idxi * first_stride];
+                    ev[v] = first_elements[v][first_idxi * first_element_stride];
                 }
 
                 ptrdiff_t count = 0;
@@ -369,7 +369,7 @@ namespace sccd {
                                                                                                        second_aabbs,
                                                                                                        second_idx,
                                                                                                        second_elements,
-                                                                                                       second_stride,
+                                                                                                       second_element_stride,
                                                                                                        ev,
                                                                                                        begin_k,
                                                                                                        end_k,
@@ -424,7 +424,7 @@ namespace sccd {
                                                    dmask);
 
                         detail::cell_mask_out_shared_two_lists<first_nxe, second_nxe, T, I>(
-                            dmask, chunk_len, begin_k, ev, second_idx, second_elements, second_stride, cellidx);
+                            dmask, chunk_len, begin_k, ev, second_idx, second_elements, second_element_stride, cellidx);
 
                         for (ptrdiff_t lane = 0; lane < chunk_len; ++lane) {
                             count += dmask[lane] ? 0 : 1;
@@ -450,12 +450,12 @@ namespace sccd {
                                const ptrdiff_t first_count,
                                T **const SCCD_RESTRICT first_aabbs,
                                I *const SCCD_RESTRICT first_idx,
-                               const ptrdiff_t first_stride,
+                               const ptrdiff_t first_element_stride,
                                I **const SCCD_RESTRICT first_elements,
                                const ptrdiff_t second_count,
                                T **const SCCD_RESTRICT second_aabbs,
                                I *const SCCD_RESTRICT second_idx,
-                               const ptrdiff_t second_stride,
+                               const ptrdiff_t second_element_stride,
                                I **const SCCD_RESTRICT second_elements,
                                // Cell list
                                const int cell_list_axis,
@@ -465,8 +465,8 @@ namespace sccd {
                                const I *const SCCD_RESTRICT cellptr,
                                const I *const SCCD_RESTRICT cellidx,
                                const ptrdiff_t *const SCCD_RESTRICT ccdptr,
-                               I *SCCD_RESTRICT foverlap,
-                               I *SCCD_RESTRICT noverlap) {
+                               I *SCCD_RESTRICT first_out,
+                               I *SCCD_RESTRICT second_out) {
         const T *const SCCD_RESTRICT first_xmin = first_aabbs[sort_axis];
         const T *const SCCD_RESTRICT first_xmax = first_aabbs[3 + sort_axis];
         const T *const SCCD_RESTRICT second_xmin = second_aabbs[sort_axis];
@@ -486,8 +486,8 @@ namespace sccd {
                 const T fimax = first_xmax[fi];
                 const I first_idxi = first_idx[fi];
 
-                I *SCCD_RESTRICT const first_local_elements = &foverlap[ccdptr[fi]];
-                I *SCCD_RESTRICT const second_local_elements = &noverlap[ccdptr[fi]];
+                I *SCCD_RESTRICT const first_local_elements = &first_out[ccdptr[fi]];
+                I *SCCD_RESTRICT const second_local_elements = &second_out[ccdptr[fi]];
 
                 ptrdiff_t cell_start =
                     std::max((int)0, (int)(floor(nextafter_down((cell_xmin[fi] - cell_min) / cell_size) - 1)));
@@ -496,7 +496,7 @@ namespace sccd {
 
                 I ev[first_nxe];
                 for (int v = 0; v < first_nxe; v++) {
-                    ev[v] = first_elements[v][first_idxi * first_stride];
+                    ev[v] = first_elements[v][first_idxi * first_element_stride];
                 }
 
                 ptrdiff_t count = 0;
@@ -530,7 +530,7 @@ namespace sccd {
                         second_aabbs,                    // 3
                         second_idx,                      // 4
                         second_elements,                 // 5
-                        second_stride,                   // 6
+                        second_element_stride,                   // 6
                         ev,                              // 7
                         begin_k,                         // 8
                         end_k,                           // 9
@@ -548,12 +548,12 @@ namespace sccd {
                                     const ptrdiff_t first_count,
                                     T **const SCCD_RESTRICT first_aabbs,
                                     I *const SCCD_RESTRICT first_idx,
-                                    const ptrdiff_t first_stride,
+                                    const ptrdiff_t first_element_stride,
                                     I **const SCCD_RESTRICT first_elements,
                                     const ptrdiff_t second_count,
                                     T **const SCCD_RESTRICT second_aabbs,
                                     I *const SCCD_RESTRICT second_idx,
-                                    const ptrdiff_t second_stride,
+                                    const ptrdiff_t second_element_stride,
                                     I **const SCCD_RESTRICT second_elements,
                                     const ptrdiff_t ncells,
                                     const T cell_min,
@@ -605,7 +605,7 @@ namespace sccd {
 
                 I ev[first_nxe];
                 for (int v = 0; v < first_nxe; v++) {
-                    ev[v] = first_elements[v][first_idxi * first_stride];
+                    ev[v] = first_elements[v][first_idxi * first_element_stride];
                 }
 
                 ptrdiff_t end = ni;
@@ -618,7 +618,7 @@ namespace sccd {
 
                 if (end - ni < SCCD_AABB_DISJOINT_NOVECTORIZE_THRESHOLD) {
                     ptrdiff_t count = detail::scalar_count_range_two_lists<first_nxe, second_nxe>(
-                        first_aabbs, fi, second_aabbs, second_idx, second_elements, second_stride, ev, ni, end);
+                        first_aabbs, fi, second_aabbs, second_idx, second_elements, second_element_stride, ev, ni, end);
                     ccdptr[fi + 1] = count;
                     continue;
                 }
@@ -643,7 +643,7 @@ namespace sccd {
                                                                dmask);
 
                     detail::mask_out_shared_two_lists<first_nxe, second_nxe>(
-                        dmask, chunk_len, noffset, ev, second_idx, second_elements, second_stride);
+                        dmask, chunk_len, noffset, ev, second_idx, second_elements, second_element_stride);
 
                     for (ptrdiff_t lane = 0; lane < chunk_len; ++lane) {
                         count += dmask[lane] ? 0 : 1;

@@ -39,11 +39,11 @@ namespace sccd {
 
     template <typename T, typename I>
     int narrow_phase_vq(const size_t noverlaps,
-                        const I *const SCCD_RESTRICT voveralp,
-                        const I *const SCCD_RESTRICT qoveralp,
+                        const I *const SCCD_RESTRICT voverlap,
+                        const I *const SCCD_RESTRICT qoverlap,
                         T **const SCCD_RESTRICT v0,
                         T **const SCCD_RESTRICT v1,
-                        const size_t quad_stride,
+                        const size_t element_stride,
                         I **const SCCD_RESTRICT quads,
                         const T max_toi,
                         T *const SCCD_RESTRICT toi,
@@ -97,13 +97,13 @@ namespace sccd {
                     toi[i] = max_toi;
                 }
 
-                const I vi = voveralp[i];
-                const I qi = qoveralp[i];
+                const I vi = voverlap[i];
+                const I qi = qoverlap[i];
 
-                const I nodes[4] = {quads[0][qi * quad_stride],
-                                    quads[1][qi * quad_stride],
-                                    quads[2][qi * quad_stride],
-                                    quads[3][qi * quad_stride]};
+                const I nodes[4] = {quads[0][qi * element_stride],
+                                    quads[1][qi * element_stride],
+                                    quads[2][qi * element_stride],
+                                    quads[3][qi * element_stride]};
 
                 const T_HP sv[3] = {v0[0][vi], v0[1][vi], v0[2][vi]};
                 const T_HP ev[3] = {v1[0][vi], v1[1][vi], v1[2][vi]};

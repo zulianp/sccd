@@ -32,12 +32,12 @@ namespace sccd {
                                         const ptrdiff_t first_count,
                                         T** const SCCD_RESTRICT first_aabbs,
                                         I* const SCCD_RESTRICT first_idx,
-                                        const ptrdiff_t first_stride,
+                                        const ptrdiff_t first_element_stride,
                                         I** const SCCD_RESTRICT first_elements,
                                         const ptrdiff_t second_count,
                                         T** const SCCD_RESTRICT second_aabbs,
                                         I* const SCCD_RESTRICT second_idx,
-                                        const ptrdiff_t second_stride,
+                                        const ptrdiff_t second_element_stride,
                                         I** const SCCD_RESTRICT second_elements,
                                         ptrdiff_t* const SCCD_RESTRICT ccdptr,
                                         const I* const SCCD_RESTRICT starts);
@@ -49,17 +49,17 @@ namespace sccd {
                                           const ptrdiff_t first_count,
                                           T** const SCCD_RESTRICT first_aabbs,
                                           I* const SCCD_RESTRICT first_idx,
-                                          const ptrdiff_t first_stride,
+                                          const ptrdiff_t first_element_stride,
                                           I** SCCD_RESTRICT const first_elements,
                                           const ptrdiff_t second_count,
                                           T** const SCCD_RESTRICT second_aabbs,
                                           I* const SCCD_RESTRICT second_idx,
-                                          const ptrdiff_t second_stride,
+                                          const ptrdiff_t second_element_stride,
                                           I** SCCD_RESTRICT const second_elements,
                                           const ptrdiff_t* const SCCD_RESTRICT ccdptr,
                                           const I* const SCCD_RESTRICT starts,
-                                          I* SCCD_RESTRICT foverlap,
-                                          I* SCCD_RESTRICT noverlap);
+                                          I* SCCD_RESTRICT first_out,
+                                          I* SCCD_RESTRICT second_out);
 
         // ---- count_overlaps_with_starts_kernel  (from sccd_broadphase.cu)
 
@@ -68,12 +68,12 @@ namespace sccd {
                                                           const ptrdiff_t first_count,
                                                           T** const SCCD_RESTRICT first_aabbs,
                                                           I* const SCCD_RESTRICT first_idx,
-                                                          const ptrdiff_t first_stride,
+                                                          const ptrdiff_t first_element_stride,
                                                           I** const SCCD_RESTRICT first_elements,
                                                           const ptrdiff_t second_count,
                                                           T** const SCCD_RESTRICT second_aabbs,
                                                           I* const SCCD_RESTRICT second_idx,
-                                                          const ptrdiff_t second_stride,
+                                                          const ptrdiff_t second_element_stride,
                                                           I** const SCCD_RESTRICT second_elements,
                                                           ptrdiff_t* const SCCD_RESTRICT ccdptr,
                                                           const I* const SCCD_RESTRICT starts) {
@@ -90,12 +90,12 @@ namespace sccd {
                                                                                     first_count,
                                                                                     first_aabbs,
                                                                                     first_idx,
-                                                                                    first_stride,
+                                                                                    first_element_stride,
                                                                                     first_elements,
                                                                                     second_count,
                                                                                     second_aabbs,
                                                                                     second_idx,
-                                                                                    second_stride,
+                                                                                    second_element_stride,
                                                                                     second_elements);
         }
 
@@ -106,12 +106,12 @@ namespace sccd {
                                         const ptrdiff_t first_count,
                                         T** const SCCD_RESTRICT first_aabbs,
                                         I* const SCCD_RESTRICT first_idx,
-                                        const ptrdiff_t first_stride,
+                                        const ptrdiff_t first_element_stride,
                                         I** const SCCD_RESTRICT first_elements,
                                         const ptrdiff_t second_count,
                                         T** const SCCD_RESTRICT second_aabbs,
                                         I* const SCCD_RESTRICT second_idx,
-                                        const ptrdiff_t second_stride,
+                                        const ptrdiff_t second_element_stride,
                                         I** const SCCD_RESTRICT second_elements,
                                         ptrdiff_t* const SCCD_RESTRICT ccdptr,
                                         const I* const SCCD_RESTRICT starts) {
@@ -123,12 +123,12 @@ namespace sccd {
                                                                                             first_count,
                                                                                             first_aabbs,
                                                                                             first_idx,
-                                                                                            first_stride,
+                                                                                            first_element_stride,
                                                                                             first_elements,
                                                                                             second_count,
                                                                                             second_aabbs,
                                                                                             second_idx,
-                                                                                            second_stride,
+                                                                                            second_element_stride,
                                                                                             second_elements,
                                                                                             ccdptr,
                                                                                             starts);
@@ -151,17 +151,17 @@ namespace sccd {
                                                             const ptrdiff_t first_count,
                                                             T** const SCCD_RESTRICT first_aabbs,
                                                             I* const SCCD_RESTRICT first_idx,
-                                                            const ptrdiff_t first_stride,
+                                                            const ptrdiff_t first_element_stride,
                                                             I** SCCD_RESTRICT const first_elements,
                                                             const ptrdiff_t second_count,
                                                             T** const SCCD_RESTRICT second_aabbs,
                                                             I* const SCCD_RESTRICT second_idx,
-                                                            const ptrdiff_t second_stride,
+                                                            const ptrdiff_t second_element_stride,
                                                             I** SCCD_RESTRICT const second_elements,
                                                             const ptrdiff_t* const SCCD_RESTRICT ccdptr,
                                                             const I* const SCCD_RESTRICT starts,
-                                                            I* SCCD_RESTRICT foverlap,
-                                                            I* SCCD_RESTRICT noverlap) {
+                                                            I* SCCD_RESTRICT first_out,
+                                                            I* SCCD_RESTRICT second_out) {
             ptrdiff_t fi = blockIdx.x * blockDim.x + threadIdx.x;
             if (fi >= first_count) return;
             const ptrdiff_t expected_count = ccdptr[fi + 1] - ccdptr[fi];
@@ -175,16 +175,16 @@ namespace sccd {
                                                                      first_count,
                                                                      first_aabbs,
                                                                      first_idx,
-                                                                     first_stride,
+                                                                     first_element_stride,
                                                                      first_elements,
                                                                      second_count,
                                                                      second_aabbs,
                                                                      second_idx,
-                                                                     second_stride,
+                                                                     second_element_stride,
                                                                      second_elements,
                                                                      ccdptr,
-                                                                     foverlap,
-                                                                     noverlap);
+                                                                     first_out,
+                                                                     second_out);
         }
 
         // ---- collect_overlaps_with_starts  (from sccd_broadphase.cu)
@@ -194,17 +194,17 @@ namespace sccd {
                                           const ptrdiff_t first_count,
                                           T** const SCCD_RESTRICT first_aabbs,
                                           I* const SCCD_RESTRICT first_idx,
-                                          const ptrdiff_t first_stride,
+                                          const ptrdiff_t first_element_stride,
                                           I** SCCD_RESTRICT const first_elements,
                                           const ptrdiff_t second_count,
                                           T** const SCCD_RESTRICT second_aabbs,
                                           I* const SCCD_RESTRICT second_idx,
-                                          const ptrdiff_t second_stride,
+                                          const ptrdiff_t second_element_stride,
                                           I** SCCD_RESTRICT const second_elements,
                                           const ptrdiff_t* const SCCD_RESTRICT ccdptr,
                                           const I* const SCCD_RESTRICT starts,
-                                          I* SCCD_RESTRICT foverlap,
-                                          I* SCCD_RESTRICT noverlap) {
+                                          I* SCCD_RESTRICT first_out,
+                                          I* SCCD_RESTRICT second_out) {
             SCCD_CUDA_LAST_ERROR();
 
             dim3 block(SCCD_BP_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
@@ -213,17 +213,17 @@ namespace sccd {
                                                                                               first_count,
                                                                                               first_aabbs,
                                                                                               first_idx,
-                                                                                              first_stride,
+                                                                                              first_element_stride,
                                                                                               first_elements,
                                                                                               second_count,
                                                                                               second_aabbs,
                                                                                               second_idx,
-                                                                                              second_stride,
+                                                                                              second_element_stride,
                                                                                               second_elements,
                                                                                               ccdptr,
                                                                                               starts,
-                                                                                              foverlap,
-                                                                                              noverlap);
+                                                                                              first_out,
+                                                                                              second_out);
 
             SCCD_CUDA_LAST_ERROR();
         }
