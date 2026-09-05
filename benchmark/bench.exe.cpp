@@ -657,6 +657,16 @@ namespace {
         return smesh::EXECUTION_SPACE_HOST;
     }
 
+    // The mode name a row carries has to say which processor produced it, or a
+    // sweep that ran both concatenates into a CSV where host and device rows are
+    // indistinguishable and get averaged together. ti_oracle already names them
+    // this way; this matches it.
+    std::string benchmark_mode_name(const smesh::ExecutionSpace execution_space) {
+        const std::string base = sccd::narrow_phase_mode_name(sccd::narrow_phase_mode());
+        return (execution_space == smesh::EXECUTION_SPACE_DEVICE) ? ("device-" + base)
+                                                                  : base;
+    }
+
     CCDRun make_ccd_run(const MeshPair& meshes, const smesh::ExecutionSpace execution_space) {
         CCDRun run;
         run.ccd = sccd::CCD<scalar_t>::create(meshes.t0, execution_space);
@@ -1071,7 +1081,7 @@ namespace {
             toi_med_early = toi_early[toi_early.size() / 2];
         }
 
-        std::cout << dataset << ',' << sccd::narrow_phase_mode_name(sccd::narrow_phase_mode()) << ','
+        std::cout << dataset << ',' << benchmark_mode_name(benchmark_execution_space()) << ','
                   << case_file.key << ',' << (case_file.is_vf ? "vf" : "ee") << ',' << narrow_queries
                   << ',' << prep_ms << ',' << broad_ms << ',' << narrow_ms << ',' << query_narrow_ms << ','
                   << fp_count << ',' << fn_count << ',' << broadphase.false_positives << ',' << broad_fn_count
