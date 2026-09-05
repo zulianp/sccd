@@ -92,6 +92,29 @@ OUT_DIR="${OUT_DIR:-"${BENCHMARK_DIR}/sweep"}"
 SCCD_BENCH="${SCCD_BENCH:-"${BUILD_DIR}/sccd_bench"}"
 TI_ORACLE="${SCCD_TI_ORACLE:-"${BUILD_DIR}/ti_oracle"}"
 
+# The driver converts a scene's PLY frames to raw arrays the first time it needs
+# them, by shelling out to smesh's db_to_raw. That tool is not on PATH inside a
+# Slurm job, and a scene whose frames_raw/ does not already exist then produces a
+# chunk with a header and no rows -- which merges silently into an otherwise
+# healthy CSV. Find it the way bench.sh does and pass it into the job.
+if [[ -z "${SCCD_DB_TO_RAW:-}" ]]; then
+    if command -v db_to_raw >/dev/null 2>&1; then
+        SCCD_DB_TO_RAW="$(command -v db_to_raw)"
+    else
+        for cmake_dir in "${SCCD_SMESH_DIR:-}" "${smesh_DIR:-}" \
+                "$(sed -n 's/^smesh_DIR[^=]*=//p' "${BUILD_DIR}/CMakeCache.txt" \
+                   2>/dev/null | tail -n 1)"; do
+            [[ -n "${cmake_dir}" ]] || continue
+            candidate="${cmake_dir%/}/../../../bin/db_to_raw"
+            if [[ -x "${candidate}" ]]; then
+                SCCD_DB_TO_RAW="$(cd "$(dirname "${candidate}")" && pwd)/db_to_raw"
+                break
+            fi
+        done
+    fi
+fi
+export SCCD_DB_TO_RAW="${SCCD_DB_TO_RAW:-}"
+
 if [[ ! -x "${SCCD_BENCH}" ]]; then
     printf 'error: %s is not executable; build the sccd_bench target first\n' \
         "${SCCD_BENCH}" >&2
@@ -288,6 +311,17 @@ run_chunk_body() {
         SCCD_BENCH_CASE_END="${end}" \
             "${SCCD_BENCH}" "${DATA_DIR}" "${scene}" | tail -n +2 >> "${tmp}"
     done
+
+    # A chunk that produced no rows is a failure, not an empty result. The driver
+    # writes its header before it touches a case, so a run where every case
+    # failed still leaves a plausible-looking file -- and a header-only file is
+    # non-empty, so it would be counted as done, never retried, and merged
+    # silently into an otherwise healthy CSV. Refuse to publish it.
+    if [[ "$(wc -l < "${tmp}")" -le 1 ]]; then
+        printf 'error: %s produced no rows; leaving it unfinished\n' "${out}" >&2
+        rm -f "${tmp}"
+        return 1
+    fi
     mv "${tmp}" "${out}"
 }
 
@@ -338,6 +372,7 @@ flush_pack() {
             --error="${OUT_DIR}/logs/${pack_name}.err" \
             --wrap="$(declare -f run_chunk_body); \
                      export SCCD_BENCH='${SCCD_BENCH}' DATA_DIR='${DATA_DIR}' MODES='${MODES}'; \
+                     export SCCD_DB_TO_RAW='${SCCD_DB_TO_RAW}'; \
                      export OMP_NUM_THREADS=\"\$(nproc)\"; \
                      header() { '${SCCD_BENCH}' --header; }; \
                      ${body}"; then
