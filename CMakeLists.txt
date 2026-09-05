@@ -132,6 +132,7 @@ if(SCCD_ENABLE_SMESH)
 endif()
 
 target_link_libraries(sccd PUBLIC ${SCCD_DEP_LIBRARIES})
+target_link_libraries(sccd PRIVATE ${SCCD_DEP_PRIVATE_LIBRARIES})
 
 include(GNUInstallDirs)
 
@@ -141,7 +142,17 @@ configure_file("${CMAKE_CURRENT_SOURCE_DIR}/src/core/sccd_config.hpp.in" "${CMAK
 # header goes on the path, in the build tree and after install alike. The
 # `sccd_` prefix plus one descriptive name per file keeps basenames unique,
 # which is what makes flat includes safe.
-set(_sccd_header_dirs api core broadphase narrowphase cuda integrations/smesh)
+# One entry per installed header directory. Each becomes an INSTALL_INTERFACE
+# include path on the exported target, so a directory listed here that does not
+# exist in the install tree makes find_package(SCCD) fail outright -- which is
+# what happens if cuda is listed in a build that installs no .cuh.
+set(_sccd_header_dirs api core broadphase narrowphase)
+if(SCCD_ENABLE_CUDA)
+  list(APPEND _sccd_header_dirs cuda)
+endif()
+if(SCCD_ENABLE_SMESH)
+  list(APPEND _sccd_header_dirs integrations/smesh)
+endif()
 set(_sccd_build_includes
     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)

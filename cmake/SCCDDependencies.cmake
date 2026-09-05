@@ -53,11 +53,16 @@ if(SCCD_ENABLE_CUDA)
         include_directories($ENV{CRAY_CUDATOOLKIT_INCLUDE_OPTS})
     endif()
 
-    #https://github.com/NVIDIA/thrust/blob/main/thrust/cmake/README.md
+    # https://github.com/NVIDIA/thrust/blob/main/thrust/cmake/README.md
+    #
+    # PRIVATE, not PUBLIC: thrust is used inside src/cuda/sccd_narrowphase.cu and
+    # by no installed header. Exporting it puts a target name in
+    # SCCDTargets.cmake that a consumer has no way to define, and CMake then
+    # falls back to a literal -lThrust, which does not exist.
     find_package(Thrust CONFIG)
     if(Thrust_FOUND)
         thrust_create_target(Thrust)
-        list(APPEND SCCD_DEP_LIBRARIES Thrust)
+        list(APPEND SCCD_DEP_PRIVATE_LIBRARIES Thrust)
     else()
         message(WARNING "Thrust not found!")
     endif()
