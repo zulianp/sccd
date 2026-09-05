@@ -36,8 +36,10 @@ def main(argv: list[str]) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     rows = data.read_rows(bench_csv)
-    if not rows:
-        print(f"error: {bench_csv} has no data rows", file=sys.stderr)
+    try:
+        data.check_schema(bench_csv, rows)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
         return 2
 
     scenes = data.by_scene(rows)

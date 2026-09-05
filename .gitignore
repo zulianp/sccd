@@ -62,6 +62,10 @@ benchmark/sweep/
 # oracle's query sets, and the measurement tables their write-ups cite.
 !benchmark/oracle/*.csv
 !benchmark/assessment/*.csv
+# The sweep a published table was computed from. docs/BENCHMARKS.md names the
+# file each of its tables came from, and the claim that a number is reproducible
+# is only worth making if the rows behind it are in the repository.
+!benchmark/results/*.csv
 !spikes/research/**/*.csv
 *.pdf
 *.aux
