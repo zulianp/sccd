@@ -21,11 +21,49 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from . import data, figures, oracle as oracle_mod, scaling as scaling_mod, style, tables
+from . import (data, embed, figures, oracle as oracle_mod,
+               scaling as scaling_mod, style, tables)
+
+
+def _repo_relative(path: Path) -> str:
+    resolved = Path(path).resolve()
+    for parent in [Path.cwd().resolve(), *Path.cwd().resolve().parents]:
+        if (parent / ".git").exists():
+            try:
+                return str(resolved.relative_to(parent))
+            except ValueError:
+                break
+    return str(path)
+
+
+def _provenance(bench_csv: Path, oracle_csv: Path | None, scenes: dict) -> str:
+    """What was run, so a reader can tell what the tables above are of."""
+    repeats = sorted({s.repeats for s in scenes.values()})
+    cases = sum(s.cases for s in scenes.values()) // max(
+        len({m for _, m in scenes}), 1)
+    lines = [
+        f"- Timings: `{_repo_relative(bench_csv)}`, {cases} cases over "
+        f"{len({d for d, _ in scenes})} scenes, "
+        f"{repeats[0] if len(repeats) == 1 else f'{min(repeats)}-{max(repeats)}'}"
+        f" independent repeats.",
+    ]
+    if oracle_csv is not None:
+        lines.append(f"- Accuracy: `{_repo_relative(oracle_csv)}`, every query of every scene "
+                     f"checked against the dataset's exact roots.")
+    lines.append("- Regenerate with `python3 -m report <bench.csv> <out> "
+                 "<oracle.csv> --embed=docs/BENCHMARKS.md`; add `--check` to "
+                 "assert the document still matches the data.")
+    return "\n".join(lines)
 
 
 def main(argv: list[str]) -> int:
+    flags = [a for a in argv[1:] if a.startswith("--")]
     args = [a for a in argv[1:] if not a.startswith("--")]
+    check_only = "--check" in flags
+    embed_into = None
+    for flag in flags:
+        if flag.startswith("--embed="):
+            embed_into = Path(flag.split("=", 1)[1])
     if len(args) < 2:
         print(__doc__, file=sys.stderr)
         return 2
@@ -51,7 +89,10 @@ def main(argv: list[str]) -> int:
 
     scenes = data.by_scene(rows)
     cases = data.by_case(rows)
-    source = str(bench_csv)
+    # Cite the CSV by its path in the repository, not by wherever it happened to
+    # be read from: a "Source:" line naming a scratch directory tells a reader
+    # nothing they can act on.
+    source = _repo_relative(bench_csv)
 
     style.apply_rcparams()
     drawn = [
@@ -74,8 +115,9 @@ def main(argv: list[str]) -> int:
     oracle_rows = {}
     if oracle_csv and oracle_csv.is_file():
         oracle_rows = oracle_mod.read(oracle_csv)
-        built.append(oracle_mod.gate_table(oracle_rows, str(oracle_csv)))
-        built.append(oracle_mod.reference_table(oracle_rows, str(oracle_csv)))
+        oracle_source = _repo_relative(oracle_csv)
+        built.append(oracle_mod.gate_table(oracle_rows, oracle_source))
+        built.append(oracle_mod.reference_table(oracle_rows, oracle_source))
     tables.write_tables(built, out_dir)
 
     # A run that reported a late time of impact must be impossible to overlook,
@@ -113,6 +155,18 @@ def main(argv: list[str]) -> int:
         lines += [f"![{f.caption}](figures/{f.stem}.png)", "", f"*{f.caption}*", ""]
 
     (out_dir / "summary.md").write_text("\n".join(lines))
+
+    # Refresh the generated blocks of docs/BENCHMARKS.md, or, with --check,
+    # verify that the committed document is what the committed data and this
+    # script reproduce. That is the difference between claiming a number is
+    # reproducible and demonstrating it.
+    if embed_into is not None:
+        blocks = {t.label.split(":", 1)[-1]: tables.render_markdown(t) for t in built}
+        blocks["comparison"] = "\n".join(notes) if notes else "_No comparison available._"
+        blocks["provenance"] = _provenance(bench_csv, oracle_csv, scenes)
+        status = embed.apply(embed_into, blocks, check=check_only)
+        if status:
+            return status
 
     print(f"wrote {out_dir}/summary.md, tables.tex, tables.md, figures.tex "
           f"and {len(drawn)} figures")
