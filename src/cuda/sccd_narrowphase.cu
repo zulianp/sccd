@@ -7,7 +7,13 @@
 #include <cstdio>
 #include <climits>
 #include <limits>
+#include <algorithm>
 #include <vector>
+
+// For SCCD_MAX_TIME_TOL / SCCD_MAX_COORD_TOL, the caps the domain tolerances
+// share with the host. They must be the same numbers on both sides or the two
+// searches terminate at different depths.
+#include "sccd_tolerance.hpp"
 
 #include <thrust/device_ptr.h>
 #include <thrust/extrema.h>
@@ -17,14 +23,9 @@
 
 #include "sccd_cuda_base.cuh"
 #include "sccd_narrowphase_mode.hpp"
+#include "sccd_device_dfs_stack.cuh"
 #include "sccd_reduce.cuh"
 
-// Entries in the per-block shared stack. An entry is six scalars plus two ints,
-// so 1024 entries is 32,800 bytes of static __shared__ for float and 57,376 for
-// double. See SharedStackCap below for why that is legal and what it costs.
-#ifndef SCCD_NP_SHARED_STACK_CAP
-#define SCCD_NP_SHARED_STACK_CAP 64
-#endif
 
 #ifndef SCCD_NP_THREADS_PER_BLOCK
 #define SCCD_NP_THREADS_PER_BLOCK 128
@@ -37,6 +38,19 @@
 // How many boxes one block takes off the global stack per launch. Bounded only
 // so a pathological run cannot spin a block forever; the host loop relaunches
 // while anything remains, so lowering this costs rounds but never correctness.
+// Shared-stack depth below which the best-first reorder is skipped. Only read
+// when SCCD_NP_BEST_FIRST is defined.
+//
+// 1 means "never skip", which is the configuration that has actually been
+// measured. 8 and 32 were tried and read *slower* on cloth-ball, which is the
+// wrong sign for a knob that removes work -- but the timing at that workload size
+// is not resolvable (see wip/CUDA_NARROWPHASE_PLAN.md), so that is an unexplained
+// sample rather than a result. Left as a knob for when there is a workload big
+// enough to tune against.
+#ifndef SCCD_NP_BEST_FIRST_MIN_TOP
+#define SCCD_NP_BEST_FIRST_MIN_TOP 1
+#endif
+
 #ifndef SCCD_NP_DRAIN_PER_BLOCK
 #define SCCD_NP_DRAIN_PER_BLOCK 4096
 #endif
@@ -145,6 +159,28 @@ namespace sccd {
         __device__ unsigned long long g_np_push_shared = 0;
         __device__ unsigned long long g_np_push_global = 0;
         __device__ unsigned long long g_np_push_lost = 0;
+        // Boxes this side evaluated and then discarded because the bound had
+        // already passed them. The host never counts these: it drops such a box
+        // in its refill loop, before it is classified and before its tick. So
+        // `corner_evals - bound_killed` is the count that means the same thing on
+        // both machines, and the raw `corner_evals` overstates the device.
+        __device__ unsigned long long g_np_bound_killed = 0;
+        // Occupancy of a block's own threads, iteration by iteration. The loop
+        // already reduces `active` across the block to decide when to stop; this
+        // accumulates it. Divided by the iteration count it gives the mean number
+        // of the N threads that had a box in hand, which is what a divergence
+        // bound looks like from the inside: three __syncthreads() per iteration
+        // and everyone waiting for the deepest thread.
+        __device__ unsigned long long g_np_active_sum = 0;
+        __device__ unsigned long long g_np_iters = 0;
+#define SCCD_NP_ACTIVE_TICK(n)                                                \
+    do {                                                                       \
+        if (threadIdx.x == 0) {                                                \
+            atomicAdd(&g_np_active_sum, (unsigned long long)(n));              \
+            atomicAdd(&g_np_iters, 1ull);                                      \
+        }                                                                      \
+    } while (0)
+#define SCCD_NP_BOUND_KILL_TICK() atomicAdd(&g_np_bound_killed, 1ull)
 #define SCCD_NP_EVAL_TICK() atomicAdd(&g_np_evals, 1ull)
 #define SCCD_NP_PERQ_TICK(qid, n)                                             \
     do {                                                                      \
@@ -154,143 +190,10 @@ namespace sccd {
     } while (0)
 #else
 #define SCCD_NP_EVAL_TICK() ((void)0)
+#define SCCD_NP_BOUND_KILL_TICK() ((void)0)
+#define SCCD_NP_ACTIVE_TICK(n) ((void)0)
 #define SCCD_NP_PERQ_TICK(qid, n) ((void)0)
 #endif
-
-        // Shared-stack capacity for scalar type T.
-        //
-        // Small on purpose. The block-local stack is where a query's subtree
-        // lives, so a large one keeps a heavy query inside the block that seeded
-        // it: measured per query on cloth-funnel, the conservative search needs
-        // one box for most queries and over a million for 208 of them, and at
-        // 1024 entries per block 99% of pushes never reach the global queue at
-        // all. One block then grinds through a 19.7-million-box query while its
-        // neighbours finish and idle.
-        //
-        // Spilling early hands those boxes to the global queue, which the next
-        // drain round redistributes across every block. Measured on GH200, mode 2,
-        // 16 cases (narrow-phase milliseconds):
-        //
-        //                        cap 1024   cap 256   cap 64
-        //   cloth-funnel           4059.2     198.2     37.2
-        //   armadillo-rollers      3133.7     277.2     75.8
-        //   cloth-ball              129.8     110.2    105.9
-        //
-        // False positives and negatives are identical at every capacity, and mode
-        // 0 -- which averages under four boxes per query and so never fills even a
-        // small stack -- is unaffected.
-        //
-        // This only became available once the global queue stopped deadlocking
-        // under sustained use; see the Stack comment above. Before that, shrinking
-        // this number hung the kernel, which is why it was 1024.
-        //
-        // 64 entries is 3,584 bytes for double against 57,376 at 1024. That does
-        // not buy occupancy -- at 238 registers per thread the kernel is capped at
-        // two blocks per SM either way -- it buys balance.
-        template <typename T>
-        struct SharedStackCap {
-            static constexpr int value = SCCD_NP_SHARED_STACK_CAP;
-        };
-
-        // Axis-aligned subdomain in (t, u, v) parameter space.
-        template <typename T>
-        struct Domain {
-            T tlower;
-            T tupper;
-            T ulower;
-            T uupper;
-            T vlower;
-            T vupper;
-        };
-
-        /**
-         * \brief One half of the double-buffered global work queue.
-         *
-         * A launch reads from one buffer and writes to the other, never both, so
-         * there is no producer/consumer handshake here and no spinning. Reading
-         * uses `top` as a claim cursor over the `count` entries a previous launch
-         * left; writing uses `top` as a bump allocator and `count` is unused.
-         *
-         * This replaces a single shared buffer in which producers and consumers
-         * ran concurrently and coordinated through the `qid` array: a writer
-         * spun on `atomicCAS(&qid[slot], EMPTY, WRITING)` until a reader released
-         * the slot, and a reader spun until the writer committed. With the queue
-         * lightly used that handshake was invisible; driven hard -- which is
-         * exactly what using it to balance the load requires -- it hung the
-         * kernel. Separating the buffers removes the interaction rather than
-         * tuning around it.
-         */
-        template <typename T>
-        struct Stack {
-            T* tlower;
-            T* tupper;
-            T* ulower;
-            T* uupper;
-            T* vlower;
-            T* vupper;
-            int* level;
-            int* qid;
-            int* top;      // write cursor when writing, claim cursor when reading
-            int* request;  // boxes that did not fit, for the host to size the retry
-            int capacity;
-            int count;     // entries available to readers; 0 for a write buffer
-        };
-
-        /**
-         * \brief Claim one slot and write a box to it. No waiting, ever.
-         *
-         * The index comes from a bump allocator, so it belongs to this thread
-         * alone and nobody reads the buffer until the launch ends. A box that does
-         * not fit is counted in `request` and dropped, which is safe -- dropping
-         * can only leave the time of impact earlier than the truth, never later --
-         * and the host grows the queue and retries.
-         */
-        template <typename T>
-        static inline __device__ void push_global(const Stack<T>& out,
-                                                  const Domain<T>& box,
-                                                  const int level,
-                                                  const int qid) {
-            const int slot = atomicAdd(out.top, 1);
-            if (slot >= out.capacity) {
-                atomicAdd(out.request, 1);
-                return;
-            }
-            out.tlower[slot] = box.tlower;
-            out.tupper[slot] = box.tupper;
-            out.ulower[slot] = box.ulower;
-            out.uupper[slot] = box.uupper;
-            out.vlower[slot] = box.vlower;
-            out.vupper[slot] = box.vupper;
-            out.level[slot] = level;
-            out.qid[slot] = qid;
-        }
-
-        /**
-         * \brief Take the next box from the read buffer, or return 0 when empty.
-         *
-         * A plain claim on a cursor over entries a previous launch committed, so
-         * the loads need no ordering against a concurrent writer -- there is none.
-         */
-        template <typename T>
-        static inline __device__ int pop_global(const Stack<T>& in,
-                                                Domain<T>& d,
-                                                int& level,
-                                                int& qid) {
-            if (in.count <= 0) return 0;
-            const int slot = atomicAdd(in.top, 1);
-            if (slot >= in.count) return 0;
-
-            d.tlower = in.tlower[slot];
-            d.tupper = in.tupper[slot];
-            d.ulower = in.ulower[slot];
-            d.uupper = in.uupper[slot];
-            d.vlower = in.vlower[slot];
-            d.vupper = in.vupper[slot];
-            level = in.level[slot];
-            qid = in.qid[slot];
-            return 1;
-        }
-
         template <bool is_vf, typename T>
         static inline __device__ bool is_domain_valid(const Domain<T>& domain,
                                                       const T toi,
@@ -302,6 +205,29 @@ namespace sccd {
             }
         }
 
+        /**
+         * \brief Per-axis domain tolerances for an edge-edge query.
+         *
+         * A direct transcription of the host's
+         * `compute_edge_edge_tolerance_soa`, which is itself written from
+         * TightInclusion's `compute_edge_edge_tolerances`. The three axes get
+         * three different denominators -- the maximum L-infinity displacement of
+         * the eight difference-function corners along t, along u, and along v --
+         * and each quotient is capped, because an axis with (near) no motion
+         * divides by ~0 and would otherwise yield an infinite tolerance that
+         * accepts the root box on sight.
+         *
+         * The version this replaces came from the SymPy generator and computed
+         * only two denominators, assigning them (dl, dl, edge0). So `tol1` was
+         * the *t* tolerance and `tol2` the *u* tolerance, and the v denominator
+         * was never computed at all. Measured on a cloth-funnel query, that made
+         * tol1 286x too large. Nothing unsafe follows -- a larger domain
+         * tolerance only accepts sooner, which is the conservative direction, and
+         * every gate stayed green -- but the split rule picks the axis with the
+         * largest width/tolerance ratio, so a u tolerance 286x too large starves
+         * the u axis of splits. The search then refines t and v against a u
+         * interval pinned at full width and never converges.
+         */
         template <typename T, typename Vec4>
         static inline __device__ void compute_edge_edge_tolerance(const T codomain_tol,
                                                                   const Vec4 sx,
@@ -313,80 +239,36 @@ namespace sccd {
                                                                   T* const SCCD_RESTRICT tol0,
                                                                   T* const SCCD_RESTRICT tol1,
                                                                   T* const SCCD_RESTRICT tol2) {
-            const T v0sx = sx.x;
-            const T v0sy = sy.x;
-            const T v0sz = sz.x;
-            const T v1sx = sx.y;
-            const T v1sy = sy.y;
-            const T v1sz = sz.y;
-            const T v2sx = sx.z;
-            const T v2sy = sy.z;
-            const T v2sz = sz.z;
-            const T v3sx = sx.w;
-            const T v3sy = sy.w;
-            const T v3sz = sz.w;
-            const T v0ex = ex.x;
-            const T v0ey = ey.x;
-            const T v0ez = ez.x;
-            const T v1ex = ex.y;
-            const T v1ey = ey.y;
-            const T v1ez = ez.y;
-            const T v2ex = ex.z;
-            const T v2ey = ey.z;
-            const T v2ez = ez.z;
-            const T v3ex = ex.w;
-            const T v3ey = ey.w;
-            const T v3ez = ez.w;
+            // The eight corners of the (t, u, v) cube through the difference
+            // function, named as in TightInclusion: p<t><u><v>.
+            const T p000[3] = {sx.x - sx.z, sy.x - sy.z, sz.x - sz.z};
+            const T p001[3] = {sx.x - sx.w, sy.x - sy.w, sz.x - sz.w};
+            const T p010[3] = {sx.y - sx.z, sy.y - sy.z, sz.y - sz.z};
+            const T p011[3] = {sx.y - sx.w, sy.y - sy.w, sz.y - sz.w};
+            const T p100[3] = {ex.x - ex.z, ey.x - ey.z, ez.x - ez.z};
+            const T p101[3] = {ex.x - ex.w, ey.x - ey.w, ez.x - ez.w};
+            const T p110[3] = {ex.y - ex.z, ey.y - ey.z, ez.y - ez.z};
+            const T p111[3] = {ex.y - ex.w, ey.y - ey.w, ez.y - ez.w};
 
-            const T ssa0 = v0ex - v0sx;
-            const T ssa1 = -v2ex + v2sx;
-            const T ssa2 = -v3ex + v3sx;
-            const T ssa3 = v0ey - v0sy;
-            const T ssa4 = -v2ey + v2sy;
-            const T ssa5 = -v3ey + v3sy;
-            const T ssa6 = v0ez - v0sz;
-            const T ssa7 = -v2ez + v2sz;
-            const T ssa8 = -v3ez + v3sz;
-            const T ssa9 = -v1sx;
-            const T ssa10 = ssa9 + v1ex;
-            const T ssa11 = -v1sy;
-            const T ssa12 = ssa11 + v1ey;
-            const T ssa13 = -v1sz;
-            const T ssa14 = ssa13 + v1ez;
-            const T ssa15 = T(1.0 / 3.0) * codomain_tol;
-            const T ssa16 =
-                ssa15 / device::max<T>(
-                            device::abs<T>(ssa0 + ssa1),
-                            device::max<T>(
-                                device::abs<T>(ssa0 + ssa2),
-                                device::max<T>(
-                                    device::abs<T>(ssa1 + ssa10),
-                                    device::max<T>(
-                                        device::abs<T>(ssa10 + ssa2),
-                                        device::max<T>(
-                                            device::abs<T>(ssa12 + ssa4),
-                                            device::max<T>(
-                                                device::abs<T>(ssa12 + ssa5),
-                                                device::max<T>(
-                                                    device::abs<T>(ssa14 + ssa7),
-                                                    device::max<T>(
-                                                        device::abs<T>(ssa14 + ssa8),
-                                                        device::max<T>(
-                                                            device::abs<T>(ssa3 + ssa4),
-                                                            device::max<T>(
-                                                                device::abs<T>(ssa3 + ssa5),
-                                                                device::max<T>(device::abs<T>(ssa6 + ssa7),
-                                                                               device::abs<T>(ssa6 + ssa8))))))))))));
-            *tol0 = ssa16;
-            *tol1 = ssa16;
-            *tol2 = ssa15 /
-                    device::max<T>(
-                        device::abs<T>(ssa11 + v0sy),
-                        device::max<T>(device::abs<T>(ssa13 + v0sz),
-                                       device::max<T>(device::abs<T>(ssa9 + v0sx),
-                                                      device::max<T>(device::abs<T>(v0ex - v1ex),
-                                                                     device::max<T>(device::abs<T>(v0ey - v1ey),
-                                                                                    device::abs<T>(v0ez - v1ez))))));
+            auto linf = [](const T a[3], const T b[3]) {
+                return device::max<T>(device::abs<T>(b[0] - a[0]),
+                                      device::max<T>(device::abs<T>(b[1] - a[1]),
+                                                     device::abs<T>(b[2] - a[2])));
+            };
+            auto max4 = [&](const T a0[3], const T a1[3], const T a2[3], const T a3[3],
+                            const T b0[3], const T b1[3], const T b2[3], const T b3[3]) {
+                return device::max<T>(device::max<T>(linf(a0, b0), linf(a1, b1)),
+                                      device::max<T>(linf(a2, b2), linf(a3, b3)));
+            };
+
+            const T dl = T(3) * max4(p000, p001, p011, p010, p100, p101, p111, p110);
+            const T edge0 = T(3) * max4(p000, p100, p101, p001, p010, p110, p111, p011);
+            const T edge1 = T(3) * max4(p000, p100, p110, p010, p001, p101, p111, p011);
+
+            auto clamp_tol = [](const T v, const T cap) { return (v < cap) ? v : cap; };
+            *tol0 = clamp_tol(codomain_tol / dl, T(SCCD_MAX_TIME_TOL));
+            *tol1 = clamp_tol(codomain_tol / edge0, T(SCCD_MAX_COORD_TOL));
+            *tol2 = clamp_tol(codomain_tol / edge1, T(SCCD_MAX_COORD_TOL));
         }
 
         template <typename T, typename Vec4>
@@ -491,6 +373,21 @@ namespace sccd {
                                                       device::max<T>(device::abs<T>(v1sx - v3sx),
                                                                      device::max<T>(device::abs<T>(v1sy - v3sy),
                                                                                     device::abs<T>(v1sz - v3sz))))));
+
+            // The caps the host applies and this side did not. Each tolerance is
+            // a codomain tolerance divided by a rate of change, so an axis with
+            // (near) no motion divides by ~0 and yields an effectively infinite
+            // tolerance. Every box then trivially satisfies "width <= tol" and the
+            // root box is accepted on sight: conservative, since accepting always
+            // is, and wrong by however far the root's t lower bound sits from the
+            // true contact.
+            //
+            // Unlike the edge-edge fix this makes the search do *more* work, and
+            // the point of it is accuracy rather than speed.
+            auto clamp_tol = [](const T v, const T cap) { return (v < cap) ? v : cap; };
+            *tol0 = clamp_tol(*tol0, T(SCCD_MAX_TIME_TOL));
+            *tol1 = clamp_tol(*tol1, T(SCCD_MAX_COORD_TOL));
+            *tol2 = clamp_tol(*tol2, T(SCCD_MAX_COORD_TOL));
         }
 
         template <typename T, typename Vec4>
@@ -1101,73 +998,6 @@ namespace sccd {
             if (i < toi_n) toi[i] = max_toi;
         }
 
-        /**
-         * \brief DFS stack buffers that persist between narrow-phase calls.
-         *
-         * cudaMalloc and cudaFree synchronize the whole device. Allocating and
-         * releasing the eight stack arrays plus the two counters on every
-         * invocation put twenty such stalls into each CCD step, and because the
-         * capacity was a local it always restarted from zero and re-grew.
-         * Keeping them alive across calls also preserves the capacity the
-         * previous step converged on, so steady state does no allocation at all.
-         *
-         * One instance per scalar type; like the rest of the device pipeline it
-         * assumes a single host thread drives it.
-         */
-        template <typename T>
-        struct PersistentDfsStack {
-            T* tlower{nullptr};
-            T* tupper{nullptr};
-            T* ulower{nullptr};
-            T* uupper{nullptr};
-            T* vlower{nullptr};
-            T* vupper{nullptr};
-            int* level{nullptr};
-            int* qid{nullptr};
-            int* counters{nullptr};       // device, [0]/[1] = write cursors for the
-                                          // two buffers, [2] = g_request
-            int* host_counters{nullptr};  // pinned staging for reading them back
-            int cap{0};
-
-            ~PersistentDfsStack() { release(); }
-
-            void release() {
-                cudaFree(tlower);
-                cudaFree(tupper);
-                cudaFree(ulower);
-                cudaFree(uupper);
-                cudaFree(vlower);
-                cudaFree(vupper);
-                cudaFree(level);
-                cudaFree(qid);
-                cudaFree(counters);
-                cudaFreeHost(host_counters);
-                tlower = tupper = ulower = uupper = vlower = vupper = nullptr;
-                level = qid = counters = nullptr;
-                host_counters = nullptr;
-                cap = 0;
-            }
-        };
-
-        template <typename T>
-        static PersistentDfsStack<T>& persistent_dfs_stack() {
-            static PersistentDfsStack<T> stack;
-            return stack;
-        }
-
-
-        static inline __device__ int reserve_slots(int* SCCD_RESTRICT counter, int k, int capacity) {
-            int old = atomicAdd(counter, 0);
-            while (true) {
-                if (old + k > capacity) return -1;
-                const int prev = atomicCAS(counter, old, old + k);
-                if (prev == old) return old;
-                old = prev;
-            }
-        }
-
-
-
         template <int N>
         struct DfsSplit;
 
@@ -1204,6 +1034,96 @@ namespace sccd {
             static constexpr int NU = 8;
             static constexpr int NV = 8;
         };
+
+        /**
+         * \brief Move the block-shared stack's smallest-t box to the top.
+         *
+         * The search wants the *earliest* time of impact, and the box that could
+         * contain it is the one with the smallest `tlower`. A LIFO refill hands an
+         * idle thread the most recently pushed box instead, which is whatever the
+         * last split produced -- often a deep box of some other query whose t
+         * interval starts far above the answer. Expanding that box cannot tighten
+         * the bound, and until the bound tightens nothing else prunes.
+         *
+         * One argmin over at most SCCD_NP_SHARED_STACK_CAP entries, then one swap,
+         * makes the next claim take the minimum. It does not make the block fully
+         * best-first -- the second and later claimers in the same round still take
+         * LIFO order -- but it puts the most promising box in front on every
+         * refill, which is the part that moves the bound.
+         *
+         * Costs one block reduction per refill round against eight corner
+         * evaluations per box, so it is cheap in the units that matter here.
+         */
+        template <int N, typename TC>
+        static inline __device__ void promote_min_tlower(TC* SCCD_RESTRICT s_tlower,
+                                                         TC* SCCD_RESTRICT s_tupper,
+                                                         TC* SCCD_RESTRICT s_ulower,
+                                                         TC* SCCD_RESTRICT s_uupper,
+                                                         TC* SCCD_RESTRICT s_vlower,
+                                                         TC* SCCD_RESTRICT s_vupper,
+                                                         int* SCCD_RESTRICT s_level,
+                                                         int* SCCD_RESTRICT s_qid,
+                                                         const int top,
+                                                         int* SCCD_RESTRICT warp_sums) {
+            // Nothing to reorder below two entries. The threshold is a knob for
+            // skipping shallow stacks, where the argmin is a fixed cost per refill
+            // round against little to choose between; it defaults to off.
+            if (top <= SCCD_NP_BEST_FIRST_MIN_TOP) return;
+
+            // Argmin over the live entries, one per thread, reduced across the
+            // block. Ties break on the lower index so the choice is deterministic.
+            int best = -1;
+            TC best_t = TC(0);
+            for (int i = (int)threadIdx.x; i < top; i += N) {
+                const TC t = s_tlower[i];
+                if (best < 0 || t < best_t) {
+                    best = i;
+                    best_t = t;
+                }
+            }
+
+            const int lane = threadIdx.x & 31;
+            for (int o = 16; o > 0; o >>= 1) {
+                const TC other_t = __shfl_xor_sync(0xffffffffu, best_t, o);
+                const int other = __shfl_xor_sync(0xffffffffu, best, o);
+                if (other >= 0 && (best < 0 || other_t < best_t || (other_t == best_t && other < best))) {
+                    best = other;
+                    best_t = other_t;
+                }
+            }
+            // warp_sums doubles as the cross-warp scratch; it is sized N/32 and is
+            // free at this point in the loop.
+            const int warp = threadIdx.x >> 5;
+            if (lane == 0) warp_sums[warp] = best;
+            __syncthreads();
+            if (threadIdx.x == 0) {
+                int win = -1;
+                TC win_t = TC(0);
+                for (int w = 0; w < (N >> 5); ++w) {
+                    const int cand = warp_sums[w];
+                    if (cand < 0) continue;
+                    const TC t = s_tlower[cand];
+                    if (win < 0 || t < win_t || (t == win_t && cand < win)) {
+                        win = cand;
+                        win_t = t;
+                    }
+                }
+                const int last = top - 1;
+                if (win >= 0 && win != last) {
+                    TC tmp;
+                    int itmp;
+                    tmp = s_tlower[win]; s_tlower[win] = s_tlower[last]; s_tlower[last] = tmp;
+                    tmp = s_tupper[win]; s_tupper[win] = s_tupper[last]; s_tupper[last] = tmp;
+                    tmp = s_ulower[win]; s_ulower[win] = s_ulower[last]; s_ulower[last] = tmp;
+                    tmp = s_uupper[win]; s_uupper[win] = s_uupper[last]; s_uupper[last] = tmp;
+                    tmp = s_vlower[win]; s_vlower[win] = s_vlower[last]; s_vlower[last] = tmp;
+                    tmp = s_vupper[win]; s_vupper[win] = s_vupper[last]; s_vupper[last] = tmp;
+                    itmp = s_level[win]; s_level[win] = s_level[last]; s_level[last] = itmp;
+                    itmp = s_qid[win];   s_qid[win]   = s_qid[last];   s_qid[last]   = itmp;
+                }
+            }
+            __syncthreads();
+        }
 
         template <int N>
         static inline __device__ int block_popc(const int pred, int* SCCD_RESTRICT warp_sums) {
@@ -1322,8 +1242,7 @@ namespace sccd {
                                                                   Domain<T>& right) {
             left = in;
             right = in;
-#define SCCD_ENABLE_CODOMAIN_SCALING
-#ifdef SCCD_ENABLE_CODOMAIN_SCALING
+#if SCCD_ENABLE_CODOMAIN_SCALING
             const T t0 = in.tlower;
             const T t1 = in.tupper;
             const T u0 = in.ulower;
@@ -1585,7 +1504,20 @@ namespace sccd {
             }
         }
 
-        template <bool is_vf, bool conservative, int N, typename T, typename I>
+        /**
+         * \brief One thread per query, depth-first, with a block-shared work stack.
+         *
+         * \tparam per_query  false: every thread prunes against one shared
+         *                     minimum in `toi[0]`, which is what
+         *                     `find_earliest_impact_time` wants. true: each
+         *                     thread carries its own query's bound and writes
+         *                     `toi[qid]`, which is what `find_impact_times`
+         *                     wants -- and is the point of the variant, because
+         *                     the block-per-query kernel that path used costs
+         *                     one block per query and is bound by scheduling
+         *                     them rather than by the search.
+         */
+        template <bool is_vf, bool conservative, bool per_query, int N, typename T, typename I>
         static __device__ void narrow_phase_dfs_zero_stride_body(const I* const SCCD_RESTRICT overlap0,
                                                                  const I* const SCCD_RESTRICT overlap1,
                                                                  T** const SCCD_RESTRICT sp,
@@ -1624,6 +1556,24 @@ namespace sccd {
             }
             __syncthreads();
 
+            // With per_query the bound is per thread: a thread prunes only
+            // against its own query's best, because another query's answer says
+            // nothing about this one. The shared scalar is unused on that path.
+            TC my_toi = TC(0);
+            auto bound = [&]() -> TC { return per_query ? my_toi : s_toi; };
+            auto lower_bound_to = [&](const TC v) {
+                if (per_query) {
+                    if (v < my_toi) my_toi = v;
+                } else {
+                    device::atomic_min(&s_toi, v);
+                }
+            };
+            // Publish this thread's bound before it takes on another query, and
+            // once more on the way out.
+            auto flush_bound = [&](const int q) {
+                if (per_query && q >= 0) atomic_min_toi<T>(&toi[q], my_toi);
+            };
+
             Stack<TC> s_stack = {s_tlower,
                                 s_tupper,
                                 s_ulower,
@@ -1651,6 +1601,8 @@ namespace sccd {
                 load_query_and_tol<is_vf, conservative, T, Vec4, I>(
                     qid, overlap0, overlap1, sp, ep, element_stride, elements, tol, sx, sy, sz, ex, ey, ez, atol, aerr);
             }
+            // An inactive thread never reads its bound; any value is fine.
+            if (per_query) my_toi = (qid >= 0) ? (TC)toi[qid] : TC(1);
 
             while (true) {
                 // Refreshed every iteration, deliberately. Every resident block
@@ -1660,13 +1612,15 @@ namespace sccd {
                 // monotonically worse on all three scenes -- 638 -> 3377 ms on
                 // cloth-funnel at 256 -- because the pruning a fresh bound buys is
                 // worth more than the atomic costs. See wip/ASSESSMENT.md.
-                if (tid == 0) {
-                    const TC g = atomic_min_toi<T>(&toi[0], s_toi);
-                    if (g < s_toi) s_toi = g;
+                if (!per_query) {
+                    if (tid == 0) {
+                        const TC g = atomic_min_toi<T>(&toi[0], s_toi);
+                        if (g < s_toi) s_toi = g;
+                    }
+                    __syncthreads();
                 }
-                __syncthreads();
 
-                if (active && cur.tlower >= s_toi) active = 0;
+                if (active && cur.tlower >= bound()) active = 0;
 
 #ifdef SCCD_NP_COUNT_BOXES
                 if (active) atomicAdd(&g_np_level[level < 80 ? level : 79], 1ull);
@@ -1682,8 +1636,8 @@ namespace sccd {
                     // triangle. The test is already padded by the u and v
                     // tolerances, so it cannot reject a box that straddles the
                     // edge.
-                    if (is_domain_valid<is_vf>(cur, s_toi, atol)) {
-                        device::atomic_min(&s_toi, cur.tlower);
+                    if (is_domain_valid<is_vf>(cur, bound(), atol)) {
+                        lower_bound_to(cur.tlower);
                     }
                     active = 0;
                 }
@@ -1693,8 +1647,8 @@ namespace sccd {
                 // the depth cutoff and gets the same answer: accept the box at its
                 // t lower bound, which is early and therefore safe.
                 if (conservative && active && !tight_can_split<TC>(cur, atol)) {
-                    if (is_domain_valid<is_vf>(cur, s_toi, atol)) {
-                        device::atomic_min(&s_toi, cur.tlower);
+                    if (is_domain_valid<is_vf>(cur, bound(), atol)) {
+                        lower_bound_to(cur.tlower);
                     }
                     active = 0;
                 }
@@ -1706,7 +1660,7 @@ namespace sccd {
                 if (active) {
                     Domain<TC> left, right;
                     SCCD_NP_PERQ_TICK(qid, 2);
-                    cur.tupper = device::min<TC>(cur.tupper, s_toi);
+                    cur.tupper = device::min<TC>(cur.tupper, bound());
 
                     // Guarded by the tight_can_split check above, so this cannot fail.
                     split_cell_policy<is_vf, conservative, TC, Vec4>(
@@ -1717,21 +1671,23 @@ namespace sccd {
                     evaluate_cell_3d_policy<is_vf, conservative, TC, Vec4>(
                         right, sx, sy, sz, ex, ey, ez, tol, atol, aerr, cr, ar);
 
-                    if (!is_domain_valid<is_vf>(left, s_toi, atol)) {
+                    if (!is_domain_valid<is_vf>(left, bound(), atol)) {
+                        if (cl || al) SCCD_NP_BOUND_KILL_TICK();
                         cl = 0;
                         al = 0;
                     }
-                    if (!is_domain_valid<is_vf>(right, s_toi, atol)) {
+                    if (!is_domain_valid<is_vf>(right, bound(), atol)) {
+                        if (cr || ar) SCCD_NP_BOUND_KILL_TICK();
                         cr = 0;
                         ar = 0;
                     }
 
                     if (al) {
-                        device::atomic_min(&s_toi, left.tlower);
+                        lower_bound_to(left.tlower);
                         cl = 0;
                     }
                     if (ar) {
-                        device::atomic_min(&s_toi, right.tlower);
+                        lower_bound_to(right.tlower);
                         cr = 0;
                     }
 
@@ -1774,6 +1730,19 @@ namespace sccd {
 
                 __syncthreads();
 
+#ifdef SCCD_NP_BEST_FIRST
+                // Best-first refill: put the smallest-t box in front before the
+                // claims run. See promote_min_tlower.
+                {
+                    const int n_idle = block_popc<N>(!active, warp_sums);
+                    if (n_idle > 0) {
+                        promote_min_tlower<N, TC>(s_tlower, s_tupper, s_ulower, s_uupper,
+                                                  s_vlower, s_vupper, s_level, s_qid,
+                                                  atomicAdd(&s_top, 0), warp_sums);
+                    }
+                }
+#endif
+
                 if (!active) {
                     int t = atomicAdd(&s_top, 0);
                     while (t > 0) {
@@ -1790,7 +1759,9 @@ namespace sccd {
                                 cur.vupper = s_stack.vupper[slot];
                                 level = s_stack.level[slot];
                                 if (new_qid != qid) {
+                                    flush_bound(qid);
                                     qid = new_qid;
+                                    if (per_query) my_toi = (TC)toi[qid];
                                     load_query_and_tol<is_vf, conservative, T, Vec4, I>(qid,
                                                                           overlap0,
                                                                           overlap1,
@@ -1819,16 +1790,21 @@ namespace sccd {
                 __syncthreads();
 
                 const int n_active = block_popc<N>(active, warp_sums);
+                SCCD_NP_ACTIVE_TICK(n_active);
                 if (n_active == 0) {
                     const int s_now = atomicAdd(&s_top, 0);
                     if (s_now <= 0) break;
                 }
             }
 
-            if (tid == 0) atomic_min_toi<T>(&toi[0], s_toi);
+            if (per_query) {
+                flush_bound(qid);
+            } else if (tid == 0) {
+                atomic_min_toi<T>(&toi[0], s_toi);
+            }
         }
 
-        template <bool is_vf, bool conservative, int N, typename T, typename I>
+        template <bool is_vf, bool conservative, bool per_query, int N, typename T, typename I>
         __global__ SCCD_NP_LAUNCH_BOUNDS(N)
         void narrow_phase_dfs_zero_stride_kernel(const I* const SCCD_RESTRICT overlap0,
                                                  const I* const SCCD_RESTRICT overlap1,
@@ -1875,7 +1851,7 @@ namespace sccd {
                 }
             }
 
-            narrow_phase_dfs_zero_stride_body<is_vf, conservative, N, T, I>(overlap0,
+            narrow_phase_dfs_zero_stride_body<is_vf, conservative, per_query, N, T, I>(overlap0,
                                                               overlap1,
                                                               sp,
                                                               ep,
@@ -1891,7 +1867,7 @@ namespace sccd {
                                                               active);
         }
 
-        template <bool is_vf, bool conservative, int N, typename T, typename I>
+        template <bool is_vf, bool conservative, bool per_query, int N, typename T, typename I>
         __global__ SCCD_NP_LAUNCH_BOUNDS(N)
         void narrow_phase_dfs_zero_stride_from_stack_kernel(const I* const SCCD_RESTRICT overlap0,
                                                             const I* const SCCD_RESTRICT overlap1,
@@ -1913,7 +1889,7 @@ namespace sccd {
                 active = 1;
             }
 
-            narrow_phase_dfs_zero_stride_body<is_vf, conservative, N, T, I>(overlap0,
+            narrow_phase_dfs_zero_stride_body<is_vf, conservative, per_query, N, T, I>(overlap0,
                                                               overlap1,
                                                               sp,
                                                               ep,
@@ -1939,7 +1915,7 @@ namespace sccd {
                                                      const T tol,
                                                      const int max_depth,
                                                      T* SCCD_RESTRICT toi,
-                                                     const int toi_stride,
+                                                     const ToiOutput toi_output,
                                                      Stack<TC> g_out,
                                                      const T alpha,
                                                      const int qid,
@@ -1969,8 +1945,13 @@ namespace sccd {
             __shared__ int s_defer_base;
             __shared__ int s_defer_cursor;
             __shared__ int warp_sums[N >> 5];
+            __shared__ int s_root_live;
 
-            const int toi_idx = qid * toi_stride;
+            // Was `qid * toi_stride`, which is where that name came from: the int
+            // doubled as an index multiplier, 0 collapsing every query onto
+            // toi[0]. The enum says which output is wanted and the index follows
+            // from it, rather than the caller's flag being arithmetic.
+            const int toi_idx = (toi_output == ToiOutput::PerPair) ? qid : 0;
 
             for (int i = tid; i < S_CAP; i += N) s_qid[i] = SCCD_QID_EMPTY;
             if (tid == 0) {
@@ -2001,10 +1982,64 @@ namespace sccd {
             load_query_and_tol<is_vf, conservative, T, Vec4, I>(
                 qid, overlap0, overlap1, sp, ep, element_stride, elements, tol, sx, sy, sz, ex, ey, ez, atol, aerr);
 
+            // Test the root box before dicing it.
+            //
+            // The dice below evaluates NT*NU*NV = 128 subboxes of the root
+            // unconditionally, which is the floor on what any query costs here:
+            // measured on the broad-phase candidate sets, this path averages
+            // 166-182 boxes per query, so the dice is 70-77% of all of it. Most
+            // of those queries are pairs whose swept boxes overlap and which
+            // never come close, and the multilinear hull over the root is exact,
+            // so if the root does not contain the origin then no subbox of it
+            // does either -- all 128 evaluations are spent proving something one
+            // evaluation already proved. The zero-stride kernel has always tested
+            // the root first; this one never has.
+            //
+            // Reject only, deliberately. The root also satisfies the acceptance
+            // test sometimes, and accepting it would report the root's t lower
+            // bound -- safe, and far earlier than the answer the dice refines to.
+            // Using this purely as a filter cannot change any reported value.
+            if (tid == 0) {
+                Domain<TC> root = {TC(0), TC(1), TC(0), TC(1), TC(0), TC(1)};
+                int rc = 0, ra = 0;
+                evaluate_cell_3d_policy<is_vf, conservative, TC, Vec4>(
+                    root, sx, sy, sz, ex, ey, ez, tol, atol, aerr, rc, ra);
+                SCCD_NP_PERQ_TICK(qid, 1);
+                s_root_live = (rc || ra) && is_domain_valid<is_vf>(root, s_toi, atol);
+            }
+            __syncthreads();
+            if (!s_root_live) {
+                if (tid == 0) atomic_min_toi<T>(&toi[toi_idx], s_toi);
+                return;
+            }
+
+#ifdef SCCD_NP_SINGLE_SEED
+            // One seed, the root box, on thread 0. The dice below fills the block
+            // with NT*NU*NV subboxes of the root, which is what a block wants for
+            // occupancy and is the opposite of what a branch-and-bound wants: all
+            // of them start before any accept exists, so 128 subtrees expand in
+            // lock-step with nothing to prune them. On toi_output=0 another query
+            // supplies a bound; on toi_output=1 the block is alone with its query
+            // and there is no bound until one of its own subtrees reaches a leaf.
+            //
+            // This is the switch that tests that. It was tried once before, read
+            // 803 -> 871 ms on armadillo edge-edge, and was kept out on that
+            // basis -- a time measurement, on a baseline since shown to swing
+            // 28-48%, taken before anyone knew the path costs thousands of boxes
+            // per query. Re-measure with box counts, split by stride.
+            const int ti = 0;
+            const int ui = 0;
+            const int vi = 0;
+            const int seed_NT = 1, seed_NU = 1, seed_NV = 1;
+            const bool seeded = (tid == 0);
+#else
             const int ti = tid / (NU * NV);
             const int rem = tid % (NU * NV);
             const int ui = rem / NV;
             const int vi = rem % NV;
+            const int seed_NT = NT, seed_NU = NU, seed_NV = NV;
+            const bool seeded = true;
+#endif
 
             // Seeding is the uniform NT*NU*NV dice on both paths.
             //
@@ -2024,13 +2059,13 @@ namespace sccd {
             Domain<TC> cur;
             int contains = 0;
             int accept = 0;
-            SCCD_NP_PERQ_TICK(qid, 1);
+            if (seeded) SCCD_NP_PERQ_TICK(qid, 1);
             sample_cell_3d<is_vf, conservative, TC, Vec4>(ti,
                                                           ui,
                                                           vi,
-                                                          NT,
-                                                          NU,
-                                                          NV,
+                                                          seed_NT,
+                                                          seed_NU,
+                                                          seed_NV,
                                                           sampling_root,
                                                           sx,
                                                           sy,
@@ -2045,12 +2080,12 @@ namespace sccd {
                                                           accept,
                                                           cur);
 
-            if (accept && is_domain_valid<is_vf>(cur, s_toi, atol)) {
+            if (seeded && accept && is_domain_valid<is_vf>(cur, s_toi, atol)) {
                 device::atomic_min(&s_toi, cur.tlower);
             }
             __syncthreads();
 
-            const int active_seed = contains && !accept && (cur.tlower < s_toi);
+            const int active_seed = seeded && contains && !accept && (cur.tlower < s_toi);
 
             const int co_count = block_popc<N>(active_seed, warp_sums);
             if (!co_count) {
@@ -2094,7 +2129,7 @@ namespace sccd {
             int active = active_seed;
             int level = initial_level + 1;
             while (true) {
-                if (toi_stride == 0) {
+                if (toi_output == ToiOutput::Earliest) {
                     if (tid == 0) {
                         const TC g = atomic_min_toi<T>(&toi[toi_idx], s_toi);
                         if (g < s_toi) s_toi = g;
@@ -2143,10 +2178,12 @@ namespace sccd {
                         right, sx, sy, sz, ex, ey, ez, tol, atol, aerr, cr, ar);
 
                     if (!is_domain_valid<is_vf>(left, s_toi, atol)) {
+                        if (cl || al) SCCD_NP_BOUND_KILL_TICK();
                         cl = 0;
                         al = 0;
                     }
                     if (!is_domain_valid<is_vf>(right, s_toi, atol)) {
+                        if (cr || ar) SCCD_NP_BOUND_KILL_TICK();
                         cr = 0;
                         ar = 0;
                     }
@@ -2238,7 +2275,7 @@ namespace sccd {
                                      const T tol,
                                      const int max_depth,
                                      T* SCCD_RESTRICT toi,
-                                     const int toi_stride,
+                                     const ToiOutput toi_output,
                                      Stack<TC> g_out,
                                      const T alpha,
                                      const int seed_begin,
@@ -2256,7 +2293,7 @@ namespace sccd {
                                                   tol,
                                                   max_depth,
                                                   toi,
-                                                  toi_stride,
+                                                  toi_output,
                                                   g_out,
                                                   alpha,
                                                   qid,
@@ -2276,7 +2313,7 @@ namespace sccd {
                                                 const T tol,
                                                 const int max_depth,
                                                 T* SCCD_RESTRICT toi,
-                                                const int toi_stride,
+                                                const ToiOutput toi_output,
                                                 Stack<TC> g_in,
                                                 Stack<TC> g_out) {
             __shared__ int b_qid;
@@ -2326,7 +2363,7 @@ namespace sccd {
                                                       tol,
                                                       max_depth,
                                                       toi,
-                                                      toi_stride,
+                                                      toi_output,
                                                       g_out,
                                                       TC(0),
                                                       b_qid,
@@ -2353,16 +2390,22 @@ namespace sccd {
                                  T* const SCCD_RESTRICT d_toi,
                                  const int max_depth,
                                  const T tol,
-                                 const int toi_stride) {
+                                 const ToiOutput toi_output) {
             SCCD_CUDA_LAST_ERROR();
 
-            if (noverlaps == 0) return max_toi;
+            // 0, not max_toi. This is an int-returning function and the return
+            // is a status, as in narrow_phase_tight_vf: 0 means the call
+            // succeeded. Returning the time of impact here narrowed a T to an
+            // int, so the device vf/ee entry points reported 1 on an empty
+            // candidate list and 0 otherwise -- two different meanings from one
+            // function, neither documented. Nothing checked it, which is why it
+            // survived.
+            if (noverlaps == 0) return 0;
             assert(d_toi != nullptr);
-            assert(toi_stride == 0 || toi_stride == 1);
 
             // toi length: 1 when stride==0 (all candidates share toi[0]),
             //             noverlaps when stride==1 (one toi per candidate).
-            const size_t toi_n = (toi_stride == 0) ? 1 : noverlaps;
+            const size_t toi_n = (toi_output == ToiOutput::Earliest) ? 1 : noverlaps;
 
             // SCCD_READ_ENV stringifies the variable name, so this used to read a
             // bare lowercase `alpha` from the environment -- an unprefixed name in
@@ -2402,7 +2445,7 @@ namespace sccd {
             {
                 int occ = 0;
                 if (cudaOccupancyMaxActiveBlocksPerMultiprocessor(
-                        &occ, (const void*)narrow_phase_dfs_zero_stride_from_stack_kernel<is_vf, conservative, N, T, I>, N, 0) ==
+                        &occ, (const void*)narrow_phase_dfs_zero_stride_from_stack_kernel<is_vf, conservative, false, N, T, I>, N, 0) ==
                         cudaSuccess &&
                     occ > 0) {
                     SCCD_BLOCKS_PER_SM = occ;
@@ -2492,6 +2535,9 @@ namespace sccd {
                 SCCD_CHECK_CUDA(cudaMemcpyToSymbol(g_np_push_shared, &zero, sizeof(zero)));
                 SCCD_CHECK_CUDA(cudaMemcpyToSymbol(g_np_push_global, &zero, sizeof(zero)));
                 SCCD_CHECK_CUDA(cudaMemcpyToSymbol(g_np_push_lost, &zero, sizeof(zero)));
+                SCCD_CHECK_CUDA(cudaMemcpyToSymbol(g_np_bound_killed, &zero, sizeof(zero)));
+                SCCD_CHECK_CUDA(cudaMemcpyToSymbol(g_np_active_sum, &zero, sizeof(zero)));
+                SCCD_CHECK_CUDA(cudaMemcpyToSymbol(g_np_iters, &zero, sizeof(zero)));
                 unsigned long long lvl_zero[80] = {0};
                 SCCD_CHECK_CUDA(cudaMemcpyToSymbol(g_np_level, lvl_zero, sizeof(lvl_zero)));
                 SCCD_CHECK_CUDA(cudaMalloc(&d_perq, noverlaps * sizeof(unsigned long long)));
@@ -2560,10 +2606,31 @@ namespace sccd {
                     Stack<TC> g_out = make_buf(write_half, 0);
 
                     // Pass 1: seed-driven.
-                    if (toi_stride == 0) {
+                    //
+                    // toi_output == ToiOutput::PerPair runs one thread per query, like stride 0,
+                    // with a per-thread bound and a per-query output slot.
+                    //
+                    // It used to give each query a whole block. That is bound by
+                    // scheduling the blocks rather than by the search -- 843,414
+                    // of them on cloth-funnel, each classifying 63 boxes across
+                    // 128 threads, half a box per thread. One thread per query
+                    // measured 4.47x, 2.76x and 4.43x faster on the three scenes
+                    // with identical false positives and no missed collisions.
+                    //
+                    // SCCD_NP_S1_BLOCK_PER_QUERY=1 restores the old kernel. It is
+                    // kept because the thread-per-query path has one session's
+                    // measurement behind it, and because a query heavy enough to
+                    // want a whole block is exactly what the global queue is for
+                    // -- if such a workload turns up, this is the switch to try.
+                    const bool s1_thread_per_query = [] {
+                        const char* e = getenv("SCCD_NP_S1_BLOCK_PER_QUERY");
+                        return !(e != nullptr && atoi(e) != 0);
+                    }();
+                    if (toi_output == ToiOutput::Earliest || s1_thread_per_query) {
                         const int grid_blocks_zs = (this_batch + N - 1) / N;
                         dim3 grid_pass1_zs(grid_blocks_zs, 1, 1);
-                        narrow_phase_dfs_zero_stride_kernel<is_vf, conservative, N, T, I>
+                        if (toi_output == ToiOutput::Earliest) {
+                        narrow_phase_dfs_zero_stride_kernel<is_vf, conservative, false, N, T, I>
                             <<<grid_pass1_zs, block_pass1>>>(overlap0,
                                                              overlap1,
                                                              v0,
@@ -2576,6 +2643,21 @@ namespace sccd {
                                                              g_out,
                                                              (int)begin,
                                                              (int)end);
+                        } else {
+                            narrow_phase_dfs_zero_stride_kernel<is_vf, conservative, true, N, T, I>
+                                <<<grid_pass1_zs, block_pass1>>>(overlap0,
+                                                                 overlap1,
+                                                                 v0,
+                                                                 v1,
+                                                                 element_stride,
+                                                                 elements,
+                                                                 tol,
+                                                                 max_depth,
+                                                                 d_toi,
+                                                                 g_out,
+                                                                 (int)begin,
+                                                                 (int)end);
+                        }
                     } else {
                         dim3 grid_pass1(this_batch, 1, 1);
                         narrow_phase_dfs_kernel<is_vf, conservative, SCCD_NP_THREADS_PER_BLOCK, T, I>
@@ -2588,7 +2670,7 @@ namespace sccd {
                                                           tol,
                                                           max_depth,
                                                           d_toi,
-                                                          toi_stride,
+                                                          toi_output,
                                                           g_out,
                                                           np_alpha,
                                                           (int)begin,
@@ -2631,7 +2713,7 @@ namespace sccd {
                         // the swap instead, so the cap has to go. One thread per
                         // entry for the zero-stride kernel; the block-per-query
                         // kernel claims up to SCCD_NP_DRAIN_PER_BLOCK each.
-                        long long need = (toi_stride == 0)
+                        long long need = (toi_output == ToiOutput::Earliest || s1_thread_per_query)
                                              ? ((long long)h_g_top + N - 1) / N
                                              : ((long long)h_g_top + SCCD_NP_DRAIN_PER_BLOCK - 1) /
                                                    SCCD_NP_DRAIN_PER_BLOCK;
@@ -2639,8 +2721,11 @@ namespace sccd {
                         if (need > 2147483647LL) need = 2147483647LL;
                         dim3 grid_pass2((unsigned)need, 1, 1);
 
-                        if (toi_stride == 0) {
-                            narrow_phase_dfs_zero_stride_from_stack_kernel<is_vf, conservative, N, T, I><<<grid_pass2, block_pass1>>>(
+                        if (toi_output == ToiOutput::Earliest) {
+                            narrow_phase_dfs_zero_stride_from_stack_kernel<is_vf, conservative, false, N, T, I><<<grid_pass2, block_pass1>>>(
+                                overlap0, overlap1, v0, v1, element_stride, elements, tol, max_depth, d_toi, g_in, g_out);
+                        } else if (s1_thread_per_query) {
+                            narrow_phase_dfs_zero_stride_from_stack_kernel<is_vf, conservative, true, N, T, I><<<grid_pass2, block_pass1>>>(
                                 overlap0, overlap1, v0, v1, element_stride, elements, tol, max_depth, d_toi, g_in, g_out);
                         } else {
                             narrow_phase_dfs_from_stack_kernel<is_vf, conservative, N, T, I>
@@ -2653,7 +2738,7 @@ namespace sccd {
                                                               tol,
                                                               max_depth,
                                                               d_toi,
-                                                              toi_stride,
+                                                              toi_output,
                                                               g_in,
                                                               g_out);
                         }
@@ -2726,17 +2811,29 @@ namespace sccd {
 
 #ifdef SCCD_NP_COUNT_BOXES
             {
-                unsigned long long evals = 0;
+                unsigned long long evals = 0, bound_killed = 0;
                 SCCD_CHECK_CUDA(cudaDeviceSynchronize());
                 SCCD_CHECK_CUDA(cudaMemcpyFromSymbol(&evals, g_np_evals, sizeof(evals)));
+                SCCD_CHECK_CUDA(cudaMemcpyFromSymbol(&bound_killed, g_np_bound_killed, sizeof(bound_killed)));
+                unsigned long long act = 0, iters = 0;
+                SCCD_CHECK_CUDA(cudaMemcpyFromSymbol(&act, g_np_active_sum, sizeof(act)));
+                SCCD_CHECK_CUDA(cudaMemcpyFromSymbol(&iters, g_np_iters, sizeof(iters)));
                 fprintf(stderr,
-                        "sccd-np-count %s %s stride=%d queries=%zu corner_evals=%llu per_query=%.1f\n",
+                        "sccd-np-active stride=%d threads_per_block=%d iters=%llu mean_active=%.2f occupancy=%.1f%%\n",
+                        toi_output, SCCD_NP_THREADS_PER_BLOCK, iters,
+                        iters ? (double)act / (double)iters : 0.0,
+                        iters ? 100.0 * (double)act / ((double)iters * SCCD_NP_THREADS_PER_BLOCK) : 0.0);
+                fprintf(stderr,
+                        "sccd-np-count %s %s stride=%d queries=%zu corner_evals=%llu per_query=%.1f "
+                        "bound_killed=%llu comparable=%llu\n",
                         is_vf ? "vf" : "ee",
                         conservative ? "conservative" : "mode0",
-                        toi_stride,
+                        toi_output,
                         noverlaps,
                         evals,
-                        noverlaps ? (double)evals / (double)noverlaps : 0.0);
+                        noverlaps ? (double)evals / (double)noverlaps : 0.0,
+                        bound_killed,
+                        evals - bound_killed);
 
                 std::vector<unsigned long long> perq(noverlaps, 0ull);
                 SCCD_CHECK_CUDA(cudaMemcpy(perq.data(),
@@ -2760,11 +2857,97 @@ namespace sccd {
                 }
                 fprintf(stderr,
                         "sccd-np-hist device stride=%d queries=%zu worst=%llu at=%zu hist=",
-                        toi_stride,
+                        toi_output,
                         noverlaps,
                         worst,
                         worst_q);
                 for (int b = 0; b < 24; ++b) fprintf(stderr, "%llu%s", hist[b], b == 23 ? "\n" : ",");
+
+                // The histogram says a few queries carry almost everything and
+                // says nothing about *which*, so there has never been a way to
+                // look at one. SCCD_NP_WORST_CSV names a file; the geometry of
+                // the costliest queries is appended to it in the datasets' own
+                // query-CSV format, which sccd_np_trace reads, so one of them can
+                // be run on both machines and diffed box by box.
+                //
+                // Written as value/1 rather than as a dyadic rational: the
+                // coordinates have already been through the mesh (float) or the
+                // parser (double) by this point, so there is no exact rational to
+                // recover, and %.17g round-trips a double exactly.
+                if (const char* worst_csv = getenv("SCCD_NP_WORST_CSV")) {
+                    int want = 4;
+                    if (const char* n = getenv("SCCD_NP_WORST_N")) {
+                        want = atoi(n);
+                        if (want < 1) want = 1;
+                    }
+                    std::vector<size_t> order(noverlaps);
+                    for (size_t q = 0; q < noverlaps; ++q) order[q] = q;
+                    const size_t take = (size_t)want < noverlaps ? (size_t)want : noverlaps;
+                    std::partial_sort(order.begin(), order.begin() + take, order.end(),
+                                      [&](size_t a, size_t b) { return perq[a] > perq[b]; });
+
+                    // Everything needed to reconstruct a query lives on the
+                    // device: two index arrays, three or four element rows, and
+                    // the point rows behind two arrays of device pointers.
+                    std::vector<I> h_o0(noverlaps), h_o1(noverlaps);
+                    SCCD_CHECK_CUDA(cudaMemcpy(h_o0.data(), overlap0, noverlaps * sizeof(I), cudaMemcpyDeviceToHost));
+                    SCCD_CHECK_CUDA(cudaMemcpy(h_o1.data(), overlap1, noverlaps * sizeof(I), cudaMemcpyDeviceToHost));
+                    T* h_sp[3];
+                    T* h_ep[3];
+                    SCCD_CHECK_CUDA(cudaMemcpy(h_sp, v0, 3 * sizeof(T*), cudaMemcpyDeviceToHost));
+                    SCCD_CHECK_CUDA(cudaMemcpy(h_ep, v1, 3 * sizeof(T*), cudaMemcpyDeviceToHost));
+                    const int nrows = is_vf ? 3 : 2;
+                    I* h_elem[4] = {nullptr, nullptr, nullptr, nullptr};
+                    SCCD_CHECK_CUDA(cudaMemcpy(h_elem, elements, nrows * sizeof(I*), cudaMemcpyDeviceToHost));
+
+                    auto node_at = [&](I* row, const I e) {
+                        I v = 0;
+                        SCCD_CHECK_CUDA(cudaMemcpy(&v, row + (size_t)e * element_stride, sizeof(I),
+                                                   cudaMemcpyDeviceToHost));
+                        return v;
+                    };
+                    auto point_at = [&](T* const rows[3], const I node, double out[3]) {
+                        for (int d = 0; d < 3; ++d) {
+                            T v = T(0);
+                            SCCD_CHECK_CUDA(cudaMemcpy(&v, rows[d] + (size_t)node, sizeof(T),
+                                                       cudaMemcpyDeviceToHost));
+                            out[d] = (double)v;
+                        }
+                    };
+
+                    FILE* f = fopen(worst_csv, "a");
+                    if (f) {
+                        for (size_t k = 0; k < take; ++k) {
+                            const size_t q = order[k];
+                            if (perq[q] == 0) break;  // nothing left worth dumping
+                            I node[4];
+                            if (is_vf) {
+                                node[0] = h_o0[q];
+                                for (int r = 0; r < 3; ++r) node[r + 1] = node_at(h_elem[r], h_o1[q]);
+                            } else {
+                                node[0] = node_at(h_elem[0], h_o0[q]);
+                                node[1] = node_at(h_elem[1], h_o0[q]);
+                                node[2] = node_at(h_elem[0], h_o1[q]);
+                                node[3] = node_at(h_elem[1], h_o1[q]);
+                            }
+                            fprintf(stderr, "sccd-np-worst %s stride=%d q=%zu boxes=%llu -> %s\n",
+                                    is_vf ? "vf" : "ee", toi_output, q, perq[q], worst_csv);
+                            // Four start points then four end points, one row
+                            // each: the layout every query CSV in data/ uses.
+                            for (int half = 0; half < 2; ++half) {
+                                T* const* rows = half == 0 ? h_sp : h_ep;
+                                for (int k4 = 0; k4 < 4; ++k4) {
+                                    double xyz[3];
+                                    point_at(rows, node[k4], xyz);
+                                    fprintf(f, "%.17g,1,%.17g,1,%.17g,1\n", xyz[0], xyz[1], xyz[2]);
+                                }
+                            }
+                        }
+                        fclose(f);
+                    } else {
+                        fprintf(stderr, "sccd-np-worst: could not open %s\n", worst_csv);
+                    }
+                }
 
                 unsigned long long lvl[80] = {0}, depth_acc = 0;
                 SCCD_CHECK_CUDA(cudaMemcpyFromSymbol(lvl, g_np_level, sizeof(lvl)));
@@ -2775,7 +2958,7 @@ namespace sccd {
                 SCCD_CHECK_CUDA(cudaMemcpyFromSymbol(&pl, g_np_push_lost, sizeof(pl)));
                 fprintf(stderr,
                         "sccd-np-push stride=%d s_cap=%d shared=%llu global=%llu lost=%llu drains=%d\n",
-                        toi_stride,
+                        toi_output,
                         S_CAP_DIAG,
                         ps,
                         pg,
@@ -2806,16 +2989,16 @@ namespace sccd {
                             T* const SCCD_RESTRICT toi,
                             const int max_depth,
                             const T tol,
-                            const int toi_stride) {
+                            const ToiOutput toi_output) {
             if (narrow_phase_mode_is_tight(narrow_phase_mode())) {
                 return narrow_phase_generic<false, true, T, I>(
-                    noverlaps, overlap0, overlap1, v0, v1, edge_stride, edges, max_toi, toi, max_depth, tol, toi_stride);
+                    noverlaps, overlap0, overlap1, v0, v1, edge_stride, edges, max_toi, toi, max_depth, tol, toi_output);
             }
             return narrow_phase_generic<false, false, T, I>(
-                noverlaps, overlap0, overlap1, v0, v1, edge_stride, edges, max_toi, toi, max_depth, tol, toi_stride);
+                noverlaps, overlap0, overlap1, v0, v1, edge_stride, edges, max_toi, toi, max_depth, tol, toi_output);
         }
 
-        template <int nxe, typename T, typename I>
+        template <typename T, typename I>
         int narrow_phase_vf(const size_t noverlaps,
                             const I* const SCCD_RESTRICT voveralp,
                             const I* const SCCD_RESTRICT foveralp,
@@ -2828,13 +3011,13 @@ namespace sccd {
                             T* const SCCD_RESTRICT toi,
                             const int max_depth,
                             const T tol,
-                            const int toi_stride) {
+                            const ToiOutput toi_output) {
             if (narrow_phase_mode_is_tight(narrow_phase_mode())) {
                 return narrow_phase_generic<true, true, T, I>(
-                    noverlaps, voveralp, foveralp, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_stride);
+                    noverlaps, voveralp, foveralp, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_output);
             }
             return narrow_phase_generic<true, false, T, I>(
-                noverlaps, voveralp, foveralp, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_stride);
+                noverlaps, voveralp, foveralp, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_output);
         }
 
         template <typename T>
@@ -2869,10 +3052,10 @@ namespace sccd {
                                                      T* const SCCD_RESTRICT toi,            \
                                                      const int max_depth,                   \
                                                      const T tol,                           \
-                                                     const int toi_stride);
+                                                     const ToiOutput toi_output);
 
-#define SCCD_NP_NARROW_PHASE_VF(NXE, T, I)                                                   \
-    template int sccd::device::narrow_phase_vf<NXE, T, I>(const size_t noverlaps,                \
+#define SCCD_NP_NARROW_PHASE_VF(T, I)                                                   \
+    template int sccd::device::narrow_phase_vf<T, I>(const size_t noverlaps,                \
                                                           const I* const SCCD_RESTRICT voveralp, \
                                                           const I* const SCCD_RESTRICT foveralp, \
                                                           T** const SCCD_RESTRICT v0,            \
@@ -2883,17 +3066,17 @@ namespace sccd {
                                                           T* const SCCD_RESTRICT toi,            \
                                                           const int max_depth,                   \
                                                           const T tol,                           \
-                                                          const int toi_stride);
+                                                          const ToiOutput toi_output);
 
 SCCD_NP_NARROW_PHASE_EE(float, int32_t);
 SCCD_NP_NARROW_PHASE_EE(float, int64_t);
 SCCD_NP_NARROW_PHASE_EE(double, int32_t);
 SCCD_NP_NARROW_PHASE_EE(double, int64_t);
 
-SCCD_NP_NARROW_PHASE_VF(3, float, int32_t);
-SCCD_NP_NARROW_PHASE_VF(3, float, int64_t);
-SCCD_NP_NARROW_PHASE_VF(3, double, int32_t);
-SCCD_NP_NARROW_PHASE_VF(3, double, int64_t);
+SCCD_NP_NARROW_PHASE_VF(float, int32_t);
+SCCD_NP_NARROW_PHASE_VF(float, int64_t);
+SCCD_NP_NARROW_PHASE_VF(double, int32_t);
+SCCD_NP_NARROW_PHASE_VF(double, int64_t);
 
 template int sccd::device::minmax<float>(const float* const SCCD_RESTRICT data,
                                          const size_t n,

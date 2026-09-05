@@ -14,14 +14,14 @@ The narrow phase is the library. One call, three arrays of geometry per time
 step, and one time of impact per candidate pair.
 
 ```cpp
-template <int nxe, typename T, typename I>
+template <typename T, typename I>
 int sccd::narrow_phase_vf(size_t n_pairs,
                           const I* vertex_of_pair, const I* face_of_pair,
                           T** v0, T** v1,          // start / end geometry, SoA
                           size_t face_stride, I** faces,
                           T max_toi, T* toi,       // out
                           int max_depth, T tol,
-                          int toi_stride = 0);
+                          ToiOutput toi_output = ToiOutput::Earliest);
 ```
 
 `T** v0` is three row pointers — x, y and z — not a matrix type. `I** faces` is
@@ -35,15 +35,21 @@ std::vector<double> z0 = {0.0, 0.0, 0.0, 1.00};
 double* v0[3] = {x0.data(), y0.data(), z0.data()};
 ```
 
-`toi_stride` selects what comes back: `1` writes one time of impact per pair,
-`0` writes a single earliest time to `toi[0]` and lets every query prune against
-the running minimum, which is markedly cheaper.
+`toi_output` selects what comes back. `ToiOutput::Earliest` writes a single
+earliest time to `toi[0]` and lets every query prune against the running minimum,
+so `toi` needs one element. `ToiOutput::PerPair` writes one time of impact per
+pair, so `toi` needs `n_pairs` of them, and nothing prunes across queries — it
+costs 1.6–4.4× the earliest form on the host and more on the device. Reach for
+`Earliest` unless you need to know which pair collided.
+
+`max_toi` bounds the search: no contact at or after it is reported. Pass `1.0`
+for a whole step.
 
 | call | header | query |
 |---|---|---|
-| `sccd::narrow_phase_vf<3>` | `sccd_narrowphase.hpp` | vertex against triangle |
+| `sccd::narrow_phase_vf` | `sccd_narrowphase.hpp` | vertex against triangle |
 | `sccd::narrow_phase_ee` | `sccd_narrowphase.hpp` | edge against edge |
-| `sccd::narrow_phase_vq<4>` | `sccd_narrowphase_quad.hpp` | vertex against quad |
+| `sccd::narrow_phase_vq` | `sccd_narrowphase_quad.hpp` | vertex against quad |
 | `sccd::device::narrow_phase_*` | `sccd_narrowphase.cuh`, `sccd_narrowphase_vq.cuh` | the same, on the GPU |
 
 Device entry points take **device** arrays of device pointers, not host arrays.
@@ -110,12 +116,30 @@ edge against edge.
 
 ## The C ABI
 
-For callers that are not C++. `src/api/sccd_c_api.cpp` is SCCD's only compiled
-translation unit; `python/sccd.py` is a `ctypes` binding on top of it.
+For callers that are not C++. Include `sccd.h` and link `sccd`;
+`python/sccd.py` is a `ctypes` binding on the same symbols.
+
+```c
+#include "sccd.h"
+
+double t = 1.1, u = 0.0, v = 0.0;   /* t is the search bound on the way in */
+const int hit = sccd_find_root_vf_d(69, 1e-8, sv, s1, s2, s3, ev, e1, e2, e3,
+                                    &t, &u, &v);
+```
 
 It is a thin layer. Each entry point takes one query, runs the branch-and-bound
 search on it, and writes back a time of impact and the parameter coordinates of
 the contact. There is no broad phase here and no batching.
+
+Two parts of the contract are easy to miss, and both are in the header:
+
+- **The return value is a hit, not a status.** Non-zero means a collision was
+  found. The C++ entry points return an `int` that is a status, zero on success.
+- **`*t` is read as well as written.** On entry it is the upper bound of the
+  search: a box whose `t` lower bound is at or past it is discarded unopened.
+  Pass something greater than the latest time you care about — `1.1` for a whole
+  step. Passing `0`, or uninitialised memory, searches nothing and returns `0`.
+  `*u` and `*v` are read too; initialise them to `0`.
 
 ### Entry points
 
@@ -189,11 +213,11 @@ The phases are callable separately, to interleave your own logic:
 ```cpp
 ccd.broad_phase_prep(points_t0, points_t1);
 ccd.broad_phase_fv_step(v_overlap, f_overlap);   // or broad_phase_ee_step
-ccd.narrow_phase_fv(toi, vf_tois, max_depth, tol, /*toi_stride=*/0);
+ccd.narrow_phase_fv(toi, vf_tois, max_depth, tol, sccd::ToiOutput::Earliest);
 ```
 
 `narrow_phase_fv` and `narrow_phase_ee` take `max_toi` by reference: it bounds
-the search on the way in and, for `toi_stride == 0`, comes back holding the
+the search on the way in and, for `ToiOutput::Earliest`, comes back holding the
 earliest time of impact.
 
 One caveat worth knowing: **smesh stores coordinates as `float`**
@@ -233,8 +257,24 @@ tools that sit beside it.
 
 ## Building against it
 
-The library installs as `libsccd`, and the C declarations are in
-`src/api/sccd_c_api.cpp`; there is no separate installed C header yet, so a consumer
-declares the entry points it needs. `python/sccd.py` shows the shape, and
-`python/sccd_binding_test.py` -- registered as the `sccd_binding_test` ctest --
+```sh
+cmake -S . -B build && cmake --build build -j
+cmake --install build --prefix /where/you/want
+```
+
+The library installs as `libsccd` with its headers under `include/`:
+
+| you are writing | include | also link |
+|---|---|---|
+| C++ | `sccd_narrowphase.hpp`, `sccd_broadphase_sweep.hpp`, … | `sccd` |
+| C | `sccd.h` | `sccd` |
+| CUDA | `sccd_narrowphase.cuh`, `sccd_narrowphase_vq.cuh`, `sccd_broadphase.cuh`, `sccd_vaabb.cuh`, `sccd_cell2d_broadphase.cuh` | `sccd`, built with `SCCD_ENABLE_CUDA=ON` |
+
+The include directory has one subdirectory per component (`api`, `core`,
+`narrowphase`, `broadphase`, `cuda`), and all of them are on the interface
+include path of the exported `SCCD::sccd` target, so `find_package(SCCD)` and a
+`target_link_libraries(... SCCD::sccd)` is enough — the includes above are flat.
+
+`python/sccd.py` binds the same C symbols through `ctypes`;
+`python/sccd_binding_test.py`, registered as the `sccd_binding_test` ctest,
 checks that the binding and the library still agree.

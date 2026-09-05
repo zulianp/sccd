@@ -9,9 +9,7 @@ supported configuration.
 | Variable | Values | Default | Effect |
 |---|---|---|---|
 | `SCCD_NARROWPHASE_MODE` | `0`, `2` | `0` | Narrow-phase kernel: `0` `Relaxed`, `2` `Tight`. Any other value warns and runs `0`. **Ignored for quads**, which have one root-finder variant. |
-| `SCCD_BROADPHASE` | `sweep`, `cell2d` | auto | Forces a broad phase instead of letting `choose_broadphase_strategy` decide. Both produce identical pair sets, so this only changes speed. |
-| `SCCD_USE_VNARROW_PHASE` | `2` | build option | Consulted only when `SCCD_NARROWPHASE_MODE` is unset. `2` selects `Tight`; any other non-zero value warns and runs `0`. |
-| `SCCD_VNARROWPHASE_TI_COMPAT` | `0`, `1` | build option | Consulted only when `SCCD_NARROWPHASE_MODE` is unset. Non-zero warns and runs `0`. |
+| `SCCD_BROADPHASE` | `sweep`, `cell2d` | auto | Forces a broad phase instead of letting `BroadPhaseAutoTuner` race the two and keep the winner. Both produce identical pair sets, so this only changes speed. |
 | `SCCD_USE_TI` | `0`, `1` | `0` | Calls TightInclusion directly. Requires a TightInclusion build. Oracle use only. |
 
 ### Getting TightInclusion's answer
@@ -32,7 +30,6 @@ else:
 |---|---|---|
 | `SCCD_NARROWPHASE_MODE=1` or `3` | `Relaxed` | that the value selects no kernel, and to use `SCCD_USE_TI=1` for the reference |
 | `SCCD_NARROWPHASE_MODE=20`, or any non-number | `Relaxed` | that the value was ignored, and what the valid ones are |
-| `SCCD_VNARROWPHASE_TI_COMPAT`, or `SCCD_USE_VNARROW_PHASE` other than `2` | `Relaxed` | that the variable selects no kernel, and what to use instead |
 | any mode on a quad mesh | the one quad kernel | that the mode does not reach the quad path |
 
 An unset variable, or `SCCD_NARROWPHASE_MODE=0`, says nothing: there is no
@@ -47,9 +44,9 @@ anywhere; setting them does nothing.
 
 | Variable | Type | Default | Effect |
 |---|---|---|---|
-| `SCCD_MAX_DEPTH` | int | `69` | Maximum subdivision depth. At the cap a box is **accepted** at its `t` lower bound, never dropped — that is what keeps a depth limit from costing a collision. |
+| `SCCD_MAX_DEPTH` | int | `69` | Maximum subdivision depth. At the cap a box is **accepted** at its `t` lower bound, never dropped — that is what keeps a depth limit from costing a collision. The device vertex-quad kernel holds a stack for depth 128 (`-DSCCD_VQ_MAX_DEPTH`) and reports on stderr if asked for more. |
 | `SCCD_TOL` | float | `3e-8` | Codomain tolerance for the acceptance test. |
-| `SCCD_REFINE` | int | `0` | Extra refinement passes in the vertex-quad search. |
+| `SCCD_REFINE` | int | `0` | Newton polish on an accepted vertex-face box: if it converges to an earlier time inside the box, that time is reported instead. Vertex-face only — the edge-edge and vertex-quad searches have no polish step and ignore it. |
 
 Lowering `SCCD_TOL` or raising `SCCD_MAX_DEPTH` tightens the reported time of
 impact and costs time. Neither can make the result unsafe: the rejection test
@@ -61,6 +58,7 @@ pads by the certified numerical error bound, which these do not touch.
 |---|---|---|---|
 | `SCCD_BLOCKS_PER_SM` | int | occupancy API | Blocks resident per SM. |
 | `SCCD_BATCH_SIZE` | int | all candidates | Candidates per outer iteration. |
+| `SCCD_NP_S1_BLOCK_PER_QUERY` | `0`, `1` | `0` | Runs the `ToiOutput::PerPair` path as one block per query instead of one thread per query. The default is one thread, which measures 2.8–4.5× faster for identical results; this is here to reproduce the comparison. |
 | `SCCD_GSTACK_CAP_MAX` | int | `INT_MAX` | Soft cap on a single growth step of the global stack. The stack starts empty and grows from the deficit the kernel reports. |
 | `SCCD_NP_ALPHA` | float | `0.5` | Splitter blending factor. |
 
@@ -70,7 +68,7 @@ pads by the certified numerical error bound, which these do not touch.
 `-DSCCD_NP_COUNT_BOXES` in `CMAKE_CUDA_FLAGS` and `CMAKE_CXX_FLAGS` makes the
 device narrow phase and the host TightInclusion kernel each count the boxes they
 classify and print one line per call to stderr. Both count the same unit, so the
-two numbers are directly comparable: on cloth-funnel at `toi_stride=0` the device
+two numbers are directly comparable: on cloth-funnel at `ToiOutput::Earliest` the device
 classifies 94× the boxes the host does for the same queries. It is a
 global atomic on the hot path, so an instrumented build's *timings* mean nothing;
 only the counts do.

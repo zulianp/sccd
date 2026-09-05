@@ -118,14 +118,15 @@ int main() {
     faabb.resize(n_faces);
     eaabb.resize(n_edges);
 
-    // `safe_inflate` rounds each bound outward by one ULP. It is a no-op here,
-    // where the boxes have the same type as the coordinates and the bounds are
-    // therefore exact, and it is what keeps the broad phase from dropping a
-    // candidate when they do not -- float boxes over double geometry, say.
-    const bool safe_inflate = true;
-    sccd::compute_aabbs(kDim, n_nodes, p0, p1, vaabb.rows, vaabb.rows + kDim, safe_inflate);
-    sccd::compute_aabbs(3, n_faces, faces, kDim, p0, p1, faabb.rows, faabb.rows + kDim, safe_inflate);
-    sccd::compute_aabbs(2, n_edges, edges, kDim, p0, p1, eaabb.rows, eaabb.rows + kDim, safe_inflate);
+    // BoxRounding::OutwardUlp rounds each bound outward by one ULP. It is a
+    // no-op here, where the boxes have the same type as the coordinates and the
+    // bounds are therefore exact, and it is what keeps the broad phase from
+    // dropping a candidate when they do not -- float boxes over double
+    // geometry, say.
+    const auto rounding = sccd::BoxRounding::OutwardUlp;
+    sccd::compute_aabbs(n_nodes, p0, p1, vaabb.rows, rounding);
+    sccd::compute_aabbs(3, n_faces, faces, p0, p1, faabb.rows, rounding);
+    sccd::compute_aabbs(2, n_edges, edges, p0, p1, eaabb.rows, rounding);
 
     // ---- broad phase, step 2: sort along one axis ---------------------------
     // The sweep needs the lists ordered on a common axis. choose_axis picks the
@@ -195,22 +196,23 @@ int main() {
     }
 
     // ---- narrow phase -------------------------------------------------------
-    // toi_stride = 0 asks for a single earliest time of impact over all pairs,
-    // which lets every query prune against the running minimum. Pass 1 instead,
-    // with an output array of one element per pair, to get them individually.
+    // ToiOutput::Earliest asks for a single earliest time of impact over all
+    // pairs, which lets every query prune against the running minimum. Pass
+    // ToiOutput::PerPair instead, with an output array of one element per pair,
+    // to get them individually.
     const T max_toi = 1.0;
     const int max_depth = 69;
     const T tol = 3e-8;
 
     T vf_toi = max_toi;
-    sccd::narrow_phase_vf<3, T, I>(vf_vertex.size(), vf_vertex.data(), vf_face.data(), p0, p1,
+    sccd::narrow_phase_vf<T, I>(vf_vertex.size(), vf_vertex.data(), vf_face.data(), p0, p1,
                                    /*face_stride=*/1, faces, max_toi, &vf_toi, max_depth, tol,
-                                   /*toi_stride=*/0);
+                                   sccd::ToiOutput::Earliest);
 
     T ee_toi = max_toi;
     sccd::narrow_phase_ee<T, I>(ee_a.size(), ee_a.data(), ee_b.data(), p0, p1,
                                 /*edge_stride=*/1, edges, max_toi, &ee_toi, max_depth, tol,
-                                /*toi_stride=*/0);
+                                sccd::ToiOutput::Earliest);
 
     const T toi = std::min(vf_toi, ee_toi);
 

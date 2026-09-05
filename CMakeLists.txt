@@ -132,6 +132,7 @@ if(SCCD_ENABLE_SMESH)
 endif()
 
 target_link_libraries(sccd PUBLIC ${SCCD_DEP_LIBRARIES})
+target_link_libraries(sccd PRIVATE ${SCCD_DEP_PRIVATE_LIBRARIES})
 
 include(GNUInstallDirs)
 
@@ -141,7 +142,17 @@ configure_file("${CMAKE_CURRENT_SOURCE_DIR}/src/core/sccd_config.hpp.in" "${CMAK
 # header goes on the path, in the build tree and after install alike. The
 # `sccd_` prefix plus one descriptive name per file keeps basenames unique,
 # which is what makes flat includes safe.
-set(_sccd_header_dirs core broadphase narrowphase cuda integrations/smesh)
+# One entry per installed header directory. Each becomes an INSTALL_INTERFACE
+# include path on the exported target, so a directory listed here that does not
+# exist in the install tree makes find_package(SCCD) fail outright -- which is
+# what happens if cuda is listed in a build that installs no .cuh.
+set(_sccd_header_dirs api core broadphase narrowphase)
+if(SCCD_ENABLE_CUDA)
+  list(APPEND _sccd_header_dirs cuda)
+endif()
+if(SCCD_ENABLE_SMESH)
+  list(APPEND _sccd_header_dirs integrations/smesh)
+endif()
 set(_sccd_build_includes
     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
@@ -192,6 +203,8 @@ install(TARGETS sccd
 # Everything here is header-only templates, so the support headers are installed
 # too: a consumer of narrowphase.hpp needs everything it includes.
 set(SCCD_PUBLIC_HEADERS
+  # The C ABI. The one declaration of the extern "C" entry points.
+  src/api/sccd.h
   # Entry points.
   src/narrowphase/sccd_narrowphase.hpp
   src/narrowphase/sccd_narrowphase_quad.hpp
@@ -212,23 +225,54 @@ set(SCCD_PUBLIC_HEADERS
   src/narrowphase/sccd_numerical_error.hpp
   src/core/sccd_parallel.hpp
 )
+
+# The device API. Installed only in a CUDA build, but classified in every build
+# so the guard below can see them: a header that is in neither list is an
+# omission, and CUDA headers used to be in neither because the guard globbed
+# only *.hpp.
+set(SCCD_PUBLIC_CUDA_HEADERS
+  src/cuda/sccd_narrowphase.cuh
+  src/cuda/sccd_narrowphase_vq.cuh
+  src/cuda/sccd_broadphase.cuh
+  src/cuda/sccd_cell2d_broadphase.cuh
+  src/cuda/sccd_vaabb.cuh
+)
+
+# Implementation headers for the device kernels. Included only by .cu files
+# inside src/cuda/ (and by spikes), never by a public header, so they are not
+# installed -- but they are classified, which is what keeps the guard honest.
+set(SCCD_INTERNAL_HEADERS
+  src/cuda/sccd_cuda_base.cuh
+  src/cuda/sccd_reduce.cuh
+  src/cuda/sccd_device_workspace.cuh
+  src/cuda/sccd_device_dfs_stack.cuh
+)
+
 if(SCCD_ENABLE_SMESH)
   list(APPEND SCCD_PUBLIC_HEADERS src/integrations/smesh/sccd_smesh_ccd.hpp)
+endif()
+if(SCCD_ENABLE_CUDA)
+  list(APPEND SCCD_PUBLIC_HEADERS ${SCCD_PUBLIC_CUDA_HEADERS})
 endif()
 
 # Fail configure if a header exists that nobody has classified. Without this the
 # list silently drifts from the tree and we are back to guessing.
 file(GLOB_RECURSE _sccd_all_headers RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}"
-     CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp")
+     CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp"
+                       "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
+                       "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cuh")
 list(FILTER _sccd_all_headers EXCLUDE REGEX "^src/tests/")
 if(NOT SCCD_ENABLE_SMESH)
   list(FILTER _sccd_all_headers EXCLUDE REGEX "^src/integrations/smesh/")
 endif()
+set(_sccd_classified ${SCCD_PUBLIC_HEADERS} ${SCCD_PUBLIC_CUDA_HEADERS} ${SCCD_INTERNAL_HEADERS})
 foreach(_hdr IN LISTS _sccd_all_headers)
-  if(NOT _hdr IN_LIST SCCD_PUBLIC_HEADERS)
+  if(NOT _hdr IN_LIST _sccd_classified)
     message(FATAL_ERROR
-      "SCCD: ${_hdr} is not in SCCD_PUBLIC_HEADERS. Add it there if it is part of "
-      "the public surface, or move it to spikes/ if it is not. See spikes/README.md.")
+      "SCCD: ${_hdr} is in no header list. Add it to SCCD_PUBLIC_HEADERS (or "
+      "SCCD_PUBLIC_CUDA_HEADERS) if it is part of the public surface, to "
+      "SCCD_INTERNAL_HEADERS if it is an implementation header, or move it to "
+      "spikes/ if it is neither. See spikes/README.md.")
   endif()
 endforeach()
 
@@ -312,6 +356,16 @@ if(SCCD_ENABLE_SMESH)
   # skin operations, so it lives with the other smesh-gated targets.
   add_executable(sccd_refine_scaling "${CMAKE_CURRENT_SOURCE_DIR}/benchmark/refine_scaling.exe.cpp")
   target_link_libraries(sccd_refine_scaling PRIVATE sccd)
+endif()
+
+# Per-query box counts, host and device, one query at a time. Needs neither smesh
+# nor TightInclusion -- it reads the datasets' query CSVs directly -- so it builds
+# in the default configuration and is the tool to reach for when a box count needs
+# explaining. Build it with -DSCCD_NP_COUNT_BOXES for the counts to exist.
+add_executable(sccd_np_trace "${CMAKE_CURRENT_SOURCE_DIR}/benchmark/np_trace.exe.cpp")
+target_link_libraries(sccd_np_trace PRIVATE sccd)
+if(SCCD_ENABLE_CUDA)
+  target_link_libraries(sccd_np_trace PRIVATE CUDA::cudart)
 endif()
 
 # Accuracy oracle: compares every narrow-phase mode against TightInclusion on the

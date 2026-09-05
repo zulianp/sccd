@@ -80,27 +80,22 @@ between.
 `src/cuda/` ships five kernels: broad phase (sweep), 2D cell list, narrow phase
 (triangles), narrow phase (quads), and AABB construction.
 
-The device broad phase is a clear win, 1.3× to 4.8× over 72 Grace cores — it is
-the phase whose shape suits a GPU, being count, prefix sum and scatter with no
-sequential window walk.
+The broad phase is the phase whose shape suits a GPU — count, prefix sum and
+scatter, with no sequential window walk — and it wins there on every scene.
 
-The device **narrow** phase depends entirely on which kernel you ask for. Mode for
-mode against 72 Grace cores, the default kernel is 2.0× *ahead* on cloth-ball and
-2.2–3.6× behind on the two smaller scenes; end to end, the whole pipeline on the
-GPU beats the whole pipeline on the host by 3.2× on cloth-ball and is within 35%
-on the others.
+The narrow phase depends on which kernel you ask for, and the two modes do not
+rank the same way on the two machines: `Tight` is the host's faster path and the
+device's slower one. **A sweep that pins the same `SCCD_NARROWPHASE_MODE` on both
+sides therefore races the host's best kernel against the device's worst.** Compare
+a mode against itself across hardware only when you mean to; otherwise compare
+each side at its own best mode.
 
-**Setting the same `SCCD_NARROWPHASE_MODE` on both sides does not compare like
-with like.** Mode 2 is the host's fastest path and the device's slowest, so a
-sweep that pins it on both races the host's best kernel against the device's
-worst. Compare a mode against itself across hardware only when you mean to.
+Being conservative costs the device more than it costs the host, on the same
+scene with the same tolerances. Part of that is the price of the guarantee, which
+the host pays too; part is that the device re-evaluates all eight corners of both
+children at every split where the host inherits four of them from the parent.
 
-What the numbers do show is a device-internal gap. Being conservative costs the
-host 1.15× and the device 26×, on the same scene with the same tolerances. Part
-of that is the price of the guarantee, which the host pays too; part of it is
-that the device re-evaluates all eight corners of both children at every split
-where the host inherits four of them from the parent. `wip/ASSESSMENT.md`
-has the measurement and the decomposition.
+Figures for all of this are in [`BENCHMARKS.md`](BENCHMARKS.md).
 
 Root finding computes in double regardless of the storage type: in single
 precision the certified error bound and the tolerances that terminate the search
@@ -112,11 +107,15 @@ toward negative infinity.
 - **`CCD<T>`** (`src/integrations/smesh/sccd_smesh_ccd.hpp`) — the main interface.
   `find_earliest_impact_time` and `find_impact_times` for one-shot use, or the
   staged broad/narrow calls to interleave your own logic. Needs smesh.
-- **C ABI** (`src/api/sccd_c_api.cpp`, documented in `docs/API.md`) — seven exports for
-  single queries, and the basis for `python/sccd.py`.
-- **Headers** — sixteen installed, listed explicitly in `CMakeLists.txt`. A
-  configure-time check fails on any header under `src/` that nobody classified,
-  so the list cannot drift from the tree.
+- **C ABI** (`src/api/sccd.h`, documented in `docs/API.md`) — seven exports for
+  single queries, and the basis for `python/sccd.py`. The header is the one
+  declaration of them: the library, the ABI test and the Python binding all take
+  their signatures from it.
+- **Headers** — listed explicitly in `CMakeLists.txt`, in three sets: the public
+  C++ and C surface, the public device headers (installed only in a CUDA build),
+  and the implementation headers under `src/cuda/` that are classified but never
+  installed. A configure-time check fails on any `.hpp`, `.h` or `.cuh` under
+  `src/` that appears in none of them, so the lists cannot drift from the tree.
 
 ## Correctness gate
 
@@ -130,9 +129,8 @@ descends through it, so the contact time is one division, solved in `long double
 and rounded up -- then requires every kernel, host and device, triangle and quad,
 to report a contact at or before it.
 
-Test counts by configuration: 6 with no options, 7 with smesh and spikes, 13 with
-smesh and TightInclusion, 8 with CUDA. The default build needs no options and no
-network.
+Test counts by configuration: 6 with no options, 8 with CUDA, 13 with smesh and
+TightInclusion. The default build needs no options and no network.
 
 ## Building
 

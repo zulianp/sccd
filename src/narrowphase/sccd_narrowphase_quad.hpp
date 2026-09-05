@@ -25,6 +25,7 @@
  */
 
 #include "sccd_base.hpp"
+#include "sccd_parallel.hpp"
 #include "sccd_narrowphase_mode.hpp"
 #include "sccd_rootfinder_quad.hpp"
 
@@ -34,26 +35,9 @@
 #include <cstdlib>
 #include <vector>
 
-#ifndef SCCD_ENABLE_CODOMAIN_SCALING
-#define SCCD_ENABLE_CODOMAIN_SCALING 1
-#endif
-
 namespace sccd {
 
-    namespace detail {
-        template <typename T>
-        inline T atomic_min_vq(std::atomic<T> &atm, const T val) {
-            T expected = atm.load();
-            while (expected > val) {
-                if (atm.compare_exchange_strong(expected, val)) {
-                    break;
-                }
-            }
-            return expected;
-        }
-    } // namespace detail
-
-    template <int nxe, typename T, typename I>
+    template <typename T, typename I>
     int narrow_phase_vq(const size_t noverlaps,
                         const I *const SCCD_RESTRICT voveralp,
                         const I *const SCCD_RESTRICT qoveralp,
@@ -65,50 +49,51 @@ namespace sccd {
                         T *const SCCD_RESTRICT toi,
                         const int max_depth,
                         const T tol,
-                        const int toi_stride = 0) {
-        (void)nxe;
+                        const ToiOutput toi_output = ToiOutput::Earliest) {
         using T_HP = double;
 
         narrow_phase_mode_note_quads_ignore();
-
-        assert(toi_stride == 0 || toi_stride == 1);
         if (noverlaps == 0) {
-            if (toi != nullptr && toi_stride == 0) {
+            if (toi != nullptr && toi_output == ToiOutput::Earliest) {
                 toi[0] = max_toi;
             }
             return 0;
         }
         assert(toi != nullptr);
 
-        int SCCD_REFINE = 0;
-        SCCD_READ_ENV(SCCD_REFINE, atoi);
 
         std::atomic<T> min_t = max_toi;
 
-        if (toi_stride == 1) {
-#pragma omp parallel for
-            for (ptrdiff_t i = 0; i < noverlaps; ++i) {
-                toi[i] = max_toi;
-            }
+        if (toi_output == ToiOutput::PerPair) {
+            sccd::parallel_for_br_dynamic(0, (ptrdiff_t)noverlaps,
+                                          [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+                                              for (ptrdiff_t i = rbegin; i < rend; ++i) toi[i] = max_toi;
+                                          });
         }
 
-        if (toi_stride == 0 && min_t.load() == T(0)) {
+        if (toi_output == ToiOutput::Earliest && min_t.load(std::memory_order_relaxed) == T(0)) {
             toi[0] = T(0);
             return 0;
         }
 
-        if (toi_stride == 0) {
+        if (toi_output == ToiOutput::Earliest) {
             toi[0] = max_toi;
         }
 
-#pragma omp parallel
-        {
-            std::vector<Box<T_HP>> stack;
+        // Per-candidate cost varies by orders of magnitude, hence the dynamic
+        // schedule. Going through parallel_for_br_dynamic rather than a raw
+        // OpenMP pragma is what lets a TBB build use TBB: with SCCD_ENABLE_TBB
+        // set and no -fopenmp the pragmas below were ignored and the whole quad
+        // narrow phase ran on one thread, and with both it oversubscribed. The
+        // stack is thread_local rather than block-local so it keeps its capacity
+        // across blocks instead of reallocating per chunk.
+        sccd::parallel_for_br_dynamic(0, (ptrdiff_t)noverlaps, [&](const ptrdiff_t rbegin,
+                                                                   const ptrdiff_t rend) {
+            static thread_local std::vector<Box<T_HP>> stack;
             stack.reserve(64);
 
-#pragma omp for schedule(dynamic, 64) nowait
-            for (ptrdiff_t i = 0; i < static_cast<ptrdiff_t>(noverlaps); ++i) {
-                if (toi_stride == 1) {
+            for (ptrdiff_t i = rbegin; i < rend; ++i) {
+                if (toi_output == ToiOutput::PerPair) {
                     toi[i] = max_toi;
                 }
 
@@ -133,7 +118,7 @@ namespace sccd {
                 const T_HP e3[3] = {v1[0][nodes[2]], v1[1][nodes[2]], v1[2][nodes[2]]};
                 const T_HP e4[3] = {v1[0][nodes[3]], v1[1][nodes[3]], v1[2][nodes[3]]};
 
-                T_HP t = toi_stride == 0 ? T_HP(min_t.load()) : T_HP(toi[i]);
+                T_HP t = toi_output == ToiOutput::Earliest ? T_HP(min_t.load(std::memory_order_relaxed)) : T_HP(toi[i]);
                 T_HP u = T_HP(0);
                 T_HP v = T_HP(0);
 
@@ -157,7 +142,10 @@ namespace sccd {
                 T_HP codomain_widths[3];
                 T_HP tols[3];
                 T_HP numerical_error[3];
-                vq_prepare<T_HP>(tol, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4,
+                // t_upper, not 1: the split scale should follow the window the
+                // search is actually confined to, which the shared time of
+                // impact has already pruned. Same as the triangle path.
+                vq_prepare<T_HP>(tol, t_upper, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4,
                                  tols, codomain_widths, numerical_error);
 #endif
 
@@ -194,50 +182,30 @@ namespace sccd {
                                                                               u,
                                                                               v,
                                                                               stack,
-                                                                              SCCD_REFINE);
+                                                                              /*refine=*/false);
 
                     if (found) {
-                        if (toi_stride == 0) {
-                            const T previous = detail::atomic_min_vq<T>(min_t, T(t));
+                        if (toi_output == ToiOutput::Earliest) {
+                            const T previous = sccd::atomic_min<T>(min_t, T(t));
                             if (previous < T(t)) {
                                 t = T_HP(previous);
                             }
                         } else {
                             toi[i] = T(t);
                         }
-                    } else if (!stack.empty() && toi_stride == 0) {
-                        t = sccd::min<T_HP>(t, T_HP(min_t.load()));
+                    } else if (!stack.empty() && toi_output == ToiOutput::Earliest) {
+                        t = sccd::min<T_HP>(t, T_HP(min_t.load(std::memory_order_relaxed)));
                     }
                 }
             }
-        }
+        });
 
-        if (toi_stride == 0) {
-            toi[0] = min_t.load();
+        if (toi_output == ToiOutput::Earliest) {
+            toi[0] = min_t.load(std::memory_order_relaxed);
         }
         return 0;
     }
 
-    template <int nxe, typename T, typename I>
-    int narrow_phase_vq(const size_t noverlaps,
-                        const I *const SCCD_RESTRICT voveralp,
-                        const I *const SCCD_RESTRICT qoveralp,
-                        T **const SCCD_RESTRICT v0,
-                        T **const SCCD_RESTRICT v1,
-                        const size_t quad_stride,
-                        I **const SCCD_RESTRICT quads,
-                        const T max_toi,
-                        T *const SCCD_RESTRICT toi,
-                        const int toi_stride = 0) {
-        int SCCD_MAX_DEPTH = 69;
-        SCCD_READ_ENV(SCCD_MAX_DEPTH, atoi);
-
-        T SCCD_TOL = T(3e-8);
-        SCCD_READ_ENV(SCCD_TOL, atof);
-
-        return narrow_phase_vq<nxe, T, I>(
-            noverlaps, voveralp, qoveralp, v0, v1, quad_stride, quads, max_toi, toi, SCCD_MAX_DEPTH, SCCD_TOL, toi_stride);
-    }
 
 } // namespace sccd
 

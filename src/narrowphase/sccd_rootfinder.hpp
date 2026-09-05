@@ -32,6 +32,27 @@
 
 namespace sccd {
 
+#ifdef SCCD_NP_COUNT_BOXES
+    // The Relaxed kernel's box counter, sharing the symbol the Tight kernel uses
+    // so the two are directly comparable and so a run reports one number for the
+    // narrow phase whichever mode it selected. Without this, mode 0 reported zero
+    // boxes and the cost of a Relaxed pass -- what a Relaxed prepass would have to
+    // pay for -- could not be measured at all.
+    //
+    // One tick per codomain_acceptance call: one box whose inclusion function was
+    // evaluated and whose fate was decided, which is the unit the Tight kernel and
+    // the device kernel both count.
+    extern unsigned long long g_np_host_boxes;
+#ifndef SCCD_NP_HOST_BOX_TICK
+#define SCCD_NP_HOST_BOX_TICK() (++::sccd::g_np_host_boxes)
+#endif
+#else
+#ifndef SCCD_NP_HOST_BOX_TICK
+#define SCCD_NP_HOST_BOX_TICK() ((void)0)
+#endif
+#endif
+
+
 #ifdef SCCD_ENABLE_TIGHT_INCLUSION
     static bool barycentric_triangle_3d(const ticcd::Vector3 &A,
                                         const ticcd::Vector3 &B,
@@ -537,14 +558,17 @@ namespace sccd {
     /**
      * \brief Acceptance for the vertex-quad search.
      *
-     * `numerical_error` is the certified bound, and it is what makes the
-     * rejection sound. This used to pad the origin-containment test with
-     * std::numeric_limits<T>::epsilon() instead -- about 30x smaller than the
-     * bound for unit-scale geometry -- which is an *unsound rejection*: it can
-     * discard a box that contains a root, and a discarded box is a missed
-     * collision. Every other acceptance condition here is free to be as loose as
-     * it likes, because accepting early only reports an earlier time of impact;
-     * only this one test can lose a root.
+     * The quad search accepts on exactly the same conditions as the triangle
+     * Relaxed search, so this forwards rather than repeating them. It was a
+     * character-for-character copy of codomain_acceptance apart from one local's
+     * name, which meant a fix to either would reach only half the library --
+     * and the fix that function's own comment records, padding origin
+     * containment with the certified bound instead of machine epsilon, is
+     * exactly the kind that must reach both.
+     *
+     * `numerical_error` is what makes the rejection sound. Every other condition
+     * is free to be as loose as it likes, because accepting early only reports
+     * an earlier time of impact; only origin containment can lose a root.
      */
     template <typename T>
     inline bool codomain_acceptance_vq(const T fmin[3],
@@ -553,26 +577,7 @@ namespace sccd {
                                        const T tols[3],
                                        const T numerical_error[3],
                                        bool &accept) {
-        bool contains_zero = true;
-        bool smaller_than_axis_tol = true;
-        bool inside_epsilon_box = true;
-        bool smaller_than_scalar_tol = true;
-        bool degenerate_interval = true;
-
-        for (int d = 0; d < 3; ++d) {
-            const T interval_width = fmax[d] - fmin[d];
-            contains_zero =
-                contains_zero && (fmin[d] <= numerical_error[d]) && (fmax[d] >= -numerical_error[d]);
-            smaller_than_axis_tol = smaller_than_axis_tol && (interval_width <= tols[d]);
-            inside_epsilon_box =
-                inside_epsilon_box && (fmin[d] >= -numerical_error[d]) && (fmax[d] <= numerical_error[d]);
-            smaller_than_scalar_tol = smaller_than_scalar_tol && (interval_width < tol);
-            degenerate_interval = degenerate_interval && (fmin[d] >= fmax[d]);
-        }
-
-        accept = contains_zero &&
-                 (smaller_than_axis_tol || inside_epsilon_box || smaller_than_scalar_tol || degenerate_interval);
-        return contains_zero;
+        return codomain_acceptance<T>(fmin, fmax, tol, tols, numerical_error, accept);
     }
 
     // template <typename T>
@@ -1118,6 +1123,7 @@ namespace sccd {
             carried_level = i + 1;
 
             bool accepted = false;
+            SCCD_NP_HOST_BOX_TICK();
             if (!codomain_acceptance<T>(fmin, fmax, tol, tols, numerical_error, accepted)) {
                 // Does not contain origin
                 continue;
@@ -1490,6 +1496,7 @@ namespace sccd {
             carried_level = i + 1;
 
             bool accepted = false;
+            SCCD_NP_HOST_BOX_TICK();
             if (!codomain_acceptance<T>(fmin, fmax, tol, tols, numerical_error, accepted)) {
                 continue;
             }

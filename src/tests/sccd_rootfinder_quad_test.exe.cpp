@@ -31,6 +31,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <random>
+#include <string>
 #include <vector>
 
 using S = double;
@@ -38,6 +39,26 @@ using S = double;
 namespace {
 
     int failures = 0;
+
+    // How far before the true time of impact a report is allowed to be.
+    //
+    // These are accuracy budgets, not safety ones: reporting early is the safe
+    // direction and the design leans on it. They exist because "earlier is safe"
+    // is not a licence to be arbitrarily early -- a time of impact half a step
+    // before the contact costs a solver its step size just as surely as a missed
+    // collision costs it correctness. Nothing asserted earliness on this path
+    // before, so an accuracy regression of any size passed silently.
+    //
+    // The values are the tolerance caps the search is supposed to honour:
+    // SCCD_MAX_TIME_TOL is 1e-3, and the searches below resolve t to about that.
+    //
+    // The scale check instead asserts a ratio, because the property it tests is
+    // that the answer does not change with the size of the scene at all: a
+    // similar scene has the same time of impact, so the earliness at every scale
+    // should match the earliness at scale 1 rather than merely stay under a cap.
+    constexpr double kScaleDriftFactor = 4.0;
+    constexpr double kSlowEarlyBudget  = 1e-3;
+    constexpr double kEntryEarlyBudget = 1e-3;
 
     void fail(const char* what, const double a, const double b) {
         std::printf("  FAIL %s: %.17g vs %.17g\n", what, a, b);
@@ -302,6 +323,191 @@ namespace {
         return missed + late;
     }
 
+
+    // ---------------------------------------------------------------------
+    // 4. Scale invariance.
+    //
+    // Multiplying every coordinate of a scene by the same factor produces a
+    // similar scene: the vertex meets the quad at the same parameter, so the
+    // time of impact is unchanged. Scaling the distance tolerance by the same
+    // factor keeps the two acceptance conditions that measure a distance --
+    // `smaller_than_scalar_tol` and the per-axis tolerances, which divide by
+    // Lipschitz constants that scale the same way -- invariant too.
+    //
+    // So everything in the search is scale-free except the certified numerical
+    // error bound, and any drift in the reported time of impact across the
+    // scales below is that bound and nothing else.
+    // ---------------------------------------------------------------------
+    int check_scale_invariance() {
+        const S sq[4][3] = {{0, 0, 0}, {1, 0, 0}, {0, 1, 0}, {1, 1, 0}};
+        const double scales[] = {1.0, 1e1, 1e2, 1e3, 1e4};
+        const double expect = 0.5;
+
+        int bad = 0;
+        double reference_error = 0.0;  // the scale-1 result, which the rest must match
+        for (const double scale : scales) {
+            Query q;
+            for (int k = 0; k < 4; ++k) {
+                for (int d = 0; d < 3; ++d) {
+                    q.s[k][d] = (S)(sq[k][d] * scale);
+                    q.e[k][d] = q.s[k][d];
+                }
+            }
+            q.sv[0] = (S)(0.30 * scale); q.sv[1] = (S)(0.40 * scale); q.sv[2] = (S)( 1.0 * scale);
+            q.ev[0] = q.sv[0];           q.ev[1] = q.sv[1];           q.ev[2] = (S)(-1.0 * scale);
+
+            S toi = S(1);
+            const bool hit = run_kernel(q, 69, (S)(1e-8 * scale), toi);
+            if (!hit) {
+                std::printf("  FAIL scale %.0e: missed a crossing at t=1/2\n", scale);
+                ++failures; ++bad;
+                continue;
+            }
+            const double err = (double)toi - expect;
+            if (err > 1e-6) { fail("scale invariance (late)", (double)toi, expect); ++bad; continue; }
+
+            if (scale == 1.0) {
+                reference_error = -err;
+                std::printf("  scale %.0e: toi=%.9f  err=%+.2e  (the reference)\n",
+                            scale, (double)toi, err);
+                continue;
+            }
+            // The scene is similar, so the answer should be too. Allow a small
+            // factor for the search taking a different path, not a growth trend.
+            const double ratio = -err / reference_error;
+            if (ratio > kScaleDriftFactor) {
+                std::printf("  FAIL scale %.0e: toi=%.9f is %.2e early, %.0fx the scale-1 result\n",
+                            scale, (double)toi, -err, ratio);
+                ++failures; ++bad;
+            } else {
+                std::printf("  scale %.0e: toi=%.9f  err=%+.2e  (%.1fx the reference)\n",
+                            scale, (double)toi, err, ratio);
+            }
+        }
+        return bad;
+    }
+
+    // 5. Slow motion.
+    //
+    // A vertex crossing a stationary quad at t = 1/2 crosses at t = 1/2 however
+    // slowly it travels. The geometry below shrinks the vertex's displacement
+    // over the step through eighteen orders of magnitude while leaving the quad,
+    // and therefore the u and v Lipschitz constants, at unit scale.
+    //
+    // The per-axis tolerance is `codomain_tol / 3 / lipschitz[d]`, so a small
+    // Lipschitz constant in t makes the time tolerance enormous -- and below
+    // machine epsilon the quad path abandons the division and returns 1.0, a
+    // tolerance as wide as the whole domain. `SCCD_MAX_TIME_TOL` and
+    // `SCCD_MAX_COORD_TOL` exist to bound exactly that, and no quad file
+    // references them.
+    // ---------------------------------------------------------------------
+    int check_slow_motion() {
+        const S sq[4][3] = {{0, 0, 0}, {1, 0, 0}, {0, 1, 0}, {1, 1, 0}};
+        const double travels[] = {2.0, 2e-3, 2e-6, 2e-9, 2e-12, 2e-18};
+        const double expect = 0.5;
+
+        int bad = 0;
+        for (const double d : travels) {
+            Query q;
+            for (int k = 0; k < 4; ++k) {
+                for (int c = 0; c < 3; ++c) { q.s[k][c] = sq[k][c]; q.e[k][c] = sq[k][c]; }
+            }
+            // Straddles z = 0 symmetrically, so the crossing is at t = 1/2 for
+            // every displacement.
+            q.sv[0] = S(0.30); q.sv[1] = S(0.40); q.sv[2] = (S)( 0.5 * d);
+            q.ev[0] = S(0.30); q.ev[1] = S(0.40); q.ev[2] = (S)(-0.5 * d);
+
+            S toi = S(1);
+            const bool hit = run_kernel(q, 69, S(1e-8), toi);
+            if (!hit) {
+                std::printf("  FAIL travel %.0e: missed a crossing at t=1/2\n", d);
+                ++failures; ++bad;
+                continue;
+            }
+            const double err = (double)toi - expect;
+            if (err > 1e-6) { fail("slow motion (late)", (double)toi, expect); ++bad; }
+            else if (err < -kSlowEarlyBudget) {
+                std::printf("  FAIL travel %.0e: toi=%.9f is %.2e before the true 0.5\n",
+                            d, (double)toi, -err);
+                ++failures; ++bad;
+            } else {
+                std::printf("  travel %.0e: toi=%.9f  err=%+.2e\n", d, (double)toi, err);
+            }
+        }
+        return bad;
+    }
+
+    // ---------------------------------------------------------------------
+    // 6. The shipped entry point, not just the free root finder.
+    //
+    // Checks 1-5 call `find_root_grid_adaptive_split_vq` directly and build the
+    // tolerances with the three separate `compute_vertex_quad_tolerance` /
+    // `compute_vertex_quad_codomain_widths` / `vq_numerical_error` calls.
+    // `narrow_phase_vq` instead goes through the one-pass `vq_prepare`, which
+    // recomputes all three. Nothing else in the repository runs both forms on the
+    // same query, so a divergence between them would be invisible.
+    //
+    // This also covers ToiOutput::Earliest, the shared-minimum path, which is the
+    // only thing that exercises the quad atomics.
+    // ---------------------------------------------------------------------
+    int check_entry_point() {
+        // Two vertices against one stationary unit square: one crosses at t=1/2,
+        // one at t=1/4. The shared minimum is 1/4; the per-query answers are both.
+        S px0[6] = {0, 1, 0, 1, S(0.30), S(0.50)};
+        S py0[6] = {0, 0, 1, 1, S(0.40), S(0.50)};
+        S pz0[6] = {0, 0, 0, 0, S(1.0),  S(1.0)};
+        S px1[6], py1[6], pz1[6];
+        for (int i = 0; i < 6; ++i) { px1[i] = px0[i]; py1[i] = py0[i]; pz1[i] = pz0[i]; }
+        pz1[4] = S(-1.0);   // crosses z=0 at t=1/2
+        pz1[5] = S(-3.0);   // crosses z=0 at t=1/4
+
+        S* v0[3] = {px0, py0, pz0};
+        S* v1[3] = {px1, py1, pz1};
+
+        int q0[1] = {0}, q1[1] = {1}, q2[1] = {2}, q3[1] = {3};
+        int* quads[4] = {q0, q1, q2, q3};
+
+        const int vov[2] = {4, 5};
+        const int qov[2] = {0, 0};
+
+        int bad = 0;
+
+        // ToiOutput::PerPair: one answer per candidate.
+        {
+            S toi[2] = {S(1), S(1)};
+            sccd::narrow_phase_vq<S, int>(2, vov, qov, v0, v1, 1, quads,
+                                             S(1), toi, 69, S(1e-8), sccd::ToiOutput::PerPair);
+            const double expect[2] = {0.5, 0.25};
+            for (int i = 0; i < 2; ++i) {
+                const double err = (double)toi[i] - expect[i];
+                if (err > 1e-6 || err < -kEntryEarlyBudget) {
+                    std::printf("  FAIL narrow_phase_vq stride 1, query %d: toi=%.9f, true=%.3f\n",
+                                i, (double)toi[i], expect[i]);
+                    ++failures; ++bad;
+                } else {
+                    std::printf("  narrow_phase_vq stride 1, query %d: toi=%.9f  err=%+.2e\n",
+                                i, (double)toi[i], err);
+                }
+            }
+        }
+
+        // ToiOutput::Earliest: the shared minimum over both candidates.
+        {
+            S toi = S(1);
+            sccd::narrow_phase_vq<S, int>(2, vov, qov, v0, v1, 1, quads,
+                                             S(1), &toi, 69, S(1e-8), sccd::ToiOutput::Earliest);
+            const double err = (double)toi - 0.25;
+            if (err > 1e-6 || err < -kEntryEarlyBudget) {
+                std::printf("  FAIL narrow_phase_vq stride 0: toi=%.9f, true=%.3f\n",
+                            (double)toi, 0.25);
+                ++failures; ++bad;
+            } else {
+                std::printf("  narrow_phase_vq stride 0: toi=%.9f  err=%+.2e\n", (double)toi, err);
+            }
+        }
+        return bad;
+    }
+
 }  // namespace
 
 int main() {
@@ -313,6 +519,15 @@ int main() {
 
     std::printf("3. random queries with a planted root\n");
     check_planted_roots(2000);
+
+    std::printf("4. scale invariance\n");
+    check_scale_invariance();
+
+    std::printf("5. slow motion\n");
+    check_slow_motion();
+
+    std::printf("6. the shipped entry point\n");
+    check_entry_point();
 
     std::printf("%s\n", failures ? "FAIL" : "OK: the vertex-quad root finder is conservative on every check");
     return failures ? 1 : 0;

@@ -1,5 +1,9 @@
-// Simple C exports for SCCD narrowphase vertex-face root finder
-// #include "sccd_narrowphase.hpp"
+// The definitions behind SCCD's C ABI. sccd.h is the declaration, and is
+// included here so the compiler checks these against it: before it existed the
+// signatures were re-typed by hand in the ABI test and again in the ctypes
+// binding, and nothing compared any copy with another.
+
+#include "sccd.h"
 
 #include "sccd_rootfinder.hpp"
 

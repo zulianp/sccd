@@ -11,10 +11,56 @@ deleted, so it is not retried.
 
 * [`wip/ALPS.md`](ALPS.md) — how to run the tests on the CSCS Alps cluster.
   `ctest` under `srun` stalls after the first test; run the binaries directly.
+* [`wip/CUDA_NARROWPHASE_PLAN.md`](CUDA_NARROWPHASE_PLAN.md) — the device narrow
+  phase's remaining work: the 94× box-count gap on the earliest-impact path, what
+  has already been ruled out, and the variants worth trying. Branch `cuda-op-np`.
 
 ---
 
 ## High
+
+### Nothing tests the install tree
+
+Three defects shipped in the exported CMake package at once, and each was
+invisible for the same reason: no test ever consumed an install. The exported
+target advertised `include/cuda` in builds that install no `.cuh`, so
+`find_package(SCCD)` failed outright on every non-CUDA install; `SCCDConfig.cmake`
+never found the CUDA toolkit though the target links `CUDA::cudart`; and Thrust
+was linked `PUBLIC`, exporting a target name a consumer cannot define, which CMake
+degraded to a literal `-lThrust`.
+
+All three are fixed and were verified by hand -- a C++ consumer through
+`find_package` against a non-CUDA install, and a `.cu` consumer against a CUDA
+install on GH200. **That verification is not automated.** A ctest that installs
+to a temporary prefix and compiles a three-line consumer against it would have
+caught all three, and would catch the next one. The header-classification guard
+already fails configure on an unclassified header; this is the same idea one step
+later.
+
+### Naming, the last of the API pass
+
+Left from the API work, all mechanical, none behavioural:
+
+* The public narrow-phase entry points spell their overlap arrays `voveralp`,
+  `foveralp`, `qoveralp`, `e0overalp`, `e1overalp` -- a transposition typo -- while
+  the internal kernel they forward to spells the same parameters correctly.
+  Both spellings appear in one call chain.
+* One concept has five names for stride (`face_stride`, `edge_stride`,
+  `quad_stride`, `first_stride`/`second_stride`, `stride`) and the output pair has
+  three (`foverlap`/`noverlap`, `first_out`/`second_out`, `out0`/`out1`).
+  `noverlap` also reads as a count while colliding with `noverlaps`, which is one.
+* `CCD<T>::narrow_phase_fv` against the core's `narrow_phase_vf`.
+
+### Another spatial dimension needs the overlap predicate, not a parameter
+
+`SCCD_DIM` is a constant rather than a parameter because `sccd::disjoint` and
+`vaabb_overlap_one_to_many_bits` take x, y and z as separate positional arguments
+and their SIMD forms load three min rows and three max rows. Measured at `dim = 2`
+with a four-row table, the sweep returns **zero pairs**: it reads row 2, an x
+maximum, as a z minimum. Generalising the predicate is the work; it is the broad
+phase's hot loop, so it needs its own benchmarking rather than being folded into
+an API change.
+
 
 ### ~~Shrink the clone: 4.6 GiB of history~~ — withdrawn, the measurement was wrong
 
@@ -49,6 +95,29 @@ shared history, clone the URL and measure that.
 ---
 
 ## Done
+
+- ~~The vertex-quad path lagged the triangle path~~ — **done.** The certified
+  error bound had its clamp inverted, `max(max_coord, 1)^3` where TightInclusion
+  uses `min(...)`, which inflated the pad by the cube of the scene size: the
+  scale-invariance check drifted 6x at scale 1e3 and 618x at 1e4 and is now flat.
+  The tolerance caps from `sccd_tolerance.hpp` are applied, the split scale
+  follows the pruned time window (12% at `ToiOutput::Earliest` on a moving quad),
+  and six divergences from the triangle path are gone, including a re-created
+  seq_cst atomic and a raw OpenMP loop that ran single-threaded in a TBB build.
+
+- ~~The device quad kernel's local DFS stack~~ — **built, measured, rejected.**
+  The restructure onto a block-shared pool works and is conservative, and removes
+  the spill (8128 B frame and 112/216 B spill become 336 B and none), but wins one
+  measured cell of four and halves throughput in another. `wip/DECISIONS.md` has
+  the numbers and why. Reverted; the header extraction it needed,
+  `sccd_device_dfs_stack.cuh`, stands on its own.
+
+- ~~The assessment discarded every refine row~~ — **fixed.** `run_refine`
+  filtered with `awk 'NF == 10'` and `sccd_refine_scaling` prints eleven fields,
+  so refine successes were dropped while the `rc != 0` branch kept writing failure
+  rows. That is why `FAILED rc=134` survived in the hopper quad rows with nothing
+  to contradict it.
+
 
 - ~~Validation-only narrow-phase modes in the shipped API~~ — **removed.** Mode 1
   was the slowest kernel in the library on every scene (15.9 / 90.9 / 223.4 ms

@@ -20,6 +20,16 @@ ctest --test-dir build
 No external dependencies, no network, no options, no environment variables.
 `CMAKE_BUILD_TYPE` defaults to `Release`.
 
+To use it from another project:
+
+```sh
+cmake --install build --prefix /where/you/want
+```
+
+then `find_package(SCCD REQUIRED)` and link `SCCD::sccd`. C++ callers include
+`sccd_narrowphase.hpp`, C callers `sccd.h`, CUDA callers the `.cuh` headers —
+all flat, see [`docs/API.md`](docs/API.md).
+
 | Option | Default | Effect |
 |---|---|---|
 | `SCCD_ENABLE_NATIVE_ARCH` | `ON` | `-march=native`. Off, the AVX2/AVX-512/NEON AABB kernels fall back to scalar — in your translation units as well as ours. |
@@ -44,11 +54,11 @@ std::vector<double> z0 = {0.0, 0.0, 0.0, 1.00};
 double* v0[3] = {x0.data(), y0.data(), z0.data()};
 // ... v1 likewise for the end of the step
 
-sccd::narrow_phase_vf<3, double, int>(n_pairs, vertex_of_pair, face_of_pair,
-                                      v0, v1, /*face_stride=*/1, faces,
-                                      /*max_toi=*/1.0, toi.data(),
-                                      /*max_depth=*/69, /*tol=*/3e-8,
-                                      /*toi_stride=*/1);
+sccd::narrow_phase_vf<double, int>(n_pairs, vertex_of_pair, face_of_pair,
+                                   v0, v1, /*face_stride=*/1, faces,
+                                   /*max_toi=*/1.0, toi.data(),
+                                   /*max_depth=*/69, /*tol=*/3e-8,
+                                   sccd::ToiOutput::PerPair);
 ```
 
 `demo/sccd_minimal.exe.cpp` is both stages end to end — two disconnected
@@ -85,7 +95,7 @@ src/core/          base, math, parallel, aabb
 src/broadphase/    sweep-and-prune, 2D cell list, run-time strategy
 src/narrowphase/   modes, root finders, tolerances, error bounds
 src/cuda/          device kernels
-src/api/           C ABI
+src/api/           C ABI: sccd.h and its implementation
 python/            ctypes binding and the analysis tools
 benchmark/         harness, drivers, and committed result tables
 spikes/            demoted and dead code, and the research notes; not built, not installed
