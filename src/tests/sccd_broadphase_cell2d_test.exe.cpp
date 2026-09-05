@@ -124,7 +124,7 @@ namespace {
         sccd::cell2d_setup<scalar_t>(second.n, second.ptr, grid);
 
         std::vector<ptrdiff_t> cellptr(grid.ncells() + 1);
-        sccd::cell2d_count<scalar_t, idx_t>(second.n, second.ptr, grid, cellptr.data());
+        sccd::cell2d_count<scalar_t>(second.n, second.ptr, grid, cellptr.data());
 
         std::vector<idx_t> cellidx(cellptr[grid.ncells()]);
         std::vector<ptrdiff_t> cursor(grid.ncells());
@@ -196,7 +196,7 @@ namespace {
         sccd::cell2d_setup<scalar_t>(e.n, e.ptr, grid);
 
         std::vector<ptrdiff_t> cellptr(grid.ncells() + 1);
-        sccd::cell2d_count<scalar_t, idx_t>(e.n, e.ptr, grid, cellptr.data());
+        sccd::cell2d_count<scalar_t>(e.n, e.ptr, grid, cellptr.data());
         std::vector<idx_t> cellidx(cellptr[grid.ncells()]);
         std::vector<ptrdiff_t> cursor(grid.ncells());
         sccd::cell2d_fill<scalar_t, idx_t>(e.n, e.ptr, grid, cellptr.data(), cellidx.data(), cursor.data());

@@ -449,7 +449,7 @@ namespace sccd {
 
                 sccd::cell2d_setup<scalar_t>(n_nodes, vaabb_->data(), v_grid_);
                 v_cellptr_.assign((size_t)v_grid_.ncells() + 1, 0);
-                sccd::cell2d_count<scalar_t, smesh::idx_t>(
+                sccd::cell2d_count<scalar_t>(
                     n_nodes, vaabb_->data(), v_grid_, v_cellptr_.data());
                 v_cellidx_.resize((size_t)v_cellptr_[v_grid_.ncells()]);
                 v_cursor_.resize((size_t)v_grid_.ncells());
@@ -464,7 +464,7 @@ namespace sccd {
 
                 sccd::cell2d_setup<scalar_t>(n_edges, eaabb_->data(), e_grid_);
                 e_cellptr_.assign((size_t)e_grid_.ncells() + 1, 0);
-                sccd::cell2d_count<scalar_t, smesh::idx_t>(
+                sccd::cell2d_count<scalar_t>(
                     n_edges, eaabb_->data(), e_grid_, e_cellptr_.data());
                 e_cellidx_.resize((size_t)e_cellptr_[e_grid_.ncells()]);
                 e_cursor_.resize((size_t)e_grid_.ncells());
