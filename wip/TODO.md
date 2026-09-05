@@ -223,12 +223,13 @@ other three scenes of the NYU set are not in it:
 - **n-body-simulation** and **rod-twist** were never downloaded.
   `download_datasets.sh` already has a URL and an env gate for each. Note that
   rod-twist ships its frames in four separate archives.
+- **puffer-ball on the GPU** is not measured. Its device chunks run about twenty
+  minutes each against a partition that allows twenty-nine, so a three-repeat
+  series is a couple of hours of queue; the host series is in. Removing the
+  broad_fp hashing above would make it routine.
 
-Also not swept: the device execution space for the *broad* phase and the
-end-to-end timings. The device narrow phase is covered -- `ti_oracle` emits
-`device-relaxed` and `device-tight` rows and they are in the published accuracy
-and reference tables -- but `sweep.sh --spaces device` has not been run, so
-`docs/BENCHMARKS.md` has no GPU column in the whole-scene timing table.
+The device execution space is now swept for the three smaller scenes, five
+repeats each, and is in the published timing table.
 
 The refinement scaling study in `docs/BENCHMARKS.md` uses two cloth-ball frames
 that do not come into contact, so it measures the broad phase and its
