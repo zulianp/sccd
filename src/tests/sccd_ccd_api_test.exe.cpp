@@ -202,8 +202,8 @@ namespace {
 
         T toi_staged = 1;
         smesh::SharedBuffer<T> vf_tois, ee_tois;
-        SMESH_TEST_EQ(staged->narrow_phase_fv(toi_staged, vf_tois, 40, 1e-8, 0), SCCD_SUCCESS);
-        SMESH_TEST_EQ(staged->narrow_phase_ee(toi_staged, ee_tois, 40, 1e-8, 0), SCCD_SUCCESS);
+        SMESH_TEST_EQ(staged->narrow_phase_fv(toi_staged, vf_tois, 40, 1e-8, sccd::ToiOutput::Earliest), SCCD_SUCCESS);
+        SMESH_TEST_EQ(staged->narrow_phase_ee(toi_staged, ee_tois, 40, 1e-8, sccd::ToiOutput::Earliest), SCCD_SUCCESS);
 
         std::printf("  one-shot toi=%.9f   staged vertex-face toi=%.9f\n",
                     (double)toi_oneshot, (double)toi_staged);

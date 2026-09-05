@@ -34,6 +34,35 @@ namespace sccd {
      * on depth, resolution or stack exhaustion -- and not a property to document
      * and live with. See benchmark/oracle/README.md.
      */
+    /**
+     * \brief What the narrow phase writes to `toi`, and how much it may prune.
+     *
+     * This was an `int` named `toi_stride` whose two meanings lived in
+     * docs/API.md and in a demo comment, enforced only by an assert that
+     * vanishes under NDEBUG. The name described the output array's layout; what
+     * a caller actually chooses is what they want back, and the pruning follows
+     * from that.
+     *
+     * The values keep the numbers the old parameter used, so a recorded run or
+     * a CSV column that says 0 or 1 still means what it did.
+     */
+    enum class ToiOutput : int {
+        /// One time of impact for the whole batch, in `toi[0]`: the earliest
+        /// over every candidate. Every query prunes against the running minimum,
+        /// which is what makes this markedly cheaper -- on a real mesh the
+        /// search explores about 1.2 boxes per query with the bound tightening,
+        /// against about 11 without.
+        Earliest = 0,
+        /// One time of impact per candidate pair, in `toi[i]`. No shared bound,
+        /// so nothing prunes across queries; 1.6-4.4x the cost of Earliest on
+        /// the host and more on the device.
+        PerPair = 1
+    };
+
+    static inline const char* toi_output_name(const ToiOutput out) {
+        return out == ToiOutput::Earliest ? "earliest" : "per-pair";
+    }
+
     enum class NarrowPhaseMode : int {
         /// Scalar search with the looser acceptance test: it compares codomain
         /// widths against domain tolerances, so it accepts sooner and reports a
@@ -92,9 +121,7 @@ namespace sccd {
      * Read per call rather than cached, because harnesses switch modes between
      * calls in the same process.
      *
-     * SCCD_NARROWPHASE_MODE is the one knob. The older SCCD_USE_VNARROW_PHASE
-     * and SCCD_VNARROWPHASE_TI_COMPAT still work and are consulted when it is
-     * unset, so existing scripts keep behaving as they did.
+     * SCCD_NARROWPHASE_MODE is the one knob, and the only one.
      */
     /**
      * \brief Resolve the requested narrow-phase kernel, saying so when it cannot
@@ -150,29 +177,6 @@ namespace sccd {
             }
         }
 
-        // The two pre-enum switches. Both selected kernels that no longer exist
-        // here, so both are dead letters now; they warn rather than silently
-        // doing something else, and SCCD_USE_VNARROW_PHASE=2 still means Tight
-        // because that mode is still real.
-        int SCCD_USE_VNARROW_PHASE = SCCD_USE_VNARROW_PHASE_DEFAULT;
-        SCCD_READ_ENV(SCCD_USE_VNARROW_PHASE, atoi);
-        if (SCCD_USE_VNARROW_PHASE == 2) {
-            return NarrowPhaseMode::Tight;
-        }
-
-        int SCCD_VNARROWPHASE_TI_COMPAT = SCCD_VNARROWPHASE_TI_COMPAT_DEFAULT;
-        SCCD_READ_ENV(SCCD_VNARROWPHASE_TI_COMPAT, atoi);
-        if (SCCD_VNARROWPHASE_TI_COMPAT || SCCD_USE_VNARROW_PHASE) {
-            static bool warned_legacy = false;
-            if (!warned_legacy) {
-                warned_legacy = true;
-                fprintf(stderr,
-                        "SCCD: SCCD_VNARROWPHASE_TI_COMPAT and SCCD_USE_VNARROW_PHASE selected "
-                        "kernels that have moved to spikes/; running 0 (Relaxed). Use "
-                        "SCCD_NARROWPHASE_MODE=2 for the tight kernel, or SCCD_USE_TI=1 to call "
-                        "TightInclusion directly.\n");
-            }
-        }
         return NarrowPhaseMode::Relaxed;
     }
 
@@ -208,5 +212,23 @@ namespace sccd {
     }
 
 }  // namespace sccd
+
+/**
+ * \brief Scale the split-axis choice by the per-axis codomain widths.
+ *
+ * Defined here because all three narrow phases -- triangle host, quad host and
+ * the device kernels -- consume it, and they previously each defined it for
+ * themselves in a different spelling. The triangle header defined it
+ * unconditionally and tested it with #ifndef, so -DSCCD_ENABLE_CODOMAIN_SCALING=0
+ * both provoked a non-identical macro redefinition and left the scaling ON for
+ * triangles while turning it OFF for quads: the same flag, opposite effects on
+ * the two paths.
+ *
+ * Guarded, and tested by VALUE (`#if SCCD_ENABLE_CODOMAIN_SCALING`), so setting
+ * it to 0 on the command line does what it says everywhere.
+ */
+#ifndef SCCD_ENABLE_CODOMAIN_SCALING
+#define SCCD_ENABLE_CODOMAIN_SCALING 1
+#endif
 
 #endif  // SCCD_NARROWPHASE_MODE_HPP

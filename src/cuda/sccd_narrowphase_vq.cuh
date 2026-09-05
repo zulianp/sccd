@@ -2,6 +2,7 @@
 #define SCCD_NARROWPHASE_VQ_CUH
 
 #include "sccd_base.hpp"
+#include "sccd_narrowphase_mode.hpp"
 
 #include <cstddef>
 
@@ -9,9 +10,9 @@
  * \file
  * \brief Device vertex-quad narrow phase.
  *
- * Quads had no device narrow phase at all: `sccd_smesh_CCD.hpp` raised
- * `SMESH_ERROR("CUDA QUADSHELL4 narrow phase is not implemented")`, so a quad
- * mesh could be broad-phased on the GPU and then not finished there.
+ * A quad mesh runs both phases on the device: the broad phase through
+ * `count_overlaps<4, 1>` and this kernel for the narrow phase. The smesh
+ * integration dispatches both for QUADSHELL4.
  *
  * ## Node order: lexicographic, not cyclic
  *
@@ -51,13 +52,19 @@
  *    drop, because dropping a box that may contain a root is the one way this
  *    algorithm loses a collision.
  *
- * The per-thread stack is sized so overflow cannot occur, and the search depth
- * is clamped to what it holds. Those two numbers are tied together deliberately.
- * Neither limit can cost a collision -- exhaustion accepts, and accepting is
- * always safe -- so what an undersized stack buys is false positives and a time
- * of impact further before the true one than it needs to be. That is an accuracy
- * cost, not a safety one, and it is silent, which is why the two numbers are
- * derived from each other rather than chosen independently.
+ * The per-thread stack is sized from `SCCD_VQ_MAX_DEPTH` (128) so that overflow
+ * cannot occur, and the search depth is clamped to what it holds. Neither limit
+ * can cost a collision -- exhaustion accepts, and accepting is always safe -- so
+ * what a short search buys is false positives and a time of impact further
+ * before the true one than it needs to be. That is an accuracy cost rather than
+ * a safety one, and it would otherwise be silent, so a `max_depth` beyond what
+ * the stack holds is reported on stderr.
+ *
+ * The stack is deliberately larger than the default depth of 69 needs. Measured
+ * on GH200, growing it from 8 KB to 29 KB per thread changes neither the
+ * register count (255) nor the spill (112/216 bytes) nor the runtime: only the
+ * entries a search reaches are ever touched. Depth is what costs, and headroom
+ * for it is free.
  *
  * Arithmetic is double throughout regardless of the storage type: the error
  * bound and the tolerances that terminate the search are too close together in
@@ -72,7 +79,7 @@ namespace sccd {
         /**
          * \brief Vertex-quad times of impact for \p noverlaps candidate pairs.
          *
-         * \p toi_stride 0 writes a single shared minimum to `toi[0]`; 1 writes one
+         * \p toi_output 0 writes a single shared minimum to `toi[0]`; 1 writes one
          * time of impact per pair. Mirrors the host `narrow_phase_vq`.
          */
         template <typename T, typename I>
@@ -87,7 +94,7 @@ namespace sccd {
                             T* const SCCD_RESTRICT toi,
                             const int max_depth,
                             const T tol,
-                            const int toi_stride = 0);
+                            const ToiOutput toi_output = ToiOutput::Earliest);
 
     }  // namespace device
 }  // namespace sccd

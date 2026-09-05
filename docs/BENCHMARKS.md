@@ -17,38 +17,58 @@ that band is not a result.
 | cloth-ball | 33,329,729 | 95,424 |
 
 **Modes.** `Relaxed` (0) is the scalar search with the looser acceptance test.
-`Tight` (2) compares domain widths against domain tolerances. Both ship; modes 1
+`Tight` (2) compares domain widths against domain tolerances. On the CPU
+`Relaxed` is the cheaper of the two; **on the GPU it is not** — it costs 1.5×
+`Tight`'s boxes on armadillo-rollers at `ToiOutput::PerPair` and about the same on
+cloth-ball. A looser acceptance ends a box sooner but reports a time of impact
+further before the true one, and a looser bound prunes less, so the queries that
+follow do more work. Both ship; modes 1
 and 3 are validation-only and need `SCCD_ENABLE_TIGHT_INCLUSION=ON`.
 
-**Strides.** `toi_stride=0` is `find_earliest_impact_time` — one time of impact
-for the step, so every query prunes against the running minimum. `toi_stride=1`
-is `find_impact_times` — one result per candidate, no shared bound.
+**Output mode.** `ToiOutput::Earliest` is `find_earliest_impact_time` — one time
+of impact for the step, so every query prunes against the running minimum.
+`ToiOutput::PerPair` is `find_impact_times` — one result per candidate, no shared
+bound, and correspondingly more work. Rows below are labelled by the mode they
+were measured under.
 
 ---
 
 ## Narrow phase, milliseconds
 
-| scene | mode | CPU s0 | GPU s0 | CPU s1 | GPU s1 |
+| scene | mode | CPU `Earliest` | GPU `Earliest` | CPU `PerPair` | GPU `PerPair` |
 |---|---|---:|---:|---:|---:|
-| cloth-funnel | Fast | **6.2** | 23.1 | **9.7** | 56.3 |
-| cloth-funnel | Tight | **7.1** | 36.5 | **12.3** | 789.9 |
-| armadillo-rollers | Fast | **18.0** | 31.7 | **62.8** | 218.8 |
-| armadillo-rollers | Tight | **17.4** | 56.3 | **77.3** | 3126.7 |
-| cloth-ball | Fast | 184.1 | **102.1** | **308.4** | 612.2 |
-| cloth-ball | Tight | 114.9 | **107.9** | **241.2** | 902.8 |
+| cloth-funnel | Relaxed | **6.2** | 24.3 | 9.7 | **22.2** |
+| cloth-funnel | Tight | **7.2** | 27.2 | **12.2** | 33.4 |
+| armadillo-rollers | Relaxed | **17.9** | 32.4 | 62.9 | **66.8** |
+| armadillo-rollers | Tight | **17.5** | 37.5 | 77.1 | **65.2** |
+| cloth-ball | Relaxed | 185.9 | **105.6** | 309.6 | **154.8** |
+| cloth-ball | Tight | 115.2 | **103.0** | 241.6 | **158.4** |
 
-Stride 1 costs the CPU 1.6–4.4× over stride 0 — the value of the shared running
-minimum. It costs the GPU 2.4–55×, because stride 1 runs a different kernel: one
-block per query, seeded with a 128-way dice, which classifies 2.58 million boxes
-per query against the host's 1,844.
+Each cell is the sum over the scene's 16 cases within one repeat, then the median
+over three repeats; vertex-face and edge-edge cases are summed together. Timings
+come from a build **without** `-DSCCD_NP_COUNT_BOXES`, which puts a global atomic
+on the hot path and makes an instrumented build 20× slower on the host.
+
+`PerPair` costs the CPU 1.6–4.4× over `Earliest` and the GPU 2.6–6.6×. The
+difference is the shared running minimum: with one time of impact for the step,
+every query prunes against the best found so far, and the search explores about
+1.2 boxes per query instead of about 11. Ask for `Earliest` unless you need to
+know which pair collided.
+
+Both device paths run one thread per query. A block-per-query kernel is bound by
+scheduling blocks rather than by the search, so it is not the default;
+`SCCD_NP_S1_BLOCK_PER_QUERY=1` selects it if you want to measure the difference.
+
+Run-to-run spread on these scenes is 1–7% on the CPU. Treat a difference smaller
+than that as noise.
 
 ## Broad phase, milliseconds
 
 | scene | CPU | GPU | |
 |---|---:|---:|---|
-| cloth-funnel | 22.4 | **17.4** | 1.3× GPU |
-| armadillo-rollers | 30.1 | **15.7** | 1.9× GPU |
-| cloth-ball | 291.3 | **59.5** | 4.9× GPU |
+| cloth-funnel | 22.7 | **17.1** | 1.3× GPU |
+| armadillo-rollers | 30.3 | **15.3** | 2.0× GPU |
+| cloth-ball | 295.0 | **59.0** | 5.0× GPU |
 
 Two implementations ship — sweep-and-prune and a 2D cell list — and they produce
 identical pair sets. `sccd_broadphase_strategy.hpp` picks between them by racing
@@ -56,11 +76,29 @@ them at run time, because which one wins is not predictable from the geometry.
 
 ## End to end, each side at its best mode
 
+Broad phase plus narrow phase, at whichever mode is faster for that side.
+
+**`find_earliest_impact_time`:**
+
 | scene | CPU | GPU | |
 |---|---:|---:|---|
-| cloth-funnel | **29.2** | 38.4 | 1.3× CPU |
-| armadillo-rollers | 47.8 | 47.3 | parity |
-| cloth-ball | 408.8 | **159.4** | 2.6× GPU |
+| cloth-funnel | **29.1** | 41.2 | 1.4× CPU |
+| armadillo-rollers | **47.9** | 48.7 | parity |
+| cloth-ball | 421.6 | **162.8** | 2.6× GPU |
+
+**`find_impact_times`:**
+
+| scene | CPU | GPU | |
+|---|---:|---:|---|
+| cloth-funnel | **32.6** | 39.2 | 1.2× CPU |
+| armadillo-rollers | 95.6 | **79.3** | 1.2× GPU |
+| cloth-ball | 547.7 | **215.7** | 2.5× GPU |
+
+The earliest-impact row is within a few percent of what it has always been: that
+path was never the one that was wrong. The per-query row is the one that moved —
+the GPU goes from losing on every scene to winning on two — and it is what
+`find_impact_times` callers see.
+
 
 ## Accuracy against exact roots
 
@@ -68,7 +106,7 @@ Signed error over queries with a real collision. **Zero late times of impact and
 zero missed collisions in all twelve configurations**, across 101,164 roots. Late
 would be a correctness failure; early only costs a solver step size.
 
-| scene | roots | Fast CPU | Fast GPU | Tight CPU | Tight GPU |
+| scene | roots | Relaxed CPU | Relaxed GPU | Tight CPU | Tight GPU |
 |---|---:|---:|---:|---:|---:|
 | cloth-funnel | 104 | 1.18e-01 | 1.60e-01 | **1.72e-03** | 9.40e-02 |
 | armadillo-rollers | 5,636 | 4.04e-04 | 5.56e-04 | **1.83e-05** | **1.83e-05** |
@@ -85,6 +123,44 @@ Accuracy is measured on the datasets' curated query sets, which carry exact
 roots and whose coordinates are exact dyadic rationals. It cannot be measured
 through the mesh path: smesh stores coordinates as `float`, so the mesh geometry
 is a rounded copy of the geometry those roots belong to.
+
+## Hit and miss, against TightInclusion and against exact roots
+
+`ti_oracle`, every query of every curated query set, edge-edge, one GH200
+allocation. `FP`/`FN` are against TightInclusion's own answer; `gtMISS`/`gtLATE`
+are against the datasets' exact roots and are the gate.
+
+| scene | queries | TI hits | mode | hits | FP | FN | gtMISS | gtLATE |
+|---|---:|---:|---|---:|---:|---:|---:|---:|
+| cloth-funnel | 6,751 | 6,259 | `tight` CPU | 6,259 | **0** | **0** | 0 | 0 |
+| | | | `tight` GPU | 6,259 | **0** | **0** | 0 | 0 |
+| | | | `relaxed` CPU | 6,700 | 441 | 0 | 0 | 0 |
+| | | | `relaxed` GPU | 6,734 | 475 | 0 | 0 | 0 |
+| armadillo-rollers | 99,104 | 98,761 | `tight` CPU | 98,761 | **0** | **0** | 0 | 0 |
+| | | | `tight` GPU | 98,761 | **0** | **0** | 0 | 0 |
+| | | | `relaxed` CPU | 98,895 | 134 | 0 | 0 | 0 |
+| | | | `relaxed` GPU | 98,930 | 169 | 0 | 0 | 0 |
+| cloth-ball | 557,683 | 557,668 | `tight` CPU | 557,668 | **0** | **0** | 0 | 0 |
+| | | | `tight` GPU | 557,668 | **0** | **0** | 0 | 0 |
+| | | | `relaxed` CPU | 557,669 | 1 | 0 | 0 | 0 |
+| | | | `relaxed` GPU | 557,669 | 1 | 0 | 0 | 0 |
+
+**`Tight` reproduces TightInclusion's hit set exactly on both machines**, over
+663,538 queries: no false positive, no false negative, no missed collision and no
+late time of impact. The gate exits zero on all three scenes.
+
+`Relaxed` accepts sooner by design, so it reports more hits — 441 and 475 extra on
+cloth-funnel out of 6,751. Those are false positives, which cost work and never
+safety, and the two implementations of the looser predicate do not agree query for
+query, which is expected: `Relaxed` is a different search on each machine, unlike
+`Tight`.
+
+One difference worth naming rather than hiding. The host's `Tight` is bit-identical
+to TightInclusion (`abserr_max` 0.000e+00 on every scene); the device's reproduces
+the hit set exactly but its times of impact sit up to 5.25e-3, 4.43e-4 and 1.76e-6
+*after* TightInclusion's. TightInclusion's answer is itself a lower bound on the
+truth, so being later than it is not a violation — `gtLATE` is zero — and the
+`lateTI` column that counts it is documented as over-reporting for that reason.
 
 ## Device narrow phase, occupancy
 
@@ -105,9 +181,11 @@ Counted with `-DSCCD_NP_COUNT_BOXES` (off by default), cloth-funnel, `Tight`:
 | | boxes | per query |
 |---|---:|---:|
 | host | 1,038,395 | 1.2 |
-| device, `toi_stride=0` | 97,757,836 | 111 |
-| device, `toi_stride=1` | 705,986,614 | 2,576,594 |
+| device, `ToiOutput::Earliest` | 97,757,836 | 111 |
+| device, `ToiOutput::PerPair` | 705,986,614 | 2,576,594 |
 
-The device does 94× the host's work on the earliest-impact path. The per-query
-path is worse by an order of magnitude and is the largest open item; see
-`wip/TODO.md`.
+These counts are from the same pre-fix build as the timing table above. After the
+edge-edge tolerance fix the same cloth-funnel run classifies 1.35 M boxes on the
+earliest-impact path and 129 M on the per-query path, against 4.08 M and 1.78 G
+before. The investigation is in
+[`../wip/CUDA_NARROWPHASE_PLAN.md`](../wip/CUDA_NARROWPHASE_PLAN.md).

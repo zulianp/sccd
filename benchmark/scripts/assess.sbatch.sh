@@ -133,11 +133,12 @@ run_refine() { # hardware topology component variant repeat  [env assignments...
            timeout "$ASSESS_TIMEOUT" "$build/sccd_refine_scaling" "$ASSESS_REFINE_LEVELS" 2>>"$LOG" )
     local rc=$?
     echo "$out" >> "$LOG"
-    # A failure here is a result, not an accident to be swallowed. The device
-    # narrow phase raises SMESH_ERROR for QUADSHELL4 -- it is simply not
-    # implemented -- so the hopper quad rows are expected to land here, and an
-    # explicit row is what puts that gap in the data instead of leaving it as an
-    # unexplained absence.
+    # A failure here is a result, not an accident to be swallowed: an explicit
+    # row puts the gap in the data instead of leaving it as an unexplained
+    # absence. Any hopper quad rows already in assessment.csv reading
+    # "FAILED rc=134" predate the device vertex-quad narrow phase and should be
+    # re-run rather than trusted -- quads now dispatch on the device for both
+    # phases.
     if [ "$rc" -ne 0 ]; then
         local why="FAILED rc=$rc"
         [ "$rc" -eq 124 ] && why="TIMEOUT after ${ASSESS_TIMEOUT}s"
@@ -148,10 +149,17 @@ run_refine() { # hardware topology component variant repeat  [env assignments...
 
     echo "$out" | awk -v hw="$hw" -v topo="$topo" -v comp="$comp" \
                       -v var="$var" -v rep="$rep" '
-        /^[ ]*[0-9]+[ ]/ && NF == 10 {
+        # NF >= 10, not == 10. refine_scaling grew a toi column and this filter
+        # did not, so for as long as that column has existed every refine row has
+        # been silently dropped -- while the rc != 0 branch above kept writing
+        # failure rows. The harness recorded refine failures and discarded refine
+        # successes, which is how "FAILED rc=134" survived in the quad rows with
+        # nothing to contradict it.
+        /^[ ]*[0-9]+[ ]/ && NF >= 10 {
             lvl = $1; faces = $2; pairs = $3 + $4; broad = $8; narrow = $9
+            toi = (NF >= 11) ? $NF : ""
             printf "%s,refine-%s,%s,%s,%s,broad,%s,%.3f,%d,faces=%d\n", hw, topo, lvl, comp, var, rep, broad, pairs, faces
-            printf "%s,refine-%s,%s,%s,%s,narrow,%s,%.3f,%d,faces=%d\n", hw, topo, lvl, comp, var, rep, narrow, pairs, faces
+            printf "%s,refine-%s,%s,%s,%s,narrow,%s,%.3f,%d,faces=%d;toi=%s\n", hw, topo, lvl, comp, var, rep, narrow, pairs, faces, toi
         }' >> "$CSV"
 }
 

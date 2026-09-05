@@ -2,6 +2,7 @@
 #define SCCD_ROOTFINDER_QUAD_HPP
 
 #include "sccd_rootfinder.hpp"
+#include "sccd_tolerance.hpp"
 
 namespace sccd {
 
@@ -140,12 +141,25 @@ namespace sccd {
      */
     template <typename T>
     struct VQBounds {
+        // Over the whole step. These are the tolerance denominators, and the
+        // triangle path takes its tolerances over the whole step too.
         T lipschitz[3];
+        // Over [0, t_upper] only, and used solely to scale the split-axis
+        // choice. The u and v Lipschitz constants come from the quad's own edge
+        // vectors, which move during the step, so measuring them at t = 1 when
+        // the search has already been pruned to t_upper over-weights u and v
+        // and picks the wrong axis to split. The triangle path interpolates
+        // them the same way (sccd_narrowphase.hpp, u_upper / v_upper).
+        //
+        // Kept separate from `lipschitz` rather than replacing it: the split
+        // scale should follow the pruned window, the tolerances should not.
+        T split_widths[3];
         T max_coord[3];
     };
 
     template <typename T>
-    inline void vq_bounds(const T sv[3],
+    inline void vq_bounds(const T t_upper,
+                          const T sv[3],
                           const T s1[3],
                           const T s2[3],
                           const T s3[3],
@@ -156,22 +170,47 @@ namespace sccd {
                           const T e3[3],
                           const T e4[3],
                           VQBounds<T> &out) {
-        for (int i = 0; i < 3; ++i) out.lipschitz[i] = T(0);
+        for (int i = 0; i < 3; ++i) out.lipschitz[i] = out.split_widths[i] = T(0);
 
         for (int d = 0; d < 3; ++d) {
             const T vt = ev[d] - sv[d];
+            // Axis 0 is time; the triangle path does not restrict it either.
             out.lipschitz[0] = sccd::max<T>(
                 out.lipschitz[0],
                 sccd::max<T>(sccd::max<T>(sccd::abs<T>(vt - (e1[d] - s1[d])), sccd::abs<T>(vt - (e2[d] - s2[d]))),
                              sccd::max<T>(sccd::abs<T>(vt - (e3[d] - s3[d])), sccd::abs<T>(vt - (e4[d] - s4[d])))));
+            out.split_widths[0] = out.lipschitz[0];
+            // u edges at t = 0 and at t = 1, and the same pair at t = t_upper.
+            const T u_a0 = s2[d] - s1[d], u_a1 = e2[d] - e1[d];
+            const T u_b0 = s4[d] - s3[d], u_b1 = e4[d] - e3[d];
+            const T v_a0 = s3[d] - s1[d], v_a1 = e3[d] - e1[d];
+            const T v_b0 = s4[d] - s2[d], v_b1 = e4[d] - e2[d];
+
             out.lipschitz[1] = sccd::max<T>(
                 out.lipschitz[1],
-                sccd::max<T>(sccd::max<T>(sccd::abs<T>(s2[d] - s1[d]), sccd::abs<T>(s4[d] - s3[d])),
-                             sccd::max<T>(sccd::abs<T>(e2[d] - e1[d]), sccd::abs<T>(e4[d] - e3[d]))));
+                sccd::max<T>(sccd::max<T>(sccd::abs<T>(u_a0), sccd::abs<T>(u_b0)),
+                             sccd::max<T>(sccd::abs<T>(u_a1), sccd::abs<T>(u_b1))));
             out.lipschitz[2] = sccd::max<T>(
                 out.lipschitz[2],
-                sccd::max<T>(sccd::max<T>(sccd::abs<T>(s3[d] - s1[d]), sccd::abs<T>(s4[d] - s2[d])),
-                             sccd::max<T>(sccd::abs<T>(e3[d] - e1[d]), sccd::abs<T>(e4[d] - e2[d]))));
+                sccd::max<T>(sccd::max<T>(sccd::abs<T>(v_a0), sccd::abs<T>(v_b0)),
+                             sccd::max<T>(sccd::abs<T>(v_a1), sccd::abs<T>(v_b1))));
+
+            // The edge vectors are linear in t, so the max over [0, t_upper] is
+            // attained at an endpoint: evaluate at t_upper and take it against
+            // t = 0.
+            const T u_at = u_a0 + (u_a1 - u_a0) * t_upper;
+            const T u_bt = u_b0 + (u_b1 - u_b0) * t_upper;
+            const T v_at = v_a0 + (v_a1 - v_a0) * t_upper;
+            const T v_bt = v_b0 + (v_b1 - v_b0) * t_upper;
+
+            out.split_widths[1] = sccd::max<T>(
+                out.split_widths[1],
+                sccd::max<T>(sccd::max<T>(sccd::abs<T>(u_a0), sccd::abs<T>(u_b0)),
+                             sccd::max<T>(sccd::abs<T>(u_at), sccd::abs<T>(u_bt))));
+            out.split_widths[2] = sccd::max<T>(
+                out.split_widths[2],
+                sccd::max<T>(sccd::max<T>(sccd::abs<T>(v_a0), sccd::abs<T>(v_b0)),
+                             sccd::max<T>(sccd::abs<T>(v_at), sccd::abs<T>(v_bt))));
 
             // Same walk, so the error bound's reduction rides along with it.
             const T m = sccd::max<T>(
@@ -180,7 +219,15 @@ namespace sccd {
                 sccd::max<T>(sccd::max<T>(sccd::abs<T>(s4[d]), sccd::abs<T>(ev[d])),
                              sccd::max<T>(sccd::max<T>(sccd::abs<T>(e1[d]), sccd::abs<T>(e2[d])),
                                           sccd::max<T>(sccd::abs<T>(e3[d]), sccd::abs<T>(e4[d])))));
-            out.max_coord[d] = sccd::max<T>(T(1), m);
+            // Clamped from ABOVE, not below: TightInclusion's bound is
+            // `filter * min(max_coord, 1)^3` (interval_root_finder.cpp, which
+            // writes it `max.cwiseMin(1)`), so the cube never exceeds 1 and the
+            // bound is a constant `filter` on any scene whose coordinates reach
+            // unit scale. Clamping the other way makes the pad grow as the cube
+            // of the scene size -- a factor of 1e6 at scale 100 -- which the
+            // acceptance test then spends, accepting boxes the search could
+            // still have resolved.
+            out.max_coord[d] = sccd::min<T>(T(1), m);
         }
     }
 
@@ -198,13 +245,29 @@ namespace sccd {
                                               const T e4[3],
                                               T *const SCCD_RESTRICT tol) {
         VQBounds<T> b;
-        vq_bounds<T>(sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, b);
+        vq_bounds<T>(T(1), sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, b);
         const T *const lipschitz = b.lipschitz;
 
         const T axis_tol = codomain_tol / T(3);
         const T eps = std::numeric_limits<T>::epsilon();
+        const T caps[3] = {T(SCCD_MAX_TIME_TOL), T(SCCD_MAX_COORD_TOL), T(SCCD_MAX_COORD_TOL)};
+        // Axis 0 is time and axes 1 and 2 are the quad's parameters, so they
+        // take the same caps as the vertex-face and edge-edge tolerances in
+        // sccd_tolerance.hpp. Without a cap this division grows without bound as
+        // the motion slows, and below machine epsilon it was abandoned for a
+        // tolerance of 1.0 -- as wide as the whole domain.
+        //
+        // On this path the caps are hardening rather than a fix: the Relaxed
+        // acceptance test compares CODOMAIN widths against these tolerances and
+        // requires all three axes at once, so a slack tolerance on a
+        // low-Lipschitz axis is held in check by the other two, and no check in
+        // sccd_rootfinder_quad_test moves when they are applied. The triangle
+        // Tight predicate compares the DOMAIN width instead, where the same cap
+        // binds directly. Sharing the caps costs nothing and stops the two paths
+        // from drifting further apart.
         for (int d = 0; d < 3; ++d) {
-            tol[d] = lipschitz[d] > eps ? axis_tol / lipschitz[d] : T(1);
+            const T raw = lipschitz[d] > eps ? axis_tol / lipschitz[d] : caps[d];
+            tol[d] = sccd::clamp_domain_tol<T>(raw, caps[d]);
         }
     }
 
@@ -221,7 +284,7 @@ namespace sccd {
                                                     const T e4[3],
                                                     T widths[3]) {
         VQBounds<T> b;
-        vq_bounds<T>(sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, b);
+        vq_bounds<T>(T(1), sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, b);
         widths[0] = b.lipschitz[0];
         widths[1] = b.lipschitz[1];
         widths[2] = b.lipschitz[2];
@@ -236,7 +299,7 @@ namespace sccd {
     }
 
     template <typename T>
-    static inline void sccd_get_numerical_error_vq_soa(const int use_ms,
+    static inline void sccd_get_numerical_error_vq_soa(
                                                        const T v0sx,
                                                        const T v0sy,
                                                        const T v0sz,
@@ -270,9 +333,14 @@ namespace sccd {
                                                        T *const SCCD_RESTRICT errx,
                                                        T *const SCCD_RESTRICT erry,
                                                        T *const SCCD_RESTRICT errz) {
-        const T kFilter = (use_ms ? T(42) : T(38)) * std::numeric_limits<T>::epsilon();
+        // 38 is an over-estimate: TightInclusion certifies 30 for vertex-face
+        // and 28 for edge-edge, and derives no constant for the bilinear quad
+        // form. Nothing in this repository derives 38 either. It exceeds both
+        // triangle constants, so it errs on the safe side; lowering it is the
+        // unsafe direction and needs a derivation first.
+        const T kFilter = T(38) * std::numeric_limits<T>::epsilon();
         const T maxx =
-            sccd::max<T>(T(1),
+            sccd::min<T>(T(1),
                          sccd::max<T>(
                              sccd::max<T>(sccd::max<T>(sccd::abs<T>(v0sx), sccd::abs<T>(v1sx)),
                                           sccd::max<T>(sccd::abs<T>(v2sx), sccd::abs<T>(v3sx))),
@@ -281,7 +349,7 @@ namespace sccd {
                                               sccd::max<T>(sccd::abs<T>(v1ex), sccd::abs<T>(v2ex)),
                                               sccd::max<T>(sccd::abs<T>(v3ex), sccd::abs<T>(v4ex))))));
         const T maxy =
-            sccd::max<T>(T(1),
+            sccd::min<T>(T(1),
                          sccd::max<T>(
                              sccd::max<T>(sccd::max<T>(sccd::abs<T>(v0sy), sccd::abs<T>(v1sy)),
                                           sccd::max<T>(sccd::abs<T>(v2sy), sccd::abs<T>(v3sy))),
@@ -290,7 +358,7 @@ namespace sccd {
                                               sccd::max<T>(sccd::abs<T>(v1ey), sccd::abs<T>(v2ey)),
                                               sccd::max<T>(sccd::abs<T>(v3ey), sccd::abs<T>(v4ey))))));
         const T maxz =
-            sccd::max<T>(T(1),
+            sccd::min<T>(T(1),
                          sccd::max<T>(
                              sccd::max<T>(sccd::max<T>(sccd::abs<T>(v0sz), sccd::abs<T>(v1sz)),
                                           sccd::max<T>(sccd::abs<T>(v2sz), sccd::abs<T>(v3sz))),
@@ -323,7 +391,7 @@ namespace sccd {
                                    const T e3[3],
                                    const T e4[3],
                                    T out[3]) {
-        sccd_get_numerical_error_vq_soa<T>(/*use_ms=*/0,
+        sccd_get_numerical_error_vq_soa<T>(
                                            sv[0], sv[1], sv[2],
                                            s1[0], s1[1], s1[2],
                                            s2[0], s2[1], s2[2],
@@ -346,6 +414,7 @@ namespace sccd {
      */
     template <typename T>
     inline void vq_prepare(const T codomain_tol,
+                           const T t_upper,
                            const T sv[3],
                            const T s1[3],
                            const T s2[3],
@@ -360,14 +429,18 @@ namespace sccd {
                            T widths[3],
                            T numerical_error[3]) {
         VQBounds<T> b;
-        vq_bounds<T>(sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, b);
+        vq_bounds<T>(t_upper, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, b);
 
         const T axis_tol = codomain_tol / T(3);
         const T eps = std::numeric_limits<T>::epsilon();
         const T kFilter = T(38) * eps;
+        // The same caps as compute_vertex_quad_tolerance above; this is the
+        // one-pass form of it and the two must not diverge.
+        const T caps[3] = {T(SCCD_MAX_TIME_TOL), T(SCCD_MAX_COORD_TOL), T(SCCD_MAX_COORD_TOL)};
         for (int d = 0; d < 3; ++d) {
-            tols[d] = b.lipschitz[d] > eps ? axis_tol / b.lipschitz[d] : T(1);
-            widths[d] = b.lipschitz[d];
+            const T raw = b.lipschitz[d] > eps ? axis_tol / b.lipschitz[d] : caps[d];
+            tols[d] = sccd::clamp_domain_tol<T>(raw, caps[d]);
+            widths[d] = b.split_widths[d];
             numerical_error[d] = sccd::pow3<T>(b.max_coord[d]) * kFilter;
         }
         normalize_vertex_quad_codomain_widths<T>(widths);
@@ -496,6 +569,12 @@ namespace sccd {
         // machine epsilon instead, roughly 30x too small for unit-scale
         // geometry, which let it discard boxes that contained a root.)
 
+        // The quad search has no Newton polish, so `refine` is accepted for
+        // signature parity with the vertex-face and edge-edge root finders and
+        // then ignored -- as edge-edge also ignores it. narrow_phase_vq used to
+        // read SCCD_REFINE from the environment and thread it down to this line,
+        // which advertised a knob that could not be turned; it now passes false
+        // explicitly.
         (void)refine;
 
         const T lo = domain.tuv[SplitDim].lower;

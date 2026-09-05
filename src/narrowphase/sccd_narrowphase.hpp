@@ -18,38 +18,12 @@
 
 #include <atomic>
 
-#define SCCD_ENABLE_CODOMAIN_SCALING 1
 
 namespace sccd {
 
-    /**
-     * \brief Monotonically lower a shared minimum.
-     *
-     * Relaxed ordering is sufficient: the value is a pruning bound, not a
-     * synchronization edge, and it is only ever decreased. Nothing is published
-     * alongside it, so no acquire/release pairing is needed. Under the default
-     * seq_cst this sat on the DFS inner loop and serialized every worker on one
-     * cache line.
-     *
-     * \return The value the atomic held when the exchange settled, i.e. the
-     *         prior minimum.
-     */
-    template <typename T>
-    T atomic_min(std::atomic<T>& atm, T val) {
-        T expected = atm.load(std::memory_order_relaxed);
-        while (expected > val) {
-            // compare_exchange_weak refreshes 'expected' on failure, so the loop
-            // re-tests and exits as soon as another thread has published a
-            // smaller value.
-            if (atm.compare_exchange_weak(expected, val, std::memory_order_relaxed, std::memory_order_relaxed)) {
-                break;
-            }
-        }
-        return expected;
-    }
 
 
-    template <int nxe, typename T, typename I>
+    template <typename T, typename I>
     int narrow_phase_vf(const size_t noverlaps,
                         const I* const SCCD_RESTRICT voveralp,
                         const I* const SCCD_RESTRICT foveralp,
@@ -62,13 +36,10 @@ namespace sccd {
                         T* const SCCD_RESTRICT toi,
                         const int max_depth,
                         const T tol,
-                        const int toi_stride = 0) {
+                        const ToiOutput toi_output = ToiOutput::Earliest) {
         using T_HP = double;
-        const T infty = 100000;
-
-        assert(toi_stride == 0 || toi_stride == 1);
         if (noverlaps == 0) {
-            if (toi != nullptr && toi_stride == 0) toi[0] = max_toi;
+            if (toi != nullptr && toi_output == ToiOutput::Earliest) toi[0] = max_toi;
             return 0;
         }
         assert(toi != nullptr);
@@ -76,8 +47,8 @@ namespace sccd {
         const NarrowPhaseMode mode = narrow_phase_mode();
 
         if (mode == NarrowPhaseMode::Tight) {
-            return narrow_phase_tight_vf<nxe, T, I>(
-                noverlaps, voveralp, foveralp, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_stride);
+            return narrow_phase_tight_vf<T, I>(
+                noverlaps, voveralp, foveralp, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_output);
         }
 
 
@@ -90,7 +61,7 @@ namespace sccd {
 
         std::atomic<T> min_t = max_toi;
 
-        if (toi_stride == 1) {
+        if (toi_output == ToiOutput::PerPair) {
             sccd::parallel_for_br(0, (ptrdiff_t)noverlaps, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
                 for (ptrdiff_t i = rbegin; i < rend; i++) {
                     toi[i] = max_toi;
@@ -98,13 +69,13 @@ namespace sccd {
             });
         }
 
-        if (toi_stride == 0 && min_t == 0) {
+        if (toi_output == ToiOutput::Earliest && min_t == 0) {
             toi[0] = 0;
             // printf("[after newton pass vf] min_t is 0 returning\n");
             return 0;
         }
 
-        if (toi_stride == 0) toi[0] = max_toi;
+        if (toi_output == ToiOutput::Earliest) toi[0] = max_toi;
         // sccd::parallel_for_br_dynamic(0, noverlaps, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
         // std::vector<Box<T_HP>> stack;
 
@@ -116,7 +87,7 @@ namespace sccd {
             stack.reserve(64);
 
             for (ptrdiff_t i = rbegin; i < rend; i++) {
-                if (toi_stride == 1) toi[i] = max_toi;
+                if (toi_output == ToiOutput::PerPair) toi[i] = max_toi;
 
                 const I vi = voveralp[i];
                 const I fi = foveralp[i];
@@ -135,14 +106,14 @@ namespace sccd {
                 const T_HP e3[3] = {v1[0][nodes[2]], v1[1][nodes[2]], v1[2][nodes[2]]};
 
                 // Iteration variables
-                T_HP t = toi_stride == 0 ? T_HP(min_t.load(std::memory_order_relaxed)) : T_HP(toi[i]);
+                T_HP t = toi_output == ToiOutput::Earliest ? T_HP(min_t.load(std::memory_order_relaxed)) : T_HP(toi[i]);
                 T_HP u = 0;
                 T_HP v = 0;
 
 #ifdef SCCD_ENABLE_TIGHT_INCLUSION
                 if (SCCD_USE_TI) {
                     if (find_root_tight_inclusion_vf<T_HP>(max_depth, tol, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v)) {
-                        if (toi_stride == 0) {
+                        if (toi_output == ToiOutput::Earliest) {
                             atomic_min<T>(min_t, t);
                         } else {
                             toi[i] = t;
@@ -157,7 +128,7 @@ namespace sccd {
                                                Interval<T_HP>{T_HP(0), T_HP(1)},
                                                0);
 
-#ifndef SCCD_ENABLE_CODOMAIN_SCALING
+#if !SCCD_ENABLE_CODOMAIN_SCALING
                 T_HP codomain_widths[3] = {1, 1, 1};
 #else
                 T_HP codomain_widths[3];
@@ -235,7 +206,7 @@ namespace sccd {
                                                                    SCCD_REFINE);
 
                     if (found) {
-                        if (toi_stride == 0) {
+                        if (toi_output == ToiOutput::Earliest) {
                             auto ret = atomic_min<T>(min_t, t);
                             if (ret < t) {
                                 t = ret;
@@ -245,7 +216,7 @@ namespace sccd {
                             toi[i] = t;
                         }
                     } else if (!stack.empty()) {
-                        if (toi_stride == 0) {
+                        if (toi_output == ToiOutput::Earliest) {
                             t = sccd::min<T_HP>(t, min_t.load(std::memory_order_relaxed));
                         }
                     }
@@ -253,41 +224,10 @@ namespace sccd {
             }
         });
 
-        if (toi_stride == 0) toi[0] = min_t.load(std::memory_order_relaxed);
+        if (toi_output == ToiOutput::Earliest) toi[0] = min_t.load(std::memory_order_relaxed);
         return 0;
     }
 
-    // Legacy direct-call overload: the old API only exposed toi_stride here.
-    template <int nxe, typename T, typename I>
-    int narrow_phase_vf(const size_t noverlaps,
-                        const I* const SCCD_RESTRICT voveralp,
-                        const I* const SCCD_RESTRICT foveralp,
-                        T** const SCCD_RESTRICT v0,
-                        T** const SCCD_RESTRICT v1,
-                        const size_t face_stride,
-                        I** const SCCD_RESTRICT faces,
-                        const T max_toi,
-                        T* const SCCD_RESTRICT toi,
-                        const int toi_stride = 0) {
-        int SCCD_MAX_DEPTH = 69;
-        SCCD_READ_ENV(SCCD_MAX_DEPTH, atoi);
-
-        T SCCD_TOL = T(3e-8);
-        SCCD_READ_ENV(SCCD_TOL, atof);
-
-        return narrow_phase_vf<nxe, T, I>(noverlaps,
-                                          voveralp,
-                                          foveralp,
-                                          v0,
-                                          v1,
-                                          face_stride,
-                                          faces,
-                                          max_toi,
-                                          toi,
-                                          SCCD_MAX_DEPTH,
-                                          SCCD_TOL,
-                                          toi_stride);
-    }
 
     template <typename T, typename I>
     int narrow_phase_ee(const size_t noverlaps,
@@ -303,27 +243,24 @@ namespace sccd {
                         T* const SCCD_RESTRICT toi,
                         const int max_depth,
                         const T tol,
-                        const int toi_stride = 0) {
+                        const ToiOutput toi_output = ToiOutput::Earliest) {
         using T_HP = double;
-        const T infty = 100000;
 
-        if (toi_stride == 0 && max_toi == 0) {
+        if (toi_output == ToiOutput::Earliest && max_toi == 0) {
             toi[0] = 0;
             // printf("max_toi is 0 returning\n");
             return 0;
         }
 
-        if (toi_stride == 1) {
+        if (toi_output == ToiOutput::PerPair) {
             sccd::parallel_for_br(0, (ptrdiff_t)noverlaps, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
                 for (ptrdiff_t i = rbegin; i < rend; i++) {
                     toi[i] = max_toi;
                 }
             });
         }
-
-        assert(toi_stride == 0 || toi_stride == 1);
         if (noverlaps == 0) {
-            if (toi != nullptr && toi_stride == 0) toi[0] = max_toi;
+            if (toi != nullptr && toi_output == ToiOutput::Earliest) toi[0] = max_toi;
             return 0;
         }
         assert(toi != nullptr);
@@ -342,7 +279,7 @@ namespace sccd {
                                               toi,
                                               max_depth,
                                               tol,
-                                              toi_stride);
+                                              toi_output);
         }
 
         int SCCD_USE_TI = 0;
@@ -353,7 +290,7 @@ namespace sccd {
 
 
         std::atomic<T> min_t = max_toi;
-        if (toi_stride == 0) toi[0] = max_toi;
+        if (toi_output == ToiOutput::Earliest) toi[0] = max_toi;
 
         // sccd::parallel_for_br_dynamic(0, noverlaps, [&](const ptrdiff_t rbegin, const ptrdiff_t rend)
 
@@ -362,7 +299,7 @@ namespace sccd {
             stack.reserve(64);
 
             for (ptrdiff_t i = rbegin; i < rend; i++) {
-                if (toi_stride == 1) toi[i] = max_toi;
+                if (toi_output == ToiOutput::PerPair) toi[i] = max_toi;
 
                 const I i0 = e0overalp[i];
                 const I i1 = e1overalp[i];
@@ -383,7 +320,7 @@ namespace sccd {
                 const T_HP e4[3] = {v1[0][nodes1[1]], v1[1][nodes1[1]], v1[2][nodes1[1]]};
 
                 // Iteration variables
-                T_HP t = toi_stride == 0 ? T_HP(min_t.load(std::memory_order_relaxed)) : T_HP(toi[i]);
+                T_HP t = toi_output == ToiOutput::Earliest ? T_HP(min_t.load(std::memory_order_relaxed)) : T_HP(toi[i]);
                 T_HP u = 0;
                 T_HP v = 0;
                 const T_HP t_upper = sccd::min<T_HP>(t, T_HP(1));
@@ -392,7 +329,7 @@ namespace sccd {
                                                Interval<T_HP>{T_HP(0), T_HP(1)},
                                                0);
 
-#ifndef SCCD_ENABLE_CODOMAIN_SCALING
+#if !SCCD_ENABLE_CODOMAIN_SCALING
                 T_HP codomain_widths[3] = {1, 1, 1};
 #else
                 T_HP codomain_widths[3];
@@ -436,7 +373,7 @@ namespace sccd {
 #ifdef SCCD_ENABLE_TIGHT_INCLUSION
                 if (SCCD_USE_TI) {
                     if (find_root_tight_inclusion_ee<T_HP>(max_depth, tol, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v)) {
-                        if (toi_stride == 0) {
+                        if (toi_output == ToiOutput::Earliest) {
                             atomic_min<T>(min_t, t);
                         } else {
                             toi[i] = t;
@@ -483,7 +420,7 @@ namespace sccd {
                                                                    SCCD_REFINE);
 
                     if (found) {
-                        if (toi_stride == 0) {
+                        if (toi_output == ToiOutput::Earliest) {
                             auto ret = atomic_min<T>(min_t, t);
                             if (ret < t) {
                                 t = ret;
@@ -493,7 +430,7 @@ namespace sccd {
                             toi[i] = t;
                         }
                     } else if (!stack.empty()) {
-                        if (toi_stride == 0) {
+                        if (toi_output == ToiOutput::Earliest) {
                             t = sccd::min<T_HP>(t, min_t.load(std::memory_order_relaxed));
                         }
                     }
@@ -502,41 +439,10 @@ namespace sccd {
         });
         // );
 
-        if (toi_stride == 0) toi[0] = min_t.load(std::memory_order_relaxed);
+        if (toi_output == ToiOutput::Earliest) toi[0] = min_t.load(std::memory_order_relaxed);
         return 0;
     }
 
-    // Legacy direct-call overload: the old API only exposed toi_stride here.
-    template <typename T, typename I>
-    int narrow_phase_ee(const size_t noverlaps,
-                        const I* const SCCD_RESTRICT e0overalp,
-                        const I* const SCCD_RESTRICT e1overalp,
-                        T** const SCCD_RESTRICT v0,
-                        T** const SCCD_RESTRICT v1,
-                        const size_t edge_stride,
-                        I** const SCCD_RESTRICT edges,
-                        const T max_toi,
-                        T* const SCCD_RESTRICT toi,
-                        const int toi_stride = 0) {
-        int SCCD_MAX_DEPTH = 69;
-        SCCD_READ_ENV(SCCD_MAX_DEPTH, atoi);
-
-        T SCCD_TOL = T(3e-8);
-        SCCD_READ_ENV(SCCD_TOL, atof);
-
-        return narrow_phase_ee<T, I>(noverlaps,
-                                     e0overalp,
-                                     e1overalp,
-                                     v0,
-                                     v1,
-                                     edge_stride,
-                                     edges,
-                                     max_toi,
-                                     toi,
-                                     SCCD_MAX_DEPTH,
-                                     SCCD_TOL,
-                                     toi_stride);
-    }
 
 }  // namespace sccd
 

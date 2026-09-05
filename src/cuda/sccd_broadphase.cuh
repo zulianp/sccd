@@ -9,14 +9,13 @@ namespace sccd {
     namespace device {
 
         template <typename T>
-        int choose_axis(const int dim, const ptrdiff_t n, const T* const SCCD_RESTRICT* const SCCD_RESTRICT aabbs);
+        int choose_axis(const ptrdiff_t n, const T* const SCCD_RESTRICT* const SCCD_RESTRICT aabbs);
 
         template <typename T>
         void enumerate(const ptrdiff_t begin, const ptrdiff_t end, T* const SCCD_RESTRICT idx);
 
         template <typename T, typename I>
-        void sort_along_axis(const int dim,
-                             const ptrdiff_t n,
+        void sort_along_axis(const ptrdiff_t n,
                              const int sort_axis,
                              T** const SCCD_RESTRICT arrays,
                              I* const SCCD_RESTRICT idx,
@@ -47,7 +46,7 @@ namespace sccd {
 
         /** Row pointer for SoA device buffers (same host/device table rules as sort_along_axis). */
         template <typename T>
-        T* soa_device_row(T** const SCCD_RESTRICT arrays, const int dim, const int row);
+        T* soa_device_row(T** const SCCD_RESTRICT arrays, const int row);
 
         template <int first_nxe, int second_nxe, typename T, typename I>
         void count_overlaps(const int sort_axis,
@@ -62,7 +61,7 @@ namespace sccd {
                             const ptrdiff_t second_stride,
                             I** const SCCD_RESTRICT second_elements,
                             ptrdiff_t* const SCCD_RESTRICT ccdptr,
-                            const T* const SCCD_RESTRICT cummax);
+                            const T* const SCCD_RESTRICT second_xmax_running);
 
         template <int first_nxe, int second_nxe, typename T, typename I>
         void collect_overlaps(const int sort_axis,
@@ -77,7 +76,7 @@ namespace sccd {
                               const ptrdiff_t second_stride,
                               I** SCCD_RESTRICT const second_elements,
                               const ptrdiff_t* const SCCD_RESTRICT ccdptr,
-                              const T* const SCCD_RESTRICT cummax,
+                              const T* const SCCD_RESTRICT second_xmax_running,
                               I* SCCD_RESTRICT foverlap,
                               I* SCCD_RESTRICT noverlap);
 

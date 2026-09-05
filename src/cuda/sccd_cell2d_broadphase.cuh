@@ -53,8 +53,7 @@ namespace sccd {
          * as it does for the pair arrays.
          */
         template <typename T, typename I>
-        void cell2d_setup_and_count(const int dim,
-                                    const ptrdiff_t n,
+        void cell2d_setup_and_count(const ptrdiff_t n,
                                     T** const SCCD_RESTRICT aabbs,
                                     Cell2DGridD<T>& grid,
                                     ptrdiff_t* const SCCD_RESTRICT cellptr,

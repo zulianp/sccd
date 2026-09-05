@@ -20,6 +20,7 @@
 
 #include "sccd_aabb.hpp"
 #include "sccd_broadphase_sweep.hpp"
+#include "sccd_broadphase_strategy.hpp"
 #include "sccd_base.hpp"
 #include "sccd_math.hpp"
 
@@ -855,6 +856,39 @@ namespace sccd {
                                             const T tol,
                                             const int toi_stride = 0);
 
+
+        // ------------------------------------------------------------------
+        // From src/broadphase/sccd_broadphase_strategy.hpp.
+        //
+        // The stateless broad-phase chooser: one look at the box distribution,
+        // one verdict, no memory between calls. BroadPhaseAutoTuner superseded it
+        // by racing the two strategies and keeping the winner, which is what the
+        // shipped path does. This never had a caller in src/, benchmark/, demo/,
+        // the tests or spikes/.
+        // ------------------------------------------------------------------
+        /**
+         * \brief Resolve Auto without a race; a forced setting passes through.
+         *
+         * The stateless fallback, for a caller with nowhere to keep a measurement.
+         * `BroadPhaseAutoTuner` is what the CCD object uses and what should be
+         * preferred: it decides from timings rather than asserting an answer.
+         *
+         * This returns the cell list, which is the same choice the tuner makes on its
+         * first probe and for the same reason -- with only one shot, take the option
+         * whose worst case is bounded. See the file comment.
+         *
+         * \p out_stats is filled when asked so a caller can log or override on its own
+         * evidence; computing it costs one pass over the AABBs.
+         */
+        template <typename T>
+        static BroadPhaseStrategy choose_broadphase_strategy(const ptrdiff_t n,
+                                                             T** const SCCD_RESTRICT aabb,
+                                                             BroadPhaseStats<T>* out_stats = nullptr) {
+            const BroadPhaseStrategy forced = broadphase_strategy_setting();
+            if (out_stats) *out_stats = broadphase_stats<T>(n, aabb);
+            if (forced != BroadPhaseStrategy::Auto) return forced;
+            return BroadPhaseStrategy::Cell2D;
+        }
 
     }  // namespace dead
 }  // namespace sccd

@@ -13,6 +13,8 @@ every one of these was believed at the time on evidence that looked sufficient.
 - [Retracted: every `fn=0` in this document before the matrix above](ASSESSMENT.md)
 - [Resolved: the sweep dropped touching pairs](ASSESSMENT.md)
 - Reversed: demoting `external/json` to `spikes/` — see below
+- Withdrawn: "the quad device kernel's local stack costs it 255 registers and a
+  spill" — see below
 
 The full argument and the numbers behind each sit in
 [`ASSESSMENT.md`](ASSESSMENT.md).
@@ -85,6 +87,153 @@ configure time and the shipped library must build with nothing fetched.
 The shape is the same as the other five, one level up: the *check* answered a
 different question than the one being asked. "Is it in the build?" is not "does
 anything use it?", and a grep of `CMakeLists.txt` cannot tell them apart.
+
+## 7. Reading a symptom off the wrong line of the compiler's output
+
+`narrow_phase_vq_kernel` reported, at `-Xptxas -v`, an 8128-byte stack frame,
+112 bytes of spill stores, 216 of spill loads and 255 registers — the only
+kernel in the build that spilled. Its `Domain stack[140]` was 7840 of those
+8128 bytes, so the diagnosis wrote itself: the thread-local stack is the
+problem, move it to a block-shared pool with a global overflow queue the way
+the triangle kernel does. That was the plan, and it was approved.
+
+It was wrong on every count, and one compile settled it. Rebuilding at stack
+caps from 4 to 513 entries:
+
+    cap    frame      registers   spill
+      4      448 B    254           0/0
+      8      736 B    255       112/216
+     16     1184 B    255       112/216
+     32     2080 B    255       112/216
+    140     8128 B    255       112/216
+    513    29024 B    255       112/216
+
+The registers and the spill do not move with the array at all. They are the
+inclusion function's working set — thirty coordinates, two `Frame`s, eight
+corner triples — and no stack change touches them. The frame is the array, and
+the frame is not the spill; they had been read as one number.
+
+Nor does the frame cost time. Only the entries a search actually reaches are
+ever written; the rest is address space. On GH200, 400k queries at depth 69:
+cap 140 runs 7.589 ms, cap 257 runs 7.441 ms, cap 513 runs 7.355 ms — the
+largest is the fastest, which is to say it is noise.
+
+**The near-miss.** A first timing run appeared to confirm the restructure
+handsomely: cap 140 at 7.613 ms against cap 32 at 3.681 ms, a 2.07x win for the
+smaller stack. It measured the wrong thing. `kMaxDeviceDepth` is *derived* from
+the cap, so shrinking the array shortens the search: cap 32 means depth 15, not
+depth 69. Holding depth fixed at 15, cap 140 and cap 32 run 3.719 ms and
+3.680 ms to a bit-identical answer. This is failure mode 5 again, measuring the
+wrong object entirely, and it would have "validated" a rewrite that could not
+have delivered what it promised.
+
+What the exercise did produce is the opposite change from the one planned.
+Since depth is what costs and headroom for it is free, the stack is now sized
+*from* a depth (`SCCD_VQ_MAX_DEPTH`, 128) rather than being an entry count that
+a depth is derived from. The old 140 entries capped the device at 69, which
+happens to equal the host's default `SCCD_MAX_DEPTH` — so the two agreed by
+coincidence, and raising `SCCD_MAX_DEPTH` gave a host that searched deeper and
+a device that quietly did not. The clamp is safe, since exhaustion accepts at
+the box's `t` lower bound, but it is an accuracy divergence and it is now
+reported on stderr instead of being silent.
+
+The rule to carry forward: **when a plan rests on a number, re-derive the
+number before executing the plan, and check that the knob you are varying moves
+only the thing you think it moves.**
+
+### Then it was built anyway, and measured
+
+The reasoning above is sound about *sizes* and wrong about one conclusion, which
+is worth separating. Varying `SCCD_VQ_STACK_CAP` does not change the register
+count or the spill — that part holds. But the spill was not caused by the array's
+size; it was caused by there being a dynamically-indexed array at all. The
+restructured kernel, which keeps one box per thread and puts the rest in a
+block-shared pool, reports:
+
+    before   8128 B frame   112/216 spill   255 registers
+    after     336 B frame       0/0 spill   216-226 registers, 3.6 KB smem
+
+So the restructure does deliver the static improvement the plan claimed. It was
+built in full — a seed kernel, a drain kernel, a shared body, a host grow-and-retry
+loop, all mirroring `narrow_phase_dfs_zero_stride_body` — and it is conservative:
+`sccd_narrowphase_cuda_test` passes all 20 configurations, and at `tol = 1e-16`
+the device vertex-quad row is slightly *better* than before (6.675e-14 against
+8.601e-14 of earliness).
+
+It still does not ship, because throughput does not follow. 400k queries on
+GH200, best of 5, every configuration returning an identical answer:
+
+    scene / stride          before   order only   restructured
+    stationary, stride 1    7.393      4.456          8.181
+    stationary, stride 0    0.972      0.608          0.739
+    moving,     stride 1   16.367     18.012         34.734
+    moving,     stride 0    1.796      1.900          1.501
+
+The restructure wins one cell of four (1.20x) and loses more than half its
+throughput in another (0.47x). The loss is not the global queue overflowing:
+raising the shared pool from 64 to 512 entries moves moving/stride 1 only from
+34.4 ms to 32.1 ms. It is the design itself. In `per_query` mode every query is
+uniformly deep, so work sharing has no imbalance to correct, while the block
+still pays a `__syncthreads()` per DFS iteration and a thirty-coordinate reload
+plus a `prepare()` every time a thread picks up a box belonging to another
+query. That is the fourth experiment in this project to land on the same
+finding: **the lanes are finished, not waiting.** Best-first ordering, per-query
+bounds and 128-way dicing on the triangle kernel all lost for the same reason.
+
+### The ordering lead, and why it also does not ship
+
+The `order only` column above is a separate change and looked like the better
+prize: ten lines against the existing kernel — buffer the surviving sub-boxes and
+push them in reverse, so the LIFO pop follows the earliest `t` first and tightens
+the bound sooner. On the synthetic scenes it is worth 1.60-1.66x on a stationary
+quad and costs 5-9% on a moving one.
+
+It was taken to the real workload, which meant getting smesh into the CUDA build
+on Alps (it was present but never installed, so its build tree had no
+`smeshTargets.cmake`; `cmake --install` to a prefix fixes it) and running
+`sccd_refine_scaling` with `SCCD_TOPOLOGY=quad` on the device. Level 4 —
+6144 faces, 37.7M vertex-face and 301.8M edge-edge pairs — narrow-phase
+milliseconds, interleaved repeats:
+
+    rep      before     order
+      1    10521.25  10874.16
+      2     9763.41   9420.46
+      3     9599.97   9654.04
+      4     9651.51   9770.79
+    median     9707      9713
+
+Identical within noise, and the reported time of impact is 0.6666653904 in all
+eight runs. **The synthetic win does not transfer at all.**
+
+The reason is the query mix. Following the earliest `t` first only pays when
+there is a root to find early: it reaches one sooner and the tighter bound then
+prunes everything else. The synthetic scene is one crossing vertex per quad, so
+every query has a root. The real scene is dominated by candidate pairs with no
+root at all, and a box holding no root has to be exhausted whatever order its
+children are visited in. Traversal order buys nothing on the boxes that cost the
+most.
+
+So the knob is not kept. A tuning parameter measured as worthless on the workload
+does not earn a place in the shipped kernel any more than a kernel does.
+
+**Note on determinism.** These runs also make it explicit that the quad narrow
+phase is not run-to-run reproducible at `toi_stride == 0`: the shared minimum is
+an atomic under a dynamic schedule, so which thread prunes first varies and the
+reported time of impact moves in the last few digits between runs of the *same
+binary* (0.6666666588 / 0.6666664327 / 0.6666653904 were all observed at
+level 2-4 on the host). Every value is at or before the true 2/3, so the
+guarantee holds; it is the exact answer that is not stable, and a test that
+pins a quad time of impact to more than about 1e-6 will flake.
+
+**A stale record corrected by the same run.** `benchmark/assessment/assessment.csv`
+carries `FAILED rc=134` for the hopper quad rows, and `assess.sbatch.sh` used to
+explain them as the device narrow phase not existing for QUADSHELL4. It does
+exist, and `sccd_refine_scaling` with `SCCD_TOPOLOGY=quad` now completes all five
+levels on the device. Those rows predate the kernel and should be re-run.
+
+What survives from the whole exercise is the header extraction
+(`sccd_device_dfs_stack.cuh`), which stands on its own, and the stack now being
+sized from a depth rather than the other way round.
 
 ## A note on the C ABI
 

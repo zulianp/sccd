@@ -1,9 +1,11 @@
 #include "sccd_narrowphase_vq.cuh"
 
 #include "sccd_cuda_base.cuh"
+#include "sccd_tolerance.hpp"
 
 #include <cfloat>
 #include <cstdint>
+#include <cstdio>
 
 namespace sccd {
     namespace device {
@@ -51,13 +53,37 @@ namespace sccd {
             //     cap 128 -> 0.6666666238   (the host's answer)
             //     cap 512 -> 0.6666666238
             //
-            // The cap is tied to the depth limit below so the tightness of the
-            // answer is a property of the search depth rather than of an array
-            // size that happens to be too small.
-#ifndef SCCD_VQ_STACK_CAP
-#define SCCD_VQ_STACK_CAP 140
+            // ## Why this array is large, and why that is free
+            //
+            // 257 entries is a 14.7 KB per-thread stack frame, which looks
+            // alarming and measures as nothing. Only the first few entries are
+            // ever touched -- the rest is address space, not traffic -- and on
+            // GH200, 400k queries at depth 69:
+            //
+            //     cap   frame     registers  spill      stride 1   stride 0
+            //     140   8128 B    255        112/216    7.589 ms   0.904 ms
+            //     257  14688 B    255        112/216    7.441 ms   0.893 ms
+            //     513  29024 B    255        112/216    7.355 ms   0.922 ms
+            //
+            // The register count and the spill are the inclusion function's
+            // working set -- 30 coordinates, two Frames, eight corner triples --
+            // and do not move with this array at all: they are 255 and 112/216
+            // from cap 4 to cap 513.
+            //
+            // What the cap does change is the depth limit derived from it, and
+            // that is worth a great deal: at a matched depth the array size is
+            // invisible (cap 140 and cap 32 both run 3.7 ms at depth 15, to the
+            // same answer), while cap 32's implied depth of 15 costs 5.5e-5 of
+            // mean accuracy and cap 8's implied depth of 3 collapses the shared
+            // minimum to zero.
+            //
+            // So the cap buys search depth and headroom costs nothing. It is
+            // sized for depth 128 rather than for the default 69, which is what
+            // lets a caller raise SCCD_MAX_DEPTH and actually get it.
+#ifndef SCCD_VQ_MAX_DEPTH
+#define SCCD_VQ_MAX_DEPTH 128
 #endif
-            constexpr int kStackCap = SCCD_VQ_STACK_CAP;
+            constexpr int kStackCap = 1 + kSplits * SCCD_VQ_MAX_DEPTH;
 
             // The deepest search this stack can hold without overflowing.
             constexpr int kMaxDeviceDepth = (kStackCap - 1) / kSplits;
@@ -129,6 +155,7 @@ namespace sccd {
             // certified numerical error bound. One pass, as on the host.
             // ----------------------------------------------------------------
             static inline __device__ void prepare(const TC codomain_tol,
+                                                  const TC t_upper,
                                                   const TC sv[3],
                                                   const TC s[4][3],
                                                   const TC ev[3],
@@ -137,6 +164,10 @@ namespace sccd {
                                                   TC widths[3],
                                                   TC err[3]) {
                 TC lip[3] = {TC(0), TC(0), TC(0)};
+                // Over [0, t_upper] only, for the split-axis scale; `lip` stays
+                // over the whole step because it is the tolerance denominator.
+                // Mirrors VQBounds::split_widths on the host.
+                TC swid[3] = {TC(0), TC(0), TC(0)};
                 TC maxc[3];
 
 #pragma unroll
@@ -148,21 +179,41 @@ namespace sccd {
                     for (int k = 0; k < 4; ++k) {
                         l0 = fmax(l0, fabs(vt - (e[k][d] - s[k][d])));
                     }
-                    l1 = fmax(fmax(fabs(s[1][d] - s[0][d]), fabs(s[3][d] - s[2][d])),
-                              fmax(fabs(e[1][d] - e[0][d]), fabs(e[3][d] - e[2][d])));
-                    l2 = fmax(fmax(fabs(s[2][d] - s[0][d]), fabs(s[3][d] - s[1][d])),
-                              fmax(fabs(e[2][d] - e[0][d]), fabs(e[3][d] - e[1][d])));
+                    const TC u_a0 = s[1][d] - s[0][d], u_a1 = e[1][d] - e[0][d];
+                    const TC u_b0 = s[3][d] - s[2][d], u_b1 = e[3][d] - e[2][d];
+                    const TC v_a0 = s[2][d] - s[0][d], v_a1 = e[2][d] - e[0][d];
+                    const TC v_b0 = s[3][d] - s[1][d], v_b1 = e[3][d] - e[1][d];
+
+                    l1 = fmax(fmax(fabs(u_a0), fabs(u_b0)), fmax(fabs(u_a1), fabs(u_b1)));
+                    l2 = fmax(fmax(fabs(v_a0), fabs(v_b0)), fmax(fabs(v_a1), fabs(v_b1)));
 
                     lip[0] = fmax(lip[0], l0);
                     lip[1] = fmax(lip[1], l1);
                     lip[2] = fmax(lip[2], l2);
+
+                    // The edge vectors are linear in t, so the max over
+                    // [0, t_upper] sits at an endpoint.
+                    const TC u_at = u_a0 + (u_a1 - u_a0) * t_upper;
+                    const TC u_bt = u_b0 + (u_b1 - u_b0) * t_upper;
+                    const TC v_at = v_a0 + (v_a1 - v_a0) * t_upper;
+                    const TC v_bt = v_b0 + (v_b1 - v_b0) * t_upper;
+
+                    swid[0] = fmax(swid[0], l0);
+                    swid[1] = fmax(swid[1],
+                                   fmax(fmax(fabs(u_a0), fabs(u_b0)), fmax(fabs(u_at), fabs(u_bt))));
+                    swid[2] = fmax(swid[2],
+                                   fmax(fmax(fabs(v_a0), fabs(v_b0)), fmax(fabs(v_at), fabs(v_bt))));
 
                     TC m = fmax(fabs(sv[d]), fabs(ev[d]));
 #pragma unroll
                     for (int k = 0; k < 4; ++k) {
                         m = fmax(m, fmax(fabs(s[k][d]), fabs(e[k][d])));
                     }
-                    maxc[d] = fmax(TC(1), m);
+                    // fmin, not fmax: TightInclusion's bound is
+                    // `filter * min(max_coord, 1)^3`, so the cube is 1 on any
+                    // scene at unit scale or larger. Clamping the other way
+                    // grows the pad as the cube of the scene size.
+                    maxc[d] = fmin(TC(1), m);
                 }
 
                 const TC axis_tol = codomain_tol / TC(3);
@@ -173,10 +224,23 @@ namespace sccd {
                 // it is exactly the unsound rejection this project has already
                 // found once.
                 const TC filter = TC(38) * eps;
+
+                // The same caps as the host's compute_vertex_quad_tolerance and
+                // vq_prepare: axis 0 is time, axes 1 and 2 are the quad's
+                // parameters. Without them the division grows without bound as
+                // the motion slows, and below epsilon it fell back to 1.0 -- a
+                // tolerance as wide as the whole domain.
+                // Spelled out rather than calling sccd::clamp_domain_tol, which
+                // is host-only; this is the same expression, and the same
+                // clamp_tol lambda the triangle kernel uses.
+                const TC caps[3] = {TC(SCCD_MAX_TIME_TOL), TC(SCCD_MAX_COORD_TOL),
+                                    TC(SCCD_MAX_COORD_TOL)};
+                auto clamp_tol = [](const TC v, const TC cap) { return (v < cap) ? v : cap; };
 #pragma unroll
                 for (int d = 0; d < 3; ++d) {
-                    tols[d] = lip[d] > eps ? axis_tol / lip[d] : TC(1);
-                    widths[d] = lip[d];
+                    const TC raw = lip[d] > eps ? axis_tol / lip[d] : caps[d];
+                    tols[d] = clamp_tol(raw, caps[d]);
+                    widths[d] = swid[d];
                     err[d] = maxc[d] * maxc[d] * maxc[d] * filter;
                 }
 
@@ -317,7 +381,7 @@ namespace sccd {
                                                    T* const SCCD_RESTRICT toi,
                                                    const int max_depth,
                                                    const TC tol,
-                                                   const int toi_stride) {
+                                                   const ToiOutput toi_output) {
                 const size_t i = blockIdx.x * (size_t)blockDim.x + threadIdx.x;
                 if (i >= noverlaps) return;
 
@@ -340,8 +404,15 @@ namespace sccd {
                     e[k][2] = (TC)v1z[n[k]];
                 }
 
+                // The search window comes first: prepare() scales the split-axis
+                // choice by the codomain widths over [0, t_upper], so it needs to
+                // know what the shared time of impact has already pruned away.
+                TC t = (toi_output == ToiOutput::Earliest) ? *shared_toi : (TC)max_toi;
+                if (t > (TC)max_toi) t = (TC)max_toi;
+                const TC t_upper = fmin(t, TC(1));
+
                 TC tols[3], widths[3], err[3];
-                prepare(tol, sv, s, ev, e, tols, widths, err);
+                prepare(tol, t_upper, sv, s, ev, e, tols, widths, err);
 
                 // Clamp to what the stack can hold. Going deeper than this could
                 // only end in an overflow, and an overflow accepts, so the clamp
@@ -349,10 +420,6 @@ namespace sccd {
                 // the limit explicit and keeps the reported time of impact a
                 // property of the depth rather than of an array size.
                 const int depth_limit = max_depth < kMaxDeviceDepth ? max_depth : kMaxDeviceDepth;
-
-                TC t = (toi_stride == 0) ? *shared_toi : (TC)max_toi;
-                if (t > (TC)max_toi) t = (TC)max_toi;
-                const TC t_upper = fmin(t, TC(1));
 
                 Domain stack[kStackCap];
                 int top = 0;
@@ -374,19 +441,20 @@ namespace sccd {
                     const TC dt = (box.thi - box.tlo) * widths[0];
                     const TC du = (box.uhi - box.ulo) * widths[1];
                     const TC dv = (box.vhi - box.vlo) * widths[2];
-                    const int dim = (du > dt && du >= dv) ? 1 : ((dv > dt && dv > du) ? 2 : 0);
+                    // Which of t, u, v to split -- not a spatial dimension.
+                    const int split_axis = (du > dt && du >= dv) ? 1 : ((dv > dt && dv > du) ? 2 : 0);
 
                     TC splitters[kSplits];
-                    if (dim == 0) {
+                    if (split_axis == 0) {
                         axis_splitters<0>(box, sv, s, ev, e, splitters);
-                    } else if (dim == 1) {
+                    } else if (split_axis == 1) {
                         axis_splitters<1>(box, sv, s, ev, e, splitters);
                     } else {
                         axis_splitters<2>(box, sv, s, ev, e, splitters);
                     }
 
-                    const TC lo = (dim == 0) ? box.tlo : (dim == 1 ? box.ulo : box.vlo);
-                    const TC hi = (dim == 0) ? box.thi : (dim == 1 ? box.uhi : box.vhi);
+                    const TC lo = (split_axis == 0) ? box.tlo : (split_axis == 1 ? box.ulo : box.vlo);
+                    const TC hi = (split_axis == 0) ? box.thi : (split_axis == 1 ? box.uhi : box.vhi);
                     TC samples[kSamples];
                     samples[0] = lo;
                     samples[kSamples - 1] = hi;
@@ -403,22 +471,22 @@ namespace sccd {
                     for (int k = 0; k < kSplits + 1; ++k) {
                         const TC smin = samples[k];
                         const TC smax = samples[k + 1];
-                        const TC tt_min = (dim == 0) ? smin : box.tlo;
+                        const TC tt_min = (split_axis == 0) ? smin : box.tlo;
                         if (tt_min >= t) { have_a = false; continue; }
 
                         // The four corners on each of the two bounding planes.
                         TC plane_b[4][3];
-                        const TC a_lo = (dim == 0) ? box.ulo : box.tlo;
-                        const TC a_hi = (dim == 0) ? box.uhi : box.thi;
-                        const TC b_lo = (dim == 2) ? box.ulo : box.vlo;
-                        const TC b_hi = (dim == 2) ? box.uhi : box.vhi;
+                        const TC a_lo = (split_axis == 0) ? box.ulo : box.tlo;
+                        const TC a_hi = (split_axis == 0) ? box.uhi : box.thi;
+                        const TC b_lo = (split_axis == 2) ? box.ulo : box.vlo;
+                        const TC b_hi = (split_axis == 2) ? box.uhi : box.vhi;
 
                         for (int pass = 0; pass < 2; ++pass) {
                             if (pass == 0 && have_a) continue;
                             const TC sample = (pass == 0) ? smin : smax;
                             TC (*dst)[3] = (pass == 0) ? plane_a : plane_b;
 
-                            if (dim == 0) {
+                            if (split_axis == 0) {
                                 Frame f;
                                 frame_at(sv, s, ev, e, sample, f);
 #pragma unroll
@@ -433,8 +501,8 @@ namespace sccd {
                                 for (int c = 0; c < 4; ++c) {
                                     const Frame& f = (c & 1) ? fhi : flo;
                                     const TC other = (c & 2) ? b_hi : b_lo;
-                                    const TC uu = (dim == 1) ? sample : other;
-                                    const TC vv = (dim == 1) ? other : sample;
+                                    const TC uu = (split_axis == 1) ? sample : other;
+                                    const TC vv = (split_axis == 1) ? other : sample;
                                     eval_frame(f, uu, vv, dst[c]);
                                 }
                             }
@@ -471,8 +539,8 @@ namespace sccd {
                         accepted = accepted && (tt_min > TC(0));
 
                         Domain sub = box;
-                        if (dim == 0) { sub.tlo = smin; sub.thi = smax; }
-                        else if (dim == 1) { sub.ulo = smin; sub.uhi = smax; }
+                        if (split_axis == 0) { sub.tlo = smin; sub.thi = smax; }
+                        else if (split_axis == 1) { sub.ulo = smin; sub.uhi = smax; }
                         else { sub.vlo = smin; sub.vhi = smax; }
                         sub.depth = box.depth + 1;
 
@@ -497,7 +565,7 @@ namespace sccd {
                 }
 
                 if (found) {
-                    if (toi_stride == 0) {
+                    if (toi_output == ToiOutput::Earliest) {
                         const double previous = atomic_min_double(shared_toi, (double)t);
                         (void)previous;
                     } else {
@@ -505,7 +573,7 @@ namespace sccd {
                         // is safe, a later one is the failure this exists to prevent.
                         toi[i] = sizeof(T) == sizeof(float) ? (T)__double2float_rd(t) : (T)t;
                     }
-                } else if (toi_stride == 1) {
+                } else if (toi_output == ToiOutput::PerPair) {
                     toi[i] = sizeof(T) == sizeof(float) ? (T)__double2float_rd((double)max_toi)
                                                         : (T)max_toi;
                 }
@@ -535,9 +603,9 @@ namespace sccd {
                             T* const SCCD_RESTRICT toi,
                             const int max_depth,
                             const T tol,
-                            const int toi_stride) {
+                            const ToiOutput toi_output) {
             if (noverlaps == 0) {
-                if (toi != nullptr && toi_stride == 0) {
+                if (toi != nullptr && toi_output == ToiOutput::Earliest) {
                     SCCD_CHECK_CUDA(cudaMemcpy(toi, &max_toi, sizeof(T), cudaMemcpyHostToDevice));
                 }
                 return 0;
@@ -547,6 +615,26 @@ namespace sccd {
             SCCD_CHECK_CUDA(cudaMalloc(&d_shared, sizeof(double)));
             const double h_shared = (double)max_toi;
             SCCD_CHECK_CUDA(cudaMemcpy(d_shared, &h_shared, sizeof(double), cudaMemcpyHostToDevice));
+
+            // A depth the device cannot reach must not pass unremarked. The
+            // clamp itself is safe -- exhaustion accepts at the box's t lower
+            // bound, so a shallower search reports an earlier time of impact and
+            // never a later one -- but it is an accuracy divergence from the
+            // host, which honours whatever depth it is given, and a silent one
+            // is the kind nobody finds. SCCD_VQ_MAX_DEPTH sizes the stack, and
+            // the measurements above say raising it is free.
+            if (max_depth > kMaxDeviceDepth) {
+                static bool warned = false;
+                if (!warned) {
+                    warned = true;
+                    std::fprintf(stderr,
+                                 "SCCD: device vertex-quad narrow phase clamps max_depth %d to %d "
+                                 "(the compiled stack holds %d boxes). The reported time of impact "
+                                 "will be earlier than the host's, never later. Rebuild with "
+                                 "-DSCCD_VQ_MAX_DEPTH=%d to match.\n",
+                                 max_depth, kMaxDeviceDepth, kStackCap, max_depth);
+                }
+            }
 
             const int block = 128;
             const int grid = (int)((noverlaps + block - 1) / block);
@@ -577,10 +665,10 @@ namespace sccd {
                                                           toi,
                                                           max_depth,
                                                           (TC)tol,
-                                                          toi_stride);
+                                                          toi_output);
             SCCD_CUDA_LAST_ERROR();
 
-            if (toi_stride == 0) {
+            if (toi_output == ToiOutput::Earliest) {
                 if constexpr (sizeof(T) == sizeof(float)) {
                     write_shared_toi_kernel<<<1, 1>>>(d_shared, (float*)toi);
                 } else {
@@ -609,7 +697,7 @@ namespace sccd {
                                                      T* const,                           \
                                                      const int,                           \
                                                      const T,                            \
-                                                     const int);
+                                                     const sccd::ToiOutput);
 
 SCCD_VQ_INSTANTIATE(float, int32_t)
 SCCD_VQ_INSTANTIATE(double, int32_t)

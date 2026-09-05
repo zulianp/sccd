@@ -151,29 +151,6 @@ namespace sccd {
         return BroadPhaseStrategy::Auto;
     }
 
-    /**
-     * \brief Resolve Auto without a race; a forced setting passes through.
-     *
-     * The stateless fallback, for a caller with nowhere to keep a measurement.
-     * `BroadPhaseAutoTuner` is what the CCD object uses and what should be
-     * preferred: it decides from timings rather than asserting an answer.
-     *
-     * This returns the cell list, which is the same choice the tuner makes on its
-     * first probe and for the same reason -- with only one shot, take the option
-     * whose worst case is bounded. See the file comment.
-     *
-     * \p out_stats is filled when asked so a caller can log or override on its own
-     * evidence; computing it costs one pass over the AABBs.
-     */
-    template <typename T>
-    static BroadPhaseStrategy choose_broadphase_strategy(const ptrdiff_t n,
-                                                         T** const SCCD_RESTRICT aabb,
-                                                         BroadPhaseStats<T>* out_stats = nullptr) {
-        const BroadPhaseStrategy forced = broadphase_strategy_setting();
-        if (out_stats) *out_stats = broadphase_stats<T>(n, aabb);
-        if (forced != BroadPhaseStrategy::Auto) return forced;
-        return BroadPhaseStrategy::Cell2D;
-    }
 
     /** \brief Wall clock in milliseconds, for the race below. */
     static inline double broadphase_now_ms() {

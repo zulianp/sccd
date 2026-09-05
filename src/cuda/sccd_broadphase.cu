@@ -43,8 +43,7 @@ namespace sccd {
         }
 
         template <typename T>
-        __global__ void choose_axis_mean_kernel(const int dim,
-                                                const ptrdiff_t n,
+        __global__ void choose_axis_mean_kernel(                                                const ptrdiff_t n,
                                                 const T* const SCCD_RESTRICT* const SCCD_RESTRICT aabbs,
                                                 T* const SCCD_RESTRICT mean) {
             ptrdiff_t i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -52,22 +51,21 @@ namespace sccd {
 
             T local_mean[3] = {0};
 
-            for (int d = 0; d < dim; d++) {
+            for (int d = 0; d < SCCD_DIM; d++) {
                 const T p0 = aabbs[d][i];
-                const T p1 = aabbs[dim + d][i];
+                const T p1 = aabbs[SCCD_DIM + d][i];
                 const T p = (p0 + p1) / 2;
                 local_mean[d] += p;
             }
 
             __shared__ T block_accumulator[SCCD_BP_N_WARPS_PER_BLOCK];
-            for (int d = 0; d < dim; d++) {
+            for (int d = 0; d < SCCD_DIM; d++) {
                 block_reduce_to_gmem<T>(local_mean[d], block_accumulator, &mean[d]);
             }
         }
 
         template <typename T>
-        __global__ void choose_axis_var_kernel(const int dim,
-                                               const ptrdiff_t n,
+        __global__ void choose_axis_var_kernel(                                               const ptrdiff_t n,
                                                const T* const SCCD_RESTRICT* const SCCD_RESTRICT aabbs,
                                                T* const SCCD_RESTRICT mean,
                                                T* const SCCD_RESTRICT var) {
@@ -75,42 +73,42 @@ namespace sccd {
             if (i >= n) return;
 
             T local_var[3] = {0};
-            for (int d = 0; d < dim; d++) {
+            for (int d = 0; d < SCCD_DIM; d++) {
                 const T m = mean[d] / n;
-                const T p = (aabbs[d][i] + aabbs[dim + d][i]) / 2;
+                const T p = (aabbs[d][i] + aabbs[SCCD_DIM + d][i]) / 2;
                 local_var[d] += (p - m) * (p - m);
             }
 
             __shared__ T block_accumulator[SCCD_BP_N_WARPS_PER_BLOCK];
-            for (int d = 0; d < dim; d++) {
+            for (int d = 0; d < SCCD_DIM; d++) {
                 block_reduce_to_gmem<T>(local_var[d], block_accumulator, &var[d]);
             }
         }
 
         template <typename T>
-        int choose_axis(const int dim, const ptrdiff_t n, const T* const SCCD_RESTRICT* const SCCD_RESTRICT aabbs) {
+        int choose_axis(const ptrdiff_t n, const T* const SCCD_RESTRICT* const SCCD_RESTRICT aabbs) {
             dim3 block(SCCD_BP_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
             dim3 grid((n + block.x - 1) / block.x);
 
             // One cached allocation holding [mean | var]; these used to be two
             // cudaMalloc/cudaFree pairs on every call.
-            T* const mean = workspace(WorkspaceSlot::TempStorage).get_as<T>(2 * dim);
-            T* const var = mean + dim;
+            T* const mean = workspace(WorkspaceSlot::TempStorage).get_as<T>(2 * SCCD_DIM);
+            T* const var = mean + SCCD_DIM;
 
-            cudaMemset(mean, 0, 2 * dim * sizeof(T));
+            cudaMemset(mean, 0, 2 * SCCD_DIM * sizeof(T));
 
-            choose_axis_mean_kernel<T><<<grid, block>>>(dim, n, aabbs, mean);
-            choose_axis_var_kernel<T><<<grid, block>>>(dim, n, aabbs, mean, var);
+            choose_axis_mean_kernel<T><<<grid, block>>>(n, aabbs, mean);
+            choose_axis_var_kernel<T><<<grid, block>>>(n, aabbs, mean, var);
 
             cudaError_t error = cudaGetLastError();
 
-            T* hvar = (T*)malloc(dim * sizeof(T));
-            cudaMemcpy(hvar, var, dim * sizeof(T), cudaMemcpyDeviceToHost);
+            T* hvar = (T*)malloc(SCCD_DIM * sizeof(T));
+            cudaMemcpy(hvar, var, SCCD_DIM * sizeof(T), cudaMemcpyDeviceToHost);
 
             int fargmax = 0;
             T fmax = hvar[0];
 
-            for (int d = 1; d < dim; d++) {
+            for (int d = 1; d < SCCD_DIM; d++) {
                 if (fmax < hvar[d]) {
                     fmax = hvar[d];
                     fargmax = d;
@@ -168,12 +166,12 @@ namespace sccd {
         }
 
         template <typename T>
-        T* soa_device_row(T** const SCCD_RESTRICT arrays, const int dim, const int row) {
+        T* soa_device_row(T** const SCCD_RESTRICT arrays, const int row) {
             T* host_rows[6] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
             if (is_ptr_device(arrays)) {
-                SCCD_CHECK_CUDA(cudaMemcpy(host_rows, arrays, 2 * dim * sizeof(T*), cudaMemcpyDeviceToHost));
+                SCCD_CHECK_CUDA(cudaMemcpy(host_rows, arrays, 2 * SCCD_DIM * sizeof(T*), cudaMemcpyDeviceToHost));
             } else {
-                for (int d = 0; d < 2 * dim; d++) {
+                for (int d = 0; d < 2 * SCCD_DIM; d++) {
                     host_rows[d] = arrays[d];
                 }
             }
@@ -181,8 +179,7 @@ namespace sccd {
         }
 
         template <typename T, typename I>
-        void sort_along_axis(const int dim,
-                             const ptrdiff_t n,
+        void sort_along_axis(const ptrdiff_t n,
                              const int sort_axis,
                              T** const SCCD_RESTRICT arrays,
                              I* const SCCD_RESTRICT idx,
@@ -200,9 +197,9 @@ namespace sccd {
             T* host_arrays[6] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
 
             if (is_ptr_device(arrays)) {
-                SCCD_CHECK_CUDA(cudaMemcpy(host_arrays, arrays, 2 * dim * sizeof(T*), cudaMemcpyDeviceToHost));
+                SCCD_CHECK_CUDA(cudaMemcpy(host_arrays, arrays, 2 * SCCD_DIM * sizeof(T*), cudaMemcpyDeviceToHost));
             } else {
-                for (int d = 0; d < 2 * dim; d++) {
+                for (int d = 0; d < 2 * SCCD_DIM; d++) {
                     host_arrays[d] = arrays[d];
                 }
             }
@@ -228,7 +225,7 @@ namespace sccd {
             // done against caller-owned double buffers.
             dim3 block(SCCD_BP_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
             dim3 grid((n + block.x - 1) / block.x);
-            for (int d = 0; d < 2 * dim; d++) {
+            for (int d = 0; d < 2 * SCCD_DIM; d++) {
                 if (d == sort_axis) continue;
                 permute_kernel<T, I><<<grid, block>>>(n, idx, host_arrays[d], scratch);
                 SCCD_CUDA_LAST_ERROR();
@@ -618,7 +615,7 @@ namespace sccd {
                                               I* const SCCD_RESTRICT second_idx,
                                               const ptrdiff_t second_stride,
                                               I** const SCCD_RESTRICT second_elements,
-                                              const T* const SCCD_RESTRICT cummax,
+                                              const T* const SCCD_RESTRICT second_xmax_running,
                                               ptrdiff_t* const SCCD_RESTRICT ccdptr) {
             ptrdiff_t fi = blockIdx.x * blockDim.x + threadIdx.x;
             if (fi >= first_count) return;
@@ -627,7 +624,7 @@ namespace sccd {
             }
 
             const T fimin = first_aabbs[sort_axis][fi];
-            ptrdiff_t begin = lower_bound(cummax, cummax + second_count, fimin) - cummax;
+            ptrdiff_t begin = lower_bound(second_xmax_running, second_xmax_running + second_count, fimin) - second_xmax_running;
             ccdptr[fi + 1] = count_overlaps_kernel_aux<first_nxe, second_nxe, T, I>(fi,
                                                                                     begin,
                                                                                     sort_axis,
@@ -656,7 +653,7 @@ namespace sccd {
                             const ptrdiff_t second_stride,
                             I** const SCCD_RESTRICT second_elements,
                             ptrdiff_t* const SCCD_RESTRICT ccdptr,
-                            const T* const SCCD_RESTRICT cummax) {
+                            const T* const SCCD_RESTRICT second_xmax_running) {
             SCCD_CUDA_LAST_ERROR();
 
             if (first_count <= 0) {
@@ -677,7 +674,7 @@ namespace sccd {
                                                                                 second_idx,
                                                                                 second_stride,
                                                                                 second_elements,
-                                                                                cummax,
+                                                                                second_xmax_running,
                                                                                 ccdptr);
 
             SCCD_CUDA_LAST_ERROR();
@@ -804,7 +801,7 @@ namespace sccd {
                                                 const ptrdiff_t second_stride,
                                                 I** SCCD_RESTRICT const second_elements,
                                                 const ptrdiff_t* const SCCD_RESTRICT ccdptr,
-                                                const T* const SCCD_RESTRICT cummax,
+                                                const T* const SCCD_RESTRICT second_xmax_running,
                                                 I* SCCD_RESTRICT foverlap,
                                                 I* SCCD_RESTRICT noverlap) {
             ptrdiff_t fi = blockIdx.x * blockDim.x + threadIdx.x;
@@ -814,7 +811,7 @@ namespace sccd {
 
             const T fimin = first_aabbs[sort_axis][fi];
 
-            ptrdiff_t begin = lower_bound(cummax, cummax + second_count, fimin) - cummax;
+            ptrdiff_t begin = lower_bound(second_xmax_running, second_xmax_running + second_count, fimin) - second_xmax_running;
 
             collect_overlaps_kernel_aux<first_nxe, second_nxe, T, I>(fi,
                                                                      begin,
@@ -847,7 +844,7 @@ namespace sccd {
                               const ptrdiff_t second_stride,
                               I** SCCD_RESTRICT const second_elements,
                               const ptrdiff_t* const SCCD_RESTRICT ccdptr,
-                              const T* const SCCD_RESTRICT cummax,
+                              const T* const SCCD_RESTRICT second_xmax_running,
                               I* SCCD_RESTRICT foverlap,
                               I* SCCD_RESTRICT noverlap) {
             SCCD_CUDA_LAST_ERROR();
@@ -866,7 +863,7 @@ namespace sccd {
                                                                                   second_stride,
                                                                                   second_elements,
                                                                                   ccdptr,
-                                                                                  cummax,
+                                                                                  second_xmax_running,
                                                                                   foverlap,
                                                                                   noverlap);
 
@@ -880,13 +877,13 @@ namespace sccd {
 
 #define SCCD_BP_INSTANTIATE_CHOOSE_AXIS(T)             \
     template int sccd::device::choose_axis<T>( \
-        const int dim, const ptrdiff_t n, const T* const SCCD_RESTRICT* const SCCD_RESTRICT aabbs)
+        const ptrdiff_t n, const T* const SCCD_RESTRICT* const SCCD_RESTRICT aabbs)
 
 #define SCCD_BP_INSTANTIATE_ENUMERATE(T) \
     template void sccd::device::enumerate<T>(const ptrdiff_t begin, const ptrdiff_t end, T* const SCCD_RESTRICT idx)
 
 #define SCCD_BP_INSTANTIATE_SORT_ALONG_AXIS(T, I)                                             \
-    template void sccd::device::sort_along_axis<T, I>(const int dim,                  \
+    template void sccd::device::sort_along_axis<T, I>(                                \
                                                       const ptrdiff_t n,              \
                                                       const int sort_axis,            \
                                                       T** const SCCD_RESTRICT arrays, \
@@ -918,7 +915,7 @@ namespace sccd {
         const ptrdiff_t n, const T* const SCCD_RESTRICT in, T* const SCCD_RESTRICT out)
 
 #define SCCD_BP_INSTANTIATE_SOA_DEVICE_ROW(T) \
-    template T* sccd::device::soa_device_row<T>(T * * const SCCD_RESTRICT arrays, const int dim, const int row)
+    template T* sccd::device::soa_device_row<T>(T * * const SCCD_RESTRICT arrays, const int row)
 
 #define SCCD_BP_INSTANTIATE_COUNT_OVERLAPS(FIRST_NXE, SECOND_NXE, T, I)                                                      \
     template void sccd::device::count_overlaps<FIRST_NXE, SECOND_NXE, T, I>(const int sort_axis,                     \
@@ -933,7 +930,7 @@ namespace sccd {
                                                                             const ptrdiff_t second_stride,           \
                                                                             I** const SCCD_RESTRICT second_elements, \
                                                                             ptrdiff_t* const SCCD_RESTRICT ccdptr,   \
-                                                                            const T* const SCCD_RESTRICT cummax)
+                                                                            const T* const SCCD_RESTRICT second_xmax_running)
 
 #define SCCD_BP_INSTANTIATE_COLLECT_OVERLAPS(FIRST_NXE, SECOND_NXE, T, I)              \
     template void sccd::device::collect_overlaps<FIRST_NXE, SECOND_NXE, T, I>( \
@@ -949,7 +946,7 @@ namespace sccd {
         const ptrdiff_t second_stride,                                         \
         I** const SCCD_RESTRICT second_elements,                               \
         const ptrdiff_t* const SCCD_RESTRICT ccdptr,                           \
-        const T* const SCCD_RESTRICT cummax,                                   \
+        const T* const SCCD_RESTRICT second_xmax_running,                                   \
         I* SCCD_RESTRICT foverlap,                                             \
         I* SCCD_RESTRICT noverlap)
 
@@ -1012,8 +1009,6 @@ SCCD_BP_INSTANTIATE_COLLECT_OVERLAPS(4, 1, double, int64_t);
 #undef SCCD_BP_INSTANTIATE_SOA_DEVICE_ROW
 #undef SCCD_BP_INSTANTIATE_COUNT_OVERLAPS
 #undef SCCD_BP_INSTANTIATE_COLLECT_OVERLAPS
-#undef SCCD_BP_INSTANTIATE_COUNT_OVERLAPS_WITH_STARTS
-#undef SCCD_BP_INSTANTIATE_COLLECT_OVERLAPS_WITH_STARTS
 
 // Clean-up kernel macros
 #undef SCCD_BP_N_WARPS_PER_BLOCK

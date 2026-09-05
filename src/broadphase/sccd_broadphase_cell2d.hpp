@@ -158,7 +158,7 @@ namespace sccd {
      * which is cellptr[ncells] after the prefix sum, so this is called in two
      * steps by the caller the same way the pair collection is.
      */
-    template <typename T, typename I>
+    template <typename T>
     static void cell2d_count(const ptrdiff_t n,
                              T** const SCCD_RESTRICT aabb,
                              const Cell2DGrid<T>& grid,
