@@ -203,11 +203,28 @@ printf '  roots (skipping what is current)\n'
 printf '  queries (packing into queries_raw/)\n'
 "${PYTHON}" "${BENCHMARK_DIR}/queries_to_raw.py" "${DATA_DIR}" "${scenes[@]}"
 
-# cloth-funnel's PLY headers carry non-ASCII bytes that the frame reader rejects.
-if is_enabled "${SCCD_ENABLE_CLOTH_FUNNEL}" \
-        && compgen -G "${DATA_DIR}/cloth-funnel/frames/*.ply" >/dev/null; then
-    "${PYTHON}" "${PYTHON_DIR}/sccd_strip_nonascii.py" "${DATA_DIR}"/cloth-funnel/frames/*.ply
-fi
+# --- PLY headers ----------------------------------------------------------
+# Some frames carry non-ASCII bytes in the PLY header, which the frame reader
+# rejects. This ran for cloth-funnel only, which is where the problem was first
+# seen -- but it is a property of how the frames were written, not of a scene, so
+# a newly downloaded scene would arrive unstripped and its frames would simply
+# fail to load. Every scene gets it. The rewrite replaces each offending byte
+# with a space in place, so it is length-preserving and idempotent: running it on
+# already-clean frames does nothing.
+# Passed through xargs rather than a glob: rod-twist ships four thousand frames,
+# which is enough path text to run into the argument-list limit.
+for scene in "${scenes[@]}"; do
+    frames_dir="${DATA_DIR}/${scene}/frames"
+    [[ -d "${frames_dir}" ]] || continue
+    printf '  %s: ply headers\n' "${scene}"
+    # `sh -c` guards the empty case: BSD xargs has no --no-run-if-empty, and
+    # running the script with no paths is an argparse error rather than a no-op.
+    find "${frames_dir}" -maxdepth 1 -name '*.ply' -print0 | xargs -0 sh -c '
+        if [ "$#" -gt 0 ]; then
+            "$0" "$@"
+        fi
+    ' "${PYTHON}" "${PYTHON_DIR}/sccd_strip_nonascii.py"
+done
 
 # --- verify ---------------------------------------------------------------
 echo

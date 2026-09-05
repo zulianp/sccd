@@ -34,8 +34,23 @@ def main() -> None:
     parser.add_argument("paths", nargs="+", help="PLY files to update")
     args = parser.parse_args()
 
+    rewritten = 0
+    replaced = 0
     for path in args.paths:
-        replace_nonascii_header(path)
+        count = replace_nonascii_header(path)
+        if count:
+            rewritten += 1
+            replaced += count
+
+    # Say what happened. A silent pass over a thousand files cannot be told from
+    # a pass over none, and "these frames were already clean" and "these frames
+    # were never reached" are very different things to be looking at when the
+    # reader later refuses a PLY.
+    if rewritten:
+        print(f"stripped {replaced} non-ASCII byte(s) from {rewritten} "
+              f"of {len(args.paths)} PLY header(s)")
+    else:
+        print(f"{len(args.paths)} PLY header(s) already ASCII")
 
 
 if __name__ == "__main__":
