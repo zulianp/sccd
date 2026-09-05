@@ -100,11 +100,12 @@ def main(argv: list[str]) -> int:
         figures.narrow_phase_per_case(cases, figure_dir),
         figures.earliness_distribution(cases, figure_dir),
     ]
+    scaling_runs = []
     if scaling_files:
-        runs = [scaling_mod.parse(p) for p in scaling_files]
-        runs = [r for r in runs if r.faces]
-        if runs:
-            drawn.append(scaling_mod.figure(runs, figure_dir))
+        scaling_runs = [r for r in (scaling_mod.parse(p) for p in scaling_files)
+                        if r.faces]
+        if scaling_runs:
+            drawn.append(scaling_mod.figure(scaling_runs, figure_dir))
     figures.write_figure_tex(drawn, out_dir)
 
     built = [
@@ -118,6 +119,9 @@ def main(argv: list[str]) -> int:
         oracle_source = _repo_relative(oracle_csv)
         built.append(oracle_mod.gate_table(oracle_rows, oracle_source))
         built.append(oracle_mod.reference_table(oracle_rows, oracle_source))
+    if scaling_runs:
+        built.append(scaling_mod.table(
+            scaling_runs, ", ".join(_repo_relative(p) for p in scaling_files)))
     tables.write_tables(built, out_dir)
 
     # A run that reported a late time of impact must be impossible to overlook,

@@ -187,4 +187,26 @@ this right; `sccd_bench` does not.
 Cheap to fix and worth doing before the next accuracy claim is made from a
 benchmark run.
 
+## Benchmark coverage still missing
 
+The published sweep covers armadillo-rollers, cloth-ball and cloth-funnel. The
+other three scenes of the NYU set are not in it:
+
+- **puffer-ball** ships boxes, queries, `mma_bool` and roots but no extracted
+  frames, so `bench.exe.cpp` finds zero runnable cases. Its 240 root archives are
+  also unconverted. It is a frames download and a `prepare_data.sh` run away from
+  being the largest scene in the set -- 1.5 M queries, more than the other three
+  together. Alps scratch has 150 TB free; the workstation does not have the room.
+- **n-body-simulation** and **rod-twist** were never downloaded.
+  `download_datasets.sh` already has a URL and an env gate for each.
+
+Also not swept: the device execution space for the *broad* phase and the
+end-to-end timings. The device narrow phase is covered -- `ti_oracle` emits
+`device-relaxed` and `device-tight` rows and they are in the published accuracy
+and reference tables -- but `sweep.sh --spaces device` has not been run, so
+`docs/BENCHMARKS.md` has no GPU column in the whole-scene timing table.
+
+The refinement scaling study in `docs/BENCHMARKS.md` uses two cloth-ball frames
+that do not come into contact, so it measures the broad phase and its
+preparation. A pair that collides at every refinement level would let it measure
+the narrow phase against element count too.
