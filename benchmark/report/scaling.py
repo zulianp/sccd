@@ -92,6 +92,42 @@ def fitted_exponent(x: list[float], y: list[float]) -> float:
     return (n * sxy - sx * sy) / denom
 
 
+def table(runs: list[ScalingRun], source: str):
+    """Cost per refinement level, with the fitted exponent per series."""
+    from .tables import Column, Table
+
+    t = Table(
+        label="tab:scaling",
+        caption=("Cost against element count on a repeatedly refined surface, "
+                 "each level quadrupling the element count. $p$ is the "
+                 "least-squares exponent in $t \\sim n^{p}$ fitted over all "
+                 "levels of that series."),
+        columns=[Column("mode", "l"), Column("level"), Column("elements"),
+                 Column("candidate pairs"),
+                 Column("broad ms", tex_header="broad (ms)"),
+                 Column("narrow ms", tex_header="narrow (ms)"),
+                 Column("p")],
+        source=source,
+        notes=("The two frames used here do not come into contact, so the narrow "
+               "phase has almost no work to do and its column is dominated by "
+               "noise rather than by element count; what this measures is the "
+               "broad phase and the preparation that feeds it. Narrow-phase cost "
+               "against problem size is in the per-case figure, over cases that "
+               "do collide. The exponent is below 1 because the fixed cost "
+               "visible at the smallest size is amortised as the mesh grows."),
+    )
+    for run in runs:
+        faces = [float(f) for f in run.faces]
+        totals = [b + n for b, n in zip(run.broad_ms, run.narrow_ms)]
+        p_fit = fitted_exponent(faces, totals)
+        for i, level in enumerate(run.levels):
+            t.add(run.label if i == 0 else "", f"{level}", f"{run.faces[i]:,}",
+                  f"{run.vf_pairs[i] + run.ee_pairs[i]:,}",
+                  f"{run.broad_ms[i]:.1f}", f"{run.narrow_ms[i]:.1f}",
+                  f"{p_fit:.2f}" if i == 0 else "")
+    return t
+
+
 def figure(runs: list[ScalingRun], out_dir: Path):
     """Cost against element count, with the fitted exponent on each series."""
     import matplotlib.pyplot as plt

@@ -285,6 +285,36 @@ Source: `benchmark/results/sweep-gh200-host.csv`
 
 <!-- sccd:end earliness -->
 
+## Scaling with element count
+
+`sccd_refine_scaling` refines one surface repeatedly, quadrupling the element
+count at each level, and runs a collision step on each — the one question
+neither other driver can answer. Two consecutive cloth-ball frames, 92,230
+elements up to 23.6 million.
+
+<!-- sccd:begin scaling -->
+
+| mode                 | level |   elements | candidate pairs | broad ms | narrow ms |    p |
+|----------------------|------:|-----------:|----------------:|---------:|----------:|-----:|
+| relaxed / host / tri |     0 |     92,230 |          17,982 |     35.3 |       8.6 | 0.86 |
+|                      |     1 |    368,920 |          87,848 |     65.3 |       5.2 |      |
+|                      |     2 |  1,475,680 |         380,924 |    241.8 |       1.9 |      |
+|                      |     3 |  5,902,720 |       1,581,142 |   1008.1 |       6.2 |      |
+|                      |     4 | 23,610,880 |       6,440,923 |   4424.2 |      19.9 |      |
+| tight / host / tri   |     0 |     92,230 |          17,982 |     35.2 |       4.8 | 0.87 |
+|                      |     1 |    368,920 |          87,848 |     62.2 |      10.6 |      |
+|                      |     2 |  1,475,680 |         380,924 |    202.0 |       4.2 |      |
+|                      |     3 |  5,902,720 |       1,581,142 |    964.3 |       4.5 |      |
+|                      |     4 | 23,610,880 |       6,440,923 |   4433.4 |      16.2 |      |
+
+The two frames used here do not come into contact, so the narrow phase has almost no work to do and its column is dominated by noise rather than by element count; what this measures is the broad phase and the preparation that feeds it. Narrow-phase cost against problem size is in the per-case figure, over cases that do collide. The exponent is below 1 because the fixed cost visible at the smallest size is amortised as the mesh grows.
+
+Source: `benchmark/results/scaling/host-mode0.txt, benchmark/results/scaling/host-mode2.txt`
+
+<!-- sccd:end scaling -->
+
+![Cost against element count](figures/refine-scaling.png)
+
 ## Figures
 
 ![Broad and narrow phase per scene and mode](figures/phase-breakdown.png)
