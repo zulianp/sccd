@@ -37,6 +37,12 @@ set -euo pipefail
 #   --partition P    Slurm partition         (default debug)
 #   --account A      Slurm account           (default c40)
 #   --no-oracle      skip the accuracy stage (timings only)
+#   --pack N         chunks per Slurm job    (default 1)
+#
+# --pack matters more than it looks. The account runs one job at a time and
+# shares the queue with other work, so wall-clock time is dominated by waiting,
+# not by computing: thirty one-chunk jobs each wait their turn, while six
+# five-chunk jobs wait six times. Pack as much as fits inside --time.
 
 OUT_DIR=""
 REPEATS=5
@@ -52,6 +58,7 @@ DRY_RUN=0
 MERGE_ONLY=0
 LOCAL=0
 ORACLE=1
+PACK=1
 TI_ORACLE=""
 
 while [[ $# -gt 0 ]]; do
@@ -70,6 +77,7 @@ while [[ $# -gt 0 ]]; do
         --merge) MERGE_ONLY=1; shift ;;
         --local) LOCAL=1; shift ;;
         --no-oracle) ORACLE=0; shift ;;
+        --pack) PACK="$2"; shift 2 ;;
         -h|--help) sed -n '3,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) printf 'error: unknown argument %s\n' "$1" >&2; exit 2 ;;
     esac
@@ -309,6 +317,37 @@ submit_with_retry() {
 }
 
 failures=0
+pack_calls=()
+pack_labels=()
+
+flush_pack() {
+    [[ "${#pack_calls[@]}" -gt 0 ]] || return 0
+    local label="${pack_labels[0]}"
+    [[ "${#pack_labels[@]}" -gt 1 ]] && \
+        label="${pack_labels[0]} .. ${pack_labels[${#pack_labels[@]} - 1]} (${#pack_labels[@]})"
+    printf '==> submitting %s\n' "${label}"
+    local body
+    body="$(printf '%s; ' "${pack_calls[@]}")"
+    if ! submit_with_retry \
+            --account="${ACCOUNT}" --partition="${PARTITION}" \
+            --nodes=1 --ntasks=1 "${pack_gpu_args[@]}" \
+            --time="${TIME_LIMIT}" \
+            --uenv="${UENV}" --view=default \
+            --job-name="sccd-${pack_name}" \
+            --output="${OUT_DIR}/logs/${pack_name}.out" \
+            --error="${OUT_DIR}/logs/${pack_name}.err" \
+            --wrap="$(declare -f run_chunk_body); \
+                     export SCCD_BENCH='${SCCD_BENCH}' DATA_DIR='${DATA_DIR}' MODES='${MODES}'; \
+                     export OMP_NUM_THREADS=\"\$(nproc)\"; \
+                     header() { '${SCCD_BENCH}' --header; }; \
+                     ${body}"; then
+        printf 'FAILED %s (see %s/logs)\n' "${label}" "${OUT_DIR}" >&2
+        failures=$((failures + ${#pack_calls[@]}))
+    fi
+    pack_calls=()
+    pack_labels=()
+}
+
 for i in "${todo[@]:-}"; do
     [[ -n "${i}" ]] || continue
     IFS='|' read -r scene space r begin end <<< "${chunk_keys[$i]}"
@@ -324,31 +363,50 @@ for i in "${todo[@]:-}"; do
         continue
     fi
 
-    # One job at a time: the account's QOS will not run two, so submitting the
-    # whole sweep at once only fills the queue. --wait blocks until this chunk
-    # finishes, and because a finished chunk is skipped on the next invocation,
-    # killing the sweep here costs at most the chunk in flight.
-    printf '==> submitting %s\n' "${label}"
-    gpu_args=()
-    [[ "${space}" == "device" ]] && gpu_args=(--gpus-per-task=1)
+    pack_gpu_args=()
+    [[ "${space}" == "device" ]] && pack_gpu_args=(--gpus-per-task=1)
+    pack_name="timing-${space}-r${r}-${begin}"
+    pack_calls+=("run_chunk_body '${scene}' '${space}' '${begin}' '${end}' '${out}'")
+    pack_labels+=("${label}")
+    if [[ "${#pack_calls[@]}" -ge "${PACK}" ]]; then
+        flush_pack
+    fi
+    continue
 
+done
+# Whatever did not fill a pack still has to be submitted.
+flush_pack
+
+oracle_calls=()
+oracle_labels=()
+oracle_name="oracle"
+
+flush_oracle_pack() {
+    [[ "${#oracle_calls[@]}" -gt 0 ]] || return 0
+    local label="${oracle_labels[0]}"
+    [[ "${#oracle_labels[@]}" -gt 1 ]] && \
+        label="${oracle_labels[0]} .. ${oracle_labels[${#oracle_labels[@]} - 1]} (${#oracle_labels[@]})"
+    printf '==> submitting %s\n' "${label}"
+    local body
+    body="$(printf '%s; ' "${oracle_calls[@]}")"
     if ! submit_with_retry \
             --account="${ACCOUNT}" --partition="${PARTITION}" \
-            --nodes=1 --ntasks=1 "${gpu_args[@]}" \
+            --nodes=1 --ntasks=1 --gpus-per-task=1 \
             --time="${TIME_LIMIT}" \
             --uenv="${UENV}" --view=default \
-            --job-name="sccd-${scene}-r${r}" \
-            --output="${OUT_DIR}/logs/${scene}-${space}-r${r}-${begin}.out" \
-            --error="${OUT_DIR}/logs/${scene}-${space}-r${r}-${begin}.err" \
-            --wrap="$(declare -f run_chunk_body); \
-                     export SCCD_BENCH='${SCCD_BENCH}' DATA_DIR='${DATA_DIR}' MODES='${MODES}'; \
+            --job-name="sccd-${oracle_name}" \
+            --output="${OUT_DIR}/logs/${oracle_name}.out" \
+            --error="${OUT_DIR}/logs/${oracle_name}.err" \
+            --wrap="$(declare -f run_oracle_body); \
+                     export TI_ORACLE='${TI_ORACLE}' DATA_DIR='${DATA_DIR}'; \
                      export OMP_NUM_THREADS=\"\$(nproc)\"; \
-                     header() { '${SCCD_BENCH}' --header; }; \
-                     run_chunk_body '${scene}' '${space}' '${begin}' '${end}' '${out}'"; then
+                     ${body}"; then
         printf 'FAILED %s (see %s/logs)\n' "${label}" "${OUT_DIR}" >&2
-        failures=$((failures + 1))
+        failures=$((failures + ${#oracle_calls[@]}))
     fi
-done
+    oracle_calls=()
+    oracle_labels=()
+}
 
 for i in "${oracle_todo[@]:-}"; do
     [[ -n "${i}" ]] || continue
@@ -365,23 +423,14 @@ for i in "${oracle_todo[@]:-}"; do
         continue
     fi
 
-    printf '==> submitting %s\n' "${label}"
-    if ! submit_with_retry \
-            --account="${ACCOUNT}" --partition="${PARTITION}" \
-            --nodes=1 --ntasks=1 --gpus-per-task=1 \
-            --time="${TIME_LIMIT}" \
-            --uenv="${UENV}" --view=default \
-            --job-name="sccd-oracle-${scene}-r${r}" \
-            --output="${OUT_DIR}/logs/oracle-${scene}-r${r}.out" \
-            --error="${OUT_DIR}/logs/oracle-${scene}-r${r}.err" \
-            --wrap="$(declare -f run_oracle_body); \
-                     export TI_ORACLE='${TI_ORACLE}' DATA_DIR='${DATA_DIR}'; \
-                     export OMP_NUM_THREADS=\"\$(nproc)\"; \
-                     run_oracle_body '${scene}' '${out}'"; then
-        printf 'FAILED %s (see %s/logs)\n' "${label}" "${OUT_DIR}" >&2
-        failures=$((failures + 1))
+    oracle_calls+=("run_oracle_body '${scene}' '${out}'")
+    oracle_labels+=("${label}")
+    oracle_name="oracle-r${r}"
+    if [[ "${#oracle_calls[@]}" -ge "${PACK}" ]]; then
+        flush_oracle_pack
     fi
 done
+flush_oracle_pack
 
 printf '\n%d runs attempted, %d failed\n' \
     "$(( ${#todo[@]} + ${#oracle_todo[@]} ))" "${failures}"
