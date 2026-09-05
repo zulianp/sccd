@@ -180,14 +180,56 @@ query. That is the fourth experiment in this project to land on the same
 finding: **the lanes are finished, not waiting.** Best-first ordering, per-query
 bounds and 128-way dicing on the triangle kernel all lost for the same reason.
 
-The `order only` column is a separate discovery and a separate question: it is a
-ten-line change to the existing kernel — buffer the surviving sub-boxes and push
-them in reverse, so the LIFO pop follows the earliest `t` first and tightens the
-bound sooner. It is worth 1.60-1.66x on a stationary quad and costs 5-9% on a
-moving one. Neither synthetic scene is the mesh pipeline, and a change that
-swings that far by scene should not be taken on synthetic evidence, so it is
-recorded as an open lead rather than applied. What would settle it is
-`sccd_refine_scaling` with `SCCD_TOPOLOGY=quad`, which needs smesh in the build.
+### The ordering lead, and why it also does not ship
+
+The `order only` column above is a separate change and looked like the better
+prize: ten lines against the existing kernel — buffer the surviving sub-boxes and
+push them in reverse, so the LIFO pop follows the earliest `t` first and tightens
+the bound sooner. On the synthetic scenes it is worth 1.60-1.66x on a stationary
+quad and costs 5-9% on a moving one.
+
+It was taken to the real workload, which meant getting smesh into the CUDA build
+on Alps (it was present but never installed, so its build tree had no
+`smeshTargets.cmake`; `cmake --install` to a prefix fixes it) and running
+`sccd_refine_scaling` with `SCCD_TOPOLOGY=quad` on the device. Level 4 —
+6144 faces, 37.7M vertex-face and 301.8M edge-edge pairs — narrow-phase
+milliseconds, interleaved repeats:
+
+    rep      before     order
+      1    10521.25  10874.16
+      2     9763.41   9420.46
+      3     9599.97   9654.04
+      4     9651.51   9770.79
+    median     9707      9713
+
+Identical within noise, and the reported time of impact is 0.6666653904 in all
+eight runs. **The synthetic win does not transfer at all.**
+
+The reason is the query mix. Following the earliest `t` first only pays when
+there is a root to find early: it reaches one sooner and the tighter bound then
+prunes everything else. The synthetic scene is one crossing vertex per quad, so
+every query has a root. The real scene is dominated by candidate pairs with no
+root at all, and a box holding no root has to be exhausted whatever order its
+children are visited in. Traversal order buys nothing on the boxes that cost the
+most.
+
+So the knob is not kept. A tuning parameter measured as worthless on the workload
+does not earn a place in the shipped kernel any more than a kernel does.
+
+**Note on determinism.** These runs also make it explicit that the quad narrow
+phase is not run-to-run reproducible at `toi_stride == 0`: the shared minimum is
+an atomic under a dynamic schedule, so which thread prunes first varies and the
+reported time of impact moves in the last few digits between runs of the *same
+binary* (0.6666666588 / 0.6666664327 / 0.6666653904 were all observed at
+level 2-4 on the host). Every value is at or before the true 2/3, so the
+guarantee holds; it is the exact answer that is not stable, and a test that
+pins a quad time of impact to more than about 1e-6 will flake.
+
+**A stale record corrected by the same run.** `benchmark/assessment/assessment.csv`
+carries `FAILED rc=134` for the hopper quad rows, and `assess.sbatch.sh` used to
+explain them as the device narrow phase not existing for QUADSHELL4. It does
+exist, and `sccd_refine_scaling` with `SCCD_TOPOLOGY=quad` now completes all five
+levels on the device. Those rows predate the kernel and should be re-run.
 
 What survives from the whole exercise is the header extraction
 (`sccd_device_dfs_stack.cuh`), which stands on its own, and the stack now being
