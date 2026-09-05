@@ -1104,10 +1104,26 @@ namespace {
 
 }  // namespace
 
+// The one definition of the result schema. bench.sh asks for it with --header.
+static constexpr const char* kCsvHeader =
+    "dataset,mode,case,type,queries,prep_ms,broad_ms,narrow_ms,query_narrow_ms,fp,fn,broad_fp,broad_fn,"
+    "narrow_ms_s1,toi_n,toi_late,toi_max_late,toi_max_early,toi_med_early,s0_late,s0_margin,"
+    "s0_toi,gt_earliest,root_n,s1_min";
+
 int main(int argc, char** argv) {
     auto ctx = smesh::initialize(argc, argv);
+    // --header prints the CSV schema and exits. A consumer that has to know the
+    // column names should ask for them rather than keep its own copy: this file
+    // and benchmark/scripts/bench.sh disagreed for long enough that every toi_*
+    // accuracy column was being dropped from the report unnamed.
+    if (argc == 2 && std::string(argv[1]) == "--header") {
+        std::cout << kCsvHeader << "\n";
+        return EXIT_SUCCESS;
+    }
+
     if (argc < 3) {
         std::cerr << "usage: " << argv[0] << " <data-dir> <dataset> [<dataset> ...]\n";
+        std::cerr << "       " << argv[0] << " --header\n";
         return EXIT_FAILURE;
     }
 
@@ -1125,9 +1141,7 @@ int main(int argc, char** argv) {
     if (using_global_missing_pairs_report) {
         ok = initialize_missing_pairs_report(data_dir) && ok;
     }
-    std::cout << "dataset,mode,case,type,queries,prep_ms,broad_ms,narrow_ms,query_narrow_ms,fp,fn,broad_fp,broad_fn,"
-              "narrow_ms_s1,toi_n,toi_late,toi_max_late,toi_max_early,toi_med_early,s0_late,s0_margin,"
-              "s0_toi,gt_earliest,root_n,s1_min\n";
+    std::cout << kCsvHeader << "\n";
     for (int i = 2; i < argc; ++i) {
         const std::string dataset = argv[i];
         const fs::path dataset_dir = data_dir / dataset;

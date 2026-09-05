@@ -192,7 +192,17 @@ BENCH_FIGURE_DIR="${SCCD_BENCH_FIGURE_DIR:-"${BENCH_OUT_DIR}/figures"}"
 BENCH_REPORT_TEX="${SCCD_BENCH_REPORT_TEX:-"${BENCH_OUT_DIR}/bench_report.tex"}"
 mkdir -p "$(dirname "${BENCH_CSV}")" "$(dirname "${BENCH_AGG_CSV}")" "$(dirname "${BENCH_MISSING_PAIRS_CSV}")" "${BENCH_FIGURE_DIR}" "$(dirname "${BENCH_REPORT_TEX}")"
 
-BENCH_HEADER='dataset,mode,case,type,queries,prep_ms,broad_ms,narrow_ms,query_narrow_ms,fp,fn,broad_fp,broad_fn'
+# The header comes from the driver, never from here.
+#
+# This used to be a hardcoded 13-column string while sccd_bench printed 25, and
+# the run appended the driver's rows with `tail -n +2`. Columns 14-25 --
+# narrow_ms_s1 and every toi_* accuracy column -- therefore landed unnamed, and
+# csv.DictReader filed them under the None key where no report ever saw them.
+# The driver prints its header before it touches a dataset, so invoking it with
+# no dataset arguments yields exactly the current header and nothing else.
+bench_header() {
+    "${SCCD_BENCH}" --header 2>/dev/null
+}
 
 mode_label() {
     case "$1" in
@@ -201,6 +211,12 @@ mode_label() {
         *) echo "mode$1" ;;
     esac
 }
+
+BENCH_HEADER="$(bench_header)"
+if [[ -z "${BENCH_HEADER}" ]]; then
+    printf 'error: %s printed no header; refusing to write a CSV with no schema\n' "${SCCD_BENCH}" >&2
+    exit 1
+fi
 
 if [[ "${#datasets[@]}" -gt 0 ]]; then
     : > "${BENCH_CSV}"
