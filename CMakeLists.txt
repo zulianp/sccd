@@ -141,7 +141,7 @@ configure_file("${CMAKE_CURRENT_SOURCE_DIR}/src/core/sccd_config.hpp.in" "${CMAK
 # header goes on the path, in the build tree and after install alike. The
 # `sccd_` prefix plus one descriptive name per file keeps basenames unique,
 # which is what makes flat includes safe.
-set(_sccd_header_dirs core broadphase narrowphase cuda integrations/smesh)
+set(_sccd_header_dirs api core broadphase narrowphase cuda integrations/smesh)
 set(_sccd_build_includes
     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
@@ -192,6 +192,8 @@ install(TARGETS sccd
 # Everything here is header-only templates, so the support headers are installed
 # too: a consumer of narrowphase.hpp needs everything it includes.
 set(SCCD_PUBLIC_HEADERS
+  # The C ABI. The one declaration of the extern "C" entry points.
+  src/api/sccd.h
   # Entry points.
   src/narrowphase/sccd_narrowphase.hpp
   src/narrowphase/sccd_narrowphase_quad.hpp
@@ -219,7 +221,8 @@ endif()
 # Fail configure if a header exists that nobody has classified. Without this the
 # list silently drifts from the tree and we are back to guessing.
 file(GLOB_RECURSE _sccd_all_headers RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}"
-     CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp")
+     CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp"
+                       "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h")
 list(FILTER _sccd_all_headers EXCLUDE REGEX "^src/tests/")
 if(NOT SCCD_ENABLE_SMESH)
   list(FILTER _sccd_all_headers EXCLUDE REGEX "^src/integrations/smesh/")
