@@ -19,23 +19,23 @@ that band is not a result.
 **Modes.** `Relaxed` (0) is the scalar search with the looser acceptance test.
 `Tight` (2) compares domain widths against domain tolerances. On the CPU
 `Relaxed` is the cheaper of the two; **on the GPU it is not** — it costs 1.5×
-`Tight`'s boxes on armadillo-rollers at `toi_stride=1` and about the same on
+`Tight`'s boxes on armadillo-rollers at `ToiOutput::PerPair` and about the same on
 cloth-ball. A looser acceptance ends a box sooner but reports a time of impact
 further before the true one, and a looser bound prunes less, so the queries that
 follow do more work. Both ship; modes 1
 and 3 are validation-only and need `SCCD_ENABLE_TIGHT_INCLUSION=ON`.
 
-**Strides.** The tables below use the names the runs were recorded under; the
-parameter is now the `ToiOutput` enum, `0` being `Earliest` and `1` `PerPair`.
-`toi_stride=0` is `find_earliest_impact_time` — one time of impact
-for the step, so every query prunes against the running minimum. `toi_stride=1`
-is `find_impact_times` — one result per candidate, no shared bound.
+**Output mode.** `ToiOutput::Earliest` is `find_earliest_impact_time` — one time
+of impact for the step, so every query prunes against the running minimum.
+`ToiOutput::PerPair` is `find_impact_times` — one result per candidate, no shared
+bound, and correspondingly more work. Rows below are labelled by the mode they
+were measured under.
 
 ---
 
 ## Narrow phase, milliseconds
 
-| scene | mode | CPU s0 | GPU s0 | CPU s1 | GPU s1 |
+| scene | mode | CPU `Earliest` | GPU `Earliest` | CPU `PerPair` | GPU `PerPair` |
 |---|---|---:|---:|---:|---:|
 | cloth-funnel | Relaxed | **6.2** | 24.3 | 9.7 | **22.2** |
 | cloth-funnel | Tight | **7.2** | 27.2 | **12.2** | 33.4 |
@@ -49,35 +49,18 @@ over three repeats; vertex-face and edge-edge cases are summed together. Timings
 come from a build **without** `-DSCCD_NP_COUNT_BOXES`, which puts a global atomic
 on the hot path and makes an instrumented build 20× slower on the host.
 
-Stride 1 costs the CPU 1.6–4.4× over stride 0 — the value of the shared running
-minimum. It costs the GPU 2.6–6.6×, because stride 1 runs a different kernel: one
-block per query, seeded with a 128-way dice.
+`PerPair` costs the CPU 1.6–4.4× over `Earliest` and the GPU 2.6–6.6×. The
+difference is the shared running minimum: with one time of impact for the step,
+every query prunes against the best found so far, and the search explores about
+1.2 boxes per query instead of about 11. Ask for `Earliest` unless you need to
+know which pair collided.
 
-The GPU stride-1 column improved by an order of magnitude against the previous
-measurement of this table, from two changes:
+Both device paths run one thread per query. A block-per-query kernel is bound by
+scheduling blocks rather than by the search, so it is not the default;
+`SCCD_NP_S1_BLOCK_PER_QUERY=1` selects it if you want to measure the difference.
 
-| `Tight`, GPU s1 | was | now | |
-|---|---:|---:|---:|
-| armadillo-rollers | 3126.7 | **65.2** | **48×** |
-| cloth-funnel | 789.9 | **33.4** | **24×** |
-| cloth-ball | 902.8 | **158.4** | **5.7×** |
-
-**The per-query path now runs one thread per query**, as the earliest-impact path
-always has. It used to give each query a whole block, which is bound by scheduling
-the blocks rather than by the search — 843,414 of them on cloth-funnel, each
-classifying 63 boxes across 128 threads. On its own that change is 4.5×, 2.8× and
-4.4×. `SCCD_NP_S1_BLOCK_PER_QUERY=1` restores the old kernel.
-
-The device's edge-edge domain tolerances had been assigned to the wrong axes: `u`
-got the `t` tolerance, up to 286× too large, and the `v` denominator was never
-computed. The split rule picks the axis with the largest width/tolerance ratio, so
-`u` was starved of splits and the search refined `t` and `v` against a `u`
-interval pinned at full width. Nothing unsafe followed — a larger domain tolerance
-only accepts sooner, which is the conservative direction, and every gate stayed
-green — but on one query it cost 53 million boxes where the host needed 55.
-
-The CPU columns reproduce the previous measurement to within 1–7% and are
-unaffected.
+Run-to-run spread on these scenes is 1–7% on the CPU. Treat a difference smaller
+than that as noise.
 
 ## Broad phase, milliseconds
 
@@ -198,8 +181,8 @@ Counted with `-DSCCD_NP_COUNT_BOXES` (off by default), cloth-funnel, `Tight`:
 | | boxes | per query |
 |---|---:|---:|
 | host | 1,038,395 | 1.2 |
-| device, `toi_stride=0` | 97,757,836 | 111 |
-| device, `toi_stride=1` | 705,986,614 | 2,576,594 |
+| device, `ToiOutput::Earliest` | 97,757,836 | 111 |
+| device, `ToiOutput::PerPair` | 705,986,614 | 2,576,594 |
 
 These counts are from the same pre-fix build as the timing table above. After the
 edge-edge tolerance fix the same cloth-funnel run classifies 1.35 M boxes on the

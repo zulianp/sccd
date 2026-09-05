@@ -58,7 +58,7 @@ pads by the certified numerical error bound, which these do not touch.
 |---|---|---|---|
 | `SCCD_BLOCKS_PER_SM` | int | occupancy API | Blocks resident per SM. |
 | `SCCD_BATCH_SIZE` | int | all candidates | Candidates per outer iteration. |
-| `SCCD_NP_S1_BLOCK_PER_QUERY` | `0`, `1` | `0` | Restores the old `toi_stride=1` kernel, one block per query. The default runs one thread per query, measured 2.8–4.5× faster with identical results. |
+| `SCCD_NP_S1_BLOCK_PER_QUERY` | `0`, `1` | `0` | Runs the `ToiOutput::PerPair` path as one block per query instead of one thread per query. The default is one thread, which measures 2.8–4.5× faster for identical results; this is here to reproduce the comparison. |
 | `SCCD_GSTACK_CAP_MAX` | int | `INT_MAX` | Soft cap on a single growth step of the global stack. The stack starts empty and grows from the deficit the kernel reports. |
 | `SCCD_NP_ALPHA` | float | `0.5` | Splitter blending factor. |
 
@@ -68,7 +68,7 @@ pads by the certified numerical error bound, which these do not touch.
 `-DSCCD_NP_COUNT_BOXES` in `CMAKE_CUDA_FLAGS` and `CMAKE_CXX_FLAGS` makes the
 device narrow phase and the host TightInclusion kernel each count the boxes they
 classify and print one line per call to stderr. Both count the same unit, so the
-two numbers are directly comparable: on cloth-funnel at `toi_stride=0` the device
+two numbers are directly comparable: on cloth-funnel at `ToiOutput::Earliest` the device
 classifies 94× the boxes the host does for the same queries. It is a
 global atomic on the hot path, so an instrumented build's *timings* mean nothing;
 only the counts do.
