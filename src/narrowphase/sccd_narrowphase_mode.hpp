@@ -92,9 +92,7 @@ namespace sccd {
      * Read per call rather than cached, because harnesses switch modes between
      * calls in the same process.
      *
-     * SCCD_NARROWPHASE_MODE is the one knob. The older SCCD_USE_VNARROW_PHASE
-     * and SCCD_VNARROWPHASE_TI_COMPAT still work and are consulted when it is
-     * unset, so existing scripts keep behaving as they did.
+     * SCCD_NARROWPHASE_MODE is the one knob, and the only one.
      */
     /**
      * \brief Resolve the requested narrow-phase kernel, saying so when it cannot
@@ -150,29 +148,6 @@ namespace sccd {
             }
         }
 
-        // The two pre-enum switches. Both selected kernels that no longer exist
-        // here, so both are dead letters now; they warn rather than silently
-        // doing something else, and SCCD_USE_VNARROW_PHASE=2 still means Tight
-        // because that mode is still real.
-        int SCCD_USE_VNARROW_PHASE = SCCD_USE_VNARROW_PHASE_DEFAULT;
-        SCCD_READ_ENV(SCCD_USE_VNARROW_PHASE, atoi);
-        if (SCCD_USE_VNARROW_PHASE == 2) {
-            return NarrowPhaseMode::Tight;
-        }
-
-        int SCCD_VNARROWPHASE_TI_COMPAT = SCCD_VNARROWPHASE_TI_COMPAT_DEFAULT;
-        SCCD_READ_ENV(SCCD_VNARROWPHASE_TI_COMPAT, atoi);
-        if (SCCD_VNARROWPHASE_TI_COMPAT || SCCD_USE_VNARROW_PHASE) {
-            static bool warned_legacy = false;
-            if (!warned_legacy) {
-                warned_legacy = true;
-                fprintf(stderr,
-                        "SCCD: SCCD_VNARROWPHASE_TI_COMPAT and SCCD_USE_VNARROW_PHASE selected "
-                        "kernels that have moved to spikes/; running 0 (Relaxed). Use "
-                        "SCCD_NARROWPHASE_MODE=2 for the tight kernel, or SCCD_USE_TI=1 to call "
-                        "TightInclusion directly.\n");
-            }
-        }
         return NarrowPhaseMode::Relaxed;
     }
 

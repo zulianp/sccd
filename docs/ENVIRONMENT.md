@@ -9,9 +9,7 @@ supported configuration.
 | Variable | Values | Default | Effect |
 |---|---|---|---|
 | `SCCD_NARROWPHASE_MODE` | `0`, `2` | `0` | Narrow-phase kernel: `0` `Relaxed`, `2` `Tight`. Any other value warns and runs `0`. **Ignored for quads**, which have one root-finder variant. |
-| `SCCD_BROADPHASE` | `sweep`, `cell2d` | auto | Forces a broad phase instead of letting `choose_broadphase_strategy` decide. Both produce identical pair sets, so this only changes speed. |
-| `SCCD_USE_VNARROW_PHASE` | `2` | build option | Consulted only when `SCCD_NARROWPHASE_MODE` is unset. `2` selects `Tight`; any other non-zero value warns and runs `0`. |
-| `SCCD_VNARROWPHASE_TI_COMPAT` | `0`, `1` | build option | Consulted only when `SCCD_NARROWPHASE_MODE` is unset. Non-zero warns and runs `0`. |
+| `SCCD_BROADPHASE` | `sweep`, `cell2d` | auto | Forces a broad phase instead of letting `BroadPhaseAutoTuner` race the two and keep the winner. Both produce identical pair sets, so this only changes speed. |
 | `SCCD_USE_TI` | `0`, `1` | `0` | Calls TightInclusion directly. Requires a TightInclusion build. Oracle use only. |
 
 ### Getting TightInclusion's answer
@@ -32,7 +30,6 @@ else:
 |---|---|---|
 | `SCCD_NARROWPHASE_MODE=1` or `3` | `Relaxed` | that the value selects no kernel, and to use `SCCD_USE_TI=1` for the reference |
 | `SCCD_NARROWPHASE_MODE=20`, or any non-number | `Relaxed` | that the value was ignored, and what the valid ones are |
-| `SCCD_VNARROWPHASE_TI_COMPAT`, or `SCCD_USE_VNARROW_PHASE` other than `2` | `Relaxed` | that the variable selects no kernel, and what to use instead |
 | any mode on a quad mesh | the one quad kernel | that the mode does not reach the quad path |
 
 An unset variable, or `SCCD_NARROWPHASE_MODE=0`, says nothing: there is no

@@ -209,26 +209,6 @@ namespace sccd {
         return 0;
     }
 
-    template <int nxe, typename T, typename I>
-    int narrow_phase_vq(const size_t noverlaps,
-                        const I *const SCCD_RESTRICT voveralp,
-                        const I *const SCCD_RESTRICT qoveralp,
-                        T **const SCCD_RESTRICT v0,
-                        T **const SCCD_RESTRICT v1,
-                        const size_t quad_stride,
-                        I **const SCCD_RESTRICT quads,
-                        const T max_toi,
-                        T *const SCCD_RESTRICT toi,
-                        const int toi_stride = 0) {
-        int SCCD_MAX_DEPTH = 69;
-        SCCD_READ_ENV(SCCD_MAX_DEPTH, atoi);
-
-        T SCCD_TOL = T(3e-8);
-        SCCD_READ_ENV(SCCD_TOL, atof);
-
-        return narrow_phase_vq<nxe, T, I>(
-            noverlaps, voveralp, qoveralp, v0, v1, quad_stride, quads, max_toi, toi, SCCD_MAX_DEPTH, SCCD_TOL, toi_stride);
-    }
 
 } // namespace sccd
 
