@@ -30,7 +30,7 @@ namespace sccd {
                             const int toi_stride = 0);
 
 
-        template <int nxe, typename T, typename I>
+        template <typename T, typename I>
         int narrow_phase_vf(const size_t noverlaps,
                             const I* const SCCD_RESTRICT voveralp,
                             const I* const SCCD_RESTRICT foveralp,

@@ -721,7 +721,7 @@ namespace sccd {
             vf_tois_ = smesh::create_buffer<scalar_t>(toi_storage_size(v_overlap_->size()), execution_space_);
             const auto element_type = face_element_type_;
             if (element_type == smesh::TRISHELL3) {
-                sccd::narrow_phase_vf<3, scalar_t, smesh::idx_t>(v_overlap_->size(),
+                sccd::narrow_phase_vf<scalar_t, smesh::idx_t>(v_overlap_->size(),
                                                                  v_overlap_->data(),
                                                                  f_overlap_->data(),
                                                                  points_t0_->data(),
@@ -734,7 +734,7 @@ namespace sccd {
                                                                  tol,
                                                                  toi_stride);
             } else if (element_type == smesh::QUADSHELL4) {
-                sccd::narrow_phase_vq<4, scalar_t, smesh::idx_t>(v_overlap_->size(),
+                sccd::narrow_phase_vq<scalar_t, smesh::idx_t>(v_overlap_->size(),
                                                                  v_overlap_->data(),
                                                                  f_overlap_->data(),
                                                                  points_t0_->data(),
@@ -1031,7 +1031,7 @@ namespace sccd {
             if (element_type != smesh::TRISHELL3) {
                 SMESH_ERROR("Unsupported CCD face element type: %s\n", smesh::type_to_string(element_type));
             }
-            sccd::device::narrow_phase_vf<3>(v_overlap_->size(),
+            sccd::device::narrow_phase_vf(v_overlap_->size(),
                                              v_overlap_->data(),
                                              f_overlap_->data(),
                                              points_t0_->data(),

@@ -14,7 +14,7 @@ The narrow phase is the library. One call, three arrays of geometry per time
 step, and one time of impact per candidate pair.
 
 ```cpp
-template <int nxe, typename T, typename I>
+template <typename T, typename I>
 int sccd::narrow_phase_vf(size_t n_pairs,
                           const I* vertex_of_pair, const I* face_of_pair,
                           T** v0, T** v1,          // start / end geometry, SoA
@@ -41,9 +41,9 @@ the running minimum, which is markedly cheaper.
 
 | call | header | query |
 |---|---|---|
-| `sccd::narrow_phase_vf<3>` | `sccd_narrowphase.hpp` | vertex against triangle |
+| `sccd::narrow_phase_vf` | `sccd_narrowphase.hpp` | vertex against triangle |
 | `sccd::narrow_phase_ee` | `sccd_narrowphase.hpp` | edge against edge |
-| `sccd::narrow_phase_vq<4>` | `sccd_narrowphase_quad.hpp` | vertex against quad |
+| `sccd::narrow_phase_vq` | `sccd_narrowphase_quad.hpp` | vertex against quad |
 | `sccd::device::narrow_phase_*` | `sccd_narrowphase.cuh`, `sccd_narrowphase_vq.cuh` | the same, on the GPU |
 
 Device entry points take **device** arrays of device pointers, not host arrays.

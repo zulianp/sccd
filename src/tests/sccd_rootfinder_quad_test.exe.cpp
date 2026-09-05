@@ -475,7 +475,7 @@ namespace {
         // toi_stride == 1: one answer per candidate.
         {
             S toi[2] = {S(1), S(1)};
-            sccd::narrow_phase_vq<4, S, int>(2, vov, qov, v0, v1, 1, quads,
+            sccd::narrow_phase_vq<S, int>(2, vov, qov, v0, v1, 1, quads,
                                              S(1), toi, 69, S(1e-8), /*toi_stride=*/1);
             const double expect[2] = {0.5, 0.25};
             for (int i = 0; i < 2; ++i) {
@@ -494,7 +494,7 @@ namespace {
         // toi_stride == 0: the shared minimum over both candidates.
         {
             S toi = S(1);
-            sccd::narrow_phase_vq<4, S, int>(2, vov, qov, v0, v1, 1, quads,
+            sccd::narrow_phase_vq<S, int>(2, vov, qov, v0, v1, 1, quads,
                                              S(1), &toi, 69, S(1e-8), /*toi_stride=*/0);
             const double err = (double)toi - 0.25;
             if (err > 1e-6 || err < -kEntryEarlyBudget) {

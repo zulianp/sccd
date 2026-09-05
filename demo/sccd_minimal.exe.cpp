@@ -203,7 +203,7 @@ int main() {
     const T tol = 3e-8;
 
     T vf_toi = max_toi;
-    sccd::narrow_phase_vf<3, T, I>(vf_vertex.size(), vf_vertex.data(), vf_face.data(), p0, p1,
+    sccd::narrow_phase_vf<T, I>(vf_vertex.size(), vf_vertex.data(), vf_face.data(), p0, p1,
                                    /*face_stride=*/1, faces, max_toi, &vf_toi, max_depth, tol,
                                    /*toi_stride=*/0);
 

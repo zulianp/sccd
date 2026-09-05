@@ -910,7 +910,7 @@ namespace sccd {
         return 0;
     }
 
-    template <int nxe, typename T, typename I>
+    template <typename T, typename I>
     int narrow_phase_tight_vf(const size_t noverlaps,
                              const I* const SCCD_RESTRICT voverlap,
                              const I* const SCCD_RESTRICT foverlap,
@@ -923,7 +923,6 @@ namespace sccd {
                              const int max_depth,
                              const T tol,
                              const int toi_stride) {
-        static_assert(nxe == 3, "the TightInclusion-equivalent kernel handles triangles");
 #ifdef SCCD_NP_COUNT_BOXES
         const unsigned long long before_ = g_np_host_boxes;
         const int rc_ = narrow_phase_tight_impl<true, T, I>(

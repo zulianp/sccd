@@ -525,7 +525,7 @@ namespace sccd {
 
             geom_t max_toi = 100000;
 
-            sccd::narrow_phase_vf<3, geom_t>(voverlap.size(),
+            sccd::narrow_phase_vf<geom_t>(voverlap.size(),
                                              voverlap.data(),
                                              foverlap.data(),
                                              // Geometric data
