@@ -37,7 +37,7 @@
 
 namespace sccd {
 
-    template <int nxe, typename T, typename I>
+    template <typename T, typename I>
     int narrow_phase_vq(const size_t noverlaps,
                         const I *const SCCD_RESTRICT voveralp,
                         const I *const SCCD_RESTRICT qoveralp,
@@ -50,7 +50,6 @@ namespace sccd {
                         const int max_depth,
                         const T tol,
                         const int toi_stride = 0) {
-        (void)nxe;
         using T_HP = double;
 
         narrow_phase_mode_note_quads_ignore();

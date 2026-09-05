@@ -44,11 +44,11 @@ std::vector<double> z0 = {0.0, 0.0, 0.0, 1.00};
 double* v0[3] = {x0.data(), y0.data(), z0.data()};
 // ... v1 likewise for the end of the step
 
-sccd::narrow_phase_vf<3, double, int>(n_pairs, vertex_of_pair, face_of_pair,
-                                      v0, v1, /*face_stride=*/1, faces,
-                                      /*max_toi=*/1.0, toi.data(),
-                                      /*max_depth=*/69, /*tol=*/3e-8,
-                                      /*toi_stride=*/1);
+sccd::narrow_phase_vf<double, int>(n_pairs, vertex_of_pair, face_of_pair,
+                                   v0, v1, /*face_stride=*/1, faces,
+                                   /*max_toi=*/1.0, toi.data(),
+                                   /*max_depth=*/69, /*tol=*/3e-8,
+                                   /*toi_stride=*/1);
 ```
 
 `demo/sccd_minimal.exe.cpp` is both stages end to end — two disconnected

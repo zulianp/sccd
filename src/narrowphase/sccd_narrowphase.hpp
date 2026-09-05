@@ -23,7 +23,7 @@ namespace sccd {
 
 
 
-    template <int nxe, typename T, typename I>
+    template <typename T, typename I>
     int narrow_phase_vf(const size_t noverlaps,
                         const I* const SCCD_RESTRICT voveralp,
                         const I* const SCCD_RESTRICT foveralp,
@@ -49,7 +49,7 @@ namespace sccd {
         const NarrowPhaseMode mode = narrow_phase_mode();
 
         if (mode == NarrowPhaseMode::Tight) {
-            return narrow_phase_tight_vf<nxe, T, I>(
+            return narrow_phase_tight_vf<T, I>(
                 noverlaps, voveralp, foveralp, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_stride);
         }
 

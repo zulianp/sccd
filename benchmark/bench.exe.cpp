@@ -733,7 +733,7 @@ namespace {
             if (is_vf) {
                 smesh::SharedBuffer<idx_t*> faces = make_2d_buffer(query_geometry.faces, execution_space);
                 const auto start = std::chrono::steady_clock::now();
-                sccd::device::narrow_phase_vf<3>(query_geometry.q0.size(),
+                sccd::device::narrow_phase_vf(query_geometry.q0.size(),
                                                  q0->data(),
                                                  q1->data(),
                                                  points0->data(),
@@ -783,7 +783,7 @@ namespace {
         if (is_vf) {
             idx_t* faces[3] = {
                 query_geometry.faces[0].data(), query_geometry.faces[1].data(), query_geometry.faces[2].data()};
-            sccd::narrow_phase_vf<3, scalar_t, idx_t>(query_geometry.q0.size(),
+            sccd::narrow_phase_vf<scalar_t, idx_t>(query_geometry.q0.size(),
                                                       query_geometry.q0.data(),
                                                       query_geometry.q1.data(),
                                                       points0,

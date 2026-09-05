@@ -2995,7 +2995,7 @@ namespace sccd {
                 noverlaps, overlap0, overlap1, v0, v1, edge_stride, edges, max_toi, toi, max_depth, tol, toi_stride);
         }
 
-        template <int nxe, typename T, typename I>
+        template <typename T, typename I>
         int narrow_phase_vf(const size_t noverlaps,
                             const I* const SCCD_RESTRICT voveralp,
                             const I* const SCCD_RESTRICT foveralp,
@@ -3051,8 +3051,8 @@ namespace sccd {
                                                      const T tol,                           \
                                                      const int toi_stride);
 
-#define SCCD_NP_NARROW_PHASE_VF(NXE, T, I)                                                   \
-    template int sccd::device::narrow_phase_vf<NXE, T, I>(const size_t noverlaps,                \
+#define SCCD_NP_NARROW_PHASE_VF(T, I)                                                   \
+    template int sccd::device::narrow_phase_vf<T, I>(const size_t noverlaps,                \
                                                           const I* const SCCD_RESTRICT voveralp, \
                                                           const I* const SCCD_RESTRICT foveralp, \
                                                           T** const SCCD_RESTRICT v0,            \
@@ -3070,10 +3070,10 @@ SCCD_NP_NARROW_PHASE_EE(float, int64_t);
 SCCD_NP_NARROW_PHASE_EE(double, int32_t);
 SCCD_NP_NARROW_PHASE_EE(double, int64_t);
 
-SCCD_NP_NARROW_PHASE_VF(3, float, int32_t);
-SCCD_NP_NARROW_PHASE_VF(3, float, int64_t);
-SCCD_NP_NARROW_PHASE_VF(3, double, int32_t);
-SCCD_NP_NARROW_PHASE_VF(3, double, int64_t);
+SCCD_NP_NARROW_PHASE_VF(float, int32_t);
+SCCD_NP_NARROW_PHASE_VF(float, int64_t);
+SCCD_NP_NARROW_PHASE_VF(double, int32_t);
+SCCD_NP_NARROW_PHASE_VF(double, int64_t);
 
 template int sccd::device::minmax<float>(const float* const SCCD_RESTRICT data,
                                          const size_t n,

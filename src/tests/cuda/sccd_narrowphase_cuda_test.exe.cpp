@@ -521,7 +521,7 @@ namespace {
         scalar_t* p0[3] = {(scalar_t*)s.p0[0].data(), (scalar_t*)s.p0[1].data(), (scalar_t*)s.p0[2].data()};
         scalar_t* p1[3] = {(scalar_t*)s.p1[0].data(), (scalar_t*)s.p1[1].data(), (scalar_t*)s.p1[2].data()};
         idx_t* el[3] = {(idx_t*)s.elem[0].data(), (idx_t*)s.elem[1].data(), (idx_t*)s.elem[2].data()};
-        sccd::narrow_phase_vf<3, scalar_t, idx_t>(
+        sccd::narrow_phase_vf<scalar_t, idx_t>(
             s.nq(), s.q0.data(), s.q1.data(), p0, p1, 1, el, kMaxToi, toi.data(), kMaxDepth, tol, 1);
         return toi;
     }
@@ -544,7 +544,7 @@ namespace {
                         (idx_t*)s.elem[1].data(),
                         (idx_t*)s.elem[2].data(),
                         (idx_t*)s.elem[3].data()};
-        sccd::narrow_phase_vq<4, scalar_t, idx_t>(
+        sccd::narrow_phase_vq<scalar_t, idx_t>(
             s.nq(), s.q0.data(), s.q1.data(), p0, p1, 1, el, kMaxToi, toi.data(), kMaxDepth, tol, 1);
         return toi;
     }
@@ -556,7 +556,7 @@ namespace {
         d.upload(s);
         switch (kind) {
             case Kind::VF:
-                sccd::device::narrow_phase_vf<3, scalar_t, idx_t>(s.nq(),
+                sccd::device::narrow_phase_vf<scalar_t, idx_t>(s.nq(),
                                                                   d.d_q0,
                                                                   d.d_q1,
                                                                   d.d_p0,

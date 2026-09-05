@@ -372,7 +372,7 @@ int main(int argc, char** argv) {
 
             const unsigned long long before = host_box_count();
             if (is_vf) {
-                sccd::narrow_phase_vf<3, scalar_t, idx_t>(1, scene.c0.data(), scene.c1.data(),
+                sccd::narrow_phase_vf<scalar_t, idx_t>(1, scene.c0.data(), scene.c1.data(),
                                                           scene.p0, scene.p1, 1, scene.elem,
                                                           /*max_toi=*/1.0, &toi, max_depth, tol,
                                                           /*toi_stride=*/1);
@@ -438,7 +438,7 @@ int main(int argc, char** argv) {
                                         cudaMemcpyHostToDevice));
                     NPT_CUDA(cudaEventRecord(t0));
                     if (is_vf) {
-                        sccd::device::narrow_phase_vf<3, scalar_t, idx_t>(
+                        sccd::device::narrow_phase_vf<scalar_t, idx_t>(
                             queries.size(), df.d_a, df.d_b, df.d_p0, df.d_p1, 1, df.d_elem,
                             /*max_toi=*/1.0, df.d_toi, max_depth, tol, /*toi_stride=*/0);
                     } else {
@@ -481,7 +481,7 @@ int main(int argc, char** argv) {
                 std::fprintf(stderr, "np_trace-query %zu %s\n", idx, file.filename().c_str());
                 std::fflush(stderr);
                 if (is_vf) {
-                    sccd::device::narrow_phase_vf<3, scalar_t, idx_t>(
+                    sccd::device::narrow_phase_vf<scalar_t, idx_t>(
                         1, df.d_a + q, df.d_b + q, df.d_p0, df.d_p1, 1, df.d_elem,
                         /*max_toi=*/1.0, df.d_toi, max_depth, tol, /*toi_stride=*/1);
                 } else {
@@ -510,7 +510,7 @@ int main(int argc, char** argv) {
             nq += queries.size();
             const unsigned long long before = host_box_count();
             if (is_vf) {
-                sccd::narrow_phase_vf<3, scalar_t, idx_t>(queries.size(), scene.a.data(), scene.b.data(),
+                sccd::narrow_phase_vf<scalar_t, idx_t>(queries.size(), scene.a.data(), scene.b.data(),
                                                           scene.p0, scene.p1, 1, scene.elem,
                                                           /*max_toi=*/1.0, &batch_toi, max_depth, tol,
                                                           /*toi_stride=*/0);
