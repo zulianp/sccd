@@ -655,7 +655,7 @@ namespace {
 
         const auto start = std::chrono::steady_clock::now();
         if (is_vf) {
-            err = ccd_run.ccd->narrow_phase_fv(toi, vf_tois, narrowphase_max_depth, narrowphase_tol, sccd::ToiOutput::PerPair);
+            err = ccd_run.ccd->narrow_phase_vf(toi, vf_tois, narrowphase_max_depth, narrowphase_tol, sccd::ToiOutput::PerPair);
         } else {
             err = ccd_run.ccd->narrow_phase_ee(toi, ee_tois, narrowphase_max_depth, narrowphase_tol, sccd::ToiOutput::PerPair);
         }
@@ -672,7 +672,7 @@ namespace {
 
         const auto start = std::chrono::steady_clock::now();
         if (is_vf) {
-            err = ccd_run.ccd->narrow_phase_fv(toi, vf_tois, narrowphase_max_depth, narrowphase_tol, sccd::ToiOutput::Earliest);
+            err = ccd_run.ccd->narrow_phase_vf(toi, vf_tois, narrowphase_max_depth, narrowphase_tol, sccd::ToiOutput::Earliest);
         } else {
             err = ccd_run.ccd->narrow_phase_ee(toi, ee_tois, narrowphase_max_depth, narrowphase_tol, sccd::ToiOutput::Earliest);
         }

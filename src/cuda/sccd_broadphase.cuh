@@ -26,7 +26,7 @@ namespace sccd {
                                  const ptrdiff_t element_count,
                                  T** const SCCD_RESTRICT aabbs,
                                  I* const SCCD_RESTRICT idx,
-                                 const ptrdiff_t stride,
+                                 const ptrdiff_t element_stride,
                                  I** const SCCD_RESTRICT elements,
                                  ptrdiff_t* const SCCD_RESTRICT ccdptr);
 
@@ -35,11 +35,11 @@ namespace sccd {
                                    const ptrdiff_t element_count,
                                    T** const SCCD_RESTRICT aabbs,
                                    I* const SCCD_RESTRICT idx,
-                                   const ptrdiff_t stride,
+                                   const ptrdiff_t element_stride,
                                    I** const elements,
                                    const ptrdiff_t* const SCCD_RESTRICT ccdptr,
-                                   I* SCCD_RESTRICT foverlap,
-                                   I* SCCD_RESTRICT noverlap);
+                                   I* SCCD_RESTRICT first_out,
+                                   I* SCCD_RESTRICT second_out);
 
         template <typename T>
         void cummax(const ptrdiff_t n, const T* const SCCD_RESTRICT in, T* const SCCD_RESTRICT out);
@@ -53,12 +53,12 @@ namespace sccd {
                             const ptrdiff_t first_count,
                             T** const SCCD_RESTRICT first_aabbs,
                             I* const SCCD_RESTRICT first_idx,
-                            const ptrdiff_t first_stride,
+                            const ptrdiff_t first_element_stride,
                             I** const SCCD_RESTRICT first_elements,
                             const ptrdiff_t second_count,
                             T** const SCCD_RESTRICT second_aabbs,
                             I* const SCCD_RESTRICT second_idx,
-                            const ptrdiff_t second_stride,
+                            const ptrdiff_t second_element_stride,
                             I** const SCCD_RESTRICT second_elements,
                             ptrdiff_t* const SCCD_RESTRICT ccdptr,
                             const T* const SCCD_RESTRICT second_xmax_running);
@@ -68,17 +68,17 @@ namespace sccd {
                               const ptrdiff_t first_count,
                               T** const SCCD_RESTRICT first_aabbs,
                               I* const SCCD_RESTRICT first_idx,
-                              const ptrdiff_t first_stride,
+                              const ptrdiff_t first_element_stride,
                               I** SCCD_RESTRICT const first_elements,
                               const ptrdiff_t second_count,
                               T** const SCCD_RESTRICT second_aabbs,
                               I* const SCCD_RESTRICT second_idx,
-                              const ptrdiff_t second_stride,
+                              const ptrdiff_t second_element_stride,
                               I** SCCD_RESTRICT const second_elements,
                               const ptrdiff_t* const SCCD_RESTRICT ccdptr,
                               const T* const SCCD_RESTRICT second_xmax_running,
-                              I* SCCD_RESTRICT foverlap,
-                              I* SCCD_RESTRICT noverlap);
+                              I* SCCD_RESTRICT first_out,
+                              I* SCCD_RESTRICT second_out);
 
 
 

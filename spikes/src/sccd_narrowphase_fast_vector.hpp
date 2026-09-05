@@ -114,11 +114,11 @@ namespace sccd {
     template <typename Q, typename T, typename I, int VSIZE>
     static void load_query(const ptrdiff_t block_index,
                            const ptrdiff_t block_size,
-                           const I* const SCCD_RESTRICT voveralp,
-                           const I* const SCCD_RESTRICT foveralp,
+                           const I* const SCCD_RESTRICT voverlap,
+                           const I* const SCCD_RESTRICT first_out,
                            T** const SCCD_RESTRICT v0,
                            T** const SCCD_RESTRICT v1,
-                           const size_t face_stride,
+                           const size_t element_stride,
                            I** const SCCD_RESTRICT faces,
                            VQuery<Q, VSIZE>& query) {
         const ptrdiff_t query_begin = block_index * VSIZE;
@@ -136,9 +136,9 @@ namespace sccd {
 
         for (ptrdiff_t i = 0; i < block_size; ++i) {
             const ptrdiff_t qi = query_begin + i;
-            const I vi = voveralp[qi];
-            const I fi = foveralp[qi];
-            const size_t face_offset = static_cast<size_t>(fi) * face_stride;
+            const I vi = voverlap[qi];
+            const I fi = first_out[qi];
+            const size_t face_offset = static_cast<size_t>(fi) * element_stride;
 
             const I n0 = faces0[face_offset];
             const I n1 = faces1[face_offset];
@@ -1577,11 +1577,11 @@ namespace sccd {
 
     template <int nxe, typename T, typename I>
     static int v_narrow_phase_vf_impl(const size_t noverlaps,
-                                      const I* const SCCD_RESTRICT voveralp,
-                                      const I* const SCCD_RESTRICT foveralp,
+                                      const I* const SCCD_RESTRICT voverlap,
+                                      const I* const SCCD_RESTRICT first_out,
                                       T** const SCCD_RESTRICT v0,
                                       T** const SCCD_RESTRICT v1,
-                                      const size_t face_stride,
+                                      const size_t element_stride,
                                       I** const SCCD_RESTRICT faces,
                                       const T max_toi,
                                       T* const SCCD_RESTRICT toi,
@@ -1629,7 +1629,7 @@ namespace sccd {
                     std::min<ptrdiff_t>(VSIZE, static_cast<ptrdiff_t>(noverlaps) - block_begin);
 
                 VQueryT query;
-                load_query<T_HP, T, I, VSIZE>(ib, block_size, voveralp, foveralp, v0, v1, face_stride, faces, query);
+                load_query<T_HP, T, I, VSIZE>(ib, block_size, voverlap, first_out, v0, v1, element_stride, faces, query);
 
                 VTolerancesT tols;
                 compute_tolerances<T_HP, VSIZE>(tol, query, tols);
@@ -1745,11 +1745,11 @@ namespace sccd {
 #ifdef SCCD_ENABLE_TIGHT_INCLUSION
     template <int nxe, typename T, typename I>
     static int correct_vf_with_tight_inclusion(const size_t noverlaps,
-                                                const I* const SCCD_RESTRICT voveralp,
-                                                const I* const SCCD_RESTRICT foveralp,
+                                                const I* const SCCD_RESTRICT voverlap,
+                                                const I* const SCCD_RESTRICT first_out,
                                                 T** const SCCD_RESTRICT v0,
                                                 T** const SCCD_RESTRICT v1,
-                                                const size_t face_stride,
+                                                const size_t element_stride,
                                                 I** const SCCD_RESTRICT faces,
                                                 const T max_toi,
                                                 T* const SCCD_RESTRICT toi,
@@ -1762,8 +1762,8 @@ namespace sccd {
 
         sccd::parallel_for_br(0, static_cast<ptrdiff_t>(noverlaps), [&](const ptrdiff_t begin, const ptrdiff_t end) {
             for (ptrdiff_t qi = begin; qi < end; ++qi) {
-                const I vertex = voveralp[qi];
-                const size_t face_offset = static_cast<size_t>(foveralp[qi]) * face_stride;
+                const I vertex = voverlap[qi];
+                const size_t face_offset = static_cast<size_t>(first_out[qi]) * element_stride;
                 const I n0 = faces[0][face_offset];
                 const I n1 = faces[1][face_offset];
                 const I n2 = faces[2][face_offset];
@@ -1811,11 +1811,11 @@ namespace sccd {
 
     template <int nxe, typename T, typename I>
     int v_narrow_phase_vf(const size_t noverlaps,
-                          const I* const SCCD_RESTRICT voveralp,
-                          const I* const SCCD_RESTRICT foveralp,
+                          const I* const SCCD_RESTRICT voverlap,
+                          const I* const SCCD_RESTRICT first_out,
                           T** const SCCD_RESTRICT v0,
                           T** const SCCD_RESTRICT v1,
-                          const size_t face_stride,
+                          const size_t element_stride,
                           I** const SCCD_RESTRICT faces,
                           const T max_toi,
                           T* const SCCD_RESTRICT toi,
@@ -1832,16 +1832,16 @@ namespace sccd {
         SCCD_READ_ENV(SCCD_SPIKE_CORRECT_WITH_TI, atoi);
         if (SCCD_SPIKE_CORRECT_WITH_TI) {
             const int vector_status = v_narrow_phase_vf_impl<nxe, T, I>(
-                noverlaps, voveralp, foveralp, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_stride);
+                noverlaps, voverlap, first_out, v0, v1, element_stride, faces, max_toi, toi, max_depth, tol, toi_stride);
             if (vector_status != 0) {
                 return vector_status;
             }
             return correct_vf_with_tight_inclusion<nxe, T, I>(
-                noverlaps, voveralp, foveralp, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_stride);
+                noverlaps, voverlap, first_out, v0, v1, element_stride, faces, max_toi, toi, max_depth, tol, toi_stride);
         }
 #endif
         return v_narrow_phase_vf_impl<nxe, T, I>(
-            noverlaps, voveralp, foveralp, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_stride);
+            noverlaps, voverlap, first_out, v0, v1, element_stride, faces, max_toi, toi, max_depth, tol, toi_stride);
     }
 }  // namespace sccd
 

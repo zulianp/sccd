@@ -42,15 +42,26 @@ anywhere; setting them does nothing.
 
 ## Search parameters
 
+**The library takes these as parameters, not from the environment.**
+`narrow_phase_vf`, `narrow_phase_ee` and `narrow_phase_vq` all require
+`max_depth` and `tol` as arguments; nothing inside the library calls `getenv` for
+them. `SCCD_MAX_DEPTH` and `SCCD_TOL` are read by the *drivers* -- `sccd_bench`,
+`sccd_refine_scaling` and the mesh demos -- which pass the values in. Setting
+them changes what those programs ask for; it does not reach into a library call
+made by your own code.
+
 | Variable | Type | Default | Effect |
 |---|---|---|---|
 | `SCCD_MAX_DEPTH` | int | `69` | Maximum subdivision depth. At the cap a box is **accepted** at its `t` lower bound, never dropped — that is what keeps a depth limit from costing a collision. The device vertex-quad kernel holds a stack for depth 128 (`-DSCCD_VQ_MAX_DEPTH`) and reports on stderr if asked for more. |
 | `SCCD_TOL` | float | `3e-8` | Codomain tolerance for the acceptance test. |
 | `SCCD_REFINE` | int | `0` | Newton polish on an accepted vertex-face box: if it converges to an earlier time inside the box, that time is reported instead. Vertex-face only — the edge-edge and vertex-quad searches have no polish step and ignore it. |
 
-Lowering `SCCD_TOL` or raising `SCCD_MAX_DEPTH` tightens the reported time of
-impact and costs time. Neither can make the result unsafe: the rejection test
-pads by the certified numerical error bound, which these do not touch.
+Lowering the tolerance or raising the depth tightens the reported time of impact
+and costs time. Neither can make the result unsafe: the rejection test pads by
+the certified numerical error bound, which neither touches.
+
+`SCCD_REFINE` is the one of the three the library does read, in
+`narrow_phase_vf` and `narrow_phase_ee`.
 
 ## CUDA tuning
 
@@ -76,12 +87,18 @@ only the counts do.
 | Variable | Type | Effect |
 |---|---|---|
 | `SCCD_BROADPHASE_VERBOSE` | set | Logs the chosen broad phase and the shape statistics behind the choice. |
+| `SCCD_NP_WORST_CSV` | path | The device narrow phase writes its costliest queries here, in the query-CSV format `sccd_np_trace` reads, so the same query can be run on both machines and diffed box by box. Needs a `SCCD_NP_COUNT_BOXES` build. |
+| `SCCD_NP_WORST_N` | int (`4`) | How many queries `SCCD_NP_WORST_CSV` writes. |
+| `SCCD_NP_NO_GLOBAL_SEED` | `0`, `1` | Seeds every host block at `max_toi` instead of the running global minimum, which removes the host's pruning advantage when comparing its box count against the device's. Needs a `SCCD_NP_COUNT_BOXES` build; it does not exist otherwise. |
 | `SCCD_MISSING_PAIRS_CSV` | path | `sccd_bench` writes broad-phase pairs the reference found and it did not. |
 | `SCCD_BENCH_EXECUTION_SPACE` | `host`, `device` | Where the benchmark drivers run. |
 | `SCCD_TOPOLOGY` | `quad` | Makes `refine_scaling` generate a hexahedral cube, so its skin is `QUADSHELL4` rather than `TRISHELL3`. |
 | `SCCD_SCALE` | float | Scale factor for `refine_scaling`'s synthesised motion. Negative reflects the mesh through its centre, which is what makes a convex mesh self-intersect. |
 | `SCCD_BENCH_MAX_CASES` | int | Evenly spread subsample of a scene's cases, for variant sweeps that must run every variant on the same cases. |
 | `SCCD_DB_TO_RAW` | path | smesh's `db_to_raw`, for benchmark mesh conversion. |
+| `SCCD_EXECUTION_SPACE` | `host`, `device` | Fallback `sccd_bench` reads when `SCCD_BENCH_EXECUTION_SPACE` is unset. Prefer the `BENCH` form. |
+| `SCCD_USE_FIND_EARLIEST_IMPACT_TIME` | `0`, `1` | Demo only (`mesh_sccd`, `mesh_sccd_cuda`): picks `find_earliest_impact_time` over `find_impact_times`. |
+| `SCCD_EXPORT_COLLISIONS` | `0`, `1` | Demo only (`mesh_sccd_cuda`): writes the colliding pairs it found. |
 
 ## A note on reading these
 

@@ -52,8 +52,8 @@ namespace sccd {
         std::vector<geom_t> vf_toi;
         std::vector<geom_t> ee_toi;
 
-        // FV overalps
-        std::vector<idx_t> foverlap;
+        // FV overlaps
+        std::vector<idx_t> first_out;
         std::vector<idx_t> voverlap;
 
         // Edge overlaps
@@ -307,7 +307,7 @@ namespace sccd {
 
             // Allocation (expensive, could be expanded dynamically in CCD)
             const ptrdiff_t fv_nintersections = ccdptr[nfaces];
-            foverlap.resize(fv_nintersections);
+            first_out.resize(fv_nintersections);
             voverlap.resize(fv_nintersections);
 
             cell_collect_overlaps<3, 1, geom_t, idx_t>(sort_axis,
@@ -328,7 +328,7 @@ namespace sccd {
                                                        cellptr.data(),
                                                        cellidx.data(),
                                                        ccdptr.data(),
-                                                       foverlap.data(),
+                                                       first_out.data(),
                                                        voverlap.data());
 
             timer.stop();
@@ -424,7 +424,7 @@ namespace sccd {
 
             // Allocation (expensive, could be expanded dynamically in CCD)
             const ptrdiff_t fv_nintersections = ccdptr[nfaces];
-            foverlap.resize(fv_nintersections);
+            first_out.resize(fv_nintersections);
             voverlap.resize(fv_nintersections);
 
 #ifndef USE_LB
@@ -440,7 +440,7 @@ namespace sccd {
                                                   0,
                                                   nullptr,
                                                   ccdptr.data(),
-                                                  foverlap.data(),
+                                                  first_out.data(),
                                                   voverlap.data());
 #else
             collect_overlaps_lb<3, 1, geom_t, idx_t>(sort_axis,
@@ -456,7 +456,7 @@ namespace sccd {
                                                      nullptr,
                                                      lb.data(),
                                                      ccdptr.data(),
-                                                     foverlap.data(),
+                                                     first_out.data(),
                                                      voverlap.data());
 
 #endif
@@ -467,11 +467,11 @@ namespace sccd {
 
         void export_broadphase_results(std::vector<std::pair<int, int>>& vf_overlaps,
                                        std::vector<std::pair<int, int>>& ee_overlaps) {
-            const ptrdiff_t fv_nintersections = foverlap.size();
+            const ptrdiff_t fv_nintersections = first_out.size();
             vf_overlaps.resize(fv_nintersections);
             for (ptrdiff_t i = 0; i < fv_nintersections; i++) {
                 vf_overlaps[i].first = voverlap[i];
-                vf_overlaps[i].second = foverlap[i];
+                vf_overlaps[i].second = first_out[i];
             }
 
             const ptrdiff_t ee_n_intersections = e0_overlap.size();
@@ -527,7 +527,7 @@ namespace sccd {
 
             sccd::narrow_phase_vf<geom_t>(voverlap.size(),
                                              voverlap.data(),
-                                             foverlap.data(),
+                                             first_out.data(),
                                              // Geometric data
                                              v0,
                                              v1,
@@ -580,7 +580,7 @@ namespace sccd {
 
             // for (ptrdiff_t i = 0; i < vf_size; i++) {
             //     if (vf_toi[i] < 1.1) {
-            //         vf_collisions.push_back({voverlap[i], foverlap[i], vf_toi[i]});
+            //         vf_collisions.push_back({voverlap[i], first_out[i], vf_toi[i]});
             //     }
             // }
 

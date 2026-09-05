@@ -206,12 +206,12 @@ int main() {
 
     T vf_toi = max_toi;
     sccd::narrow_phase_vf<T, I>(vf_vertex.size(), vf_vertex.data(), vf_face.data(), p0, p1,
-                                   /*face_stride=*/1, faces, max_toi, &vf_toi, max_depth, tol,
+                                   /*element_stride=*/1, faces, max_toi, &vf_toi, max_depth, tol,
                                    sccd::ToiOutput::Earliest);
 
     T ee_toi = max_toi;
     sccd::narrow_phase_ee<T, I>(ee_a.size(), ee_a.data(), ee_b.data(), p0, p1,
-                                /*edge_stride=*/1, edges, max_toi, &ee_toi, max_depth, tol,
+                                /*element_stride=*/1, edges, max_toi, &ee_toi, max_depth, tol,
                                 sccd::ToiOutput::Earliest);
 
     const T toi = std::min(vf_toi, ee_toi);
