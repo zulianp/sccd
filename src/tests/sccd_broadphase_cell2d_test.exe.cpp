@@ -69,7 +69,44 @@ namespace {
 
     using PairSet = std::set<std::pair<idx_t, idx_t>>;
 
-    template <int first_nxe>
+    // An independent reference: every pair whose boxes overlap, minus the pairs
+    // that share a node. Written out longhand on purpose -- the sweep and the
+    // cell list are cross-checked against each other elsewhere in this file, and
+    // two implementations agreeing says nothing if they share a bug in the
+    // shared-node masking, which is exactly the code second_nxe > 1 turns on.
+    template <int first_nxe, int second_nxe>
+    PairSet brute_pairs(const Boxes& first, const Boxes& second, ptrdiff_t* masked = nullptr) {
+        PairSet out;
+        if (masked) *masked = 0;
+        for (ptrdiff_t i = 0; i < first.n; ++i) {
+            for (ptrdiff_t j = 0; j < second.n; ++j) {
+                bool disjoint = false;
+                for (int d = 0; d < 3; ++d) {
+                    if (first.data[3 + d][i] < second.data[d][j] ||
+                        second.data[3 + d][j] < first.data[d][i]) {
+                        disjoint = true;
+                        break;
+                    }
+                }
+                if (disjoint) continue;
+
+                bool shares = false;
+                for (int a = 0; a < first_nxe && !shares; ++a) {
+                    for (int b = 0; b < second_nxe; ++b) {
+                        if (first.elem[a][i] == second.elem[b][j]) { shares = true; break; }
+                    }
+                }
+                if (shares) {
+                    if (masked) ++(*masked);
+                } else {
+                    out.insert({(idx_t)i, (idx_t)j});
+                }
+            }
+        }
+        return out;
+    }
+
+    template <int first_nxe, int second_nxe = 1>
     PairSet sweep_pairs(Boxes& first, Boxes& second) {
         // The sweep needs both lists sorted along a common axis; the cell list
         // does not, which is the point of it.
@@ -82,7 +119,7 @@ namespace {
         sccd::cummax(second.n, second.ptr[3 + axis], cummax.data());
 
         std::vector<ptrdiff_t> ccdptr(first.n + 1, 0);
-        const bool any = sccd::count_overlaps<first_nxe, 1, scalar_t, idx_t>(axis,
+        const bool any = sccd::count_overlaps<first_nxe, second_nxe, scalar_t, idx_t>(axis,
                                                                              first.n,
                                                                              first.ptr,
                                                                              first.idx.data(),
@@ -91,15 +128,15 @@ namespace {
                                                                              second.n,
                                                                              second.ptr,
                                                                              second.idx.data(),
-                                                                             0,
-                                                                             nullptr,
+                                                                             second_nxe > 1 ? 1 : 0,
+                                                                             second_nxe > 1 ? second.elem_ptr : nullptr,
                                                                              ccdptr.data(),
                                                                              cummax.data());
         PairSet out;
         if (!any) return out;
 
         std::vector<idx_t> a(ccdptr[first.n]), b(ccdptr[first.n]);
-        sccd::collect_overlaps<first_nxe, 1, scalar_t, idx_t>(axis,
+        sccd::collect_overlaps<first_nxe, second_nxe, scalar_t, idx_t>(axis,
                                                       first.n,
                                                       first.ptr,
                                                       first.idx.data(),
@@ -108,8 +145,8 @@ namespace {
                                                       second.n,
                                                       second.ptr,
                                                       second.idx.data(),
-                                                      0,
-                                                      nullptr,
+                                                      second_nxe > 1 ? 1 : 0,
+                                                      second_nxe > 1 ? second.elem_ptr : nullptr,
                                                       ccdptr.data(),
                                                       cummax.data(),
                                                       a.data(),
@@ -118,7 +155,7 @@ namespace {
         return out;
     }
 
-    template <int first_nxe>
+    template <int first_nxe, int second_nxe = 1>
     PairSet cell2d_pairs(Boxes& first, Boxes& second) {
         sccd::Cell2DGrid<scalar_t> grid;
         sccd::cell2d_setup<scalar_t>(second.n, second.ptr, grid);
@@ -132,15 +169,15 @@ namespace {
             second.n, second.ptr, grid, cellptr.data(), cellidx.data(), cursor.data());
 
         std::vector<ptrdiff_t> ccdptr(first.n + 1, 0);
-        const bool any = sccd::cell2d_count_overlaps<first_nxe, 1, scalar_t, idx_t>(first.n,
+        const bool any = sccd::cell2d_count_overlaps<first_nxe, second_nxe, scalar_t, idx_t>(first.n,
                                                                             first.ptr,
                                                                             first.idx.data(),
                                                                             1,
                                                                             first.elem_ptr,
                                                                             second.ptr,
                                                                             second.idx.data(),
-                                                                            0,
-                                                                            nullptr,
+                                                                            second_nxe > 1 ? 1 : 0,
+                                                                            second_nxe > 1 ? second.elem_ptr : nullptr,
                                                                             grid,
                                                                             cellptr.data(),
                                                                             cellidx.data(),
@@ -149,15 +186,15 @@ namespace {
         if (!any) return out;
 
         std::vector<idx_t> a(ccdptr[first.n]), b(ccdptr[first.n]);
-        sccd::cell2d_fill_overlaps<first_nxe, 1, scalar_t, idx_t>(first.n,
+        sccd::cell2d_fill_overlaps<first_nxe, second_nxe, scalar_t, idx_t>(first.n,
                                                           first.ptr,
                                                           first.idx.data(),
                                                           1,
                                                           first.elem_ptr,
                                                           second.ptr,
                                                           second.idx.data(),
-                                                          0,
-                                                          nullptr,
+                                                          second_nxe > 1 ? 1 : 0,
+                                                          second_nxe > 1 ? second.elem_ptr : nullptr,
                                                           grid,
                                                           cellptr.data(),
                                                           cellidx.data(),
@@ -353,6 +390,45 @@ namespace {
         return ok ? 0 : 1;
     }
 
+    // Element against element.
+    //
+    // Every caller in the repository passes second_nxe == 1, which leaves the
+    // `if constexpr (second_nxe > 1)` branch of the shared-node masking
+    // unreachable -- so the broad phase's generality over the second list's
+    // element width was carried by the signature and by nothing else. This runs
+    // it, against a reference that does the masking independently.
+    template <int first_nxe, int second_nxe>
+    int run_two_element_case(const char* name, const ptrdiff_t na, const ptrdiff_t nb) {
+        std::mt19937 rng(9001);
+        Boxes a = make_boxes(rng, na, first_nxe, 20.0, 2.0);
+        Boxes b = make_boxes(rng, nb, second_nxe, 20.0, 2.0);
+        // A small node pool, so shared nodes between the two lists are common
+        // and the masking actually has work to do.
+        for (ptrdiff_t i = 0; i < a.n; ++i)
+            for (int v = 0; v < first_nxe; ++v) a.elem[v][i] %= 64;
+        for (ptrdiff_t i = 0; i < b.n; ++i)
+            for (int v = 0; v < second_nxe; ++v) b.elem[v][i] %= 64;
+        a.bind();
+        b.bind();
+
+        ptrdiff_t masked = 0;
+        const PairSet expected = brute_pairs<first_nxe, second_nxe>(a, b, &masked);
+
+        Boxes a_c = a, b_c = b;
+        a_c.bind();
+        b_c.bind();
+        const PairSet cell = cell2d_pairs<first_nxe, second_nxe>(a_c, b_c);
+        const PairSet sweep = sweep_pairs<first_nxe, second_nxe>(a, b);
+
+        // If the masking removed nothing, the branch ran but proved nothing --
+        // the scene has to contain shared nodes for this to be a test.
+        const bool ok = (sweep == expected) && (cell == expected) && (masked > 0);
+        std::printf("%-22s <%d,%d> a=%-6ld b=%-6ld brute=%-7zu masked=%-6ld sweep=%-7zu cell=%-7zu  %s\n",
+                    name, first_nxe, second_nxe, (long)na, (long)nb,
+                    expected.size(), (long)masked, sweep.size(), cell.size(), ok ? "ok" : "MISMATCH");
+        return ok ? 0 : 1;
+    }
+
 }  // namespace
 
 int main() {
@@ -379,6 +455,13 @@ int main() {
         bad |= quad ? run_case<4>("tiny spread", 500, 1000, 0.0001, 0.00001)
                     : run_case<3>("tiny spread", 500, 1000, 0.0001, 0.00001);
     }
+
+    // Element against element, both lists carrying connectivity. Nothing in the
+    // library calls the broad phase this way today; the capability is real and
+    // was untested, which is how it came to look removable.
+    bad |= run_two_element_case<3, 2>("tri vs edge", 1200, 2000);
+    bad |= run_two_element_case<3, 3>("tri vs tri", 1000, 1000);
+    bad |= run_two_element_case<4, 2>("quad vs edge", 900, 1500);
 
     // Self-overlap: edge-edge, where each unordered pair must appear once.
     bad |= run_self_case("self: small boxes", 3000, 100.0, 1.0);
