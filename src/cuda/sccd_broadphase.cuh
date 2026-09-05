@@ -62,7 +62,7 @@ namespace sccd {
                             const ptrdiff_t second_stride,
                             I** const SCCD_RESTRICT second_elements,
                             ptrdiff_t* const SCCD_RESTRICT ccdptr,
-                            const T* const SCCD_RESTRICT cummax);
+                            const T* const SCCD_RESTRICT second_xmax_running);
 
         template <int first_nxe, int second_nxe, typename T, typename I>
         void collect_overlaps(const int sort_axis,
@@ -77,7 +77,7 @@ namespace sccd {
                               const ptrdiff_t second_stride,
                               I** SCCD_RESTRICT const second_elements,
                               const ptrdiff_t* const SCCD_RESTRICT ccdptr,
-                              const T* const SCCD_RESTRICT cummax,
+                              const T* const SCCD_RESTRICT second_xmax_running,
                               I* SCCD_RESTRICT foverlap,
                               I* SCCD_RESTRICT noverlap);
 

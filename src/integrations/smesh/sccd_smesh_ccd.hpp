@@ -367,7 +367,6 @@ namespace sccd {
                                     points_t0_->data(),
                                     points_t1_->data(),
                                     vaabb_->data(),
-                                    vaabb_->data() + dim,
                                     safe_inflate_);
 
                 sccd::compute_aabbs(mesh_->block(0)->n_nodes_per_element(),
@@ -377,7 +376,6 @@ namespace sccd {
                                     points_t0_->data(),
                                     points_t1_->data(),
                                     faabb_->data(),
-                                    faabb_->data() + dim,
                                     safe_inflate_);
 
                 sccd::compute_aabbs(2,
@@ -387,7 +385,6 @@ namespace sccd {
                                     points_t0_->data(),
                                     points_t1_->data(),
                                     eaabb_->data(),
-                                    eaabb_->data() + dim,
                                     safe_inflate_);
             }
 

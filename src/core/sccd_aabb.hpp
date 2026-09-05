@@ -437,15 +437,14 @@ namespace sccd {
                        const int dim,
                        const geom_t* const SCCD_RESTRICT* const SCCD_RESTRICT points0,
                        const geom_t* const SCCD_RESTRICT* const SCCD_RESTRICT points1,
-                       aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_min,
-                       aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_max,
+                       aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabbs,
                        const bool safe_inflate = false) {
         // One sweep per dimension, reducing over the element's vertices in
         // registers. The previous shape ran nxe+1 separate parallel passes per
-        // dimension, each one a full read-modify-write of aabb_min/aabb_max.
+        // dimension, each one a full read-modify-write of the min/max rows.
         for (int d = 0; d < dim; d++) {
-            aabb_t *const SCCD_RESTRICT amin = aabb_min[d];
-            aabb_t *const SCCD_RESTRICT amax = aabb_max[d];
+            aabb_t *const SCCD_RESTRICT amin = aabbs[d];
+            aabb_t *const SCCD_RESTRICT amax = aabbs[dim + d];
             const geom_t *const SCCD_RESTRICT p0d = points0[d];
             const geom_t *const SCCD_RESTRICT p1d = points1[d];
 
@@ -479,12 +478,11 @@ namespace sccd {
                        const ptrdiff_t n_nodes,
                        const geom_t* const SCCD_RESTRICT* const SCCD_RESTRICT points0,
                        const geom_t* const SCCD_RESTRICT* const SCCD_RESTRICT points1,
-                       aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_min,
-                       aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_max,
+                       aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabbs,
                        const bool safe_inflate = false) {
         for (int d = 0; d < dim; d++) {
-            aabb_t *const SCCD_RESTRICT amin = aabb_min[d];
-            aabb_t *const SCCD_RESTRICT amax = aabb_max[d];
+            aabb_t *const SCCD_RESTRICT amin = aabbs[d];
+            aabb_t *const SCCD_RESTRICT amax = aabbs[dim + d];
             const geom_t *const SCCD_RESTRICT p0d = points0[d];
             const geom_t *const SCCD_RESTRICT p1d = points1[d];
 
@@ -512,12 +510,11 @@ namespace sccd {
                        const ptrdiff_t stride_disp,
                        const disp_t* const SCCD_RESTRICT* const SCCD_RESTRICT disp0,
                        const disp_t* const SCCD_RESTRICT* const SCCD_RESTRICT disp1,
-                       aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_min,
-                       aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_max,
+                       aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabbs,
                        const bool safe_inflate = false) {
         for (int d = 0; d < dim; d++) {
-            aabb_t *const SCCD_RESTRICT amin = aabb_min[d];
-            aabb_t *const SCCD_RESTRICT amax = aabb_max[d];
+            aabb_t *const SCCD_RESTRICT amin = aabbs[d];
+            aabb_t *const SCCD_RESTRICT amax = aabbs[dim + d];
             const geom_t *const SCCD_RESTRICT pd = points[d];
             const disp_t *const SCCD_RESTRICT d0 = disp0[d];
             const disp_t *const SCCD_RESTRICT d1 = disp1[d];
@@ -555,12 +552,11 @@ namespace sccd {
                        const ptrdiff_t stride_disp,
                        const disp_t* const SCCD_RESTRICT* const SCCD_RESTRICT disp0,
                        const disp_t* const SCCD_RESTRICT* const SCCD_RESTRICT disp1,
-                       aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_min,
-                       aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_max,
+                       aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabbs,
                        const bool safe_inflate = false) {
         for (int d = 0; d < dim; d++) {
-            aabb_t *const SCCD_RESTRICT amin = aabb_min[d];
-            aabb_t *const SCCD_RESTRICT amax = aabb_max[d];
+            aabb_t *const SCCD_RESTRICT amin = aabbs[d];
+            aabb_t *const SCCD_RESTRICT amax = aabbs[dim + d];
             const geom_t *const SCCD_RESTRICT pd = points[d];
             const disp_t *const SCCD_RESTRICT d0 = disp0[d];
             const disp_t *const SCCD_RESTRICT d1 = disp1[d];
@@ -589,12 +585,11 @@ namespace sccd {
                        const idx_t* const SCCD_RESTRICT* const SCCD_RESTRICT elements,
                        const int dim,
                        const geom_t* const SCCD_RESTRICT* const SCCD_RESTRICT points,
-                       aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_min,
-                       aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabb_max,
+                       aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabbs,
                        const bool safe_inflate = false) {
         for (int d = 0; d < dim; d++) {
-            aabb_t *const SCCD_RESTRICT amin = aabb_min[d];
-            aabb_t *const SCCD_RESTRICT amax = aabb_max[d];
+            aabb_t *const SCCD_RESTRICT amin = aabbs[d];
+            aabb_t *const SCCD_RESTRICT amax = aabbs[dim + d];
             const geom_t *const SCCD_RESTRICT pd = points[d];
 
             sccd::parallel_for_br(0, n_elements, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {

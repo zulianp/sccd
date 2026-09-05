@@ -123,9 +123,9 @@ int main() {
     // therefore exact, and it is what keeps the broad phase from dropping a
     // candidate when they do not -- float boxes over double geometry, say.
     const bool safe_inflate = true;
-    sccd::compute_aabbs(kDim, n_nodes, p0, p1, vaabb.rows, vaabb.rows + kDim, safe_inflate);
-    sccd::compute_aabbs(3, n_faces, faces, kDim, p0, p1, faabb.rows, faabb.rows + kDim, safe_inflate);
-    sccd::compute_aabbs(2, n_edges, edges, kDim, p0, p1, eaabb.rows, eaabb.rows + kDim, safe_inflate);
+    sccd::compute_aabbs(kDim, n_nodes, p0, p1, vaabb.rows, safe_inflate);
+    sccd::compute_aabbs(3, n_faces, faces, kDim, p0, p1, faabb.rows, safe_inflate);
+    sccd::compute_aabbs(2, n_edges, edges, kDim, p0, p1, eaabb.rows, safe_inflate);
 
     // ---- broad phase, step 2: sort along one axis ---------------------------
     // The sweep needs the lists ordered on a common axis. choose_axis picks the
