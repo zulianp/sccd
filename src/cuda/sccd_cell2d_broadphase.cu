@@ -431,8 +431,7 @@ namespace sccd {
         }  // namespace detail
 
         template <typename T, typename I>
-        void cell2d_setup_and_count(const int dim,
-                                    const ptrdiff_t n,
+        void cell2d_setup_and_count(const ptrdiff_t n,
                                     T** const SCCD_RESTRICT aabbs,
                                     Cell2DGridD<T>& grid,
                                     ptrdiff_t* const SCCD_RESTRICT cellptr,
@@ -450,8 +449,8 @@ namespace sccd {
             T h_min[3], h_max[3], h_sum[3];
             for (int d = 0; d < 3; ++d) {
                 detail::grid_stats_kernel<T><<<1, 256, 3 * 256 * sizeof(T)>>>(n,
-                                                      soa_device_row<T>(aabbs, dim, d),
-                                                      soa_device_row<T>(aabbs, dim, 3 + d),
+                                                      soa_device_row<T>(aabbs, d),
+                                                      soa_device_row<T>(aabbs, SCCD_DIM + d),
                                                       stats + 3 * d,
                                                       stats + 3 * d + 1,
                                                       stats + 3 * d + 2);
@@ -511,10 +510,10 @@ namespace sccd {
             dim3 block(SCCD_C2D_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
             dim3 gridsz((n + block.x - 1) / block.x);
             detail::bin_count_kernel<T><<<gridsz, block>>>(n,
-                                                        soa_device_row<T>(aabbs, dim, grid.axis0),
-                                                        soa_device_row<T>(aabbs, dim, 3 + grid.axis0),
-                                                        soa_device_row<T>(aabbs, dim, grid.axis1),
-                                                        soa_device_row<T>(aabbs, dim, 3 + grid.axis1),
+                                                        soa_device_row<T>(aabbs, grid.axis0),
+                                                        soa_device_row<T>(aabbs, SCCD_DIM + grid.axis0),
+                                                        soa_device_row<T>(aabbs, grid.axis1),
+                                                        soa_device_row<T>(aabbs, SCCD_DIM + grid.axis1),
                                                         grid,
                                                         cellptr);
             SCCD_CUDA_LAST_ERROR();
@@ -535,12 +534,11 @@ namespace sccd {
 
             dim3 block(SCCD_C2D_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
             dim3 gridsz((n + block.x - 1) / block.x);
-            // dim is 3 here: the caller passes rows already, see soa_device_row.
             detail::bin_fill_kernel<T, I><<<gridsz, block>>>(n,
-                                                          soa_device_row<T>(aabbs, 3, grid.axis0),
-                                                          soa_device_row<T>(aabbs, 3, 3 + grid.axis0),
-                                                          soa_device_row<T>(aabbs, 3, grid.axis1),
-                                                          soa_device_row<T>(aabbs, 3, 3 + grid.axis1),
+                                                          soa_device_row<T>(aabbs, grid.axis0),
+                                                          soa_device_row<T>(aabbs, SCCD_DIM + grid.axis0),
+                                                          soa_device_row<T>(aabbs, grid.axis1),
+                                                          soa_device_row<T>(aabbs, SCCD_DIM + grid.axis1),
                                                           grid,
                                                           cellptr,
                                                           cellidx,
@@ -709,7 +707,7 @@ namespace sccd {
 
 #define SCCD_C2D_INSTANTIATE(T, I)                                                             \
     template void sccd::device::cell2d_setup_and_count<T, I>(                                  \
-        const int, const ptrdiff_t, T**, sccd::device::Cell2DGridD<T>&, ptrdiff_t*, ptrdiff_t*); \
+        const ptrdiff_t, T**, sccd::device::Cell2DGridD<T>&, ptrdiff_t*, ptrdiff_t*);          \
     template void sccd::device::cell2d_fill<T, I>(const ptrdiff_t,                             \
                                                   T**,                                         \
                                                   const sccd::device::Cell2DGridD<T>&,         \

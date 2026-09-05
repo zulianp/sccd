@@ -34,6 +34,35 @@ namespace sccd {
      * on depth, resolution or stack exhaustion -- and not a property to document
      * and live with. See benchmark/oracle/README.md.
      */
+    /**
+     * \brief What the narrow phase writes to `toi`, and how much it may prune.
+     *
+     * This was an `int` named `toi_stride` whose two meanings lived in
+     * docs/API.md and in a demo comment, enforced only by an assert that
+     * vanishes under NDEBUG. The name described the output array's layout; what
+     * a caller actually chooses is what they want back, and the pruning follows
+     * from that.
+     *
+     * The values keep the numbers the old parameter used, so a recorded run or
+     * a CSV column that says 0 or 1 still means what it did.
+     */
+    enum class ToiOutput : int {
+        /// One time of impact for the whole batch, in `toi[0]`: the earliest
+        /// over every candidate. Every query prunes against the running minimum,
+        /// which is what makes this markedly cheaper -- on a real mesh the
+        /// search explores about 1.2 boxes per query with the bound tightening,
+        /// against about 11 without.
+        Earliest = 0,
+        /// One time of impact per candidate pair, in `toi[i]`. No shared bound,
+        /// so nothing prunes across queries; 1.6-4.4x the cost of Earliest on
+        /// the host and more on the device.
+        PerPair = 1
+    };
+
+    static inline const char* toi_output_name(const ToiOutput out) {
+        return out == ToiOutput::Earliest ? "earliest" : "per-pair";
+    }
+
     enum class NarrowPhaseMode : int {
         /// Scalar search with the looser acceptance test: it compares codomain
         /// widths against domain tolerances, so it accepts sooner and reports a

@@ -2,6 +2,7 @@
 #define SCCD_NARROWPHASE_CUH
 
 #include "sccd_base.hpp"
+#include "sccd_narrowphase_mode.hpp"
 
 #include <stdlib.h>
 
@@ -11,7 +12,7 @@ namespace sccd {
     namespace device {
 
         // toi is caller-owned device memory.
-        // toi_stride: 1 -> per-candidate toi array (toi has length noverlaps);
+        // toi_output: 1 -> per-candidate toi array (toi has length noverlaps);
         //             0 -> shared scalar toi (toi has length 1).
         template <typename T, typename I>
         int narrow_phase_ee(const size_t noverlaps,
@@ -27,7 +28,7 @@ namespace sccd {
                             T* const SCCD_RESTRICT toi,
                             const int max_depth,
                             const T tol,
-                            const int toi_stride = 0);
+                            const ToiOutput toi_output = ToiOutput::Earliest);
 
 
         template <typename T, typename I>
@@ -43,7 +44,7 @@ namespace sccd {
                             T* const SCCD_RESTRICT toi,
                             const int max_depth,
                             const T tol,
-                            const int toi_stride = 0);
+                            const ToiOutput toi_output = ToiOutput::Earliest);
 
 
         template <typename T>

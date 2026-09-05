@@ -2,6 +2,7 @@
 #define SCCD_NARROWPHASE_VQ_CUH
 
 #include "sccd_base.hpp"
+#include "sccd_narrowphase_mode.hpp"
 
 #include <cstddef>
 
@@ -78,7 +79,7 @@ namespace sccd {
         /**
          * \brief Vertex-quad times of impact for \p noverlaps candidate pairs.
          *
-         * \p toi_stride 0 writes a single shared minimum to `toi[0]`; 1 writes one
+         * \p toi_output 0 writes a single shared minimum to `toi[0]`; 1 writes one
          * time of impact per pair. Mirrors the host `narrow_phase_vq`.
          */
         template <typename T, typename I>
@@ -93,7 +94,7 @@ namespace sccd {
                             T* const SCCD_RESTRICT toi,
                             const int max_depth,
                             const T tol,
-                            const int toi_stride = 0);
+                            const ToiOutput toi_output = ToiOutput::Earliest);
 
     }  // namespace device
 }  // namespace sccd

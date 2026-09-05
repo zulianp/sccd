@@ -447,7 +447,7 @@ namespace {
     // recomputes all three. Nothing else in the repository runs both forms on the
     // same query, so a divergence between them would be invisible.
     //
-    // This also covers `toi_stride == 0`, the shared-minimum path, which is the
+    // This also covers ToiOutput::Earliest, the shared-minimum path, which is the
     // only thing that exercises the quad atomics.
     // ---------------------------------------------------------------------
     int check_entry_point() {
@@ -472,11 +472,11 @@ namespace {
 
         int bad = 0;
 
-        // toi_stride == 1: one answer per candidate.
+        // ToiOutput::PerPair: one answer per candidate.
         {
             S toi[2] = {S(1), S(1)};
             sccd::narrow_phase_vq<S, int>(2, vov, qov, v0, v1, 1, quads,
-                                             S(1), toi, 69, S(1e-8), /*toi_stride=*/1);
+                                             S(1), toi, 69, S(1e-8), sccd::ToiOutput::PerPair);
             const double expect[2] = {0.5, 0.25};
             for (int i = 0; i < 2; ++i) {
                 const double err = (double)toi[i] - expect[i];
@@ -491,11 +491,11 @@ namespace {
             }
         }
 
-        // toi_stride == 0: the shared minimum over both candidates.
+        // ToiOutput::Earliest: the shared minimum over both candidates.
         {
             S toi = S(1);
             sccd::narrow_phase_vq<S, int>(2, vov, qov, v0, v1, 1, quads,
-                                             S(1), &toi, 69, S(1e-8), /*toi_stride=*/0);
+                                             S(1), &toi, 69, S(1e-8), sccd::ToiOutput::Earliest);
             const double err = (double)toi - 0.25;
             if (err > 1e-6 || err < -kEntryEarlyBudget) {
                 std::printf("  FAIL narrow_phase_vq stride 0: toi=%.9f, true=%.3f\n",

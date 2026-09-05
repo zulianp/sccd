@@ -56,7 +56,7 @@ namespace sccd {
             points_t0_ = points_t0;
             points_t1_ = points_t1;
 
-            int err = find_impact_times_impl(0, max_depth, tol);
+            int err = find_impact_times_impl(sccd::ToiOutput::Earliest, max_depth, tol);
 
             if (err == SCCD_SUCCESS) {
                 auto temp = smesh::to_host(ee_tois_);
@@ -79,7 +79,7 @@ namespace sccd {
             points_t0_ = points_t0;
             points_t1_ = points_t1;
 
-            int err = find_impact_times_impl(1, max_depth, tol);
+            int err = find_impact_times_impl(sccd::ToiOutput::PerPair, max_depth, tol);
 
             v_overlap = v_overlap_;
             f_overlap = f_overlap_;
@@ -103,9 +103,9 @@ namespace sccd {
 
             int err = SCCD_SUCCESS;
             if (execution_space_ == smesh::EXECUTION_SPACE_HOST) {
-                err |= broad_phase_host(0);
+                err |= broad_phase_host(sccd::ToiOutput::Earliest);
             } else {
-                err |= broad_phase_device(0);
+                err |= broad_phase_device(sccd::ToiOutput::Earliest);
             }
 
             v_overlap = v_overlap_;
@@ -115,22 +115,22 @@ namespace sccd {
             return err;
         }
 
-        // FV + EE narrow_phase; `max_toi` is updated after FV when toi_stride == 0.
+        // FV + EE narrow_phase; `max_toi` is updated after FV when toi_output == sccd::ToiOutput::Earliest.
         int narrow_phase(scalar_t& max_toi,
                          smesh::SharedBuffer<scalar_t>& vf_tois,
                          smesh::SharedBuffer<scalar_t>& ee_tois,
                          const int max_depth,
                          const scalar_t tol,
-                         const ptrdiff_t toi_stride = 0) {
+                         const sccd::ToiOutput toi_output = sccd::ToiOutput::Earliest) {
             int err = SCCD_SUCCESS;
-            err |= narrow_phase_fv(max_toi, vf_tois, max_depth, tol, toi_stride);
-            err |= narrow_phase_ee(max_toi, ee_tois, max_depth, tol, toi_stride);
+            err |= narrow_phase_fv(max_toi, vf_tois, max_depth, tol, toi_output);
+            err |= narrow_phase_ee(max_toi, ee_tois, max_depth, tol, toi_output);
             return err;
         }
 
         const smesh::SharedBuffer<smesh::idx_t*>& edges() const { return edges_; }
 
-        void set_safe_inflate(const bool safe_inflate) { safe_inflate_ = safe_inflate; }
+        void set_box_rounding(const sccd::BoxRounding rounding) { rounding_ = rounding; }
 
     private:
         static smesh::ElemType canonical_face_element_type(const std::shared_ptr<smesh::Mesh>& mesh) {
@@ -221,7 +221,7 @@ namespace sccd {
         std::vector<smesh::idx_t> e_cellidx_;
 
 
-        bool safe_inflate_{false};
+        sccd::BoxRounding rounding_{sccd::BoxRounding::Exact};
 
     public:
         int broad_phase_fv(const smesh::SharedBuffer<scalar_t*>& points_t0,
@@ -305,20 +305,20 @@ namespace sccd {
         }
 
         // Run only the FV narrow_phase using the latest FV broad_phase result.
-        // `max_toi` upper-bounds the search; on `toi_stride == 0` (shared scalar
+        // `max_toi` upper-bounds the search; on `toi_output == sccd::ToiOutput::Earliest` (shared scalar
         // output) it is updated in place to the earliest TOI observed.
         int narrow_phase_fv(scalar_t& max_toi,
                             smesh::SharedBuffer<scalar_t>& vf_tois,
                             const int max_depth,
                             const scalar_t tol,
-                            const ptrdiff_t toi_stride = 0) {
+                            const sccd::ToiOutput toi_output = sccd::ToiOutput::Earliest) {
             int err = SCCD_SUCCESS;
             if (execution_space_ == smesh::EXECUTION_SPACE_HOST) {
                 SMESH_TRACE_SCOPE("Narrow phase (FV)");
-                err |= narrow_phase_fv_step_host_(max_toi, max_depth, tol, toi_stride);
+                err |= narrow_phase_fv_step_host_(max_toi, max_depth, tol, toi_output);
             } else {
                 SMESH_TRACE_SCOPE("Narrow phase (FV)");
-                err |= narrow_phase_fv_step_device_(max_toi, max_depth, tol, toi_stride);
+                err |= narrow_phase_fv_step_device_(max_toi, max_depth, tol, toi_output);
             }
             vf_tois = vf_tois_;
             return err;
@@ -328,7 +328,7 @@ namespace sccd {
          * \brief Run only the EE narrow phase, using the latest EE broad-phase result.
          *
          * `max_toi` is in/out exactly as in `narrow_phase_fv`: it bounds the
-         * search on the way in and, for `toi_stride == 0`, comes back holding the
+         * search on the way in and, for `toi_output == sccd::ToiOutput::Earliest`, comes back holding the
          * earliest time of impact. It used to be `const scalar_t` -- by value --
          * so the caller's variable was never written and the answer was reachable
          * only through `ee_tois`. Code written symmetrically against the two
@@ -338,14 +338,14 @@ namespace sccd {
                             smesh::SharedBuffer<scalar_t>& ee_tois,
                             const int max_depth,
                             const scalar_t tol,
-                            const ptrdiff_t toi_stride = 0) {
+                            const sccd::ToiOutput toi_output = sccd::ToiOutput::Earliest) {
             int err = SCCD_SUCCESS;
             if (execution_space_ == smesh::EXECUTION_SPACE_HOST) {
                 SMESH_TRACE_SCOPE("Narrow phase (EE)");
-                err |= narrow_phase_ee_step_host_(max_toi, max_depth, tol, toi_stride);
+                err |= narrow_phase_ee_step_host_(max_toi, max_depth, tol, toi_output);
             } else {
                 SMESH_TRACE_SCOPE("Narrow phase (EE)");
-                err |= narrow_phase_ee_step_device_(max_toi, max_depth, tol, toi_stride);
+                err |= narrow_phase_ee_step_device_(max_toi, max_depth, tol, toi_output);
             }
             ee_tois = ee_tois_;
             return err;
@@ -362,30 +362,27 @@ namespace sccd {
 
             {
                 SMESH_TRACE_SCOPE("Broad_phase: AABB");
-                sccd::compute_aabbs(dim,
-                                    n_nodes,
+                sccd::compute_aabbs(n_nodes,
                                     points_t0_->data(),
                                     points_t1_->data(),
                                     vaabb_->data(),
-                                    safe_inflate_);
+                                    rounding_);
 
                 sccd::compute_aabbs(mesh_->block(0)->n_nodes_per_element(),
                                     n_faces,
                                     faces_->data(),
-                                    dim,
-                                    points_t0_->data(),
+                                                                        points_t0_->data(),
                                     points_t1_->data(),
                                     faabb_->data(),
-                                    safe_inflate_);
+                                    rounding_);
 
                 sccd::compute_aabbs(2,
                                     n_edges,
                                     edges_->data(),
-                                    dim,
-                                    points_t0_->data(),
+                                                                        points_t0_->data(),
                                     points_t1_->data(),
                                     eaabb_->data(),
-                                    safe_inflate_);
+                                    rounding_);
             }
 
             sort_axis_ = sccd::choose_axis(n_nodes, vaabb_->data());
@@ -708,11 +705,11 @@ namespace sccd {
         int narrow_phase_fv_step_host_(scalar_t& max_toi,
                                        const int max_depth,
                                        const scalar_t tol,
-                                       const ptrdiff_t toi_stride) {
+                                       const sccd::ToiOutput toi_output) {
             SMESH_TRACE_SCOPE("Narrow phase: F2V");
 
-            const auto toi_storage_size = [toi_stride](const size_t noverlaps) {
-                return toi_stride == 0 ? size_t(1) : noverlaps;
+            const auto toi_storage_size = [toi_output](const size_t noverlaps) {
+                return toi_output == sccd::ToiOutput::Earliest ? size_t(1) : noverlaps;
             };
 
             vf_tois_ = smesh::create_buffer<scalar_t>(toi_storage_size(v_overlap_->size()), execution_space_);
@@ -729,7 +726,7 @@ namespace sccd {
                                                                  vf_tois_->data(),
                                                                  max_depth,
                                                                  tol,
-                                                                 toi_stride);
+                                                                 toi_output);
             } else if (element_type == smesh::QUADSHELL4) {
                 sccd::narrow_phase_vq<scalar_t, smesh::idx_t>(v_overlap_->size(),
                                                                  v_overlap_->data(),
@@ -742,12 +739,12 @@ namespace sccd {
                                                                  vf_tois_->data(),
                                                                  max_depth,
                                                                  tol,
-                                                                 toi_stride);
+                                                                 toi_output);
             } else {
                 SMESH_ERROR("Unsupported CCD face element type: %s\n", smesh::type_to_string(element_type));
             }
 
-            if (toi_stride == 0 && v_overlap_->size() != 0) {
+            if (toi_output == sccd::ToiOutput::Earliest && v_overlap_->size() != 0) {
                 max_toi = vf_tois_->data()[0];
             }
 
@@ -757,11 +754,11 @@ namespace sccd {
         int narrow_phase_ee_step_host_(scalar_t& max_toi,
                                        const int max_depth,
                                        const scalar_t tol,
-                                       const ptrdiff_t toi_stride) {
+                                       const sccd::ToiOutput toi_output) {
             SMESH_TRACE_SCOPE("Narrow phase: E2E");
 
-            const auto toi_storage_size = [toi_stride](const size_t noverlaps) {
-                return toi_stride == 0 ? size_t(1) : noverlaps;
+            const auto toi_storage_size = [toi_output](const size_t noverlaps) {
+                return toi_output == sccd::ToiOutput::Earliest ? size_t(1) : noverlaps;
             };
 
             ee_tois_ = smesh::create_buffer<scalar_t>(toi_storage_size(e0_overlap_->size()), execution_space_);
@@ -776,9 +773,9 @@ namespace sccd {
                                                           ee_tois_->data(),
                                                           max_depth,
                                                           tol,
-                                                          toi_stride);
+                                                          toi_output);
 
-            if (toi_stride == 0) {
+            if (toi_output == sccd::ToiOutput::Earliest) {
                 max_toi = ee_tois_->data()[0];
             }
             return SCCD_SUCCESS;
@@ -797,40 +794,38 @@ namespace sccd {
             {
                 SMESH_TRACE_SCOPE("Broad_phase: AABB");
                 sccd::device::compute_aabbs(
-                    dim, n_nodes, points_t0_->data(), points_t1_->data(), vaabb_->data(), safe_inflate_);
+                    n_nodes, points_t0_->data(), points_t1_->data(), vaabb_->data(), rounding_);
 
                 sccd::device::compute_aabbs(mesh_->block(0)->n_nodes_per_element(),
                                             n_faces,
                                             faces_->data(),
-                                            dim,
-                                            points_t0_->data(),
+                                                                                points_t0_->data(),
                                             points_t1_->data(),
                                             faabb_->data(),
-                                            safe_inflate_);
+                                            rounding_);
 
                 sccd::device::compute_aabbs(2,
                                             n_edges,
                                             edges_->data(),
-                                            dim,
-                                            points_t0_->data(),
+                                                                                points_t0_->data(),
                                             points_t1_->data(),
                                             eaabb_->data(),
-                                            safe_inflate_);
+                                            rounding_);
             }
 
             {
                 SMESH_TRACE_SCOPE("Sorting AABBs (device)");
 
-                sort_axis_ = sccd::device::choose_axis(dim, n_nodes, vaabb_->data());
+                sort_axis_ = sccd::device::choose_axis(n_nodes, vaabb_->data());
 
                 sccd::device::sort_along_axis(
-                    dim, n_nodes, sort_axis_, vaabb_->data(), vidx_->data(), scratch_->data());
+                    n_nodes, sort_axis_, vaabb_->data(), vidx_->data(), scratch_->data());
 
                 sccd::device::sort_along_axis(
-                    dim, n_faces, sort_axis_, faabb_->data(), fidx_->data(), scratch_->data());
+                    n_faces, sort_axis_, faabb_->data(), fidx_->data(), scratch_->data());
 
                 sccd::device::sort_along_axis(
-                    dim, n_edges, sort_axis_, eaabb_->data(), eidx_->data(), scratch_->data());
+                    n_edges, sort_axis_, eaabb_->data(), eidx_->data(), scratch_->data());
             }
             return SCCD_SUCCESS;
 #else
@@ -992,12 +987,12 @@ namespace sccd {
         int narrow_phase_fv_step_device_(scalar_t& max_toi,
                                          const int max_depth,
                                          const scalar_t tol,
-                                         const ptrdiff_t toi_stride) {
+                                         const sccd::ToiOutput toi_output) {
 #if defined(SCCD_ENABLE_CUDA)
             SMESH_TRACE_SCOPE("Narrow phase: F2V");
 
-            const auto toi_storage_size = [toi_stride](const size_t noverlaps) {
-                return toi_stride == 0 ? size_t(1) : noverlaps;
+            const auto toi_storage_size = [toi_output](const size_t noverlaps) {
+                return toi_output == sccd::ToiOutput::Earliest ? size_t(1) : noverlaps;
             };
 
             vf_tois_ = smesh::create_buffer<scalar_t>(toi_storage_size(v_overlap_->size()), execution_space_);
@@ -1018,8 +1013,8 @@ namespace sccd {
                                                                       vf_tois_->data(),
                                                                       max_depth,
                                                                       tol,
-                                                                      (int)toi_stride);
-                if (toi_stride == 0) {
+                                                                      toi_output);
+                if (toi_output == sccd::ToiOutput::Earliest) {
                     auto host_toi = smesh::to_host(vf_tois_);
                     max_toi = host_toi->data()[0];
                 }
@@ -1039,9 +1034,9 @@ namespace sccd {
                                              vf_tois_->data(),
                                              max_depth,
                                              tol,
-                                             toi_stride);
+                                             toi_output);
 
-            if (toi_stride == 0 && v_overlap_->size() != 0) {
+            if (toi_output == sccd::ToiOutput::Earliest && v_overlap_->size() != 0) {
                 auto temp = smesh::to_host(vf_tois_);
                 max_toi = temp->data()[0];
             }
@@ -1051,7 +1046,7 @@ namespace sccd {
             SMESH_UNUSED(max_toi);
             SMESH_UNUSED(max_depth);
             SMESH_UNUSED(tol);
-            SMESH_UNUSED(toi_stride);
+            SMESH_UNUSED(toi_output);
             SMESH_ERROR("Not implemented");
             return SCCD_SUCCESS;
 #endif
@@ -1060,12 +1055,12 @@ namespace sccd {
         int narrow_phase_ee_step_device_(scalar_t& max_toi,
                                          const int max_depth,
                                          const scalar_t tol,
-                                         const ptrdiff_t toi_stride) {
+                                         const sccd::ToiOutput toi_output) {
 #if defined(SCCD_ENABLE_CUDA)
             SMESH_TRACE_SCOPE("Narrow phase: E2E");
 
-            const auto toi_storage_size = [toi_stride](const size_t noverlaps) {
-                return toi_stride == 0 ? size_t(1) : noverlaps;
+            const auto toi_storage_size = [toi_output](const size_t noverlaps) {
+                return toi_output == sccd::ToiOutput::Earliest ? size_t(1) : noverlaps;
             };
 
             ee_tois_ = smesh::create_buffer<scalar_t>(toi_storage_size(e0_overlap_->size()), execution_space_);
@@ -1080,9 +1075,9 @@ namespace sccd {
                                           ee_tois_->data(),
                                           max_depth,
                                           tol,
-                                          toi_stride);
+                                          toi_output);
 
-            if (toi_stride == 0) {
+            if (toi_output == sccd::ToiOutput::Earliest) {
                 auto host_toi = smesh::to_host(ee_tois_);
                 max_toi = host_toi->data()[0];
             }
@@ -1091,7 +1086,7 @@ namespace sccd {
             SMESH_UNUSED(max_toi);
             SMESH_UNUSED(max_depth);
             SMESH_UNUSED(tol);
-            SMESH_UNUSED(toi_stride);
+            SMESH_UNUSED(toi_output);
             SMESH_ERROR("Not implemented");
             return SCCD_SUCCESS;
 #endif
@@ -1099,8 +1094,8 @@ namespace sccd {
 
         // ---- Combined-pipeline glue (matches previous behaviour) -------------
 
-        int broad_phase_host(const ptrdiff_t toi_stride) {
-            SMESH_UNUSED(toi_stride);
+        int broad_phase_host(const sccd::ToiOutput toi_output) {
+            SMESH_UNUSED(toi_output);
 
             if (!vaabb_) {
                 init();
@@ -1118,25 +1113,25 @@ namespace sccd {
             return err;
         }
 
-        int narrow_phase_host(const ptrdiff_t toi_stride, const int max_depth, const scalar_t tol) {
+        int narrow_phase_host(const sccd::ToiOutput toi_output, const int max_depth, const scalar_t tol) {
             SMESH_TRACE_SCOPE("Narrow phase");
             scalar_t toi = 1;
             int err = SCCD_SUCCESS;
-            err |= narrow_phase_fv_step_host_(toi, max_depth, tol, toi_stride);
-            err |= narrow_phase_ee_step_host_(toi, max_depth, tol, toi_stride);
+            err |= narrow_phase_fv_step_host_(toi, max_depth, tol, toi_output);
+            err |= narrow_phase_ee_step_host_(toi, max_depth, tol, toi_output);
             return err;
         }
 
-        int find_impact_times_impl_host(const ptrdiff_t toi_stride, const int max_depth, const scalar_t tol) {
+        int find_impact_times_impl_host(const sccd::ToiOutput toi_output, const int max_depth, const scalar_t tol) {
             SMESH_TRACE_SCOPE("CCD CPU");
-            int err = broad_phase_host(toi_stride);
-            err |= narrow_phase_host(toi_stride, max_depth, tol);
+            int err = broad_phase_host(toi_output);
+            err |= narrow_phase_host(toi_output, max_depth, tol);
             return err;
         }
 
-        int broad_phase_device(const ptrdiff_t toi_stride) {
+        int broad_phase_device(const sccd::ToiOutput toi_output) {
 #if defined(SCCD_ENABLE_CUDA)
-            SMESH_UNUSED(toi_stride);
+            SMESH_UNUSED(toi_output);
 
             if (!vaabb_) {
                 init();
@@ -1149,22 +1144,22 @@ namespace sccd {
             err |= broad_phase_ee_step_device_();
             return err;
 #else
-            SMESH_UNUSED(toi_stride);
+            SMESH_UNUSED(toi_output);
             SMESH_ERROR("Not implemented");
             return SCCD_SUCCESS;
 #endif
         }
 
-        int narrow_phase_device(const ptrdiff_t toi_stride, const int max_depth, const scalar_t tol) {
+        int narrow_phase_device(const sccd::ToiOutput toi_output, const int max_depth, const scalar_t tol) {
 #if defined(SCCD_ENABLE_CUDA)
             SMESH_TRACE_SCOPE("Narrow phase");
             scalar_t toi = 1;
             int err = SCCD_SUCCESS;
-            err |= narrow_phase_fv_step_device_(toi, max_depth, tol, toi_stride);
-            err |= narrow_phase_ee_step_device_(toi, max_depth, tol, toi_stride);
+            err |= narrow_phase_fv_step_device_(toi, max_depth, tol, toi_output);
+            err |= narrow_phase_ee_step_device_(toi, max_depth, tol, toi_output);
             return err;
 #else
-            SMESH_UNUSED(toi_stride);
+            SMESH_UNUSED(toi_output);
             SMESH_UNUSED(max_depth);
             SMESH_UNUSED(tol);
             SMESH_ERROR("Not implemented");
@@ -1172,18 +1167,18 @@ namespace sccd {
 #endif
         }
 
-        int find_impact_times_impl_device(const ptrdiff_t toi_stride, const int max_depth, const scalar_t tol) {
+        int find_impact_times_impl_device(const sccd::ToiOutput toi_output, const int max_depth, const scalar_t tol) {
             SMESH_TRACE_SCOPE("CCD GPU");
-            int err = broad_phase_device(toi_stride);
-            err |= narrow_phase_device(toi_stride, max_depth, tol);
+            int err = broad_phase_device(toi_output);
+            err |= narrow_phase_device(toi_output, max_depth, tol);
             return err;
         }
 
-        int find_impact_times_impl(const ptrdiff_t toi_stride, const int max_depth, const scalar_t tol) {
+        int find_impact_times_impl(const sccd::ToiOutput toi_output, const int max_depth, const scalar_t tol) {
             if (execution_space_ == smesh::EXECUTION_SPACE_HOST) {
-                return find_impact_times_impl_host(toi_stride, max_depth, tol);
+                return find_impact_times_impl_host(toi_output, max_depth, tol);
             } else {
-                return find_impact_times_impl_device(toi_stride, max_depth, tol);
+                return find_impact_times_impl_device(toi_output, max_depth, tol);
             }
         }
 
