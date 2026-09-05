@@ -155,10 +155,15 @@ def conservativeness_table(summaries: dict[tuple[str, str], SceneSummary],
                  "earliest-only output respectively. Both must be zero: a late "
                  "time of impact lets a simulation step through the contact, "
                  "which is the failure the search exists to prevent. False "
-                 "positives cost work only and are reported for information."),
+                 "positives cost work only and are reported for information. "
+                 "\\emph{queries} is how many carry ground-truth data at all, "
+                 "no-collision cases included; \\emph{toi compared} is how many "
+                 "times of impact were actually placed beside an exact root, "
+                 "which is what the claim rests on."),
         columns=[
             Column("scene", "l"), Column("mode", "l"),
-            Column("queries with a root", tex_header=r"queries w/ root"),
+            Column("queries", tex_header=r"queries"),
+            Column("toi compared", tex_header=r"toi compared"),
             Column("late (per-pair)"), Column("late (earliest)"),
             Column("false pos."), Column("false neg."),
         ],
@@ -170,8 +175,8 @@ def conservativeness_table(summaries: dict[tuple[str, str], SceneSummary],
     )
     for (scene, mode), s in sorted(summaries.items()):
         table.add(SCENE_LABEL.get(scene, scene), mode_label(mode),
-                  f"{s.gt_queries:,}", f"{s.toi_late}", f"{s.s0_late}",
-                  f"{s.fp:,}", f"{s.fn}")
+                  f"{s.gt_queries:,}", f"{s.toi_compared:,}",
+                  f"{s.toi_late}", f"{s.s0_late}", f"{s.fp:,}", f"{s.fn}")
     return table
 
 

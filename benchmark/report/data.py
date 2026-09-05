@@ -228,7 +228,13 @@ class SceneSummary:
     broad_fn: int = 0
     toi_late: int = 0
     s0_late: int = 0
+    # Two different denominators, and conflating them overstates the evidence.
+    # `gt_queries` is how many queries carry ground-truth data at all, NaN
+    # (no collision) included. `toi_compared` is how many times of impact were
+    # actually put side by side with an exact root, which is the number the
+    # conservativeness claim rests on.
     gt_queries: int = 0
+    toi_compared: int = 0
     toi_med_early: list[float] = field(default_factory=list)
 
 
@@ -283,6 +289,9 @@ def by_scene(rows: list[dict]) -> dict[tuple[str, str], SceneSummary]:
             root_n = _as_float(row.get("root_n"))
             if root_n is not None and root_n > 0:
                 summary.gt_queries += int(root_n)
+            toi_n = _as_float(row.get("toi_n"))
+            if toi_n is not None and toi_n > 0:
+                summary.toi_compared += int(toi_n)
             med_early = _as_float(row.get("toi_med_early"))
             if med_early is not None and med_early > 0:
                 summary.toi_med_early.append(med_early)
