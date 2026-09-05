@@ -12,24 +12,13 @@
 // are checked against numbers rather than against each other. Conservativeness is
 // the property under test: a reported time of impact must never be later than the
 // true one, misses are illegal, and earlier is fine.
+//
+// The declarations come from sccd.h rather than being re-typed here. They used
+// to be re-typed, which meant this file could compile and link against a
+// signature the library no longer had -- C linkage does not mangle, so the
+// mismatch would have surfaced as wrong answers rather than as a build error.
 
-extern "C" {
-int sccd_find_root_bisection_vf_f(int, float, const float[3], const float[3], const float[3],
-                                  const float[3], const float[3], const float[3], const float[3],
-                                  const float[3], float*, float*, float*);
-int sccd_find_root_bisection_vf_d(int, double, const double[3], const double[3], const double[3],
-                                  const double[3], const double[3], const double[3], const double[3],
-                                  const double[3], double*, double*, double*);
-int sccd_find_root_vf_f(int, float, const float[3], const float[3], const float[3], const float[3],
-                        const float[3], const float[3], const float[3], const float[3],
-                        float*, float*, float*);
-int sccd_find_root_vf_d(int, double, const double[3], const double[3], const double[3],
-                        const double[3], const double[3], const double[3], const double[3],
-                        const double[3], double*, double*, double*);
-int sccd_find_root_ee_d(int, double, const double[3], const double[3], const double[3],
-                        const double[3], const double[3], const double[3], const double[3],
-                        const double[3], double*, double*, double*);
-}
+#include "sccd.h"
 
 #include <cmath>
 #include <cstdio>
