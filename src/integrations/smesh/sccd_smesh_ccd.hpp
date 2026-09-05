@@ -123,7 +123,7 @@ namespace sccd {
                          const scalar_t tol,
                          const sccd::ToiOutput toi_output = sccd::ToiOutput::Earliest) {
             int err = SCCD_SUCCESS;
-            err |= narrow_phase_fv(max_toi, vf_tois, max_depth, tol, toi_output);
+            err |= narrow_phase_vf(max_toi, vf_tois, max_depth, tol, toi_output);
             err |= narrow_phase_ee(max_toi, ee_tois, max_depth, tol, toi_output);
             return err;
         }
@@ -224,6 +224,10 @@ namespace sccd {
         sccd::BoxRounding rounding_{sccd::BoxRounding::Exact};
 
     public:
+        // fv here, vf in the narrow phase, and both are right: the broad phase
+        // pairs the face list against the vertex list, in that order, while the
+        // narrow phase answers a vertex-against-face query. The core spells the
+        // latter narrow_phase_vf, and this class now matches it.
         int broad_phase_fv(const smesh::SharedBuffer<scalar_t*>& points_t0,
                            const smesh::SharedBuffer<scalar_t*>& points_t1,
                            smesh::SharedBuffer<smesh::idx_t>& v_overlap,
@@ -307,7 +311,7 @@ namespace sccd {
         // Run only the FV narrow_phase using the latest FV broad_phase result.
         // `max_toi` upper-bounds the search; on `toi_output == sccd::ToiOutput::Earliest` (shared scalar
         // output) it is updated in place to the earliest TOI observed.
-        int narrow_phase_fv(scalar_t& max_toi,
+        int narrow_phase_vf(scalar_t& max_toi,
                             smesh::SharedBuffer<scalar_t>& vf_tois,
                             const int max_depth,
                             const scalar_t tol,
@@ -315,10 +319,10 @@ namespace sccd {
             int err = SCCD_SUCCESS;
             if (execution_space_ == smesh::EXECUTION_SPACE_HOST) {
                 SMESH_TRACE_SCOPE("Narrow phase (FV)");
-                err |= narrow_phase_fv_step_host_(max_toi, max_depth, tol, toi_output);
+                err |= narrow_phase_vf_step_host_(max_toi, max_depth, tol, toi_output);
             } else {
                 SMESH_TRACE_SCOPE("Narrow phase (FV)");
-                err |= narrow_phase_fv_step_device_(max_toi, max_depth, tol, toi_output);
+                err |= narrow_phase_vf_step_device_(max_toi, max_depth, tol, toi_output);
             }
             vf_tois = vf_tois_;
             return err;
@@ -327,7 +331,7 @@ namespace sccd {
         /**
          * \brief Run only the EE narrow phase, using the latest EE broad-phase result.
          *
-         * `max_toi` is in/out exactly as in `narrow_phase_fv`: it bounds the
+         * `max_toi` is in/out exactly as in `narrow_phase_vf`: it bounds the
          * search on the way in and, for `toi_output == sccd::ToiOutput::Earliest`, comes back holding the
          * earliest time of impact. It used to be `const scalar_t` -- by value --
          * so the caller's variable was never written and the answer was reachable
@@ -702,7 +706,7 @@ namespace sccd {
             return SCCD_SUCCESS;
         }
 
-        int narrow_phase_fv_step_host_(scalar_t& max_toi,
+        int narrow_phase_vf_step_host_(scalar_t& max_toi,
                                        const int max_depth,
                                        const scalar_t tol,
                                        const sccd::ToiOutput toi_output) {
@@ -984,7 +988,7 @@ namespace sccd {
 #endif
         }
 
-        int narrow_phase_fv_step_device_(scalar_t& max_toi,
+        int narrow_phase_vf_step_device_(scalar_t& max_toi,
                                          const int max_depth,
                                          const scalar_t tol,
                                          const sccd::ToiOutput toi_output) {
@@ -1117,7 +1121,7 @@ namespace sccd {
             SMESH_TRACE_SCOPE("Narrow phase");
             scalar_t toi = 1;
             int err = SCCD_SUCCESS;
-            err |= narrow_phase_fv_step_host_(toi, max_depth, tol, toi_output);
+            err |= narrow_phase_vf_step_host_(toi, max_depth, tol, toi_output);
             err |= narrow_phase_ee_step_host_(toi, max_depth, tol, toi_output);
             return err;
         }
@@ -1155,7 +1159,7 @@ namespace sccd {
             SMESH_TRACE_SCOPE("Narrow phase");
             scalar_t toi = 1;
             int err = SCCD_SUCCESS;
-            err |= narrow_phase_fv_step_device_(toi, max_depth, tol, toi_output);
+            err |= narrow_phase_vf_step_device_(toi, max_depth, tol, toi_output);
             err |= narrow_phase_ee_step_device_(toi, max_depth, tol, toi_output);
             return err;
 #else

@@ -88,7 +88,7 @@ namespace sccd {
                             const I* const SCCD_RESTRICT qoverlap,
                             T** const SCCD_RESTRICT v0,
                             T** const SCCD_RESTRICT v1,
-                            const size_t quad_stride,
+                            const size_t element_stride,
                             I** const SCCD_RESTRICT quads,
                             const T max_toi,
                             T* const SCCD_RESTRICT toi,

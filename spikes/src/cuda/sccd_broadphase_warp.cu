@@ -117,12 +117,12 @@ namespace sccd {
                                                        const ptrdiff_t first_count,
                                                        T** const SCCD_RESTRICT first_aabbs,
                                                        I* const SCCD_RESTRICT first_idx,
-                                                       const ptrdiff_t first_stride,
+                                                       const ptrdiff_t first_element_stride,
                                                        I** const SCCD_RESTRICT first_elements,
                                                        const ptrdiff_t second_count,
                                                        T** const SCCD_RESTRICT second_aabbs,
                                                        I* const SCCD_RESTRICT second_idx,
-                                                       const ptrdiff_t second_stride,
+                                                       const ptrdiff_t second_element_stride,
                                                        I** const SCCD_RESTRICT second_elements,
                                                        const T* const SCCD_RESTRICT cummax,
                                                        ptrdiff_t* const SCCD_RESTRICT ccdptr) {
@@ -193,7 +193,7 @@ namespace sccd {
                     assert(first_idxi < first_count);
 
                     for (int v = 0; v < first_nxe; ++v) {
-                        ev[v] = first_elements[v][first_idxi * first_stride];
+                        ev[v] = first_elements[v][first_idxi * first_element_stride];
                     }
 
                     ptrdiff_t begin = lower_bound_device(cummax, cummax + second_count, fimin) - cummax;
@@ -285,7 +285,7 @@ namespace sccd {
                             if constexpr (second_nxe > 1) {
                                 I sev[second_nxe];
                                 for (int v = 0; v < second_nxe; ++v) {
-                                    sev[v] = second_elements[v][jidx * second_stride];
+                                    sev[v] = second_elements[v][jidx * second_element_stride];
                                 }
                                 for (int a = 0; a < first_nxe; ++a) {
                                     for (int b = 0; b < second_nxe; ++b) {
@@ -319,12 +319,12 @@ namespace sccd {
                                  const ptrdiff_t first_count,
                                  T** const SCCD_RESTRICT first_aabbs,
                                  I* const SCCD_RESTRICT first_idx,
-                                 const ptrdiff_t first_stride,
+                                 const ptrdiff_t first_element_stride,
                                  I** const SCCD_RESTRICT first_elements,
                                  const ptrdiff_t second_count,
                                  T** const SCCD_RESTRICT second_aabbs,
                                  I* const SCCD_RESTRICT second_idx,
-                                 const ptrdiff_t second_stride,
+                                 const ptrdiff_t second_element_stride,
                                  I** const SCCD_RESTRICT second_elements,
                                  ptrdiff_t* const SCCD_RESTRICT ccdptr,
                                  const T* const SCCD_RESTRICT cummax) {
@@ -341,12 +341,12 @@ namespace sccd {
                                                                                      first_count,
                                                                                      first_aabbs,
                                                                                      first_idx,
-                                                                                     first_stride,
+                                                                                     first_element_stride,
                                                                                      first_elements,
                                                                                      second_count,
                                                                                      second_aabbs,
                                                                                      second_idx,
-                                                                                     second_stride,
+                                                                                     second_element_stride,
                                                                                      second_elements,
                                                                                      cummax,
                                                                                      ccdptr);
@@ -369,12 +369,12 @@ namespace sccd {
                                                                                   const ptrdiff_t first_count, \
                                                                                   T** const SCCD_RESTRICT first_aabbs, \
                                                                                   I* const SCCD_RESTRICT first_idx, \
-                                                                                  const ptrdiff_t first_stride, \
+                                                                                  const ptrdiff_t first_element_stride, \
                                                                                   I** const SCCD_RESTRICT first_elements, \
                                                                                   const ptrdiff_t second_count, \
                                                                                   T** const SCCD_RESTRICT second_aabbs, \
                                                                                   I* const SCCD_RESTRICT second_idx, \
-                                                                                  const ptrdiff_t second_stride, \
+                                                                                  const ptrdiff_t second_element_stride, \
                                                                                   I** const SCCD_RESTRICT second_elements, \
                                                                                   ptrdiff_t* const SCCD_RESTRICT ccdptr, \
                                                                                   const T* const SCCD_RESTRICT cummax)

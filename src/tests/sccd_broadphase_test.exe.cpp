@@ -234,7 +234,7 @@ static int test_smesh_ccd_triangle_surface_types() {
 
         double max_toi = 1.0;
         smesh::SharedBuffer<double> vf_tois;
-        err = ccd->narrow_phase_fv(max_toi, vf_tois, 40, 1e-8, sccd::ToiOutput::Earliest);
+        err = ccd->narrow_phase_vf(max_toi, vf_tois, 40, 1e-8, sccd::ToiOutput::Earliest);
         SMESH_TEST_EQ(err, SCCD_SUCCESS);
         SMESH_TEST_APPROXEQ(max_toi, 0.5, 1e-6);
         SMESH_TEST_APPROXEQ(vf_tois->data()[0], 0.5, 1e-6);
@@ -280,7 +280,7 @@ static int test_smesh_ccd_quad_surface_types() {
 
         double max_toi = 1.0;
         smesh::SharedBuffer<double> vf_tois;
-        err = ccd->narrow_phase_fv(max_toi, vf_tois, 40, 1e-8, sccd::ToiOutput::Earliest);
+        err = ccd->narrow_phase_vf(max_toi, vf_tois, 40, 1e-8, sccd::ToiOutput::Earliest);
         SMESH_TEST_EQ(err, SCCD_SUCCESS);
         SMESH_TEST_APPROXEQ(max_toi, 0.5, 1e-6);
         SMESH_TEST_APPROXEQ(vf_tois->data()[0], 0.5, 1e-6);
