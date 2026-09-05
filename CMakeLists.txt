@@ -214,24 +214,54 @@ set(SCCD_PUBLIC_HEADERS
   src/narrowphase/sccd_numerical_error.hpp
   src/core/sccd_parallel.hpp
 )
+
+# The device API. Installed only in a CUDA build, but classified in every build
+# so the guard below can see them: a header that is in neither list is an
+# omission, and CUDA headers used to be in neither because the guard globbed
+# only *.hpp.
+set(SCCD_PUBLIC_CUDA_HEADERS
+  src/cuda/sccd_narrowphase.cuh
+  src/cuda/sccd_narrowphase_vq.cuh
+  src/cuda/sccd_broadphase.cuh
+  src/cuda/sccd_cell2d_broadphase.cuh
+  src/cuda/sccd_vaabb.cuh
+)
+
+# Implementation headers for the device kernels. Included only by .cu files
+# inside src/cuda/ (and by spikes), never by a public header, so they are not
+# installed -- but they are classified, which is what keeps the guard honest.
+set(SCCD_INTERNAL_HEADERS
+  src/cuda/sccd_cuda_base.cuh
+  src/cuda/sccd_reduce.cuh
+  src/cuda/sccd_device_workspace.cuh
+  src/cuda/sccd_device_dfs_stack.cuh
+)
+
 if(SCCD_ENABLE_SMESH)
   list(APPEND SCCD_PUBLIC_HEADERS src/integrations/smesh/sccd_smesh_ccd.hpp)
+endif()
+if(SCCD_ENABLE_CUDA)
+  list(APPEND SCCD_PUBLIC_HEADERS ${SCCD_PUBLIC_CUDA_HEADERS})
 endif()
 
 # Fail configure if a header exists that nobody has classified. Without this the
 # list silently drifts from the tree and we are back to guessing.
 file(GLOB_RECURSE _sccd_all_headers RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}"
      CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp"
-                       "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h")
+                       "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
+                       "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cuh")
 list(FILTER _sccd_all_headers EXCLUDE REGEX "^src/tests/")
 if(NOT SCCD_ENABLE_SMESH)
   list(FILTER _sccd_all_headers EXCLUDE REGEX "^src/integrations/smesh/")
 endif()
+set(_sccd_classified ${SCCD_PUBLIC_HEADERS} ${SCCD_PUBLIC_CUDA_HEADERS} ${SCCD_INTERNAL_HEADERS})
 foreach(_hdr IN LISTS _sccd_all_headers)
-  if(NOT _hdr IN_LIST SCCD_PUBLIC_HEADERS)
+  if(NOT _hdr IN_LIST _sccd_classified)
     message(FATAL_ERROR
-      "SCCD: ${_hdr} is not in SCCD_PUBLIC_HEADERS. Add it there if it is part of "
-      "the public surface, or move it to spikes/ if it is not. See spikes/README.md.")
+      "SCCD: ${_hdr} is in no header list. Add it to SCCD_PUBLIC_HEADERS (or "
+      "SCCD_PUBLIC_CUDA_HEADERS) if it is part of the public surface, to "
+      "SCCD_INTERNAL_HEADERS if it is an implementation header, or move it to "
+      "spikes/ if it is neither. See spikes/README.md.")
   endif()
 endforeach()
 
