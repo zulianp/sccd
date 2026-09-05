@@ -60,7 +60,7 @@ namespace sccd {
             // ever touched -- the rest is address space, not traffic -- and on
             // GH200, 400k queries at depth 69:
             //
-            //     cap   frame     registers  spill      stride 1   stride 0
+            //     cap   frame     registers  spill      PerPair    Earliest
             //     140   8128 B    255        112/216    7.589 ms   0.904 ms
             //     257  14688 B    255        112/216    7.441 ms   0.893 ms
             //     513  29024 B    255        112/216    7.355 ms   0.922 ms
@@ -371,7 +371,7 @@ namespace sccd {
                                                    T* const SCCD_RESTRICT v1x,
                                                    T* const SCCD_RESTRICT v1y,
                                                    T* const SCCD_RESTRICT v1z,
-                                                   const size_t quad_stride,
+                                                   const size_t element_stride,
                                                    const I* const SCCD_RESTRICT q0,
                                                    const I* const SCCD_RESTRICT q1,
                                                    const I* const SCCD_RESTRICT q2,
@@ -387,8 +387,8 @@ namespace sccd {
 
                 const I vi = voverlap[i];
                 const I qi = qoverlap[i];
-                const I n[4] = {q0[qi * quad_stride], q1[qi * quad_stride],
-                                q2[qi * quad_stride], q3[qi * quad_stride]};
+                const I n[4] = {q0[qi * element_stride], q1[qi * element_stride],
+                                q2[qi * element_stride], q3[qi * element_stride]};
 
                 // Widening float storage to double on load is exact.
                 const TC sv[3] = {(TC)v0x[vi], (TC)v0y[vi], (TC)v0z[vi]};
@@ -597,7 +597,7 @@ namespace sccd {
                             const I* const SCCD_RESTRICT qoverlap,
                             T** const SCCD_RESTRICT v0,
                             T** const SCCD_RESTRICT v1,
-                            const size_t quad_stride,
+                            const size_t element_stride,
                             I** const SCCD_RESTRICT quads,
                             const T max_toi,
                             T* const SCCD_RESTRICT toi,
@@ -658,7 +658,7 @@ namespace sccd {
                                                           qoverlap,
                                                           h_v0[0], h_v0[1], h_v0[2],
                                                           h_v1[0], h_v1[1], h_v1[2],
-                                                          quad_stride,
+                                                          element_stride,
                                                           h_quads[0], h_quads[1], h_quads[2], h_quads[3],
                                                           (TC)max_toi,
                                                           d_shared,

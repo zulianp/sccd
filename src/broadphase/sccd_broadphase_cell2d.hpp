@@ -236,7 +236,7 @@ namespace sccd {
                                                    T** const SCCD_RESTRICT second_aabbs,
                                                    const I* const SCCD_RESTRICT second_idx,
                                                    I** const SCCD_RESTRICT second_elements,
-                                                   const ptrdiff_t second_stride,
+                                                   const ptrdiff_t second_element_stride,
                                                    const I (&ev)[F],
                                                    const Cell2DGrid<T>& grid,
                                                    const ptrdiff_t* const SCCD_RESTRICT cellptr,
@@ -289,7 +289,7 @@ namespace sccd {
                             const I jidx = second_idx[j];
                             I sev[S];
                             for (int v = 0; v < S; ++v) {
-                                sev[v] = second_elements[v][jidx * second_stride];
+                                sev[v] = second_elements[v][jidx * second_element_stride];
                             }
                             share = sccd::detail::shares_vertex<F, S>(ev, sev);
                         } else {
@@ -324,7 +324,7 @@ namespace sccd {
                                                         const ptrdiff_t fi,
                                                         I* const SCCD_RESTRICT idx,
                                                         I** const SCCD_RESTRICT elements,
-                                                        const ptrdiff_t stride,
+                                                        const ptrdiff_t element_stride,
                                                         const I (&ev)[NXE],
                                                         const Cell2DGrid<T>& grid,
                                                         const ptrdiff_t* const SCCD_RESTRICT cellptr,
@@ -377,7 +377,7 @@ namespace sccd {
                         const I jidx = idx[j];
                         I sev[NXE];
                         for (int v = 0; v < NXE; ++v) {
-                            sev[v] = elements[v][jidx * stride];
+                            sev[v] = elements[v][jidx * element_stride];
                         }
                         if (sccd::detail::shares_vertex<NXE, NXE>(ev, sev)) {
                             continue;
@@ -396,7 +396,7 @@ namespace sccd {
     bool cell2d_count_self_overlaps(const ptrdiff_t element_count,
                                     T** const SCCD_RESTRICT aabbs,
                                     I* const SCCD_RESTRICT idx,
-                                    const ptrdiff_t stride,
+                                    const ptrdiff_t element_stride,
                                     I** const SCCD_RESTRICT elements,
                                     const Cell2DGrid<T>& grid,
                                     const ptrdiff_t* const SCCD_RESTRICT cellptr,
@@ -409,12 +409,12 @@ namespace sccd {
                 const I idxi = idx[fi];
                 I ev[nxe];
                 for (int v = 0; v < nxe; ++v) {
-                    ev[v] = elements[v][idxi * stride];
+                    ev[v] = elements[v][idxi * element_stride];
                 }
 
                 ptrdiff_t count = 0;
                 detail::for_each_unique_self_partner<nxe, T, I>(
-                    aabbs, fi, idx, elements, stride, ev, grid, cellptr, cellidx,
+                    aabbs, fi, idx, elements, element_stride, ev, grid, cellptr, cellidx,
                     [&](const ptrdiff_t, const I) { ++count; });
                 ccdptr[fi + 1] = count;
             }
@@ -429,28 +429,28 @@ namespace sccd {
     void cell2d_fill_self_overlaps(const ptrdiff_t element_count,
                                    T** const SCCD_RESTRICT aabbs,
                                    I* const SCCD_RESTRICT idx,
-                                   const ptrdiff_t stride,
+                                   const ptrdiff_t element_stride,
                                    I** const SCCD_RESTRICT elements,
                                    const Cell2DGrid<T>& grid,
                                    const ptrdiff_t* const SCCD_RESTRICT cellptr,
                                    const I* const SCCD_RESTRICT cellidx,
                                    const ptrdiff_t* const SCCD_RESTRICT ccdptr,
-                                   I* const SCCD_RESTRICT out0,
-                                   I* const SCCD_RESTRICT out1) {
+                                   I* const SCCD_RESTRICT first_out,
+                                   I* const SCCD_RESTRICT second_out) {
         sccd::parallel_for_br(0, element_count, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
             for (ptrdiff_t fi = rbegin; fi < rend; ++fi) {
                 const I idxi = idx[fi];
                 I ev[nxe];
                 for (int v = 0; v < nxe; ++v) {
-                    ev[v] = elements[v][idxi * stride];
+                    ev[v] = elements[v][idxi * element_stride];
                 }
 
                 ptrdiff_t at = ccdptr[fi];
                 detail::for_each_unique_self_partner<nxe, T, I>(
-                    aabbs, fi, idx, elements, stride, ev, grid, cellptr, cellidx,
+                    aabbs, fi, idx, elements, element_stride, ev, grid, cellptr, cellidx,
                     [&](const ptrdiff_t, const I jidx) {
-                        out0[at] = sccd::min<I>(idxi, jidx);
-                        out1[at] = sccd::max<I>(idxi, jidx);
+                        first_out[at] = sccd::min<I>(idxi, jidx);
+                        second_out[at] = sccd::max<I>(idxi, jidx);
                         ++at;
                     });
             }
@@ -462,11 +462,11 @@ namespace sccd {
     bool cell2d_count_overlaps(const ptrdiff_t first_count,
                                T** const SCCD_RESTRICT first_aabbs,
                                I* const SCCD_RESTRICT first_idx,
-                               const ptrdiff_t first_stride,
+                               const ptrdiff_t first_element_stride,
                                I** const SCCD_RESTRICT first_elements,
                                T** const SCCD_RESTRICT second_aabbs,
                                I* const SCCD_RESTRICT second_idx,
-                               const ptrdiff_t second_stride,
+                               const ptrdiff_t second_element_stride,
                                I** const SCCD_RESTRICT second_elements,
                                const Cell2DGrid<T>& grid,
                                const ptrdiff_t* const SCCD_RESTRICT cellptr,
@@ -479,7 +479,7 @@ namespace sccd {
                 const I first_idxi = first_idx[fi];
                 I ev[first_nxe];
                 for (int v = 0; v < first_nxe; ++v) {
-                    ev[v] = first_elements[v][first_idxi * first_stride];
+                    ev[v] = first_elements[v][first_idxi * first_element_stride];
                 }
 
                 ptrdiff_t count = 0;
@@ -488,7 +488,7 @@ namespace sccd {
                                                                                     second_aabbs,
                                                                                     second_idx,
                                                                                     second_elements,
-                                                                                    second_stride,
+                                                                                    second_element_stride,
                                                                                     ev,
                                                                                     grid,
                                                                                     cellptr,
@@ -507,11 +507,11 @@ namespace sccd {
     void cell2d_fill_overlaps(const ptrdiff_t first_count,
                               T** const SCCD_RESTRICT first_aabbs,
                               I* const SCCD_RESTRICT first_idx,
-                              const ptrdiff_t first_stride,
+                              const ptrdiff_t first_element_stride,
                               I** const SCCD_RESTRICT first_elements,
                               T** const SCCD_RESTRICT second_aabbs,
                               I* const SCCD_RESTRICT second_idx,
-                              const ptrdiff_t second_stride,
+                              const ptrdiff_t second_element_stride,
                               I** const SCCD_RESTRICT second_elements,
                               const Cell2DGrid<T>& grid,
                               const ptrdiff_t* const SCCD_RESTRICT cellptr,
@@ -524,7 +524,7 @@ namespace sccd {
                 const I first_idxi = first_idx[fi];
                 I ev[first_nxe];
                 for (int v = 0; v < first_nxe; ++v) {
-                    ev[v] = first_elements[v][first_idxi * first_stride];
+                    ev[v] = first_elements[v][first_idxi * first_element_stride];
                 }
 
                 ptrdiff_t at = ccdptr[fi];
@@ -534,7 +534,7 @@ namespace sccd {
                     second_aabbs,
                     second_idx,
                     second_elements,
-                    second_stride,
+                    second_element_stride,
                     ev,
                     grid,
                     cellptr,

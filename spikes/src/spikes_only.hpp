@@ -91,7 +91,7 @@ namespace sccd {
          * \param ev Vertex indices of the current A element.
          * \param second_idx Index mapping for second list elements.
          * \param second_elements SoA vertex arrays for second list.
-         * \param second_stride Stride between elements in second arrays.
+         * \param second_element_stride Stride between elements in second arrays.
          */
         template <int F, int S, typename I>
         static inline void mask_out_shared_two_lists(uint32_t *const SCCD_RESTRICT dmask,
@@ -100,7 +100,7 @@ namespace sccd {
                                                      const I (&ev)[F],
                                                      const I *const SCCD_RESTRICT second_idx,
                                                      I **const SCCD_RESTRICT second_elements,
-                                                     const ptrdiff_t second_stride) {
+                                                     const ptrdiff_t second_element_stride) {
             for (ptrdiff_t lane = 0; lane < chunk_len; ++lane) {
                 if (dmask[lane]) continue;
 
@@ -110,7 +110,7 @@ namespace sccd {
                 if constexpr (S > 1) {
                     I sev[S];
                     for (int v = 0; v < S; ++v) {
-                        sev[v] = second_elements[v][jidx * second_stride];
+                        sev[v] = second_elements[v][jidx * second_element_stride];
                     }
                     for (int a = 0; a < F; ++a) {
                         for (int b = 0; b < S; ++b) {

@@ -845,11 +845,11 @@ namespace sccd {
 
             template <int nxe, typename T, typename I>
             int narrow_phase_newton_pass_vf(const size_t noverlaps,
-                                            const I* const SCCD_RESTRICT voveralp,
-                                            const I* const SCCD_RESTRICT foveralp,
+                                            const I* const SCCD_RESTRICT voverlap,
+                                            const I* const SCCD_RESTRICT first_out,
                                             T** const SCCD_RESTRICT v0,
                                             T** const SCCD_RESTRICT v1,
-                                            const size_t face_stride,
+                                            const size_t element_stride,
                                             I** const SCCD_RESTRICT faces,
                                             const T max_toi,
                                             T* const SCCD_RESTRICT toi,

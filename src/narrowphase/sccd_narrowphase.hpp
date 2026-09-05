@@ -25,12 +25,12 @@ namespace sccd {
 
     template <typename T, typename I>
     int narrow_phase_vf(const size_t noverlaps,
-                        const I* const SCCD_RESTRICT voveralp,
-                        const I* const SCCD_RESTRICT foveralp,
+                        const I* const SCCD_RESTRICT voverlap,
+                        const I* const SCCD_RESTRICT first_out,
                         // Geometric data
                         T** const SCCD_RESTRICT v0,
                         T** const SCCD_RESTRICT v1,
-                        const size_t face_stride,
+                        const size_t element_stride,
                         I** const SCCD_RESTRICT faces,
                         const T max_toi,
                         T* const SCCD_RESTRICT toi,
@@ -48,7 +48,7 @@ namespace sccd {
 
         if (mode == NarrowPhaseMode::Tight) {
             return narrow_phase_tight_vf<T, I>(
-                noverlaps, voveralp, foveralp, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_output);
+                noverlaps, voverlap, first_out, v0, v1, element_stride, faces, max_toi, toi, max_depth, tol, toi_output);
         }
 
 
@@ -89,10 +89,10 @@ namespace sccd {
             for (ptrdiff_t i = rbegin; i < rend; i++) {
                 if (toi_output == ToiOutput::PerPair) toi[i] = max_toi;
 
-                const I vi = voveralp[i];
-                const I fi = foveralp[i];
+                const I vi = voverlap[i];
+                const I fi = first_out[i];
 
-                I nodes[3] = {faces[0][fi * face_stride], faces[1][fi * face_stride], faces[2][fi * face_stride]};
+                I nodes[3] = {faces[0][fi * element_stride], faces[1][fi * element_stride], faces[2][fi * element_stride]};
 
                 const T_HP sv[3] = {v0[0][vi], v0[1][vi], v0[2][vi]};
                 const T_HP ev[3] = {v1[0][vi], v1[1][vi], v1[2][vi]};
@@ -231,12 +231,12 @@ namespace sccd {
 
     template <typename T, typename I>
     int narrow_phase_ee(const size_t noverlaps,
-                        const I* const SCCD_RESTRICT e0overalp,
-                        const I* const SCCD_RESTRICT e1overalp,
+                        const I* const SCCD_RESTRICT e0overlap,
+                        const I* const SCCD_RESTRICT e1overlap,
                         // Geometric data
                         T** const SCCD_RESTRICT v0,
                         T** const SCCD_RESTRICT v1,
-                        const size_t edge_stride,
+                        const size_t element_stride,
                         I** const SCCD_RESTRICT edges,
                         // Output
                         const T max_toi,
@@ -269,11 +269,11 @@ namespace sccd {
         // one. Every other mode falls through to the scalar search below.
         if (narrow_phase_mode() == NarrowPhaseMode::Tight) {
             return narrow_phase_tight_ee<T, I>(noverlaps,
-                                              e0overalp,
-                                              e1overalp,
+                                              e0overlap,
+                                              e1overlap,
                                               v0,
                                               v1,
-                                              edge_stride,
+                                              element_stride,
                                               edges,
                                               max_toi,
                                               toi,
@@ -301,11 +301,11 @@ namespace sccd {
             for (ptrdiff_t i = rbegin; i < rend; i++) {
                 if (toi_output == ToiOutput::PerPair) toi[i] = max_toi;
 
-                const I i0 = e0overalp[i];
-                const I i1 = e1overalp[i];
+                const I i0 = e0overlap[i];
+                const I i1 = e1overlap[i];
 
-                I nodes0[2] = {edges[0][i0 * edge_stride], edges[1][i0 * edge_stride]};
-                I nodes1[2] = {edges[0][i1 * edge_stride], edges[1][i1 * edge_stride]};
+                I nodes0[2] = {edges[0][i0 * element_stride], edges[1][i0 * element_stride]};
+                I nodes1[2] = {edges[0][i1 * element_stride], edges[1][i1 * element_stride]};
 
                 const T_HP s1[3] = {v0[0][nodes0[0]], v0[1][nodes0[0]], v0[2][nodes0[0]]};
                 const T_HP s2[3] = {v0[0][nodes0[1]], v0[1][nodes0[1]], v0[2][nodes0[1]]};

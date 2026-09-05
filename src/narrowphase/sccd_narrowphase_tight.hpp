@@ -489,7 +489,7 @@ namespace sccd {
                                       const I* const SCCD_RESTRICT overlap1,
                                       T** const SCCD_RESTRICT v0,
                                       T** const SCCD_RESTRICT v1,
-                                      const size_t prim_stride,
+                                      const size_t element_stride,
                                       I** const SCCD_RESTRICT prims,
                                       const T max_toi,
                                       T* const SCCD_RESTRICT toi,
@@ -579,14 +579,14 @@ namespace sccd {
                     const ptrdiff_t i = block_begin + q;
                     I node[4];
                     if constexpr (IsVertexFace) {
-                        const size_t f = static_cast<size_t>(overlap1[i]) * prim_stride;
+                        const size_t f = static_cast<size_t>(overlap1[i]) * element_stride;
                         node[0] = overlap0[i];
                         node[1] = prims[0][f];
                         node[2] = prims[1][f];
                         node[3] = prims[2][f];
                     } else {
-                        const size_t ea = static_cast<size_t>(overlap0[i]) * prim_stride;
-                        const size_t eb = static_cast<size_t>(overlap1[i]) * prim_stride;
+                        const size_t ea = static_cast<size_t>(overlap0[i]) * element_stride;
+                        const size_t eb = static_cast<size_t>(overlap1[i]) * element_stride;
                         node[0] = prims[0][ea];
                         node[1] = prims[1][ea];
                         node[2] = prims[0][eb];
@@ -912,10 +912,10 @@ namespace sccd {
     template <typename T, typename I>
     int narrow_phase_tight_vf(const size_t noverlaps,
                              const I* const SCCD_RESTRICT voverlap,
-                             const I* const SCCD_RESTRICT foverlap,
+                             const I* const SCCD_RESTRICT first_out,
                              T** const SCCD_RESTRICT v0,
                              T** const SCCD_RESTRICT v1,
-                             const size_t face_stride,
+                             const size_t element_stride,
                              I** const SCCD_RESTRICT faces,
                              const T max_toi,
                              T* const SCCD_RESTRICT toi,
@@ -925,14 +925,14 @@ namespace sccd {
 #ifdef SCCD_NP_COUNT_BOXES
         const unsigned long long before_ = g_np_host_boxes;
         const int rc_ = narrow_phase_tight_impl<true, T, I>(
-            noverlaps, voverlap, foverlap, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_output);
+            noverlaps, voverlap, first_out, v0, v1, element_stride, faces, max_toi, toi, max_depth, tol, toi_output);
         fprintf(stderr, "sccd-np-count vf host-conservative stride=%d queries=%zu boxes=%llu per_query=%.1f\n",
                 toi_output, noverlaps, g_np_host_boxes - before_,
                 noverlaps ? (double)(g_np_host_boxes - before_) / (double)noverlaps : 0.0);
         return rc_;
 #else
         return narrow_phase_tight_impl<true, T, I>(
-            noverlaps, voverlap, foverlap, v0, v1, face_stride, faces, max_toi, toi, max_depth, tol, toi_output);
+            noverlaps, voverlap, first_out, v0, v1, element_stride, faces, max_toi, toi, max_depth, tol, toi_output);
 #endif
     }
 
@@ -942,7 +942,7 @@ namespace sccd {
                              const I* const SCCD_RESTRICT e1overlap,
                              T** const SCCD_RESTRICT v0,
                              T** const SCCD_RESTRICT v1,
-                             const size_t edge_stride,
+                             const size_t element_stride,
                              I** const SCCD_RESTRICT edges,
                              const T max_toi,
                              T* const SCCD_RESTRICT toi,
@@ -952,14 +952,14 @@ namespace sccd {
 #ifdef SCCD_NP_COUNT_BOXES
         const unsigned long long before_ = g_np_host_boxes;
         const int rc_ = narrow_phase_tight_impl<false, T, I>(
-            noverlaps, e0overlap, e1overlap, v0, v1, edge_stride, edges, max_toi, toi, max_depth, tol, toi_output);
+            noverlaps, e0overlap, e1overlap, v0, v1, element_stride, edges, max_toi, toi, max_depth, tol, toi_output);
         fprintf(stderr, "sccd-np-count ee host-conservative stride=%d queries=%zu boxes=%llu per_query=%.1f\n",
                 toi_output, noverlaps, g_np_host_boxes - before_,
                 noverlaps ? (double)(g_np_host_boxes - before_) / (double)noverlaps : 0.0);
         return rc_;
 #else
         return narrow_phase_tight_impl<false, T, I>(
-            noverlaps, e0overlap, e1overlap, v0, v1, edge_stride, edges, max_toi, toi, max_depth, tol, toi_output);
+            noverlaps, e0overlap, e1overlap, v0, v1, element_stride, edges, max_toi, toi, max_depth, tol, toi_output);
 #endif
     }
 
