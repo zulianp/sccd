@@ -219,6 +219,24 @@ namespace {
             }
             cases.swap(subset);
         }
+
+        // A chunk of the case list, so a long sweep can be cut into jobs that fit
+        // the 30-minute debug partition and be resumed one chunk at a time.
+        // Half-open [begin, end) over the list left by the subsampling above, so
+        // the two compose: MAX_CASES still means "this many spread across the
+        // trajectory", and the range then slices whatever that produced.
+        int SCCD_BENCH_CASE_BEGIN = 0;
+        int SCCD_BENCH_CASE_END = 0;
+        SCCD_READ_ENV(SCCD_BENCH_CASE_BEGIN, atoi);
+        SCCD_READ_ENV(SCCD_BENCH_CASE_END, atoi);
+        if (SCCD_BENCH_CASE_BEGIN > 0 || SCCD_BENCH_CASE_END > 0) {
+            const int total = static_cast<int>(cases.size());
+            const int begin = std::max(0, std::min(SCCD_BENCH_CASE_BEGIN, total));
+            const int end =
+                (SCCD_BENCH_CASE_END > 0) ? std::max(begin, std::min(SCCD_BENCH_CASE_END, total))
+                                          : total;
+            cases = std::vector<CaseFile>(cases.begin() + begin, cases.begin() + end);
+        }
         return cases;
     }
 
