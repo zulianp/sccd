@@ -560,7 +560,7 @@ namespace sccd {
                         const ptrdiff_t second_stride,
                         I **const SCCD_RESTRICT second_elements,
                         ptrdiff_t *const SCCD_RESTRICT ccdptr,
-                        const T *const SCCD_RESTRICT cummax) {
+                        const T *const SCCD_RESTRICT second_xmax_running) {
         const T *const SCCD_RESTRICT first_xmin = first_aabbs[sort_axis];
         const T *const SCCD_RESTRICT first_xmax = first_aabbs[3 + sort_axis];
         const T *const SCCD_RESTRICT second_xmin = second_aabbs[sort_axis];
@@ -572,7 +572,7 @@ namespace sccd {
         if (second_xmax[second_count - 1] < first_xmin[0]) return false;
 
         sccd::parallel_for_br(0, first_count, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
-            ptrdiff_t ni = std::lower_bound(cummax, cummax + second_count, first_xmin[rbegin]) - cummax;
+            ptrdiff_t ni = std::lower_bound(second_xmax_running, second_xmax_running + second_count, first_xmin[rbegin]) - second_xmax_running;
 
             for (ptrdiff_t fi = rbegin; fi < rend; fi++) {
                 const T fimin = first_xmin[fi];
@@ -656,7 +656,7 @@ namespace sccd {
                           const ptrdiff_t second_stride,
                           I **SCCD_RESTRICT const second_elements,
                           const ptrdiff_t *const SCCD_RESTRICT ccdptr,
-                          const T *const SCCD_RESTRICT cummax,
+                          const T *const SCCD_RESTRICT second_xmax_running,
                           I *SCCD_RESTRICT foverlap,
                           I *SCCD_RESTRICT noverlap) {
         const T *const SCCD_RESTRICT first_xmin = first_aabbs[sort_axis];
@@ -668,7 +668,7 @@ namespace sccd {
         if (second_xmax[second_count - 1] < first_xmin[0]) return;
 
         sccd::parallel_for_br(0, first_count, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
-            ptrdiff_t ni = std::lower_bound(cummax, cummax + second_count, first_xmin[rbegin]) - cummax;
+            ptrdiff_t ni = std::lower_bound(second_xmax_running, second_xmax_running + second_count, first_xmin[rbegin]) - second_xmax_running;
 
             for (ptrdiff_t fi = rbegin; fi < rend; fi++) {
                 const ptrdiff_t expected_count = ccdptr[fi + 1] - ccdptr[fi];

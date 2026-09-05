@@ -618,7 +618,7 @@ namespace sccd {
                                               I* const SCCD_RESTRICT second_idx,
                                               const ptrdiff_t second_stride,
                                               I** const SCCD_RESTRICT second_elements,
-                                              const T* const SCCD_RESTRICT cummax,
+                                              const T* const SCCD_RESTRICT second_xmax_running,
                                               ptrdiff_t* const SCCD_RESTRICT ccdptr) {
             ptrdiff_t fi = blockIdx.x * blockDim.x + threadIdx.x;
             if (fi >= first_count) return;
@@ -627,7 +627,7 @@ namespace sccd {
             }
 
             const T fimin = first_aabbs[sort_axis][fi];
-            ptrdiff_t begin = lower_bound(cummax, cummax + second_count, fimin) - cummax;
+            ptrdiff_t begin = lower_bound(second_xmax_running, second_xmax_running + second_count, fimin) - second_xmax_running;
             ccdptr[fi + 1] = count_overlaps_kernel_aux<first_nxe, second_nxe, T, I>(fi,
                                                                                     begin,
                                                                                     sort_axis,
@@ -656,7 +656,7 @@ namespace sccd {
                             const ptrdiff_t second_stride,
                             I** const SCCD_RESTRICT second_elements,
                             ptrdiff_t* const SCCD_RESTRICT ccdptr,
-                            const T* const SCCD_RESTRICT cummax) {
+                            const T* const SCCD_RESTRICT second_xmax_running) {
             SCCD_CUDA_LAST_ERROR();
 
             if (first_count <= 0) {
@@ -677,7 +677,7 @@ namespace sccd {
                                                                                 second_idx,
                                                                                 second_stride,
                                                                                 second_elements,
-                                                                                cummax,
+                                                                                second_xmax_running,
                                                                                 ccdptr);
 
             SCCD_CUDA_LAST_ERROR();
@@ -804,7 +804,7 @@ namespace sccd {
                                                 const ptrdiff_t second_stride,
                                                 I** SCCD_RESTRICT const second_elements,
                                                 const ptrdiff_t* const SCCD_RESTRICT ccdptr,
-                                                const T* const SCCD_RESTRICT cummax,
+                                                const T* const SCCD_RESTRICT second_xmax_running,
                                                 I* SCCD_RESTRICT foverlap,
                                                 I* SCCD_RESTRICT noverlap) {
             ptrdiff_t fi = blockIdx.x * blockDim.x + threadIdx.x;
@@ -814,7 +814,7 @@ namespace sccd {
 
             const T fimin = first_aabbs[sort_axis][fi];
 
-            ptrdiff_t begin = lower_bound(cummax, cummax + second_count, fimin) - cummax;
+            ptrdiff_t begin = lower_bound(second_xmax_running, second_xmax_running + second_count, fimin) - second_xmax_running;
 
             collect_overlaps_kernel_aux<first_nxe, second_nxe, T, I>(fi,
                                                                      begin,
@@ -847,7 +847,7 @@ namespace sccd {
                               const ptrdiff_t second_stride,
                               I** SCCD_RESTRICT const second_elements,
                               const ptrdiff_t* const SCCD_RESTRICT ccdptr,
-                              const T* const SCCD_RESTRICT cummax,
+                              const T* const SCCD_RESTRICT second_xmax_running,
                               I* SCCD_RESTRICT foverlap,
                               I* SCCD_RESTRICT noverlap) {
             SCCD_CUDA_LAST_ERROR();
@@ -866,7 +866,7 @@ namespace sccd {
                                                                                   second_stride,
                                                                                   second_elements,
                                                                                   ccdptr,
-                                                                                  cummax,
+                                                                                  second_xmax_running,
                                                                                   foverlap,
                                                                                   noverlap);
 
@@ -933,7 +933,7 @@ namespace sccd {
                                                                             const ptrdiff_t second_stride,           \
                                                                             I** const SCCD_RESTRICT second_elements, \
                                                                             ptrdiff_t* const SCCD_RESTRICT ccdptr,   \
-                                                                            const T* const SCCD_RESTRICT cummax)
+                                                                            const T* const SCCD_RESTRICT second_xmax_running)
 
 #define SCCD_BP_INSTANTIATE_COLLECT_OVERLAPS(FIRST_NXE, SECOND_NXE, T, I)              \
     template void sccd::device::collect_overlaps<FIRST_NXE, SECOND_NXE, T, I>( \
@@ -949,7 +949,7 @@ namespace sccd {
         const ptrdiff_t second_stride,                                         \
         I** const SCCD_RESTRICT second_elements,                               \
         const ptrdiff_t* const SCCD_RESTRICT ccdptr,                           \
-        const T* const SCCD_RESTRICT cummax,                                   \
+        const T* const SCCD_RESTRICT second_xmax_running,                                   \
         I* SCCD_RESTRICT foverlap,                                             \
         I* SCCD_RESTRICT noverlap)
 
