@@ -2389,7 +2389,14 @@ namespace sccd {
                                  const int toi_stride) {
             SCCD_CUDA_LAST_ERROR();
 
-            if (noverlaps == 0) return max_toi;
+            // 0, not max_toi. This is an int-returning function and the return
+            // is a status, as in narrow_phase_tight_vf: 0 means the call
+            // succeeded. Returning the time of impact here narrowed a T to an
+            // int, so the device vf/ee entry points reported 1 on an empty
+            // candidate list and 0 otherwise -- two different meanings from one
+            // function, neither documented. Nothing checked it, which is why it
+            // survived.
+            if (noverlaps == 0) return 0;
             assert(d_toi != nullptr);
             assert(toi_stride == 0 || toi_stride == 1);
 

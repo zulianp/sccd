@@ -83,6 +83,18 @@
 #endif
 #endif
 
+/*
+ * Return convention for the C++ entry points.
+ *
+ * They return an int STATUS, zero on success -- the convention
+ * narrow_phase_tight_vf follows, and the one every narrow-phase entry point in
+ * the library uses. The smesh CCD<T> methods report the same thing through an
+ * `int& err` compared against SCCD_SUCCESS.
+ *
+ * The C ABI in sccd.h is deliberately different and says so at its own
+ * declarations: there the int is a HIT, non-zero meaning a collision was found.
+ * Do not read one as the other.
+ */
 #define SCCD_SUCCESS 0
 #define SCCD_FAILURE 1
 
