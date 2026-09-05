@@ -149,10 +149,17 @@ run_refine() { # hardware topology component variant repeat  [env assignments...
 
     echo "$out" | awk -v hw="$hw" -v topo="$topo" -v comp="$comp" \
                       -v var="$var" -v rep="$rep" '
-        /^[ ]*[0-9]+[ ]/ && NF == 10 {
+        # NF >= 10, not == 10. refine_scaling grew a toi column and this filter
+        # did not, so for as long as that column has existed every refine row has
+        # been silently dropped -- while the rc != 0 branch above kept writing
+        # failure rows. The harness recorded refine failures and discarded refine
+        # successes, which is how "FAILED rc=134" survived in the quad rows with
+        # nothing to contradict it.
+        /^[ ]*[0-9]+[ ]/ && NF >= 10 {
             lvl = $1; faces = $2; pairs = $3 + $4; broad = $8; narrow = $9
+            toi = (NF >= 11) ? $NF : ""
             printf "%s,refine-%s,%s,%s,%s,broad,%s,%.3f,%d,faces=%d\n", hw, topo, lvl, comp, var, rep, broad, pairs, faces
-            printf "%s,refine-%s,%s,%s,%s,narrow,%s,%.3f,%d,faces=%d\n", hw, topo, lvl, comp, var, rep, narrow, pairs, faces
+            printf "%s,refine-%s,%s,%s,%s,narrow,%s,%.3f,%d,faces=%d;toi=%s\n", hw, topo, lvl, comp, var, rep, narrow, pairs, faces, toi
         }' >> "$CSV"
 }
 
