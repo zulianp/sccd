@@ -40,7 +40,32 @@ BENCHMARK_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ROOT_DIR="$(cd "${BENCHMARK_DIR}/.." && pwd)"
 DATA_DIR="${SCCD_DATA_DIR:-"${ROOT_DIR}/data"}"
 PYTHON_DIR="${ROOT_DIR}/python"
-PYTHON="${PYTHON:-python3}"
+# Not `python3`: a login node's default can be years old -- Alps' is 3.6.15,
+# which cannot even parse these scripts -- and the failure looks like a broken
+# script rather than a stale interpreter. A verification gate that does not run
+# is a gate that gets skipped, so find a usable interpreter instead of assuming
+# one. An explicit PYTHON always wins.
+pick_python() {
+    if [[ -n "${PYTHON:-}" ]]; then
+        printf '%s\n' "${PYTHON}"
+        return 0
+    fi
+    local candidate
+    for candidate in python3 python3.13 python3.12 python3.11 python3.10 python3.9; do
+        command -v "${candidate}" >/dev/null 2>&1 || continue
+        if "${candidate}" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' \
+                >/dev/null 2>&1; then
+            printf '%s\n' "${candidate}"
+            return 0
+        fi
+    done
+    return 1
+}
+
+if ! PYTHON="$(pick_python)"; then
+    echo "error: no Python 3.9 or newer on PATH; set PYTHON to one" >&2
+    exit 1
+fi
 JSON_PROJECT_DIR="${BENCHMARK_DIR}/json"
 JSON_BUILD_DIR="${SCCD_JSON_BUILD_DIR:-"${ROOT_DIR}/build_json"}"
 
