@@ -318,48 +318,121 @@ namespace {
         return dataset_dir / "queries" / (key + ".csv");
     }
 
-    bool parse_query_row(const std::string& line, scalar_t coords[3]) {
-        long double values[6];
+    // The packed form of the same queries, written by benchmark/queries_to_raw.py:
+    // one float64 per coordinate, rows in CSV order, no header -- the row count
+    // follows from the file size, as it does for toi.float64.
+    fs::path raw_query_path(const fs::path& dataset_dir, const std::string& key) {
+        return dataset_dir / "queries_raw" / (key + ".f64");
+    }
+
+    // Each row is three rationals, written as six integers. They are divided in
+    // `double` rather than `long double` because `long double` is not one type:
+    // it is `double` on Apple ARM64, 80-bit on x86-64, and software-emulated
+    // 128-bit quad on AArch64 Linux, which is where the benchmark's GPU runs.
+    // The coordinate is stored as `scalar_t` -- double at widest -- so the extra
+    // width bought nothing except a different answer per platform and, on the
+    // GH200, an emulated division per coordinate. Fixing the arithmetic to
+    // double also makes the packed cache exact rather than merely close: Python
+    // divides in double too, so the two paths agree bit for bit.
+    bool parse_query_row(const std::string& line, double coords[3]) {
+        double values[6];
         const char* cursor = line.c_str();
         for (int i = 0; i < 6; ++i) {
             char* end = nullptr;
-            values[i] = std::strtold(cursor, &end);
+            values[i] = std::strtod(cursor, &end);
             if (end == cursor || (i < 5 && *end != ',')) {
                 return false;
             }
             cursor = (i < 5) ? end + 1 : end;
         }
-        coords[0] = static_cast<scalar_t>(values[0] / values[1]);
-        coords[1] = static_cast<scalar_t>(values[2] / values[3]);
-        coords[2] = static_cast<scalar_t>(values[4] / values[5]);
+        coords[0] = values[0] / values[1];
+        coords[1] = values[2] / values[3];
+        coords[2] = values[4] / values[5];
         return true;
     }
 
-    bool read_query_geometry(const fs::path& path, const bool is_vf, QueryGeometry& query) {
-        std::ifstream in(path);
-        if (!in) {
-            std::cerr << "error: failed to open " << path << "\n";
+    void append_query_row(const std::size_t row, const double coords[3],
+                          QueryGeometry& query) {
+        auto& points = (row % 8 < 4) ? query.points0 : query.points1;
+        for (int d = 0; d < 3; ++d) {
+            points[d].push_back(static_cast<scalar_t>(coords[d]));
+        }
+    }
+
+    // Read the packed cache if it is present and no older than the CSV it came
+    // from. Returns false when there is no usable cache, which is not an error --
+    // the caller falls back to parsing the text.
+    bool read_packed_queries(const fs::path& raw_path, const fs::path& csv_path,
+                             QueryGeometry& query, std::size_t& row) {
+        std::error_code ec;
+        if (!fs::exists(raw_path, ec)) {
+            return false;
+        }
+        const auto raw_time = fs::last_write_time(raw_path, ec);
+        if (ec) {
+            return false;
+        }
+        const auto csv_time = fs::last_write_time(csv_path, ec);
+        if (!ec && csv_time > raw_time) {
+            return false;  // stale: the CSV was rewritten after the cache
+        }
+
+        const auto bytes = fs::file_size(raw_path, ec);
+        if (ec || bytes == 0 || bytes % (3 * sizeof(double)) != 0) {
             return false;
         }
 
-        std::string line;
-        std::size_t row = 0;
-        while (std::getline(in, line)) {
-            if (line.empty()) {
-                continue;
-            }
+        std::ifstream in(raw_path, std::ios::binary);
+        if (!in) {
+            return false;
+        }
 
-            scalar_t coords[3];
-            if (!parse_query_row(line, coords)) {
-                std::cerr << "error: invalid query row in " << path << "\n";
+        const std::size_t rows = static_cast<std::size_t>(bytes) / (3 * sizeof(double));
+        std::vector<double> buffer(3 * rows);
+        in.read(reinterpret_cast<char*>(buffer.data()),
+                static_cast<std::streamsize>(bytes));
+        if (!in) {
+            return false;
+        }
+
+        for (int d = 0; d < 3; ++d) {
+            query.points0[d].reserve(rows / 2);
+            query.points1[d].reserve(rows / 2);
+        }
+        for (std::size_t r = 0; r < rows; ++r) {
+            append_query_row(r, &buffer[3 * r], query);
+        }
+        row = rows;
+        return true;
+    }
+
+    bool read_query_geometry(const fs::path& dataset_dir, const std::string& key,
+                             const bool is_vf, QueryGeometry& query) {
+        const fs::path path = query_path(dataset_dir, key);
+        std::size_t row = 0;
+
+        if (!read_packed_queries(raw_query_path(dataset_dir, key), path, query, row)) {
+            std::ifstream in(path);
+            if (!in) {
+                std::cerr << "error: failed to open " << path << "\n";
                 return false;
             }
 
-            auto& points = (row % 8 < 4) ? query.points0 : query.points1;
-            for (int d = 0; d < 3; ++d) {
-                points[d].push_back(coords[d]);
+            std::string line;
+            while (std::getline(in, line)) {
+                if (line.empty()) {
+                    continue;
+                }
+
+                double coords[3];
+                if (!parse_query_row(line, coords)) {
+                    std::cerr << "error: invalid query row in " << path << "\n";
+                    return false;
+                }
+
+                append_query_row(row, coords, query);
+                ++row;
             }
-            ++row;
         }
 
         if (row % 8 != 0 || query.points0[0].size() != query.points1[0].size()) {
@@ -1026,7 +1099,8 @@ namespace {
 
         QueryGeometry query_geometry;
         const fs::path query_file = query_path(dataset_dir, case_file.key);
-        if (!read_query_geometry(query_file, case_file.is_vf, query_geometry)) {
+        if (!read_query_geometry(dataset_dir, case_file.key, case_file.is_vf,
+                                 query_geometry)) {
             return false;
         }
         if (query_geometry.q0.size() != q0.size()) {

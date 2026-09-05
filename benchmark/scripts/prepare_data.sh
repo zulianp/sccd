@@ -171,6 +171,13 @@ done
 printf '  roots (skipping what is current)\n'
 "${PYTHON}" "${BENCHMARK_DIR}/roots_to_raw.py" "${DATA_DIR}" "${PYTHON_DIR}" "${scenes[@]}"
 
+# --- query cache ----------------------------------------------------------
+# Text parsing is what makes starting a case slow, and the driver re-reads every
+# query for every mode of every repeat. Packing them once pays for itself on the
+# first repeat and matters most inside a thirty-minute job.
+printf '  queries (packing into queries_raw/)\n'
+"${PYTHON}" "${BENCHMARK_DIR}/queries_to_raw.py" "${DATA_DIR}" "${scenes[@]}"
+
 # cloth-funnel's PLY headers carry non-ASCII bytes that the frame reader rejects.
 if is_enabled "${SCCD_ENABLE_CLOTH_FUNNEL}" \
         && compgen -G "${DATA_DIR}/cloth-funnel/frames/*.ply" >/dev/null; then
