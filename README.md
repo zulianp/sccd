@@ -20,6 +20,16 @@ ctest --test-dir build
 No external dependencies, no network, no options, no environment variables.
 `CMAKE_BUILD_TYPE` defaults to `Release`.
 
+To use it from another project:
+
+```sh
+cmake --install build --prefix /where/you/want
+```
+
+then `find_package(SCCD REQUIRED)` and link `SCCD::sccd`. C++ callers include
+`sccd_narrowphase.hpp`, C callers `sccd.h`, CUDA callers the `.cuh` headers —
+all flat, see [`docs/API.md`](docs/API.md).
+
 | Option | Default | Effect |
 |---|---|---|
 | `SCCD_ENABLE_NATIVE_ARCH` | `ON` | `-march=native`. Off, the AVX2/AVX-512/NEON AABB kernels fall back to scalar — in your translation units as well as ours. |
@@ -85,7 +95,7 @@ src/core/          base, math, parallel, aabb
 src/broadphase/    sweep-and-prune, 2D cell list, run-time strategy
 src/narrowphase/   modes, root finders, tolerances, error bounds
 src/cuda/          device kernels
-src/api/           C ABI
+src/api/           C ABI: sccd.h and its implementation
 python/            ctypes binding and the analysis tools
 benchmark/         harness, drivers, and committed result tables
 spikes/            demoted and dead code, and the research notes; not built, not installed
