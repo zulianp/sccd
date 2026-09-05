@@ -25,14 +25,65 @@ Options: `--phase vf|ee|both`, `--max-files N`, `--tol T`, `--max-depth N`,
 CUDA `--device-float` and `--bench N` (see "Throughput"). `--float-geometry` narrows the input for every mode; see
 "Why there is no float row to gate on".
 
-`--gate tight` restricts the exit code to the `tight` kernel, which is
-what a CI check should use: modes 0 and 1 are known to violate the invariant, so
-the default `--gate all` always fails while they are still present.
+`--gate MODE` restricts the exit code to one kernel. The default `--gate all`
+is what a CI check should use: both shipped modes are conservative by
+construction and both pass it. (This paragraph used to say modes 0 and 1 were
+"known to violate the invariant" and that `--gate all` therefore always failed.
+Mode 1 no longer exists, and mode 0 does not violate anything: the full sweep
+below records zero missed collisions and zero late times of impact for Relaxed
+and Tight across all three scenes. A kernel that is not conservative has a
+defect to fix, not a property to document.)
 
 It reads `data/<scene>/queries/*.csv` (exact rationals, 8 rows per query, the
 same layout `benchmark/bench.exe.cpp` uses) and, when present,
 `data/<scene>/mma_bool/<key>/mma_bool.uint8` for the Mathematica ground truth.
 It does not need smesh.
+
+## cloth-funnel's oracle was 47% incomplete, and why
+
+Of cloth-funnel's 7,552 queries, 3,572 carried `mma_bool = true` with a NaN time
+of impact, so `ti_oracle` scored them as "no collision" and every accuracy figure
+published for the scene rested on the other 53%. armadillo-rollers and cloth-ball
+agreed bit for bit, which is what made it look like a cloth-funnel quirk rather
+than a bug in the reader.
+
+Those 3,572 are exactly the queries whose **coplanarity cubic vanishes
+identically over the step** — the count matches to the query, verified by
+evaluating the cubic's four coefficients in exact rational arithmetic for every
+query in the scene. The element stays coplanar for the whole step, so contact
+holds over an interval rather than at an instant and the root set is a continuum.
+Mathematica records that in one of two shapes, and neither survived
+`read_wxf_roots`:
+
+- **3,549** give a concrete `t` — all but thirteen of them `0`, contact from the
+  start of the step — alongside an `a` and `b` that stay unevaluated. The reader
+  required all three keys and discarded the whole root for the sake of two fields
+  that `roots_to_raw.py` never reads; it writes `toi[query] = root["t"]` and
+  nothing else.
+- **23** give `t -> First[False]` with `a` and `b` as exact rational-linear
+  functions of the scoped time variable Mathematica renamed (`t$3013` and
+  friends). The time of impact is still fully determined: contact holds where the
+  barycentric coordinates are admissible, so it is
+  `inf { t in [0,1] : a(t) >= 0, b(t) >= 0, a(t)+b(t) <= 1 }`, computed exactly
+  and rounded down on the way to double.
+
+Confirmed on the geometry: every point of 419vf's degenerate queries sits at
+`z = -2` at both ends of the step, and at the recovered time of impact the vertex
+is inside the triangle with an exactly zero out-of-plane residual.
+
+### The check that mattered
+
+A reference **later** than the true time of impact is the dangerous direction: it
+does not cause a false alarm, it makes the gate too permissive and hides a real
+violation. So the recovered roots were checked one-sidedly and exactly — contact
+evaluated in rational arithmetic at grid points strictly before each recorded
+time, so a positive result is a certain witness of lateness. Across the whole
+degenerate population there is none. All but thirteen of them record `t = 0`,
+which is the earliest possible answer and cannot be late at all.
+
+`benchmark/verify_oracle.py` now enforces `mma_bool[i] == isfinite(toi[i])` on
+every query of every scene and exits non-zero on a gap, so this class of hole
+cannot reappear unnoticed.
 
 ## The device rows
 
