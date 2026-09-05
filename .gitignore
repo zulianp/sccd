@@ -75,6 +75,11 @@ benchmark/sweep/
 # docs/ holds both written documentation and rendered output; keep the writing.
 docs/*
 !docs/*.md
+# ...and the figures BENCHMARKS.md embeds, which are part of the document rather
+# than leavings. The directory has to be re-included before anything in it can
+# be: git does not descend into an excluded directory to rescue its contents,
+# which is why a `!docs/figures/**` further up did nothing.
+!docs/figures/
 
 # Python bytecode and macOS directory metadata.
 __pycache__/
@@ -119,3 +124,9 @@ build*/
 /*.csv
 /*.tar.gz
 .DS_Store
+
+# The figures docs/BENCHMARKS.md embeds are part of the document, not leavings,
+# so they are re-included last: git takes the final matching rule, and the
+# blanket *.png and *.pdf rules above would otherwise win.
+!docs/figures/*.png
+!docs/figures/*.pdf
