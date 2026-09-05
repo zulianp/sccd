@@ -194,7 +194,17 @@ done
 # The slow one: every stale archive is deserialized and its roots evaluated
 # through sympy. Converted archives are skipped on mtime, so this resumes.
 printf '  roots (skipping what is current)\n'
-"${PYTHON}" "${BENCHMARK_DIR}/roots_to_raw.py" "${DATA_DIR}" "${PYTHON_DIR}" "${scenes[@]}"
+# A failure here is reported and not fatal. Converting roots needs sympy and
+# wolframclient, which a cluster's Python often does not have, and aborting the
+# whole run over it means nothing else can be prepared there either -- not the
+# boxes, not the query cache, not the PLY headers. The gate is verify_oracle.py
+# at the end: it fails on the resulting gap and says exactly which scene is
+# short, which is more useful than stopping halfway with a traceback.
+if ! "${PYTHON}" "${BENCHMARK_DIR}/roots_to_raw.py" \
+        "${DATA_DIR}" "${PYTHON_DIR}" "${scenes[@]}"; then
+    printf 'warning: root conversion did not complete; continuing so the rest can\n' >&2
+    printf '         be prepared. The verification below will report the gap.\n' >&2
+fi
 
 # --- query cache ----------------------------------------------------------
 # Text parsing is what makes starting a case slow, and the driver re-reads every
