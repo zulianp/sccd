@@ -1,0 +1,302 @@
+/*
+ * Styling for the generated HTML of docs/*.md (see benchmark/scripts/render.sh).
+ *
+ * The document this serves is mostly tables of numbers -- a hundred and thirty
+ * rows of them -- so the table rules carry most of the weight: figures line up
+ * on their digits, headers stay put while a wide table scrolls, and no table is
+ * ever allowed to push the page sideways.
+ *
+ * Colours are defined once as tokens on :root and only redefined for dark, so
+ * every rule below reads from the same set and neither theme can be half done.
+ */
+
+:root {
+    color-scheme: light dark;
+
+    --bg:          #fbfaf8;
+    --surface:     #ffffff;
+    --surface-alt: #f5f3ef;
+    --ink:         #23211e;
+    --ink-soft:    #5c5852;
+    --ink-faint:   #8a857d;
+    --rule:        #e3dfd8;
+    --rule-strong: #c9c3b8;
+    --accent:      #b8551f;
+    --accent-soft: #f3e6dd;
+    --good:        #2f6b46;
+    --bad:         #a8321f;
+    --code-bg:     #f5f3ef;
+
+    --measure: 46rem;      /* running text stays readable */
+    --wide:    76rem;      /* tables and figures may use more */
+}
+
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        --bg:          #17161a;
+        --surface:     #1e1d22;
+        --surface-alt: #24232a;
+        --ink:         #e8e5e0;
+        --ink-soft:    #b3aea6;
+        --ink-faint:   #837e76;
+        --rule:        #32313a;
+        --rule-strong: #47454f;
+        --accent:      #e08a55;
+        --accent-soft: #2e241d;
+        --good:        #6cc08a;
+        --bad:         #e8806c;
+        --code-bg:     #24232a;
+    }
+}
+
+:root[data-theme="dark"] {
+    --bg:          #17161a;
+    --surface:     #1e1d22;
+    --surface-alt: #24232a;
+    --ink:         #e8e5e0;
+    --ink-soft:    #b3aea6;
+    --ink-faint:   #837e76;
+    --rule:        #32313a;
+    --rule-strong: #47454f;
+    --accent:      #e08a55;
+    --accent-soft: #2e241d;
+    --good:        #6cc08a;
+    --bad:         #e8806c;
+    --code-bg:     #24232a;
+}
+
+/* --- page ------------------------------------------------------------- */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+/* One content column, centred, with wide elements breaking out of it around
+ * the same spine. Centring each child with `margin: auto` instead looked right
+ * until a later rule set `margin: 0 0 1.15rem` on paragraphs and silently
+ * un-centred exactly the elements that carry the prose. */
+body {
+    max-width: var(--measure);
+    margin: 0 auto;
+    padding: 4rem 2rem 8rem;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Charter,
+                 Georgia, "Times New Roman", serif;
+    font-size: 17px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+}
+
+/* Tables, code and figures may exceed the text measure. They grow symmetrically
+ * about its centre line, so the page keeps one optical spine however wide the
+ * viewport is, and they never widen the column the prose sits in. */
+.table-scroll,
+img {
+    width: min(var(--wide), calc(100vw - 4rem));
+    margin-left: 50%;
+    transform: translateX(-50%);
+}
+
+/* Code breaks out only a little. The commands here are short, and a block the
+ * width of a table of measurements reads as the most important thing on the
+ * page when it is the least. */
+pre {
+    width: min(var(--measure) + 6rem, calc(100vw - 4rem));
+    margin-left: 50%;
+    transform: translateX(-50%);
+}
+
+/* --- headings --------------------------------------------------------- */
+
+h1, h2, h3, h4 {
+    font-family: "Iowan Old Style", Charter, Georgia, serif;
+    line-height: 1.2;
+    text-wrap: balance;
+    color: var(--ink);
+}
+
+h1 {
+    font-size: 2.6rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    margin: 0 0 2.5rem;
+    padding-bottom: 1.2rem;
+    border-bottom: 2px solid var(--rule-strong);
+}
+
+h2 {
+    font-size: 1.7rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin: 3.5rem 0 1rem;
+    padding-top: 1.2rem;
+    border-top: 1px solid var(--rule);
+}
+
+h3 { font-size: 1.22rem; font-weight: 600; margin: 2.2rem 0 0.7rem; }
+h4 { font-size: 1.02rem; font-weight: 600; margin: 1.6rem 0 0.5rem;
+     color: var(--ink-soft); }
+
+p { margin: 0 0 1.15rem; }
+
+strong { font-weight: 600; color: var(--ink); }
+em { font-style: italic; }
+
+a { color: var(--accent); text-decoration-thickness: 1px;
+    text-underline-offset: 2px; }
+a:hover { text-decoration-thickness: 2px; }
+
+hr {
+    border: 0;
+    border-top: 1px solid var(--rule);
+    margin: 3rem auto;
+}
+
+/* --- tables ----------------------------------------------------------- */
+
+/* Wide tables scroll inside their own box. The wrapper is added by
+ * render.sh, because python-markdown emits the table element bare. */
+.table-scroll {
+    overflow-x: auto;
+    margin: 1.6rem 0 2rem;
+    margin-left: 50%;
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    background: var(--surface);
+    -webkit-overflow-scrolling: touch;
+}
+
+table {
+    border-collapse: collapse;
+    width: 100%;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas,
+                 monospace;
+    font-size: 0.82rem;
+    line-height: 1.5;
+    /* Digits in a column line up; without this a table of measurements is
+     * far harder to scan than it needs to be. */
+    font-variant-numeric: tabular-nums;
+}
+
+thead th {
+    position: sticky;
+    top: 0;
+    background: var(--surface-alt);
+    color: var(--ink-soft);
+    font-weight: 600;
+    font-size: 0.74rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    text-align: left;
+    padding: 0.7rem 0.9rem;
+    border-bottom: 1.5px solid var(--rule-strong);
+    white-space: nowrap;
+}
+
+tbody td {
+    padding: 0.5rem 0.9rem;
+    border-bottom: 1px solid var(--rule);
+    white-space: nowrap;
+}
+
+tbody tr:last-child td { border-bottom: 0; }
+tbody tr:hover { background: var(--surface-alt); }
+
+/* Markdown's `---:` alignment lands as inline style; numeric columns are
+ * right-aligned there and we only need to keep the header with them. */
+td[style*="right"], th[style*="right"] { text-align: right; }
+td[style*="center"], th[style*="center"] { text-align: center; }
+
+/* A cell that is exactly 0 in a column about failures is the good case and
+ * reads better when it is not shouting. render.sh marks them. */
+td.zero { color: var(--good); font-weight: 600; }
+td.nonzero-bad { color: var(--bad); font-weight: 600; }
+
+/* --- code ------------------------------------------------------------- */
+
+code {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas,
+                 monospace;
+    font-size: 0.85em;
+    background: var(--code-bg);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 0.1em 0.35em;
+}
+
+pre {
+    margin: 1.5rem 0 2rem;
+    margin-left: 50%;
+    padding: 1.1rem 1.3rem;
+    background: var(--code-bg);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--accent);
+    border-radius: 8px;
+    overflow-x: auto;
+    line-height: 1.55;
+}
+
+pre code {
+    background: none;
+    border: 0;
+    padding: 0;
+    font-size: 0.84rem;
+}
+
+.codehilite { background: none; }
+
+/* --- figures ---------------------------------------------------------- */
+
+img {
+    display: block;
+    height: auto;
+    margin: 1.8rem 0 0.6rem;
+    margin-left: 50%;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 0.8rem;
+}
+
+/* Marked by render.sh: a paragraph whose entire content is emphasis, which in
+ * this document is a figure caption. */
+p.caption {
+    margin: 0 auto 2.4rem;
+    color: var(--ink-soft);
+    font-size: 0.88rem;
+    line-height: 1.55;
+    text-align: center;
+}
+p.caption em { font-style: normal; }
+
+/* --- lists and quotes ------------------------------------------------- */
+
+ul, ol { margin: 0 auto 1.2rem; padding-left: 1.4rem; }
+li { margin-bottom: 0.4rem; }
+li::marker { color: var(--ink-faint); }
+
+blockquote {
+    margin: 1.6rem auto;
+    padding: 1rem 1.3rem;
+    background: var(--accent-soft);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 8px 8px 0;
+    color: var(--ink);
+}
+blockquote p:last-child { margin-bottom: 0; }
+
+/* --- print ------------------------------------------------------------ */
+
+@media print {
+    body { padding: 0; font-size: 10pt; background: #fff; color: #000; }
+    .table-scroll { overflow: visible; break-inside: avoid; }
+    h2 { break-after: avoid; }
+    table { font-size: 8pt; }
+    thead th { position: static; }
+}
+
+@media (max-width: 46rem) {
+    body { padding: 2rem 1rem 4rem; font-size: 16px; }
+    h1 { font-size: 2rem; }
+    h2 { font-size: 1.4rem; }
+}
