@@ -204,9 +204,10 @@ def earliness_distribution(case_series: dict, out_dir: Path) -> Figure:
     return Figure(
         "earliness-cdf", "fig:earliness",
         "Empirical distribution over cases of how far before the true time of "
-        "impact each mode reports. Reporting early is the safe direction and "
-        "costs a solver its step size, so a curve further left is less accurate "
-        "but never unsafe.",
+        "impact each mode reports. Earliness is plotted on a log axis, so a "
+        "curve further left reports closer to the true root and a curve "
+        "further right reports earlier -- always the safe direction, and "
+        "always at the cost of a solver's step size.",
         COLUMN_WIDTH_IN)
 
 
