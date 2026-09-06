@@ -131,6 +131,37 @@ the whole accuracy and conservativeness table are independent of
 `SMESH_GEOM_TYPE`. The mesh path -- `prep_ms`, `broad_ms`, `broad_fp`, `s0_*` --
 is what depends on it.
 
+### What geom_t=double actually changes, measured
+
+smesh built from its `double_geom` branch at `SMESH_GEOM_TYPE=float64`, frames
+converted to `x.float64`, against the stock float32 build over the same cases.
+armadillo-rollers, first 200 cases, Tight, one GH200 node:
+
+| geometry | s0_late | toi_late | fp | broad_fp | candidate pairs | time |
+|---|---:|---:|---:|---:|---:|---:|
+| float32 | 66 | 0 | 7 | 14,637,582 | 14,674,883 | 57 s |
+| float64 | **0** | 0 | 7 | 14,613,187 | 14,650,488 | 34 s |
+
+Three things, and the first is the point of the exercise.
+
+**The mesh-path divergence is entirely a precision artefact.** `s0_late` goes
+66 to zero. Those cases were never a kernel defect: the reported time of impact
+was being compared against roots belonging to the exact rational geometry while
+the mesh held a float32 copy of it. Give the mesh the coordinates the roots
+belong to and the discrepancy disappears. Per case the answer moves from just
+above the exact root to just below it -- 100ee reports 1.03297e-3 at float32
+against a root of 1.031e-3, and 1.02986e-3 at float64.
+
+**Narrow-phase false positives do not move: 7 either way.** As expected from the
+code -- `fp` comes from the curated-query path, which is double end to end and
+never reads mesh geometry. No amount of geom_t changes it.
+
+**The broad phase does move, slightly and in the useful direction.** 24,395
+fewer false positives out of 14.6 M, 0.17%, because tighter coordinates give
+tighter swept boxes. That is also why the double run is *faster* despite the
+wider type: 34 s against 57 s, from having fewer candidate pairs to carry into
+the narrow phase.
+
 ### Building smesh at geom_t=double
 
 Supported on smesh's `double_geom` branch, which adds the explicit template
