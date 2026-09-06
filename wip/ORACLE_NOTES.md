@@ -85,6 +85,61 @@ which is the earliest possible answer and cannot be late at all.
 every query of every scene and exits non-zero on a gap, so this class of hole
 cannot reappear unnoticed.
 
+## What float32 mesh geometry costs, measured
+
+`SMESH_GEOM_TYPE` defaults to `float32`, so the mesh path hands the kernels
+float-rounded coordinates while the curated query sets are exact dyadic
+rationals. `ti_oracle --float-geometry` narrows the query geometry to float and
+reruns every mode, which isolates that one variable. armadillo-rollers
+edge-edge, the same 98,757 queries both times:
+
+| geometry | `relaxed` missed / late | `tight` missed / late |
+|---|---|---|
+| double (as shipped) | 0 / 0 | 0 / 0 |
+| float32-narrowed | 0 / 1,902 | 4 / 25,485 |
+
+float32 geometry alone manufactures 25,485 apparent late times of impact, and
+four apparent missed collisions, from kernels that are exactly conservative on
+double geometry. `tight` is hurt fourteen times more than `relaxed` because it
+reports closer to the true root, so a perturbed root crosses its answer far more
+often.
+
+This is what the `s0_late` column in the benchmark CSV is seeing, at smaller
+scale: the mesh answer compared against roots belonging to the rational
+geometry. It is the input differing, not the kernel.
+
+### Which scenes have anything to gain from a double build
+
+From the PLY headers. armadillo-rollers and puffer-ball declare
+`property double x`, so float32 storage genuinely discards data — measured at up
+to 5.95e-8 relative, float32 epsilon. cloth-ball (`property float x`) and
+cloth-funnel (`property float32 x`) are float at source, so nothing is lost for
+them. That is consistent with the mesh divergence being confined to
+armadillo-rollers.
+
+Note also that converting the frames matters as much as the build switch:
+smesh's `db_to_raw` writes `x.float32`, while `benchmark/ply_to_smesh.py` writes
+`x.float64` and round-trips a double PLY bit-exactly. Converting through float32
+and widening afterwards would measure nothing.
+
+### What a double-geometry build would and would not change
+
+`benchmark/bench.exe.cpp` uses `scalar_t = double`, and its curated-query path
+builds its own double buffers straight from the CSV rationals; smesh appears
+there only as a buffer container. So `fp`, `fn`, `toi_late`, `toi_med_early` and
+the whole accuracy and conservativeness table are independent of
+`SMESH_GEOM_TYPE`. The mesh path -- `prep_ms`, `broad_ms`, `broad_fp`, `s0_*` --
+is what depends on it.
+
+### The build is currently blocked
+
+`libsmesh.a` compiles at `SMESH_GEOM_TYPE=float64`, but smesh's CLI tools do not
+link: the explicit template instantiations do not cover the double-geometry
+combinations (`adjugate_fill<f32, f64>`, `mesh_fill_tri3_square<int, double>`,
+`sshex8_fill_points<int, double>`). The install aborts before
+`smeshConfig.cmake` is written, so `find_package(smesh)` cannot find it. It
+needs a pass in smesh, not a patch from here.
+
 ## The device rows
 
 Built with `-DSCCD_ENABLE_CUDA=ON`, the oracle adds two rows for the CUDA narrow
