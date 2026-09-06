@@ -130,3 +130,7 @@ build*/
 # blanket *.png and *.pdf rules above would otherwise win.
 !docs/figures/*.png
 !docs/figures/*.pdf
+# The stylesheet for the rendered documents is source, not output. The HTML it
+# renders is output and stays ignored.
+!docs/assets/
+!docs/assets/*.css
