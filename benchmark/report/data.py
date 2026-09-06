@@ -236,6 +236,10 @@ class SceneSummary:
     gt_queries: int = 0
     toi_compared: int = 0
     toi_med_early: list[float] = field(default_factory=list)
+    # The per-case worst case, not the per-case median: the largest
+    # step a solver loses anywhere in the scene, which a median over
+    # cases hides completely.
+    toi_max_early: list[float] = field(default_factory=list)
 
 
 def by_scene(rows: list[dict]) -> dict[tuple[str, str], SceneSummary]:
@@ -295,6 +299,9 @@ def by_scene(rows: list[dict]) -> dict[tuple[str, str], SceneSummary]:
             med_early = _as_float(row.get("toi_med_early"))
             if med_early is not None and med_early > 0:
                 summary.toi_med_early.append(med_early)
+            max_early = _as_float(row.get("toi_max_early"))
+            if max_early is not None and max_early > 0:
+                summary.toi_max_early.append(max_early)
         for name in ("toi_late", "s0_late"):
             value = _as_float(row.get(name))
             if value is not None:
