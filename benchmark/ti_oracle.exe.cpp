@@ -77,6 +77,11 @@ namespace {
         // the true root; this makes that effect visible on the host rows too,
         // which is the only way to tell it apart from a kernel defect.
         bool float_geometry = false;
+        // Which search TightInclusion runs for the reference answer. Its own
+        // default is breadth-first; this tool has always asked for depth-first,
+        // which is both slower here and the only one of the two that ignores a
+        // time bound.
+        bool ti_breadth_first = false;
         // > 0 selects throughput mode: merge every query file into one batch and
         // time the device kernels with CUDA events instead of scoring accuracy.
         int bench_repeats = 0;
@@ -602,6 +607,16 @@ int main(int argc, char** argv) {
             opt.do_ee = (p == "ee" || p == "both");
         } else if (a == "--max-files") {
             opt.max_files = static_cast<std::size_t>(std::stoul(next()));
+        } else if (a == "--ti-method") {
+            const std::string m = next();
+            if (m == "bfs") {
+                opt.ti_breadth_first = true;
+            } else if (m == "dfs") {
+                opt.ti_breadth_first = false;
+            } else {
+                std::cerr << "error: --ti-method takes bfs or dfs\n";
+                return 1;
+            }
         } else if (a == "--file-begin") {
             opt.file_begin = static_cast<std::size_t>(std::stoul(next()));
         } else if (a == "--tol") {
@@ -632,7 +647,7 @@ int main(int argc, char** argv) {
 
     if (opt.dataset_dir.empty()) {
         std::cerr << "usage: ti_oracle <dataset-dir> [--phase vf|ee|both] [--max-files N]\n"
-                     "                 [--file-begin N]\n"
+                     "                 [--file-begin N] [--ti-method bfs|dfs]\n"
                      "                 [--tol T] [--max-depth N] [--csv out.csv]\n"
                      "                 [--violations-csv out.csv] [--no-strict] [--gate MODE]\n"
 #ifdef SCCD_ENABLE_CUDA
@@ -737,6 +752,80 @@ int main(int argc, char** argv) {
             // query's progress. Timed side by side because production callers
             // choose between them.
             std::printf("%-12s %12s %12s %10s\n", "mode", "per_pair_ms", "earliest_ms", "ratio");
+
+            // TightInclusion in three configurations, so the comparison against
+            // ToiOutput::Earliest is like for like and the two variables are
+            // separated.
+            //
+            // SCCD's Earliest prunes every query against the earliest time of
+            // impact found so far. TightInclusion can do the same -- `t_max` is
+            // its own parameter and needs no change to it -- but only on the
+            // breadth-first path: interval_root_finder_DFS takes no max_time and
+            // ccd.cpp returns from the DFS branch before t_max is read. So a
+            // bound passed with depth-first search does nothing at all, and the
+            // reference SCCD has always compared against ran depth-first over
+            // the whole interval. Breadth-first is TightInclusion's own default.
+            //
+            // The per-query column runs TightInclusion as the accuracy table
+            // does; the earliest column carries the running minimum forward.
+            {
+                struct TiConfig {
+                    const char* name;
+                    bool breadth_first;
+                    bool prune;
+                };
+                const TiConfig configs[3] = {
+                    {"TI dfs", false, false},   // what the reference has always been
+                    {"TI bfs", true, false},    // method changed, no bound
+                    {"TI bfs+max", true, true}, // method changed and bounded
+                };
+                for (const TiConfig& cfg : configs) {
+                    double per_pair_ms = 0.0;
+                    double earliest_ms = 0.0;
+                    for (int k = 0; k < 2; ++k) {
+                        const bool earliest = (k == 1);
+                        double best = 1e30;
+                        for (int r = 0; r < opt.bench_repeats; ++r) {
+                            double running = 1.0;  // the shared bound, as Earliest keeps
+                            const double t0 = now_seconds();
+                            for (std::size_t i = 0; i < batch.n_queries; ++i) {
+                                const idx_t bi = static_cast<idx_t>(4 * i);
+                                auto P0 = [&](int c, int d) { return batch.p0[d][bi + c]; };
+                                auto P1 = [&](int c, int d) { return batch.p1[d][bi + c]; };
+                                const double a0[3] = {P0(0, 0), P0(0, 1), P0(0, 2)};
+                                const double a1[3] = {P0(1, 0), P0(1, 1), P0(1, 2)};
+                                const double a2[3] = {P0(2, 0), P0(2, 1), P0(2, 2)};
+                                const double a3[3] = {P0(3, 0), P0(3, 1), P0(3, 2)};
+                                const double b0[3] = {P1(0, 0), P1(0, 1), P1(0, 2)};
+                                const double b1[3] = {P1(1, 0), P1(1, 1), P1(1, 2)};
+                                const double b2[3] = {P1(2, 0), P1(2, 1), P1(2, 2)};
+                                const double b3[3] = {P1(3, 0), P1(3, 1), P1(3, 2)};
+
+                                // The bound only applies to the earliest question;
+                                // asking for a time of impact per candidate means
+                                // each is searched over the whole step.
+                                const double bound =
+                                    (earliest && cfg.prune) ? running : 1.0;
+                                double t = bound, u = 0, v = 0;
+                                const bool hit =
+                                    phase.is_vf
+                                        ? sccd::find_root_tight_inclusion_vf<double>(
+                                              opt.max_depth, opt.tol, a0, a1, a2, a3, b0, b1, b2, b3,
+                                              t, u, v, bound, cfg.breadth_first)
+                                        : sccd::find_root_tight_inclusion_ee<double>(
+                                              opt.max_depth, opt.tol, a0, a1, a2, a3, b0, b1, b2, b3,
+                                              t, u, v, bound, cfg.breadth_first);
+                                if (earliest && hit && t < running) running = t;
+                            }
+                            const double ms_run = (now_seconds() - t0) * 1e3;
+                            if (ms_run < best) best = ms_run;
+                        }
+                        (earliest ? earliest_ms : per_pair_ms) = best;
+                    }
+                    std::printf("%-12s %12.3f %12.3f %9.2fx\n", cfg.name, per_pair_ms, earliest_ms,
+                                earliest_ms > 0 ? per_pair_ms / earliest_ms : 0.0);
+                }
+            }
             for (int m = 0; m < N_MODES; ++m) {
                 const Mode mode = mode_of(m);
                 const bool is_device = (mode == Mode::DeviceRelaxed || mode == Mode::DeviceTight);
@@ -841,11 +930,14 @@ int main(int argc, char** argv) {
                 const double b3[3] = {P1(3, 0), P1(3, 1), P1(3, 2)};
 
                 double t = 1, u = 0, v = 0;
-                const bool hit = phase.is_vf
-                                     ? sccd::find_root_tight_inclusion_vf<double>(
-                                           opt.max_depth, opt.tol, a0, a1, a2, a3, b0, b1, b2, b3, t, u, v)
-                                     : sccd::find_root_tight_inclusion_ee<double>(
-                                           opt.max_depth, opt.tol, a0, a1, a2, a3, b0, b1, b2, b3, t, u, v);
+                const bool hit =
+                    phase.is_vf
+                        ? sccd::find_root_tight_inclusion_vf<double>(
+                              opt.max_depth, opt.tol, a0, a1, a2, a3, b0, b1, b2, b3, t, u, v,
+                              1.0, opt.ti_breadth_first)
+                        : sccd::find_root_tight_inclusion_ee<double>(
+                              opt.max_depth, opt.tol, a0, a1, a2, a3, b0, b1, b2, b3, t, u, v,
+                              1.0, opt.ti_breadth_first);
                 ti_hit[i] = hit ? 1 : 0;
                 ti_toi[i] = hit ? t : 1.0;
                 ti_hits += hit ? 1 : 0;
