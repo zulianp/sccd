@@ -83,9 +83,10 @@ while cloth-ball contributes 79.
 <!-- sccd:begin dataset -->
 <!-- sccd:end dataset -->
 
-Accuracy is measured on the curated query sets and cannot be measured through
-the mesh path: smesh stores coordinates as `float`, so mesh geometry is a
-rounded copy of the geometry those exact roots belong to.
+Accuracy is measured on the curated query sets, because the exact roots belong
+to those coordinates specifically. The mesh path is a separately stored copy of
+the same frames, read from PLY, and is reported beside them rather than checked
+against them.
 
 ### Ground-truth coverage
 
@@ -97,10 +98,14 @@ collision", so an incomplete oracle silently shrinks the evidence instead of
 announcing itself. The gate runs as part of `prepare_data.sh` and exits non-zero
 on any gap.
 
-Coverage on the swept scenes is complete: 130,859 of armadillo-rollers' 131,441
-queries carry a root, 664,919 of cloth-ball's 664,940, 6,773 of cloth-funnel's
-7,552, and 1,486,790 of puffer-ball's 1,514,172 — in each case exactly the set
-`mma_bool` marks as colliding.
+Coverage is complete on all six scenes. A query carries a root exactly when
+`mma_bool` marks it as colliding, and the counts agree on every one: 130,859 of
+armadillo-rollers' 131,441 queries, 664,919 of cloth-ball's 664,940, 6,773 of
+cloth-funnel's 7,552, 2,947,611 of n-body-simulation's 2,947,719, 1,486,790 of
+puffer-ball's 1,514,172, and 285,431 of rod-twist's 549,208. The proportion
+varies by scene because it is the fraction of curated queries that collide, not
+a measure of how much of the oracle converted — rod-twist's 52% and cloth-ball's
+99.997% are both complete.
 
 ## Modes
 
@@ -126,7 +131,7 @@ but it is a reason to read the spread rather than a single figure.
 
 The invariant, checked against the dataset's exact symbolic roots for every mode
 on every scene, CPU and GPU. **Zero missed collisions and zero late times of
-impact in all twenty-four configurations.**
+impact in all forty-eight configurations.**
 
 <!-- sccd:begin gate -->
 
@@ -201,19 +206,18 @@ Source: `benchmark/results/sweep-gh200.csv`
 
 The last column deserves its own sentence, because it looks like a violation and
 is not. It counts cases where the earliest-impact answer computed over the
-**mesh** lands after the earliest exact root of the **curated queries**. Those are
-two different geometries: smesh stores mesh coordinates as `float32`, while the
-curated queries are exact dyadic rationals. On every one of those cases the
-curated-query answer is at or before the exact root. Near a grazing contact a
-last-bit change in a coordinate moves the root by far more than it moves the
-coordinate, which is why the divergence is larger than `float32`'s own precision.
-It measures the distance between two inputs, not a kernel reporting late, so it
-is reported and not gated on.
+**mesh** lands after the earliest exact root of the **curated queries** — two
+separately stored copies of the same frames, one read from PLY and one written
+as exact dyadic rationals. It measures the agreement between two inputs, not a
+kernel reporting late, which is why it is reported and not gated on. With the
+mesh stored in double it is **zero on every scene and every mode**; a float32
+mesh store puts it in the hundreds on the two scenes whose PLY files declare
+`property double`, which is what decided the storage type.
 
 ## Timing
 
-Whole-scene wall clock, summed over every case, median of five independent runs
-with the full run-to-run range beside it.
+Whole-scene wall clock, summed over every case, median of three independent
+runs with the full run-to-run range beside it.
 
 <!-- sccd:begin timing -->
 
@@ -261,9 +265,15 @@ the reason the trade is worth stating as a trade:
 
 <!-- sccd:end comparison -->
 
+The split between the two output modes is the mechanism, not a detail.
 `Relaxed` accepts a box sooner, so it does less work per query — but a looser
-bound also prunes less, so the queries after it do more. Which effect wins is a
-property of the scene, not of the mode.
+acceptance also means a looser bound to hand the next query, so it prunes less.
+`ToiOutput::PerPair` has no shared bound to lose, and there `Relaxed` is faster
+on **every** scene. `ToiOutput::Earliest` reintroduces it, and on the three
+scenes with the most candidate pairs per step the pruning `Tight` buys back is
+worth more than the per-query work it costs, so the ranking inverts. Which
+effect wins is a property of the scene and of what is being asked, not of the
+mode alone.
 
 **The two processors divide the work differently.** On all three scenes measured
 on both, the GPU broad phase is two to three and a half times faster than the
@@ -407,13 +417,18 @@ Source: `benchmark/results/scaling/host-mode0.txt, benchmark/results/scaling/hos
 
 ![Cost against element count](figures/refine-scaling.png)
 
+Broad-phase and narrow-phase cost against element count, log-log, over five
+refinement levels of the same surface. The fitted exponent is on the broad
+phase; the narrow-phase series is flat and noisy because these two frames do not
+come into contact.
+
 ## Figures
 
 ![Broad and narrow phase per scene and mode](figures/phase-breakdown.png)
 
 Broad phase (pale) and narrow phase (solid) summed over every case, per mode.
-Bars are the median over five repeats; whiskers span the full run-to-run range of
-the total, so a difference smaller than a whisker is not a result.
+Bars are the median over three repeats; whiskers span the full run-to-run range
+of the total, so a difference smaller than a whisker is not a result.
 
 ![Narrow-phase time per case against candidate pairs](figures/narrow-per-case.png)
 
@@ -422,8 +437,10 @@ the broad phase handed it, log-log, median over repeats.
 
 ![Distribution of earliness](figures/earliness-cdf.png)
 
-How far before the true time of impact each mode reports, over cases. A curve
-further left is less accurate and never unsafe.
+Empirical distribution, over cases, of how far before the true time of impact
+each mode reports. Earliness is on a log axis, so a curve further left reports
+closer to the true root; a curve further right reports earlier, which is always
+the safe direction and always costs a solver step size.
 
 ## Provenance
 

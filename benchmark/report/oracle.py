@@ -54,9 +54,41 @@ def _f(text: str) -> float:
         return math.nan
 
 
+def _repeat_count(values: list[int]) -> int:
+    """
+    How many times the chunk sequence repeats in `values`.
+
+    A scene large enough to be split runs as R identical passes over C chunks,
+    and the merged CSV holds all R*C rows under the same (dataset, phase, mode)
+    key. Nothing in the row says which chunk or which repeat it is, so the
+    period has to be recovered from the sequence: the largest R dividing the
+    length for which the values are R copies of the leading C = len/R block.
+
+    Counting a scene's queries has to know this. Summing every row multiplies
+    by the repeat count; taking the last row keeps only the final chunk, which
+    is what the dataset census used to do -- it reported rod-twist, the one
+    scene the oracle splits, as 61,920 queries instead of 549,208.
+    """
+    n = len(values)
+    for r in range(n, 0, -1):
+        if n % r:
+            continue
+        c = n // r
+        if all(values[i] == values[i % c] for i in range(n)):
+            return r
+    return 1
+
+
 def read(csv_path: Path) -> dict[tuple[str, str, str], OracleRow]:
-    """Rows keyed by (dataset, phase, mode); repeats accumulate into `ms`."""
+    """
+    Rows keyed by (dataset, phase, mode).
+
+    Per-repeat quantities (`ms`) accumulate into a Stat; per-query totals are
+    summed over the chunks of a single pass, so a scene split across chunks is
+    counted once and in full.
+    """
     out: dict[tuple[str, str, str], OracleRow] = {}
+    per_key: dict[tuple[str, str, str], list[dict]] = {}
     with Path(csv_path).open(newline="") as f:
         for raw in csv.DictReader(f):
             if not raw.get("dataset"):
@@ -67,18 +99,31 @@ def read(csv_path: Path) -> dict[tuple[str, str, str], OracleRow]:
             if row is None:
                 row = OracleRow(raw["dataset"], raw.get("phase", ""), mode)
                 out[key] = row
-            row.queries = int(_f(raw.get("queries")) or 0)
-            row.hits = int(_f(raw.get("hits")) or 0)
-            row.gt_checked = int(_f(raw.get("gt_checked")) or 0)
-            # Summed over repeats: one bad repeat must not be averaged away.
-            row.gt_missed += int(_f(raw.get("gt_missed")) or 0)
-            row.gt_late += int(_f(raw.get("gt_late")) or 0)
+                per_key[key] = []
+            per_key[key].append(raw)
             overshoot = _f(raw.get("gt_worst_overshoot"))
             if math.isfinite(overshoot):
                 row.gt_worst_overshoot = max(row.gt_worst_overshoot, overshoot)
             row.relerr_median = _f(raw.get("relerr_median"))
             row.abserr_max = _f(raw.get("abserr_max"))
             row.ms.add(_f(raw.get("ms")))
+
+    for key, raws in per_key.items():
+        row = out[key]
+        counts = [int(_f(r.get("queries")) or 0) for r in raws]
+        repeats = _repeat_count(counts)
+        per_pass = len(raws) // repeats
+        # One pass covers the scene exactly once.
+        for r in raws[:per_pass]:
+            row.queries += int(_f(r.get("queries")) or 0)
+            row.hits += int(_f(r.get("hits")) or 0)
+            row.gt_checked += int(_f(r.get("gt_checked")) or 0)
+        # Failures are summed over every repeat instead: a violation that shows
+        # up in one pass out of three is still a violation, and averaging or
+        # sampling it away is the one mistake this table must not make.
+        for r in raws:
+            row.gt_missed += int(_f(r.get("gt_missed")) or 0)
+            row.gt_late += int(_f(r.get("gt_late")) or 0)
     return out
 
 
