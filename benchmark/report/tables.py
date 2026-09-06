@@ -193,29 +193,44 @@ def timing_table(summaries: dict[tuple[str, str], SceneSummary], source: str) ->
     table = Table(
         label="tab:timing",
         caption=("Wall-clock time per scene and narrow-phase mode, summed over "
-                 "every case in the scene. Each figure is the median over "
-                 "independent repeats, with the full run-to-run range as a "
-                 "percentage of that median in parentheses."),
+                 "every case in the scene, median over independent repeats with "
+                 "the full run-to-run range as a percentage of that median. "
+                 "\\emph{prep} is broad-phase preparation, \\emph{broad} the "
+                 "overlap query itself. The two narrow-phase columns are the two "
+                 "output modes: \\emph{earliest} returns one time of impact for "
+                 "the step, so every query prunes against the running minimum, "
+                 "while \\emph{per-pair} returns one per candidate with no "
+                 "shared bound. \\emph{total} is prep + broad + earliest."),
         columns=[
             Column("scene", "l"), Column("mode", "l"), Column("cases"),
-            Column("queries"), Column("repeats"),
+            Column("pairs"), Column("rep"),
+            Column("prep ms", tex_header=r"prep (ms)"),
             Column("broad ms", tex_header=r"broad (ms)"),
-            Column("narrow ms", tex_header=r"narrow (ms)"),
+            Column("earliest ms", tex_header=r"earliest (ms)"),
+            Column("per-pair ms", tex_header=r"per-pair (ms)"),
             Column("total ms", tex_header=r"total (ms)"),
         ],
         source=source,
         notes=("A difference smaller than the bracketed spread does not separate "
                "two modes and is not reported as a ratio anywhere in this "
-               "document."),
+               "document. Which mode is faster depends on the output mode as "
+               "well as the scene, so the two are given side by side rather "
+               "than one standing for the other."),
     )
     for (scene, mode), s in sorted(summaries.items()):
-        total = Stat()
+        prep = s.totals["prep_ms"]
         broad, narrow = s.totals["broad_ms"], s.totals["narrow_ms"]
-        for i in range(min(broad.n, narrow.n)):
-            total.add(broad.values[i] + narrow.values[i])
+        per_pair = s.totals["narrow_ms_s1"]
+        # Total the phases a caller actually pays for, within a repeat and only
+        # then across them. Preparation is part of that: on rod-twist it is
+        # larger than the broad and narrow phases together, so a "total" that
+        # leaves it out understates the pipeline by more than half.
+        total = Stat()
+        for i in range(min(prep.n, broad.n, narrow.n)):
+            total.add(prep.values[i] + broad.values[i] + narrow.values[i])
         table.add(SCENE_LABEL.get(scene, scene), mode_label(mode),
                   f"{s.cases}", f"{s.queries:,}", f"{s.repeats}",
-                  _ms(broad), _ms(narrow), _ms(total))
+                  _ms(prep), _ms(broad), _ms(narrow), _ms(per_pair), _ms(total))
     return table
 
 
@@ -307,20 +322,29 @@ def comparison_notes(summaries: dict[tuple[str, str], SceneSummary]) -> list[str
         space = "GPU" if mode.startswith("device-") else "CPU"
         groups.setdefault((scene, space), {})[mode] = summary
 
+    # Both output modes, because which narrow-phase mode is faster depends on
+    # it. Tight's advantages exist only where a shared running minimum lets a
+    # tighter bound prune the queries that follow; with one result per candidate
+    # and no shared bound there is nothing for that tightness to buy.
     for (scene, space) in sorted(groups):
-        modes = groups[(scene, space)]
+        for column, output in (("narrow_ms", "earliest"), ("narrow_ms_s1", "per-pair")):
+            _compare(groups[(scene, space)], scene, space, column, output, notes)
+    return notes
+
+
+def _compare(modes, scene, space, column, output, notes) -> None:
         if len(modes) < 2:
-            continue
-        where = f"{SCENE_LABEL.get(scene, scene)} ({space})"
-        ranked = sorted(modes.items(), key=lambda kv: kv[1].totals["narrow_ms"].median)
+            return
+        where = f"{SCENE_LABEL.get(scene, scene)} ({space}, {output})"
+        ranked = sorted(modes.items(), key=lambda kv: kv[1].totals[column].median)
         (best_mode, best), (worst_mode, worst) = ranked[0], ranked[-1]
-        b, w = best.totals["narrow_ms"], worst.totals["narrow_ms"]
+        b, w = best.totals[column], worst.totals[column]
         if b.n < 2 or w.n < 2:
             notes.append(
                 f"- **{where}**: a single repeat gives no estimate of the noise, "
                 f"so {mode_label(best_mode)} and {mode_label(worst_mode)} are not "
                 f"separable here.")
-            continue
+            return
         ok, ratio, noise = separable(b, w)
         if ok:
             notes.append(
@@ -334,7 +358,6 @@ def comparison_notes(summaries: dict[tuple[str, str], SceneSummary]) -> list[str
                 f"{mode_label(worst_mode)} are inside noise "
                 f"({b.median:.0f} ms against {w.median:.0f} ms, spread "
                 f"{noise * 100:.1f}%); this does not separate them.")
-    return notes
 
 
 def write_tables(tables: list[Table], out_dir: Path, stem: str = "tables") -> dict:
