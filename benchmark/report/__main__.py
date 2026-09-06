@@ -126,6 +126,7 @@ def main(argv: list[str]) -> int:
         oracle_source = _repo_relative(oracle_csv)
         built.append(oracle_mod.gate_table(oracle_rows, oracle_source))
         built.append(oracle_mod.reference_table(oracle_rows, oracle_source))
+        built.append(oracle_mod.earliness_table(oracle_rows, oracle_source))
     if scaling_runs:
         built.append(scaling_mod.table(
             scaling_runs, ", ".join(_repo_relative(p) for p in scaling_files)))
