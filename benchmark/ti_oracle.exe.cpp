@@ -504,6 +504,31 @@ namespace {
         std::vector<Violation> violations;
         double seconds = 0;
 
+        // Earliness against the exact root: how far before the truth the answer
+        // lands. Kept per file (median within a file, largest anywhere) rather
+        // than as one vector of every query, which would be millions of doubles
+        // per mode, and which matches how the sweep reports the same quantity.
+        std::vector<double> file_med_early;
+        double max_early = 0;
+
+        double med_early() const {
+            if (file_med_early.empty()) return 0.0;
+            std::vector<double> v = file_med_early;
+            std::sort(v.begin(), v.end());
+            const std::size_t mid = v.size() / 2;
+            return v.size() % 2 ? v[mid] : 0.5 * (v[mid - 1] + v[mid]);
+        }
+
+        void add_file_earliness(std::vector<double>& early) {
+            if (early.empty()) return;
+            std::sort(early.begin(), early.end());
+            const std::size_t mid = early.size() / 2;
+            file_med_early.push_back(early.size() % 2
+                                         ? early[mid]
+                                         : 0.5 * (early[mid - 1] + early[mid]));
+            if (early.back() > max_early) max_early = early.back();
+        }
+
         void add(const double reference, const double value) {
             const double err = value - reference;
             abs_err.push_back(std::abs(err));
@@ -913,6 +938,12 @@ int main(int argc, char** argv) {
         }
 
         Stats stats[N_MODES];
+        // TightInclusion scored against the exact roots on exactly the same
+        // terms as every mode. It is the reference for hit-versus-miss, but it
+        // is not the truth: its own answer is a conservative lower bound, so
+        // "how early is the reference" is a fair question and one the accuracy
+        // table cannot answer without measuring it.
+        Stats ti_stats;
         double ti_seconds = 0;
         std::size_t ti_hits = 0;
         std::size_t total_queries = 0;
@@ -987,6 +1018,37 @@ int main(int argc, char** argv) {
             // total does not depend on the schedule.
             for (std::size_t i = 0; i < qs.n_queries; ++i) ti_hits += ti_hit[i] ? 1 : 0;
 
+            // The reference, scored against the exact roots on the same terms as
+            // every mode below. TightInclusion is the reference for hit versus
+            // miss, but it is not the truth -- its answer is itself a
+            // conservative lower bound -- so how early it lands is a fair
+            // question, and one the accuracy table cannot answer without asking.
+            ti_stats.n += qs.n_queries;
+            for (std::size_t i = 0; i < qs.n_queries; ++i) {
+                ti_stats.hits += ti_hit[i] ? 1 : 0;
+            }
+            if (have_gt_toi) {
+                std::vector<double> ti_early;
+                ti_early.reserve(qs.n_queries);
+                for (std::size_t i = 0; i < qs.n_queries; ++i) {
+                    const double truth = gt_toi[i];
+                    if (sccd::is_nan_bits(truth)) continue;
+                    ti_stats.gt_checked += 1;
+                    if (!ti_hit[i]) {
+                        ti_stats.gt_missed += 1;
+                    } else if (ti_toi[i] > truth) {
+                        ti_stats.gt_late += 1;
+                        const double over = ti_toi[i] - truth;
+                        if (over > ti_stats.gt_worst_overshoot) {
+                            ti_stats.gt_worst_overshoot = over;
+                        }
+                    } else {
+                        ti_early.push_back(truth - ti_toi[i]);
+                    }
+                }
+                ti_stats.add_file_earliness(ti_early);
+            }
+
             if (have_gt) {
                 gt_available += qs.n_queries;
             }
@@ -1035,6 +1097,8 @@ int main(int argc, char** argv) {
                 stats[m].seconds += now_seconds() - t0;
 
                 const std::size_t late_before = stats[m].late;
+                std::vector<double> early;
+                early.reserve(qs.n_queries);
                 for (std::size_t i = 0; i < qs.n_queries; ++i) {
                     const bool hit = toi[i] < scalar_t(1);
                     stats[m].n += 1;
@@ -1067,7 +1131,10 @@ int main(int argc, char** argv) {
                                     stats[m].violations.push_back(
                                         {key, i, "missed(truth)", truth, double(toi[i])});
                                 }
-                            } else if (double(toi[i]) > truth) {
+                            } else if (double(toi[i]) <= truth) {
+                                early.push_back(truth - double(toi[i]));
+                            }
+                            if (hit && double(toi[i]) > truth) {
                                 stats[m].gt_late += 1;
                                 const double over = double(toi[i]) - truth;
                                 if (over > stats[m].gt_worst_overshoot) {
@@ -1081,6 +1148,7 @@ int main(int argc, char** argv) {
                         }
                     }
                 }
+                stats[m].add_file_earliness(early);
             }
         }
 
@@ -1104,12 +1172,12 @@ int main(int argc, char** argv) {
             char row[640];
             std::snprintf(row, sizeof(row),
                           "%s,%s,%s,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%.17g,%.17g,%.17g,%.17g,%.17g,%.6f,"
-                          "%zu,%zu,%zu,%.17g",
+                          "%zu,%zu,%zu,%.17g,%.17g,%.17g",
                           dataset.c_str(), phase.name, name, s.n, s.hits, s.false_negative,
                           s.false_positive, s.late, s.near_zero_ref, s.gt_false_negative,
                           Stats::mean_of(s.rel_err), rel_med, rel_p95, abs_p95, abs_max,
                           s.seconds * 1e3, s.gt_checked, s.gt_missed, s.gt_late,
-                          s.gt_worst_overshoot);
+                          s.gt_worst_overshoot, s.med_early(), s.max_early);
             csv_rows.push_back(row);
         }
         std::printf("%-8s %9zu %8zu %6s %6s %6s   %10s %10s   %10s %10s %9.1f\n",
@@ -1121,9 +1189,12 @@ int main(int argc, char** argv) {
         {
             char row[640];
             std::snprintf(row, sizeof(row),
-                          "%s,%s,%s,%zu,%zu,0,0,0,0,0,0,0,0,0,0,%.6f,0,0,0,0",
+                          "%s,%s,%s,%zu,%zu,0,0,0,0,0,0,0,0,0,0,%.6f,"
+                          "%zu,%zu,%zu,%.17g,%.17g,%.17g",
                           dataset.c_str(), phase.name, "ti-reference", total_queries, ti_hits,
-                          ti_seconds * 1e3);
+                          ti_seconds * 1e3, ti_stats.gt_checked, ti_stats.gt_missed,
+                          ti_stats.gt_late, ti_stats.gt_worst_overshoot,
+                          ti_stats.med_early(), ti_stats.max_early);
             csv_rows.push_back(row);
         }
         std::printf("  gtMISS!/gtLATE! are measured against the dataset's exact roots and are the\n"
@@ -1182,7 +1253,8 @@ int main(int argc, char** argv) {
         std::ofstream out(opt.csv);
         out << "dataset,phase,mode,queries,hits,false_negative,false_positive,late,near_zero_ref,"
                "gt_false_negative,relerr_mean,relerr_median,relerr_p95,abserr_p95,abserr_max,ms,"
-               "gt_checked,gt_missed,gt_late,gt_worst_overshoot\n";
+               "gt_checked,gt_missed,gt_late,gt_worst_overshoot,"
+               "med_early,max_early\n";
         for (const std::string& r : csv_rows) {
             out << r << "\n";
         }

@@ -401,6 +401,19 @@ Source: `benchmark/results/sweep-gh200.csv`
 
 <!-- sccd:end earliness -->
 
+### Against TightInclusion, on accuracy
+
+The tables above use TightInclusion as the reference for hit versus miss, which
+is what it is good for. It is **not** the reference for accuracy: its answer is a
+conservative lower bound on the true root, exactly as SCCD's is. So the question
+is not how close each mode gets to TightInclusion but how close all three get to
+the truth, and the dataset's exact symbolic roots are the only thing in the
+comparison that is actually the truth.
+
+<!-- sccd:begin earliness-ref -->
+<!-- sccd:end earliness-ref -->
+
+
 ## Scaling with element count
 
 `sccd_refine_scaling` refines one surface repeatedly, quadrupling the element
