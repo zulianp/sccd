@@ -712,20 +712,25 @@ int main() {
             set_mode(mode);
             const Scene touch = make_vf_first_query_touching(tight ? 200 : 800);
             Verdict worst;
+            Verdict last;
             int failing_runs = 0;
             const int runs = 12;
             for (int run = 0; run < runs; ++run) {
-                const Verdict v = check(touch, device_run(touch, Kind::VF, tol));
-                if (v.missed != 0 || v.late != 0) {
+                last = check(touch, device_run(touch, Kind::VF, tol));
+                if (last.missed != 0 || last.late != 0) {
                     ++failing_runs;
-                    if (v.missed > worst.missed) worst = v;
+                    if (last.missed > worst.missed) worst = last;
                 }
             }
             char tlabel[128];
             std::snprintf(tlabel, sizeof(tlabel),
                           "device vf first-touching mode %d (%d/%d runs bad)",
                           mode, failing_runs, runs);
-            bad += report(tlabel, touch, failing_runs ? worst : Verdict{});
+            // The worst run when any failed, the last otherwise -- reporting an
+            // empty verdict on success printed hit=0, which reads as though
+            // nothing ran and makes a green line impossible to distinguish from
+            // a broken one.
+            bad += report(tlabel, touch, failing_runs ? worst : last);
         }
 
         // Quads have one root-finder variant on each side and never consult the
