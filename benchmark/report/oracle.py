@@ -132,7 +132,8 @@ def _ms(stat: Stat) -> str:
         return "--"
     if stat.n == 1:
         return f"{stat.median:.0f}"
-    return f"{stat.median:.0f} ({stat.spread * 100:.1f} %)"
+    # median / slowest, as everywhere else a repeat is reported
+    return f"{stat.median:.0f} / {stat.hi:.0f}"
 
 
 def gate_table(rows: dict[tuple[str, str, str], OracleRow], source: str) -> Table:

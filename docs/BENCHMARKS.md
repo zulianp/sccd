@@ -40,9 +40,13 @@ That asymmetry decides how the results are read. Speed and tightness are
 negotiable; the two tables headed *conservativeness* are not. Both are checked
 against the dataset's exact symbolic roots, not against another implementation.
 
-**A difference smaller than the run-to-run spread is not a result.** Timing
-tables carry that spread beside every median, figures draw it, and the mode
-comparisons below refuse to state a ratio when the gap is inside it.
+**A difference smaller than the run-to-run spread is not a result.** Every
+repeated measurement is reported as `median / slowest`, so the spread is visible
+and checkable rather than asserted as a percentage; figures draw it, and the
+mode comparisons below refuse to state a ratio when the gap is inside it.
+Distributions over cases carry their worst case for the same reason — a median
+describes the typical case, and the cost of this search is paid in the worst
+one.
 
 ## Platform
 
@@ -363,6 +367,16 @@ Source: `benchmark/results/oracle-gh200.csv`
 
 How far before the true time of impact each mode reports. This is the axis the
 two modes trade against speed, and early is the safe direction.
+
+The median and the worst case answer different questions, and only the second
+one is about step size. A solver does not take the median step: it takes the
+step it is given, so the largest earliness anywhere in a scene is the largest
+step that mode can cost. The two differ by four to five orders of magnitude
+here, and on cloth-funnel and rod-twist the worst case approaches 1.0 — a step
+reported at its very beginning when the true contact is at its end. That is
+conservative, and it is never a missed collision, but it is a step the solver
+does not get to take. Nothing in the conservativeness gate catches it, because
+by construction there is nothing there to catch.
 
 <!-- sccd:begin earliness -->
 

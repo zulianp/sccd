@@ -108,11 +108,19 @@ def render_markdown(table: Table) -> str:
 
 
 def _ms(stat: Stat) -> str:
+    """
+    Median and slowest repeat, as `median / max`.
+
+    A median alone describes the run you are likely to get and says
+    nothing about the run you have to budget for. The two together also
+    show the spread directly, which a percentage states but does not let
+    the reader check.
+    """
     if not stat.n or not math.isfinite(stat.median):
         return "--"
     if stat.n == 1:
         return f"{stat.median:.1f}"
-    return f"{stat.median:.1f} ({stat.spread * 100:.1f} %)"
+    return f"{stat.median:.1f} / {stat.hi:.1f}"
 
 
 def dataset_table(summaries: dict[tuple[str, str], SceneSummary],
@@ -198,7 +206,7 @@ def timing_table(summaries: dict[tuple[str, str], SceneSummary], source: str) ->
         label="tab:timing",
         caption=("Wall-clock time per scene and narrow-phase mode, summed over "
                  "every case in the scene, median over independent repeats with "
-                 "the full run-to-run range as a percentage of that median. "
+                 "reported as median / slowest over those repeats. "
                  "\\emph{prep} is broad-phase preparation, \\emph{broad} the "
                  "overlap query itself. The two narrow-phase columns are the two "
                  "output modes: \\emph{earliest} returns one time of impact for "
@@ -215,7 +223,7 @@ def timing_table(summaries: dict[tuple[str, str], SceneSummary], source: str) ->
             Column("total ms", tex_header=r"total (ms)"),
         ],
         source=source,
-        notes=("A difference smaller than the bracketed spread does not separate "
+        notes=("Each cell is the median over repeats and the slowest of them. A difference smaller than the gap between the two does not separate "
                "two modes and is not reported as a ratio anywhere in this "
                "document. Which mode is faster depends on the output mode as "
                "well as the scene, so the two are given side by side rather "
@@ -282,13 +290,15 @@ def conservativeness_table(summaries: dict[tuple[str, str], SceneSummary],
 def accuracy_table(summaries: dict[tuple[str, str], SceneSummary], source: str) -> Table:
     table = Table(
         label="tab:earliness",
-        caption=("How far before the true time of impact each mode reports, as "
-                 "the median over cases of the per-case median earliness. "
-                 "Reporting early is always safe and always costs a solver step "
-                 "size, so this is the accuracy axis the two modes trade "
-                 "against speed."),
+        caption=("How far before the true time of impact each mode reports. "
+                 "\\emph{median} is the median over cases of the per-case "
+                 "median; \\emph{worst case} is the largest earliness reported "
+                 "anywhere in the scene. Reporting early is always safe and "
+                 "always costs a solver step size, so the worst case is the "
+                 "largest step the mode can cost, not a tail to discount."),
         columns=[Column("scene", "l"), Column("mode", "l"),
-                 Column("median earliness", tex_header=r"median earliness")],
+                 Column("median earliness", tex_header=r"median"),
+                 Column("worst case", tex_header=r"worst case")],
         source=source,
     )
     for (scene, mode), s in sorted(summaries.items()):
@@ -300,7 +310,8 @@ def accuracy_table(summaries: dict[tuple[str, str], SceneSummary], source: str) 
             med = (ordered[mid] if len(ordered) % 2
                    else 0.5 * (ordered[mid - 1] + ordered[mid]))
             value = f"{med:.2e}"
-        table.add(SCENE_LABEL.get(scene, scene), mode_label(mode), value)
+        worst = f"{max(s.toi_max_early):.2e}" if s.toi_max_early else "--"
+        table.add(SCENE_LABEL.get(scene, scene), mode_label(mode), value, worst)
     return table
 
 
