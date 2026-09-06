@@ -289,7 +289,16 @@ namespace {
             return false;
         }
 
-        for (const char* required : {"x.float32", "y.float32", "z.float32", "i0.int32", "i1.int32", "i2.int32"}) {
+        // The coordinate files are named for the precision they hold, and smesh
+        // reads only the one matching the geom_t it was built with -- it does
+        // not fall back to the other. Asking for float32 unconditionally made a
+        // float64 build declare every prepared frame stale and shell out to
+        // db_to_raw for each one, which is not on PATH inside a scheduler job.
+        // dtype_GEOM_T is smesh's own spelling of that suffix.
+        const std::string coord_suffix = std::string(".") + dtype_GEOM_T;
+        for (const std::string required : {"x" + coord_suffix, "y" + coord_suffix,
+                                           "z" + coord_suffix, std::string("i0.int32"),
+                                           std::string("i1.int32"), std::string("i2.int32")}) {
             const fs::path raw_file = output_dir / required;
             if (!fs::exists(raw_file, ec)) {
                 return false;
