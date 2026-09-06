@@ -115,6 +115,80 @@ def _ms(stat: Stat) -> str:
     return f"{stat.median:.1f} ({stat.spread * 100:.1f} %)"
 
 
+def dataset_table(summaries: dict[tuple[str, str], SceneSummary],
+                  oracle_rows: dict, source: str) -> Table:
+    """
+    What was measured on, before any result about it.
+
+    A reader's first question is the size and shape of the problems, and it
+    should be answerable without reading prose. Cases and candidate pairs come
+    from the sweep; queries and roots from the accuracy run, which sees every
+    query rather than the subsample a timing run might use.
+    """
+    table = Table(
+        label="tab:dataset",
+        caption=("The benchmark problems. \\emph{cases} is simulation steps with "
+                 "a runnable query set, \\emph{candidate pairs} the mean number "
+                 "the broad phase produces per step, and \\emph{queries} the "
+                 "curated per-step query sets that carry exact symbolic roots."),
+        columns=[Column("scene", "l"), Column("cases"),
+                 Column("candidate pairs/step", tex_header=r"pairs/step"),
+                 Column("queries"), Column("with a root", tex_header=r"w/ root")],
+        source=source,
+    )
+    per_scene: dict[str, SceneSummary] = {}
+    for (scene, _), s in summaries.items():
+        # any mode will do for case and pair counts; they do not depend on it
+        per_scene.setdefault(scene, s)
+
+    roots: dict[str, tuple[int, int]] = {}
+    for (scene, _, mode), r in (oracle_rows or {}).items():
+        if mode == "tight-inclusion":
+            continue
+        q, g = roots.get(scene, (0, 0))
+        roots[scene] = (q + r.queries, max(g, 0) + r.gt_checked)
+
+    for scene in sorted(per_scene):
+        s = per_scene[scene]
+        pairs = s.queries // s.cases if s.cases else 0
+        q, g = roots.get(scene, (0, 0))
+        # the oracle reports per phase and per mode; collapse to one figure
+        n_modes = len({m for (sc, _, m) in (oracle_rows or {})
+                       if sc == scene and m != "tight-inclusion"}) or 1
+        table.add(SCENE_LABEL.get(scene, scene), f"{s.cases:,}", f"{pairs:,}",
+                  f"{q // n_modes:,}" if q else "--",
+                  f"{g // n_modes:,}" if g else "--")
+    return table
+
+
+def throughput_table(summaries: dict[tuple[str, str], SceneSummary], source: str) -> Table:
+    """
+    Candidate pairs per second, which is what compares across scenes.
+
+    Milliseconds for a whole scene answer "how long did this take"; they cannot
+    be compared between a 79-case scene and a 4,571-case one. Throughput can.
+    """
+    table = Table(
+        label="tab:throughput",
+        caption=("Broad- and narrow-phase throughput in candidate pairs per "
+                 "second, median over repeats. Unlike a whole-scene time this is "
+                 "comparable between scenes of very different size."),
+        columns=[Column("scene", "l"), Column("mode", "l"),
+                 Column("broad Mpair/s", tex_header=r"broad (Mpair/s)"),
+                 Column("narrow Mpair/s", tex_header=r"narrow (Mpair/s)")],
+        source=source,
+    )
+    for (scene, mode), s in sorted(summaries.items()):
+        b, n = s.totals["broad_ms"], s.totals["narrow_ms"]
+        def rate(stat):
+            m = stat.median
+            if not stat.n or not math.isfinite(m) or m <= 0 or not s.queries:
+                return "--"
+            return f"{s.queries / (m / 1000.0) / 1e6:.1f}"
+        table.add(SCENE_LABEL.get(scene, scene), mode_label(mode), rate(b), rate(n))
+    return table
+
+
 def timing_table(summaries: dict[tuple[str, str], SceneSummary], source: str) -> Table:
     table = Table(
         label="tab:timing",

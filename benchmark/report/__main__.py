@@ -94,6 +94,12 @@ def main(argv: list[str]) -> int:
     # nothing they can act on.
     source = _repo_relative(bench_csv)
 
+    # The dataset table wants the oracle's query counts, so read it before the
+    # tables are built rather than after.
+    oracle_rows_early = {}
+    if oracle_csv and oracle_csv.is_file():
+        oracle_rows_early = oracle_mod.read(oracle_csv)
+
     style.apply_rcparams()
     drawn = [
         figures.phase_breakdown(scenes, figure_dir),
@@ -109,13 +115,14 @@ def main(argv: list[str]) -> int:
     figures.write_figure_tex(drawn, out_dir)
 
     built = [
+        tables.dataset_table(scenes, oracle_rows_early, source),
         tables.timing_table(scenes, source),
+        tables.throughput_table(scenes, source),
         tables.conservativeness_table(scenes, source),
         tables.accuracy_table(scenes, source),
     ]
-    oracle_rows = {}
-    if oracle_csv and oracle_csv.is_file():
-        oracle_rows = oracle_mod.read(oracle_csv)
+    oracle_rows = oracle_rows_early
+    if oracle_rows:
         oracle_source = _repo_relative(oracle_csv)
         built.append(oracle_mod.gate_table(oracle_rows, oracle_source))
         built.append(oracle_mod.reference_table(oracle_rows, oracle_source))
