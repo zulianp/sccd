@@ -131,14 +131,35 @@ the whole accuracy and conservativeness table are independent of
 `SMESH_GEOM_TYPE`. The mesh path -- `prep_ms`, `broad_ms`, `broad_fp`, `s0_*` --
 is what depends on it.
 
-### The build is currently blocked
+### Building smesh at geom_t=double
 
-`libsmesh.a` compiles at `SMESH_GEOM_TYPE=float64`, but smesh's CLI tools do not
-link: the explicit template instantiations do not cover the double-geometry
-combinations (`adjugate_fill<f32, f64>`, `mesh_fill_tri3_square<int, double>`,
-`sshex8_fill_points<int, double>`). The install aborts before
-`smeshConfig.cmake` is written, so `find_package(smesh)` cannot find it. It
-needs a pass in smesh, not a patch from here.
+Supported on smesh's `double_geom` branch, which adds the explicit template
+instantiations the default branch lacks for the double-geometry combinations
+(`adjugate_fill<f32, f64>` and friends). Without them `libsmesh.a` compiles but
+the CLI tools do not link, and the install aborts before `smeshConfig.cmake` is
+written, so `find_package(smesh)` cannot see the build at all.
+
+```sh
+git clone --branch double_geom https://github.com/zulianp/smesh.git
+cmake -S smesh -B smesh/build-f64 -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_INSTALL_PREFIX=<prefix> \
+  -DSMESH_GEOM_TYPE=float64 -DSMESH_REAL_TYPE=float64 \
+  -DSMESH_SCALAR_TYPE=float64 -DSMESH_ACCUMULATOR_TYPE=float64 \
+  -DSMESH_ENABLE_OPENMP=ON -DSMESH_ENABLE_CUDA=OFF \
+  -DSMESH_ENABLE_MPI=OFF -DSMESH_ENABLE_MPISORT=OFF \
+  -DSMESH_ENABLE_DEMO=OFF -DSMESH_ENABLE_TESTING=OFF \
+  -DSMESH_ENABLE_RYAML=OFF -DSMESH_ENABLE_DEV_MODE=OFF
+```
+
+then point SCCD at it with `-Dsmesh_DIR=<prefix>/lib64/cmake/smesh`. Two flags
+matter beyond the type: a fresh cache defaults MPI, demos and tests **on**, which
+pulls in far more code than the reference float32 install was built with, and
+`SMESH_ENABLE_DEV_MODE=OFF` is needed because dev mode adds `-Werror` and the
+tree does not build warning-free.
+
+The frames must be converted to match. `prepare_data.sh` writes both `x.float32`
+and `x.float64` through `benchmark/ply_to_smesh.py`, and smesh reads whichever
+matches its `geom_t`, so one prepared dataset serves either build.
 
 ## The device rows
 
