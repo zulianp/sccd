@@ -240,11 +240,20 @@ done
 # Eagerly, rather than leaving it to the driver's first use of a frame. The
 # driver shells out to smesh's db_to_raw, which needs meshio and is not on PATH
 # inside a scheduler job -- a scene whose frames were never converted then
-# produces a chunk with a header and no rows. This writes both float32 and
-# float64 coordinates, so the same prepared dataset serves a smesh built either
-# way and neither needs reconverting.
-printf '  frames (converting to raw arrays, both precisions)\n'
-"${PYTHON}" "${BENCHMARK_DIR}/frames_to_raw.py" "${DATA_DIR}" "${scenes[@]}"
+# produces a chunk with a header and no rows.
+#
+# The coordinates are written at one precision, and it has to match the geom_t
+# the smesh you will run against was built with. SCCD_GEOM_PRECISION selects it;
+# float32 is smesh's own default. The two cannot share a directory -- a float32
+# build over three armadillo-rollers cases takes a second against a float32-only
+# tree and does not finish in five minutes when float64 files are also present,
+# because smesh does not select the file matching its geom_t. Switching a
+# prepared dataset from one to the other therefore reconverts, and the converter
+# removes the coordinates it is replacing.
+GEOM_PRECISION="${SCCD_GEOM_PRECISION:-float32}"
+printf '  frames (converting to raw arrays, %s)\n' "${GEOM_PRECISION}"
+"${PYTHON}" "${BENCHMARK_DIR}/frames_to_raw.py" \
+    "--precision=${GEOM_PRECISION}" "${DATA_DIR}" "${scenes[@]}"
 
 # --- verify ---------------------------------------------------------------
 echo
