@@ -279,13 +279,25 @@ worth more than the per-query work it costs, so the ranking inverts. Which
 effect wins is a property of the scene and of what is being asked, not of the
 mode alone.
 
-**The two processors divide the work differently.** On all three scenes measured
-on both, the GPU broad phase is two to three and a half times faster than the
-CPU's while the GPU narrow phase is slower — so the GPU wins end to end, but it
-wins in the broad phase and loses in the narrow one. Comparisons above are made
-within a processor for that reason: ranking every mode of a scene together would
-compare host `Relaxed` against GPU `Tight` and report the sum of two unrelated
-effects as if it were the mode trade.
+**The two processors divide the work differently, and not in the same direction
+on every scene.** The usual pattern is that Hopper wins the broad phase and
+loses the narrow one: on five of the six scenes its broad phase runs 2.2× to
+4.2× faster than Grace's while its narrow phase runs 0.27× to 0.76× as fast, and
+the broad phase is large enough that the GPU still wins end to end by 1.5× to
+2.9×.
+
+Two scenes break it, in opposite directions. On **rod-twist** the GPU wins every
+phase, narrow phase included (1.26×), for 2.50× overall. On **puffer-ball** it
+loses outright, 0.62× end to end — the only scene where the GPU is the wrong
+processor. Its narrow phase there takes 44.9 s against the host's 12.2 s, and
+unusually its broad phase does not compensate, running slightly slower as well
+(34.2 s against 28.3 s). puffer-ball is the largest scene in the set by candidate
+pairs, 30.5 million per step, so this is the GPU losing where the problem is
+biggest rather than where it is smallest.
+
+Comparisons above are made within a processor for that reason: ranking every mode
+of a scene together would compare host `Relaxed` against GPU `Tight` and report
+the sum of two unrelated effects as if it were the mode trade.
 
 ## Against TightInclusion
 
