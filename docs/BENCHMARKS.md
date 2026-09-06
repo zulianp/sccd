@@ -46,11 +46,24 @@ comparisons below refuse to state a ratio when the gap is inside it.
 
 ## Platform
 
-One GH200 node on CSCS Alps: Grace (72 threads, `OMP_NUM_THREADS` set to the
-node's core count) and Hopper sm_90 in the same allocation, built with
+One GH200 node on CSCS Alps: Grace (288 hardware threads, `OMP_NUM_THREADS` set
+to the node's core count) and Hopper sm_90 in the same allocation, built with
 `prgenv-gnu/24.11:v2`, `-O3`, `CMAKE_CUDA_ARCHITECTURES=90`. Search parameters
 are the shipped defaults. Rows marked *(GPU)* ran with
 `SCCD_BENCH_EXECUTION_SPACE=device`; the rest ran on Grace.
+
+Mesh geometry is stored and read in **double** — smesh built with
+`SMESH_GEOM_TYPE=float64`, frames converted to `x.float64`. That matters for the
+mesh path and only there. Two of the scenes ship PLY files declaring
+`property double`, so a float32 mesh store discards real data: on
+armadillo-rollers it perturbs coordinates by up to 5.95e-8 relative, and near a
+grazing contact that moves the root by far more than it moves the coordinate.
+Measured over 200 armadillo-rollers cases, float32 mesh geometry makes the
+earliest-impact answer land after the exact root in 66 of them and float64 in
+none, while the narrow-phase false positives are identical either way — that
+path takes its coordinates from the query sets, in double, and never reads the
+mesh. The double build is also the faster of the two here, 34 s against 57 s,
+because tighter coordinates give tighter swept boxes and fewer candidate pairs.
 
 ## Scenes
 
@@ -59,28 +72,16 @@ frames rather than synthetic motion. Each case is one step, with a curated query
 set whose coordinates are exact dyadic rationals and whose roots were computed
 symbolically.
 
-Four of the six scenes are swept, and what is covered for each is stated rather
-than left to be inferred:
+All six scenes are swept, every case of every one:
 
-| scene | elements | queries | timing | accuracy |
-|---|---:|---:|---|---|
-| armadillo-rollers | 24,242 | 131,441 | all 781 cases, CPU and GPU | full |
-| cloth-ball | 92,230 | 664,940 | all 79 cases, CPU and GPU | full |
-| cloth-funnel | — | 7,552 | all 577 cases, CPU and GPU | full |
-| puffer-ball | 1,064,216 | 1,514,172 | 40-case subsample, CPU | full |
-| n-body-simulation | — | — | not downloaded | — |
-| rod-twist | — | — | not downloaded | — |
 
-puffer-ball is the outlier and the reason is worth stating. Its surface is
-1,064,216 triangles, eleven times cloth-ball's and forty-four times
-armadillo-rollers', while carrying only about 845 curated queries per case. The
-library handles a case in well under a second — 28.9 M candidate pairs at
-103 ms preparation, 736 ms broad phase, 50 ms narrow phase — but the harness
-takes some twenty times that per case, because reporting `broad_fp` means
-hashing every one of those 28.9 M pairs outside any timed region. That overhead,
-not the library, is what bounds how many of its cases fit in a scheduler
-allocation, so its timing is a stated subsample while its accuracy covers every
-query.
+The scenes differ by orders of magnitude in every dimension, which is the point
+of using all of them: puffer-ball's surface is 1,064,216 triangles against
+armadillo-rollers' 24,242, and rod-twist contributes 4,571 of the 6,394 steps
+while cloth-ball contributes 79.
+
+<!-- sccd:begin dataset -->
+<!-- sccd:end dataset -->
 
 Accuracy is measured on the curated query sets and cannot be measured through
 the mesh path: smesh stores coordinates as `float`, so mesh geometry is a
@@ -238,6 +239,12 @@ A difference smaller than the bracketed spread does not separate two modes and i
 Source: `benchmark/results/sweep-gh200.csv`
 
 <!-- sccd:end timing -->
+
+Whole-scene milliseconds cannot be compared between a 79-case scene and a
+4,571-case one; throughput can:
+
+<!-- sccd:begin throughput -->
+<!-- sccd:end throughput -->
 
 **Neither mode is uniformly faster**, which is the substantive result here and
 the reason the trade is worth stating as a trade:
