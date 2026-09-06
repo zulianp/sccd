@@ -20,6 +20,9 @@
 // else changes.
 
 #include "sccd_narrowphase.hpp"
+#include "sccd_parallel.hpp"
+
+#include <atomic>
 #include "sccd_math.hpp"
 #include "sccd_rootfinder.hpp"
 
@@ -786,9 +789,17 @@ int main(int argc, char** argv) {
                         const bool earliest = (k == 1);
                         double best = 1e30;
                         for (int r = 0; r < opt.bench_repeats; ++r) {
-                            double running = 1.0;  // the shared bound, as Earliest keeps
+                            // Shared, as Earliest keeps it: every worker prunes
+                            // against the best time of impact found so far by
+                            // any of them, which is what makes the bound worth
+                            // anything. Relaxed ordering is all the bound needs
+                            // -- reading a stale (larger) value only prunes less.
+                            std::atomic<double> running(1.0);
                             const double t0 = now_seconds();
-                            for (std::size_t i = 0; i < batch.n_queries; ++i) {
+                            sccd::parallel_for_br_dynamic(
+                                0, (ptrdiff_t)batch.n_queries,
+                                [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+                            for (std::size_t i = (std::size_t)rbegin; i < (std::size_t)rend; ++i) {
                                 const idx_t bi = static_cast<idx_t>(4 * i);
                                 auto P0 = [&](int c, int d) { return batch.p0[d][bi + c]; };
                                 auto P1 = [&](int c, int d) { return batch.p1[d][bi + c]; };
@@ -805,7 +816,9 @@ int main(int argc, char** argv) {
                                 // asking for a time of impact per candidate means
                                 // each is searched over the whole step.
                                 const double bound =
-                                    (earliest && cfg.prune) ? running : 1.0;
+                                    (earliest && cfg.prune)
+                                        ? running.load(std::memory_order_relaxed)
+                                        : 1.0;
                                 double t = bound, u = 0, v = 0;
                                 const bool hit =
                                     phase.is_vf
@@ -815,8 +828,17 @@ int main(int argc, char** argv) {
                                         : sccd::find_root_tight_inclusion_ee<double>(
                                               opt.max_depth, opt.tol, a0, a1, a2, a3, b0, b1, b2, b3,
                                               t, u, v, bound, cfg.breadth_first);
-                                if (earliest && hit && t < running) running = t;
+                                if (earliest && cfg.prune && hit) {
+                                    // CAS-min: retry only while some other worker
+                                    // published a value that is still worse than ours.
+                                    double cur = running.load(std::memory_order_relaxed);
+                                    while (t < cur &&
+                                           !running.compare_exchange_weak(
+                                               cur, t, std::memory_order_relaxed)) {
+                                    }
+                                }
                             }
+                            });
                             const double ms_run = (now_seconds() - t0) * 1e3;
                             if (ms_run < best) best = ms_run;
                         }
@@ -912,11 +934,29 @@ int main(int argc, char** argv) {
             const bool have_gt_toi =
                 read_ground_truth_toi(opt.dataset_dir, key, gt_toi) && gt_toi.size() >= qs.n_queries;
 
-            // --- reference: TightInclusion, one query at a time ---
+            // --- reference: TightInclusion, over the same queries ---
+            //
+            // The loop is scheduled with the *same* helper the narrow phase
+            // uses for its own root finding (parallel_for_br_dynamic, chosen
+            // there because per-query CCD cost is heavily skewed), so the
+            // reference column compares two parallel implementations rather
+            // than a parallel one against a serial one. Running TI serially
+            // here inflated every "vs. TI" ratio by roughly the thread count.
+            //
+            // This calls TightInclusion concurrently but does not modify it.
+            // That is sound for the way it is configured: the only namespace
+            // scope mutable state in the library is the timing accumulators in
+            // interval_root_finder.cpp, written solely through
+            // TIGHT_INCLUSION_SCOPED_TIMER, which expands to nothing unless
+            // TIGHT_INCLUSION_WITH_TIMER is defined -- and SCCDDependencies
+            // forces it OFF. The remaining statics are a magic static logger
+            // and an unused timer constant. Each query writes only its own slot.
             std::vector<double> ti_toi(qs.n_queries, 1.0);
             std::vector<std::uint8_t> ti_hit(qs.n_queries, 0);
             const double t_ti0 = now_seconds();
-            for (std::size_t i = 0; i < qs.n_queries; ++i) {
+            sccd::parallel_for_br_dynamic(0, (ptrdiff_t)qs.n_queries,
+                                          [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+            for (std::size_t i = (std::size_t)rbegin; i < (std::size_t)rend; ++i) {
                 const idx_t b = static_cast<idx_t>(4 * i);
                 auto P0 = [&](int k, int d) { return qs.p0[d][b + k]; };
                 auto P1 = [&](int k, int d) { return qs.p1[d][b + k]; };
@@ -940,9 +980,12 @@ int main(int argc, char** argv) {
                               1.0, opt.ti_breadth_first);
                 ti_hit[i] = hit ? 1 : 0;
                 ti_toi[i] = hit ? t : 1.0;
-                ti_hits += hit ? 1 : 0;
             }
+            });
             ti_seconds += now_seconds() - t_ti0;
+            // Counted after the fact rather than accumulated in the loop, so the
+            // total does not depend on the schedule.
+            for (std::size_t i = 0; i < qs.n_queries; ++i) ti_hits += ti_hit[i] ? 1 : 0;
 
             if (have_gt) {
                 gt_available += qs.n_queries;
