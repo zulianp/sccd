@@ -141,23 +141,27 @@ def dataset_table(summaries: dict[tuple[str, str], SceneSummary],
         # any mode will do for case and pair counts; they do not depend on it
         per_scene.setdefault(scene, s)
 
-    roots: dict[str, tuple[int, int]] = {}
+    # Per mode, then take one mode: every mode sees the same queries, so summing
+    # across modes and dividing back by how many there were only invites the
+    # count to drift when a scene is swept on one processor and not another.
+    by_mode: dict[tuple[str, str], tuple[int, int]] = {}
     for (scene, _, mode), r in (oracle_rows or {}).items():
         if mode == "tight-inclusion":
             continue
-        q, g = roots.get(scene, (0, 0))
-        roots[scene] = (q + r.queries, max(g, 0) + r.gt_checked)
+        q, g = by_mode.get((scene, mode), (0, 0))
+        by_mode[(scene, mode)] = (q + r.queries, g + r.gt_checked)
+
+    roots: dict[str, tuple[int, int]] = {}
+    for (scene, _mode), qg in by_mode.items():
+        roots[scene] = max(roots.get(scene, (0, 0)), qg)
 
     for scene in sorted(per_scene):
         s = per_scene[scene]
         pairs = s.queries // s.cases if s.cases else 0
         q, g = roots.get(scene, (0, 0))
-        # the oracle reports per phase and per mode; collapse to one figure
-        n_modes = len({m for (sc, _, m) in (oracle_rows or {})
-                       if sc == scene and m != "tight-inclusion"}) or 1
         table.add(SCENE_LABEL.get(scene, scene), f"{s.cases:,}", f"{pairs:,}",
-                  f"{q // n_modes:,}" if q else "--",
-                  f"{g // n_modes:,}" if g else "--")
+                  f"{q:,}" if q else "--",
+                  f"{g:,}" if g else "--")
     return table
 
 
@@ -259,18 +263,14 @@ def conservativeness_table(summaries: dict[tuple[str, str], SceneSummary],
         notes=("Measured against the exact roots shipped with the dataset, not "
                "against TightInclusion: TightInclusion's own answer is itself a "
                "lower bound on the truth, so comparing against it over-reports "
-               "lateness. The last column is not part of the gate and is "
-               "reported for completeness. It counts cases where the "
-               "earliest-impact answer computed over the *mesh* is later than "
-               "the earliest exact root of the *curated queries* -- two "
-               "different geometries, because smesh stores mesh coordinates as "
-               "float32 while the curated queries are exact dyadic rationals. "
-               "Near a grazing contact a last-bit coordinate change moves the "
-               "root by far more than it moves the coordinate, which is why the "
-               "divergence is larger than float32's precision. On every one of "
-               "those cases the curated-query answer is at or before the exact "
-               "root, so it is a difference between two inputs, not a kernel "
-               "reporting late."),
+               "lateness. The last column is not part of the gate. It counts "
+               "cases where the earliest-impact answer computed over the *mesh* "
+               "is later than the earliest exact root of the *curated queries*, "
+               "which are two separately stored geometries: the mesh is read "
+               "from PLY, the queries are exact dyadic rationals. It is a "
+               "measure of the agreement between those two inputs rather than "
+               "of the kernel, and with the mesh stored in double it is zero "
+               "everywhere."),
     )
     for (scene, mode), s in sorted(summaries.items()):
         table.add(SCENE_LABEL.get(scene, scene), mode_label(mode),
