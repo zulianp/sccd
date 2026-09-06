@@ -236,6 +236,16 @@ for scene in "${scenes[@]}"; do
     ' "${PYTHON}" "${PYTHON_DIR}/sccd_strip_nonascii.py"
 done
 
+# --- frames ---------------------------------------------------------------
+# Eagerly, rather than leaving it to the driver's first use of a frame. The
+# driver shells out to smesh's db_to_raw, which needs meshio and is not on PATH
+# inside a scheduler job -- a scene whose frames were never converted then
+# produces a chunk with a header and no rows. This writes both float32 and
+# float64 coordinates, so the same prepared dataset serves a smesh built either
+# way and neither needs reconverting.
+printf '  frames (converting to raw arrays, both precisions)\n'
+"${PYTHON}" "${BENCHMARK_DIR}/frames_to_raw.py" "${DATA_DIR}" "${scenes[@]}"
+
 # --- verify ---------------------------------------------------------------
 echo
 verify
