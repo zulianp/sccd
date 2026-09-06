@@ -147,13 +147,26 @@ def main(argv: list[str]) -> int:
             f"impact lets a simulation step through the contact. Every number "
             f"below is suspect until it is fixed.", ""]
     else:
-        checked = sum(s.gt_queries for s in scenes.values())
+        # Distinct queries, not query-mode pairs: every scene appears once per
+        # mode in `scenes`, so summing over it counts each query as many times
+        # as there are modes and overstates the evidence by that factor.
+        per_scene = {}
+        for (scene, _), s in scenes.items():
+            per_scene[scene] = max(per_scene.get(scene, 0), s.gt_queries)
+        checked = sum(per_scene.values())
+        modes = len({m for _, m in scenes}) or 1
         if oracle_rows:
-            checked = max(checked, sum(r.gt_checked for (_, _, m), r in
-                                       oracle_rows.items() if m != "tight-inclusion"))
+            oracle_per = {}
+            for (scene, phase, m), r in oracle_rows.items():
+                if m == "tight-inclusion":
+                    continue
+                key = (scene, phase)
+                oracle_per[key] = max(oracle_per.get(key, 0), r.gt_checked)
+            checked = max(checked, sum(oracle_per.values()))
         lines += [
-            f"Across {checked:,} queries with an exact root, no mode reported a "
-            f"time of impact after the true one and none missed a collision.", ""]
+            f"Across {checked:,} queries carrying an exact root — "
+            f"{checked * modes:,} query-mode checks — no mode reported a time of "
+            f"impact after the true one and none missed a collision.", ""]
         mesh_div = sum(s.s0_late for s in scenes.values())
         if mesh_div:
             lines += [
