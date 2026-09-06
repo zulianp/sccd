@@ -44,6 +44,12 @@ class OracleRow:
     gt_worst_overshoot: float = 0.0
     relerr_median: float = math.nan
     abserr_max: float = math.nan
+    # Earliness against the exact roots, for every mode and for the reference
+    # itself. TightInclusion is the reference for hit-versus-miss but it is not
+    # the truth -- its answer is a conservative lower bound too -- so how early
+    # it lands is a fair question and one this makes answerable.
+    med_early: float = math.nan
+    max_early: float = 0.0
     ms: Stat = field(default_factory=Stat)
 
 
@@ -106,6 +112,13 @@ def read(csv_path: Path) -> dict[tuple[str, str, str], OracleRow]:
                 row.gt_worst_overshoot = max(row.gt_worst_overshoot, overshoot)
             row.relerr_median = _f(raw.get("relerr_median"))
             row.abserr_max = _f(raw.get("abserr_max"))
+            med = _f(raw.get("med_early"))
+            if math.isfinite(med) and med > 0:
+                row.med_early = med if not math.isfinite(row.med_early) \
+                    else min(row.med_early, med)
+            mx = _f(raw.get("max_early"))
+            if math.isfinite(mx):
+                row.max_early = max(row.max_early, mx)
             row.ms.add(_f(raw.get("ms")))
 
     for key, raws in per_key.items():
@@ -188,3 +201,41 @@ def reference_table(rows: dict[tuple[str, str, str], OracleRow], source: str) ->
 def violations(rows: dict[tuple[str, str, str], OracleRow]) -> int:
     return sum(r.gt_missed + r.gt_late
                for (_, _, mode), r in rows.items() if mode != "tight-inclusion")
+
+
+def earliness_table(rows: dict[tuple[str, str, str], OracleRow], source: str) -> Table:
+    """
+    Accuracy against the exact roots, with TightInclusion as a subject.
+
+    Every other table treats TightInclusion as the reference for hit versus
+    miss. It is not the reference for *accuracy*: its own answer is a
+    conservative lower bound on the true root, exactly like SCCD's, so the
+    honest question is how far before the truth each of the three lands. All
+    three are measured here against the dataset's exact symbolic roots, which
+    is the only thing in the comparison that is actually the truth.
+    """
+    table = Table(
+        label="tab:earliness-ref",
+        caption=("Earliness against the dataset's exact symbolic roots: how far "
+                 "before the true time of impact each implementation reports, as "
+                 "the median over files of the within-file median, and the "
+                 "largest anywhere in the scene. TightInclusion is a subject "
+                 "here rather than the reference, because its own answer is a "
+                 "conservative lower bound and not the truth."),
+        columns=[Column("scene", "l"), Column("phase", "l"), Column("mode", "l"),
+                 Column("median earliness", tex_header=r"median"),
+                 Column("worst case", tex_header=r"worst case")],
+        source=source,
+    )
+    order = {"relaxed": 0, "tight": 1, "device-relaxed": 2, "device-tight": 3,
+             "tight-inclusion": 4}
+    for (scene, phase, mode) in sorted(rows,
+                                       key=lambda k: (k[0], k[1],
+                                                      order.get(k[2], 9), k[2])):
+        r = rows[(scene, phase, mode)]
+        if r.gt_checked == 0:
+            continue
+        med = f"{r.med_early:.2e}" if math.isfinite(r.med_early) else "--"
+        mx = f"{r.max_early:.2e}" if r.max_early > 0 else "--"
+        table.add(SCENE_LABEL.get(scene, scene), phase, mode_label(mode), med, mx)
+    return table
