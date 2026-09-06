@@ -228,7 +228,10 @@ if [[ "${ORACLE}" -eq 1 ]]; then
         for ((r = 1; r <= REPEATS; ++r)); do
             for ((fb = 0; fb < widest; fb += span)); do
                 oracle_keys+=("${scene}|${r}|${fb}|${span}")
-                oracle_paths+=("${OUT_DIR}/oracle/${scene}/r${r}-$(printf '%06d' "${fb}").csv")
+                # The span is in the name, not just the start: a file named
+                # only by where it begins would be silently reused after a
+                # change of --oracle-chunk, as covering a range it does not.
+                oracle_paths+=("${OUT_DIR}/oracle/${scene}/r${r}-$(printf '%06d-%06d' "${fb}" "$((fb + span))").csv")
             done
         done
     done
@@ -242,9 +245,13 @@ merge() {
     while IFS= read -r -d '' f; do
         tail -n +2 "${f}" >> "${merged}"
         n=$((n + 1))
-    done < <(find "${OUT_DIR}" -path "${OUT_DIR}/oracle" -prune -o \
-                  -name '*.csv' -not -name 'bench.csv' -not -name 'oracle.csv' \
-                  -print0 | sort -z)
+    # Only files matching the chunk layout, <scene>/<space>/r<N>/<range>.csv.
+    # Excluding a directory by name instead ("everything but oracle/") let a
+    # sibling holding CSVs of another schema be swept in: 26 accuracy files
+    # parked under the sweep tree merged into the timing CSV and added 250 rows
+    # to it. Naming what belongs cannot go wrong that way.
+    done < <(find "${OUT_DIR}" -mindepth 4 -maxdepth 4 \
+                  -path "${OUT_DIR}/*/*/r*/*.csv" -print0 | sort -z)
     printf 'merged %d chunk files -> %s (%d rows)\n' \
         "${n}" "${merged}" "$(( $(wc -l < "${merged}") - 1 ))"
 
