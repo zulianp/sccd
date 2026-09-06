@@ -43,41 +43,71 @@ def is_current(out_dir: Path, ply: Path) -> bool:
     return all(f.stat().st_mtime >= ply_mtime for f in needed)
 
 
-def convert_one(job: tuple[str, str]) -> tuple[str, int]:
+def frame_plys(frames: Path) -> list[Path]:
+    """
+    The PLY files, without the archive's leavings.
+
+    Some of the dataset tarballs were made on macOS and carry an AppleDouble
+    resource fork beside each file -- `._balls16_0.ply` next to
+    `balls16_0.ply`. They match `*.ply` and are not PLYs, so a converter that
+    globs naively tries to parse one and fails.
+    """
+    return [p for p in sorted(frames.glob("*.ply")) if not p.name.startswith("._")]
+
+
+def convert_one(job: tuple[str, str]) -> tuple[str, str]:
+    """Returns (name, error): an empty error means it converted."""
     ply, out_dir = job
-    n_vertices, coords, faces = read_ply(ply)
-    write_smesh_folder(out_dir, coords, faces, PRECISIONS)
-    return (Path(ply).name, n_vertices)
+    try:
+        _, coords, faces = read_ply(ply)
+        write_smesh_folder(out_dir, coords, faces, PRECISIONS)
+        return (Path(ply).name, "")
+    except Exception as exc:  # noqa: BLE001 - one bad frame must not stop the rest
+        # Report and carry on. A pool that dies on the first unreadable file
+        # leaves every later scene unconverted, and the failure surfaces as a
+        # scene that mysteriously has no frames rather than as a bad file.
+        return (Path(ply).name, f"{type(exc).__name__}: {exc}")
 
 
-def convert_scene(data_dir: Path, scene: str, workers: int) -> None:
+def convert_scene(data_dir: Path, scene: str, workers: int) -> int:
     frames = data_dir / scene / "frames"
     if not frames.is_dir():
-        return
+        return 0
     out_root = data_dir / scene / "frames_raw"
 
+    plys = frame_plys(frames)
     jobs = []
-    for ply in sorted(frames.glob("*.ply")):
+    for ply in plys:
         out_dir = out_root / ply.stem
         if is_current(out_dir, ply):
             continue
         jobs.append((str(ply), str(out_dir)))
 
-    total = len(sorted(frames.glob("*.ply")))
+    total = len(plys)
     if not jobs:
         print(f"  {scene}: {total} frames already current", flush=True)
-        return
+        return 0
 
     print(f"  {scene}: converting {len(jobs)} of {total} frames "
           f"on {workers} process(es)", flush=True)
+
+    failures: list[tuple[str, str]] = []
     if workers <= 1:
-        for job in jobs:
-            convert_one(job)
+        results = (convert_one(job) for job in jobs)
     else:
-        with ProcessPoolExecutor(max_workers=workers) as pool:
-            for _ in pool.map(convert_one, jobs):
-                pass
-    print(f"  {scene}: {len(jobs)} frames converted", flush=True)
+        pool = ProcessPoolExecutor(max_workers=workers)
+        results = pool.map(convert_one, jobs)
+    for name, error in results:
+        if error:
+            failures.append((name, error))
+    if workers > 1:
+        pool.shutdown()
+
+    print(f"  {scene}: {len(jobs) - len(failures)} frames converted"
+          + (f", {len(failures)} failed" if failures else ""), flush=True)
+    for name, error in failures[:5]:
+        print(f"    {name}: {error}", flush=True)
+    return len(failures)
 
 
 def main(argv: list[str]) -> int:
@@ -94,8 +124,12 @@ def main(argv: list[str]) -> int:
         workers = os.cpu_count() or 1
 
     data_dir = Path(args[0])
+    failures = 0
     for scene in args[1:]:
-        convert_scene(data_dir, scene, workers)
+        failures += convert_scene(data_dir, scene, workers)
+    if failures:
+        print(f"{failures} frame(s) could not be converted", file=sys.stderr)
+        return 1
     return 0
 
 
