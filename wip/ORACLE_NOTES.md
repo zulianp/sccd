@@ -192,6 +192,51 @@ The frames must be converted to match. `prepare_data.sh` writes both `x.float32`
 and `x.float64` through `benchmark/ply_to_smesh.py`, and smesh reads whichever
 matches its `geom_t`, so one prepared dataset serves either build.
 
+## A non-deterministic missed collision, and what found it
+
+The first accuracy run over every scene caught the device Relaxed kernel
+missing collisions on rod-twist: 2 missed and 5 late of 15,957 vertex-face
+queries in one repeat and none in the next, over identical input. Host Relaxed,
+host Tight and device Tight were clean, as were the other five scenes --
+65,079,040 checks.
+
+One index. With `ToiOutput::PerPair` the kernel keeps a bound per query, but the
+seed of `narrow_phase_dfs_zero_stride_kernel` pruned the root box against
+`toi[0]` rather than `toi[qid]`. `is_domain_valid` is `tlower < toi` and a root
+box has `tlower == 0`, so it only bites when `toi[0]` is exactly zero -- which is
+what a query already in contact at the start of the step reports, and these
+datasets are full of them. From that moment every query whose block ran its seed
+saw `0 < 0`, never became active, and came back as no collision. Whether it
+happened depended on whether the thread owning query zero had published before
+the other blocks seeded: hence non-deterministic, and hence Relaxed only, since
+Tight refines that query to a small positive value instead of exactly zero.
+
+The sibling kernel already had this right, with a comment about the index that
+"used to collapse every query onto toi[0]". The seed was missed by that fix.
+
+### What this says about the harness
+
+The bug is four years' worth of "runs fine" away from being noticed by a single
+benchmark run. What found it was **repeats over every case of every scene**: it
+appeared in one repeat of one file range of one scene. A 16-case subsample, or
+one repeat, would have missed it, and so would any comparison against another
+implementation rather than against exact roots -- a kernel that silently drops a
+query agrees with nothing, but only the exact root says so.
+
+`src/tests/cuda/sccd_narrowphase_cuda_test.exe.cpp` now carries a case for it: a
+scene whose first query touches at t = 0 alongside 800 ordinary crossings, run
+twelve times because a scheduling-dependent failure makes a single green run
+worthless as evidence. Before the fix it failed 5 of 12 runs, worst case 158
+missed of 801; after, 0 of 12.
+
+### Consequence for measurements taken before the fix
+
+Any device `PerPair` figure taken with the unfixed kernel is suspect in both
+directions: accuracy, because queries were dropped, and *timing*, because a
+dropped query costs nothing, so the kernel looked faster than it is. Device
+`Earliest` numbers are unaffected -- there `toi[0]` is the correct shared bound --
+and so is every host figure.
+
 ## The device rows
 
 Built with `-DSCCD_ENABLE_CUDA=ON`, the oracle adds two rows for the CUDA narrow
