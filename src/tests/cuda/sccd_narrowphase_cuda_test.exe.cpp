@@ -276,6 +276,54 @@ namespace {
         return s;
     }
 
+
+    /**
+     * \brief A scene whose *first* query touches at t = 0, and many that do not.
+     *
+     * Built to exercise one specific thing. With ToiOutput::PerPair the device
+     * kernel keeps a bound per query, but its seed prunes the root box against
+     * `toi[0]` rather than against `toi[qid]`:
+     *
+     *     if (contains && is_domain_valid<is_vf>(root, (TC)toi[0], atol))
+     *
+     * `is_domain_valid` is `tlower < toi`, and a root box has `tlower == 0`, so
+     * the test only bites when `toi[0]` reaches exactly zero -- which is what a
+     * query already in contact at the start of the step reports. From then on
+     * every query whose block runs its seed sees `0 < 0`, never becomes active,
+     * and is reported as no collision.
+     *
+     * Whether that happens depends on whether the thread owning query 0 has
+     * published its answer before the other blocks seed, so the failure is
+     * non-deterministic and a single run can pass. That is why the caller
+     * repeats it.
+     *
+     * Query 0 is a vertex sitting exactly on the triangle at t = 0 and
+     * descending; the rest are ordinary crossings at t* in (0, 1).
+     */
+    Scene make_vf_first_query_touching(const int ncases) {
+        Scene s = make_vf(ncases);
+
+        // Prepend a query that is already in contact: same triangle geometry as
+        // the others so nothing else about the scene is special.
+        Scene head_case;
+        head_case.nxe = 3;
+        scalar_t tri0[3][3] = {{-0.5, -0.5, 0}, {0.5, -0.4, 0}, {-0.4, 0.5, 0}};
+        idx_t nodes[3];
+        for (int k = 0; k < 3; ++k) nodes[k] = s.add_vertex(tri0[k], tri0[k]);
+        const idx_t f = s.add_element(nodes);
+
+        // On the triangle at t = 0, descending through it. z(0) = 0 exactly, so
+        // the contact is at t = 0 and the kernel reports toi = 0.
+        const scalar_t on[3] = {scalar_t(-0.15), scalar_t(-0.13), scalar_t(0)};
+        const scalar_t below[3] = {scalar_t(-0.15), scalar_t(-0.13), scalar_t(-1)};
+        const idx_t v = s.add_vertex(on, below);
+
+        s.q0.insert(s.q0.begin(), v);
+        s.q1.insert(s.q1.begin(), f);
+        s.t_star.insert(s.t_star.begin(), scalar_t(0));
+        return s;
+    }
+
     /** \brief Edge-edge: one edge along x in z = 0, the other along y descending
      *         through it. They are coplanar only at the instant z reaches 0. */
     Scene make_ee(const int ncases) {
@@ -653,6 +701,31 @@ int main() {
             bad += report(label, ee, check(ee, host_ee(ee, tol)));
             std::snprintf(label, sizeof(label), "device edge-edge    mode %d", mode);
             bad += report(label, ee, check(ee, device_run(ee, Kind::EE, tol)));
+        }
+
+        // A query already in contact at the start of the step must not silence
+        // the others. Repeated because the failure depends on block scheduling:
+        // it needs query 0's answer of zero to be published before another
+        // block seeds, so one run proves nothing and a green single run is not
+        // evidence. Cheap -- the scene is small and the search on it is short.
+        for (const int mode : {0, 2}) {
+            set_mode(mode);
+            const Scene touch = make_vf_first_query_touching(tight ? 200 : 800);
+            Verdict worst;
+            int failing_runs = 0;
+            const int runs = 12;
+            for (int run = 0; run < runs; ++run) {
+                const Verdict v = check(touch, device_run(touch, Kind::VF, tol));
+                if (v.missed != 0 || v.late != 0) {
+                    ++failing_runs;
+                    if (v.missed > worst.missed) worst = v;
+                }
+            }
+            char tlabel[128];
+            std::snprintf(tlabel, sizeof(tlabel),
+                          "device vf first-touching mode %d (%d/%d runs bad)",
+                          mode, failing_runs, runs);
+            bad += report(tlabel, touch, failing_runs ? worst : Verdict{});
         }
 
         // Quads have one root-finder variant on each side and never consult the
