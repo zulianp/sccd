@@ -11,7 +11,7 @@
 // Deliberately free of smesh: it reads the raw rational query CSVs directly, so
 // it builds with nothing but SCCD + TightInclusion.
 //
-//   ti_oracle <dataset-dir> [--phase vf|ee|both] [--max-files N]
+//   ti_oracle <dataset-dir> [--phase vf|ee|both] [--max-files N] [--file-begin N]
 //             [--tol T] [--max-depth N] [--csv out.csv]
 //
 // Built with SCCD_ENABLE_CUDA it also runs the device narrow phase as a fourth
@@ -54,7 +54,8 @@ namespace {
         fs::path dataset_dir;
         bool do_vf = true;
         bool do_ee = true;
-        std::size_t max_files = 0;  // 0 == all
+        std::size_t max_files = 0;   // 0 == all
+        std::size_t file_begin = 0;  // skip this many files first
         scalar_t tol = 3e-8;
         int max_depth = 96;
         fs::path csv;
@@ -601,6 +602,8 @@ int main(int argc, char** argv) {
             opt.do_ee = (p == "ee" || p == "both");
         } else if (a == "--max-files") {
             opt.max_files = static_cast<std::size_t>(std::stoul(next()));
+        } else if (a == "--file-begin") {
+            opt.file_begin = static_cast<std::size_t>(std::stoul(next()));
         } else if (a == "--tol") {
             opt.tol = std::stod(next());
         } else if (a == "--max-depth") {
@@ -629,6 +632,7 @@ int main(int argc, char** argv) {
 
     if (opt.dataset_dir.empty()) {
         std::cerr << "usage: ti_oracle <dataset-dir> [--phase vf|ee|both] [--max-files N]\n"
+                     "                 [--file-begin N]\n"
                      "                 [--tol T] [--max-depth N] [--csv out.csv]\n"
                      "                 [--violations-csv out.csv] [--no-strict] [--gate MODE]\n"
 #ifdef SCCD_ENABLE_CUDA
@@ -687,6 +691,19 @@ int main(int argc, char** argv) {
             }
         }
         std::sort(files.begin(), files.end());
+        // A half-open file range, so a scene with more files than fit in one
+        // scheduler allocation can be checked in pieces. rod-twist is 4,571
+        // query files and takes over half an hour in one go -- not because it
+        // has many queries (it has fewer than cloth-ball) but because the
+        // per-file work dominates.
+        if (opt.file_begin > 0) {
+            if (opt.file_begin >= files.size()) {
+                files.clear();
+            } else {
+                files.erase(files.begin(),
+                            files.begin() + static_cast<std::ptrdiff_t>(opt.file_begin));
+            }
+        }
         if (opt.max_files && files.size() > opt.max_files) {
             files.resize(opt.max_files);
         }
