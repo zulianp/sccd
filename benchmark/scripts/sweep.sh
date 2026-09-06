@@ -37,6 +37,7 @@ set -euo pipefail
 #   --partition P    Slurm partition         (default debug)
 #   --account A      Slurm account           (default c40)
 #   --no-oracle      skip the accuracy stage (timings only)
+#   --oracle-chunk N query files per accuracy job, 0 = whole scene
 #   --pack N         chunks per Slurm job    (default 1)
 #   --max-cases N    sweep an evenly spread subsample of N cases (default: all)
 #
@@ -59,6 +60,7 @@ DRY_RUN=0
 MERGE_ONLY=0
 LOCAL=0
 ORACLE=1
+ORACLE_CHUNK=0
 PACK=1
 MAX_CASES=0
 TI_ORACLE=""
@@ -80,6 +82,7 @@ while [[ $# -gt 0 ]]; do
         --local) LOCAL=1; shift ;;
         --no-oracle) ORACLE=0; shift ;;
         --pack) PACK="$2"; shift 2 ;;
+        --oracle-chunk) ORACLE_CHUNK="$2"; shift 2 ;;
         --max-cases) MAX_CASES="$2"; shift 2 ;;
         -h|--help) sed -n '3,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) printf 'error: unknown argument %s\n' "$1" >&2; exit 2 ;;
@@ -196,14 +199,30 @@ done
 # (scene, repeat) rather than per case range -- it has no case selector, and its
 # own timing column is what makes TightInclusion a timed reference rather than
 # only a correctness oracle.
+# ti_oracle applies a file range to each phase's list separately, so the number
+# of chunks follows the larger of the two phases.
+phase_files() {
+    local scene="$1" suffix="$2"
+    local n
+    n=$(find "${DATA_DIR}/${scene}/queries" -maxdepth 1 -name "*${suffix}.csv" 2>/dev/null | wc -l)
+    printf '%s\n' "${n}"
+}
+
 oracle_keys=()
 oracle_paths=()
 if [[ "${ORACLE}" -eq 1 ]]; then
     for scene in ${SCENES}; do
         [[ -d "${DATA_DIR}/${scene}/queries" ]] || continue
+        widest=$(( $(phase_files "${scene}" vf) > $(phase_files "${scene}" ee)
+                   ? $(phase_files "${scene}" vf) : $(phase_files "${scene}" ee) ))
+        span="${ORACLE_CHUNK}"
+        [[ "${span}" -le 0 || "${span}" -gt "${widest}" ]] && span="${widest}"
+        [[ "${span}" -le 0 ]] && span=1
         for ((r = 1; r <= REPEATS; ++r)); do
-            oracle_keys+=("${scene}|${r}")
-            oracle_paths+=("${OUT_DIR}/oracle/${scene}/r${r}.csv")
+            for ((fb = 0; fb < widest; fb += span)); do
+                oracle_keys+=("${scene}|${r}|${fb}|${span}")
+                oracle_paths+=("${OUT_DIR}/oracle/${scene}/r${r}-$(printf '%06d' "${fb}").csv")
+            done
         done
     done
 fi
@@ -282,8 +301,9 @@ if [[ "${DRY_RUN}" -eq 1 ]]; then
     done
     for i in "${oracle_todo[@]:-}"; do
         [[ -n "${i}" ]] || continue
-        IFS='|' read -r scene r <<< "${oracle_keys[$i]}"
-        printf '  TODO accuracy %-20s        r%-2s\n' "${scene}" "${r}"
+        IFS='|' read -r scene r fb span <<< "${oracle_keys[$i]}"
+        printf '  TODO accuracy %-20s r%-2s files [%s, %s)\n' \
+            "${scene}" "${r}" "${fb}" "$((fb + span))"
     done
     exit 0
 fi
@@ -297,13 +317,17 @@ fi
 # Every mode goes into the same chunk file, each in its own process so one
 # mode's allocator and cache state cannot colour the next one's timings.
 run_oracle_body() {
-    local scene="$1" out="$2"
+    local scene="$1" out="$2" file_begin="${3:-0}" span="${4:-0}"
     local tmp="${out}.partial"
+    local range=()
+    [[ "${file_begin}" -gt 0 ]] && range+=(--file-begin "${file_begin}")
+    [[ "${span}" -gt 0 ]] && range+=(--max-files "${span}")
     mkdir -p "$(dirname "${out}")"
     # --no-strict so one scene's violation does not abort the sweep before the
     # rest is measured. The violations are in the CSV either way, and the report
     # fails on them; losing the remaining scenes as well helps nobody.
-    "${TI_ORACLE}" "${DATA_DIR}/${scene}" --csv "${tmp}" --no-strict >/dev/null 2>&1 || true
+    "${TI_ORACLE}" "${DATA_DIR}/${scene}" --csv "${tmp}" --no-strict \
+        "${range[@]}" >/dev/null 2>&1 || true
     [[ -s "${tmp}" ]] || return 1
     mv "${tmp}" "${out}"
 }
@@ -460,22 +484,22 @@ flush_oracle_pack() {
 
 for i in "${oracle_todo[@]:-}"; do
     [[ -n "${i}" ]] || continue
-    IFS='|' read -r scene r <<< "${oracle_keys[$i]}"
+    IFS='|' read -r scene r fb span <<< "${oracle_keys[$i]}"
     out="${oracle_paths[$i]}"
-    label="accuracy ${scene}/r${r}"
+    label="accuracy ${scene}/r${r}/${fb}"
 
     if [[ "${LOCAL}" -eq 1 ]]; then
         printf '==> %s\n' "${label}"
-        if ! run_oracle_body "${scene}" "${out}"; then
+        if ! run_oracle_body "${scene}" "${out}" "${fb}" "${span}"; then
             printf 'FAILED %s\n' "${label}" >&2
             failures=$((failures + 1))
         fi
         continue
     fi
 
-    oracle_calls+=("run_oracle_body '${scene}' '${out}'")
+    oracle_calls+=("run_oracle_body '${scene}' '${out}' '${fb}' '${span}'")
     oracle_labels+=("${label}")
-    oracle_name="oracle-r${r}"
+    oracle_name="oracle-${scene}-r${r}-${fb}"
     if [[ "${#oracle_calls[@]}" -ge "${PACK}" ]]; then
         flush_oracle_pack
     fi
