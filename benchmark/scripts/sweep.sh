@@ -201,11 +201,16 @@ done
 # only a correctness oracle.
 # ti_oracle applies a file range to each phase's list separately, so the number
 # of chunks follows the larger of the two phases.
+# wc -l pads its output on some systems, and a command substitution inside an
+# arithmetic expansion swallows the result when it does; strip it here instead.
 phase_files() {
     local scene="$1" suffix="$2"
-    local n
-    n=$(find "${DATA_DIR}/${scene}/queries" -maxdepth 1 -name "*${suffix}.csv" 2>/dev/null | wc -l)
-    printf '%s\n' "${n}"
+    # -L because a prepared data tree may reach its query set through a symlink
+    # -- the float64 tree shares one copy of the queries with the float32 tree --
+    # and plain find does not descend into one, so the count silently comes back
+    # zero and the scene looks like it has no work.
+    find -L "${DATA_DIR}/${scene}/queries" -maxdepth 1 -name "*${suffix}.csv" \
+        2>/dev/null | wc -l | tr -d ' \n'
 }
 
 oracle_keys=()
@@ -213,8 +218,10 @@ oracle_paths=()
 if [[ "${ORACLE}" -eq 1 ]]; then
     for scene in ${SCENES}; do
         [[ -d "${DATA_DIR}/${scene}/queries" ]] || continue
-        widest=$(( $(phase_files "${scene}" vf) > $(phase_files "${scene}" ee)
-                   ? $(phase_files "${scene}" vf) : $(phase_files "${scene}" ee) ))
+        n_vf="$(phase_files "${scene}" vf)"
+        n_ee="$(phase_files "${scene}" ee)"
+        widest="${n_vf:-0}"
+        [[ "${n_ee:-0}" -gt "${widest}" ]] && widest="${n_ee}"
         span="${ORACLE_CHUNK}"
         [[ "${span}" -le 0 || "${span}" -gt "${widest}" ]] && span="${widest}"
         [[ "${span}" -le 0 ]] && span=1
