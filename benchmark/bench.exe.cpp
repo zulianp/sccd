@@ -58,8 +58,14 @@ namespace {
         int err = SCCD_SUCCESS;
         double prep_elapsed_ms = 0.0;
         double elapsed_ms = 0.0;
-        std::unordered_set<std::uint64_t> pairs;
+        // Which expected pairs the broad phase produced, indexed as
+        // ExpectedPairs::index_of returns. Not a set of every pair it produced:
+        // that set was the single most expensive thing the benchmark did.
+        std::vector<std::uint8_t> expected_found;
         std::uint64_t false_positives = 0;
+        // Only filled when SCCD_BENCH_DUMP_FP_PAIRS asks for it.
+        std::vector<std::int32_t> fp_c0;
+        std::vector<std::int32_t> fp_c1;
         smesh::SharedBuffer<idx_t> v_overlap;
         smesh::SharedBuffer<idx_t> f_overlap;
         smesh::SharedBuffer<idx_t> e0_overlap;
@@ -557,20 +563,43 @@ namespace {
         return true;
     }
 
-    std::unordered_set<std::uint64_t> expected_pairs(const std::vector<std::int32_t>& c0,
-                                                     const std::vector<std::int32_t>& c1) {
-        std::unordered_set<std::uint64_t> set;
-        set.reserve(c0.size() * 2 + 1);
-        for (std::size_t i = 0; i < c0.size(); ++i) {
-            set.insert(pair_key(c0[i], c1[i]));
-        }
-        return set;
-    }
+    /**
+     * \brief The benchmark's own candidate list, as a lookup keyed by pair.
+     *
+     * This is the *small* side of the comparison -- one entry per curated query,
+     * hundreds to thousands -- while the broad phase can produce tens of
+     * millions. Everything is therefore arranged to stream the large side once
+     * and probe this, rather than to materialise the large side.
+     *
+     * Both orientations of a pair map to the same slot, so a single probe
+     * answers what used to take two set lookups. Duplicate pairs share a slot,
+     * which is what we want: if the broad phase found the pair, every query
+     * naming it was found.
+     */
+    struct ExpectedPairs {
+        std::unordered_map<std::uint64_t, std::uint32_t> index;
+        std::uint32_t slots = 0;
 
-    bool contains_pair(const std::unordered_set<std::uint64_t>& set, const std::uint64_t pair) {
-        const std::uint64_t reversed = (pair << 32) | (pair >> 32);
-        return set.find(pair) != set.end() || set.find(reversed) != set.end();
-    }
+        void build(const std::vector<std::int32_t>& c0, const std::vector<std::int32_t>& c1) {
+            index.reserve(c0.size() * 4 + 1);
+            for (std::size_t i = 0; i < c0.size(); ++i) {
+                const std::uint64_t key = pair_key(c0[i], c1[i]);
+                const std::uint64_t reversed = (key << 32) | (key >> 32);
+                if (index.find(key) != index.end()) {
+                    continue;
+                }
+                index.emplace(key, slots);
+                index.emplace(reversed, slots);
+                ++slots;
+            }
+        }
+
+        // -1 when the pair is not one the benchmark expected.
+        std::int64_t index_of(const std::uint64_t pair) const {
+            const auto it = index.find(pair);
+            return (it == index.end()) ? -1 : static_cast<std::int64_t>(it->second);
+        }
+    };
 
     std::array<std::vector<idx_t>, 2> benchmark_ordered_edges(const std::shared_ptr<smesh::Mesh>& mesh) {
         auto faces = mesh->block(0)->elements();
@@ -713,9 +742,25 @@ namespace {
         return result;
     }
 
+    bool dump_fp_pairs() {
+        const char* env = std::getenv("SCCD_BENCH_DUMP_FP_PAIRS");
+        return env != nullptr && env[0] != '\0' && env[0] != '0';
+    }
+
+    /**
+     * \brief Classify the broad phase's output against the benchmark's.
+     *
+     * One pass over the pairs, one hash probe each into the small expected set,
+     * and nothing retained. It used to build an unordered_set of every pair --
+     * 28.9 M nodes for a puffer-ball case -- purely to count how many were not
+     * expected and to answer membership for the false-negative check. That set
+     * cost roughly twenty seconds a case against 0.9 s of the work the benchmark
+     * exists to measure, and it happened outside every timed region, so it never
+     * appeared in a column and made the largest scenes impractical to sweep.
+     */
     void populate_broadphase_pairs(const MeshPair& meshes,
                                    const bool is_vf,
-                                   const std::unordered_set<std::uint64_t>& expected,
+                                   const ExpectedPairs& expected,
                                    const std::vector<idx_t>& edge_id_map,
                                    BroadphaseResult& result) {
         const ptrdiff_t n_nodes = meshes.t0->n_nodes();
@@ -724,28 +769,36 @@ namespace {
         const ptrdiff_t face_offset = n_nodes + n_edges;
         const ptrdiff_t edge_offset = n_nodes;
 
+        result.expected_found.assign(expected.slots, 0);
+        result.false_positives = 0;
+        const bool dump = dump_fp_pairs();
+
+        auto classify = [&](const std::uint64_t pair) {
+            const std::int64_t slot = expected.index_of(pair);
+            if (slot < 0) {
+                ++result.false_positives;
+                if (dump) {
+                    result.fp_c0.push_back(static_cast<std::int32_t>(pair >> 32));
+                    result.fp_c1.push_back(static_cast<std::int32_t>(pair & 0xffffffffu));
+                }
+            } else {
+                result.expected_found[static_cast<std::size_t>(slot)] = 1;
+            }
+        };
+
         if (is_vf) {
             auto v_overlap = smesh::to_host(result.v_overlap);
             auto f_overlap = smesh::to_host(result.f_overlap);
-            result.pairs.reserve(v_overlap->size() * 2 + 1);
             for (std::size_t i = 0; i < v_overlap->size(); ++i) {
-                result.pairs.insert(pair_key(v_overlap->data()[i], f_overlap->data()[i] + face_offset));
+                classify(pair_key(v_overlap->data()[i], f_overlap->data()[i] + face_offset));
             }
         } else {
             auto e0_overlap = smesh::to_host(result.e0_overlap);
             auto e1_overlap = smesh::to_host(result.e1_overlap);
-            result.pairs.reserve(e0_overlap->size() * 2 + 1);
             for (std::size_t i = 0; i < e0_overlap->size(); ++i) {
                 const idx_t e0 = edge_id_map.empty() ? e0_overlap->data()[i] : edge_id_map[e0_overlap->data()[i]];
                 const idx_t e1 = edge_id_map.empty() ? e1_overlap->data()[i] : edge_id_map[e1_overlap->data()[i]];
-                result.pairs.insert(pair_key(e0 + edge_offset, e1 + edge_offset));
-            }
-        }
-
-        result.false_positives = 0;
-        for (const auto pair : result.pairs) {
-            if (!contains_pair(expected, pair)) {
-                ++result.false_positives;
+                classify(pair_key(e0 + edge_offset, e1 + edge_offset));
             }
         }
     }
@@ -933,7 +986,7 @@ namespace {
                             const std::vector<idx_t>& q0,
                             QueryGeometry& query_geometry,
                             const std::vector<idx_t>& edge_id_map,
-                            const std::unordered_set<std::uint64_t>& broad_expected,
+                            const ExpectedPairs& broad_expected,
                             const double prep_ms,
                             const double broad_ms,
                             const double narrow_ms,
@@ -973,9 +1026,7 @@ namespace {
         std::vector<std::int32_t> fp_broad_c1;
         std::vector<std::int32_t> fn_broad_c0;
         std::vector<std::int32_t> fn_broad_c1;
-        fp_broad.reserve(static_cast<std::size_t>(broadphase.false_positives));
-        fp_broad_c0.reserve(static_cast<std::size_t>(broadphase.false_positives));
-        fp_broad_c1.reserve(static_cast<std::size_t>(broadphase.false_positives));
+
 
         // Signed error against the exact roots. Unsigned error would hide the
         // only failure that matters: a time of impact *after* the true one lets a
@@ -1021,7 +1072,9 @@ namespace {
                 }
             }
 
-            const bool broad_found = contains_pair(broadphase.pairs, pair_key(c0[i], c1[i]));
+            const std::int64_t slot = broad_expected.index_of(pair_key(c0[i], c1[i]));
+            const bool broad_found =
+                slot >= 0 && broadphase.expected_found[static_cast<std::size_t>(slot)] != 0;
             if (!broad_found) {
                 fn_broad[i] = 1;
                 fn_broad_c0.push_back(c0[i]);
@@ -1029,14 +1082,13 @@ namespace {
             }
         }
 
-        if (broadphase.false_positives != 0) {
-            for (const auto pair : broadphase.pairs) {
-                if (!contains_pair(broad_expected, pair)) {
-                    fp_broad.push_back(1);
-                    fp_broad_c0.push_back(static_cast<std::int32_t>(pair >> 32));
-                    fp_broad_c1.push_back(static_cast<std::int32_t>(pair & 0xffffffffu));
-                }
-            }
+        // The individual false-positive pairs are only materialised when asked
+        // for: there can be tens of millions of them per case, nothing in the
+        // repository reads the files, and writing them dominated the run.
+        if (!broadphase.fp_c0.empty()) {
+            fp_broad.assign(broadphase.fp_c0.size(), 1);
+            fp_broad_c0 = broadphase.fp_c0;
+            fp_broad_c1 = broadphase.fp_c1;
         }
 
         const std::uint64_t broad_fn_count = static_cast<std::uint64_t>(fn_broad_c0.size());
@@ -1152,7 +1204,8 @@ namespace {
 
         const smesh::ExecutionSpace execution_space = benchmark_execution_space();
         CCDRun ccd_run = make_ccd_run(meshes, execution_space);
-        const auto broad_expected = expected_pairs(c0, c1);
+        ExpectedPairs broad_expected;
+        broad_expected.build(c0, c1);
         const bool warmup_first_case = timings_ms.empty();
         if (warmup_first_case) {
             BroadphaseResult warmup = run_broadphase(case_file.is_vf, ccd_run);
