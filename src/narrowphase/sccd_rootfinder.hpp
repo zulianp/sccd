@@ -100,6 +100,42 @@ namespace sccd {
                std::abs(lambda.sum() - ticcd::Scalar(1)) <= ticcd::Scalar(1e-6);
     }
 
+    /**
+     * \brief TightInclusion's answer, optionally bounded above in time.
+     *
+     * `t_max` is TightInclusion's own parameter and needs no change to it, but
+     * two things about it are easy to get wrong and both matter for a fair
+     * comparison.
+     *
+     * It is honoured on **one** of the two search methods. `interval_root_finder_BFS`
+     * takes a `max_time` and refuses to push a time-half that does not overlap
+     * `[0, t_max]`; `interval_root_finder_DFS` has no such parameter, and
+     * `ccd.cpp` returns from the DFS branch before `t_max` is ever consulted. So
+     * passing a bound while asking for depth-first search silently does nothing.
+     * Breadth-first is also TightInclusion's own default -- selecting DFS is the
+     * override.
+     *
+     * And `t_max == 1` is a short-circuit rather than a no-op bound: the split
+     * tests `t_upper_bound == 1 || halves.overlaps(...)`, so a bound of exactly 1
+     * disables the check instead of passing it trivially.
+     *
+     *
+     * `max_iter` is SCCD's subdivision depth cap, and TightInclusion's `max_itr`
+     * is not the same quantity: it counts refinements, and on the breadth-first
+     * path exceeding it makes the search **stop and return a conservative hit**
+     * with a truncated time of impact. Passing a depth cap there truncates the
+     * search almost immediately -- on cloth-funnel it turned 363 hits into 582
+     * and looked nine times faster for it. TightInclusion documents the setting
+     * as "a big number like 1e7, or -1 which means it will not be terminated
+     * earlier", so the breadth-first path is given -1 and its precision is
+     * governed by the tolerance, as depth-first's already is.
+     *
+     * Passing the earliest time of impact found so far therefore lets
+     * TightInclusion prune the time axis exactly as SCCD's `ToiOutput::Earliest`
+     * prunes against its running minimum -- which is what makes the two
+     * comparable when the question is "what is the earliest contact in this
+     * step".
+     */
     template <typename T>
     bool find_root_tight_inclusion_vf(const int max_iter,
                                       const T atol,
@@ -113,7 +149,9 @@ namespace sccd {
                                       const T e3[3],
                                       T &t,
                                       T &u,
-                                      T &v) {
+                                      T &v,
+                                      const T t_max = T(1),
+                                      const bool breadth_first = false) {
         ticcd::Vector3 v_t0(sv[0], sv[1], sv[2]);
         ticcd::Vector3 f0_t0(s1[0], s1[1], s1[2]);
         ticcd::Vector3 f1_t0(s2[0], s2[1], s2[2]);
@@ -143,12 +181,13 @@ namespace sccd {
                                     ms,
                                     t,
                                     atol,
-                                    1,
-                                    max_iter,
+                                    t_max,
+                                    breadth_first ? -1 : static_cast<long>(max_iter),
                                     output_tolerance,
                                     no_zero_toi,
-                                    // ticcd::CCDRootFindingMethod::BREADTH_FIRST_SEARCH);
-                                    ticcd::CCDRootFindingMethod::DEPTH_FIRST_SEARCH);
+                                    breadth_first
+                                        ? ticcd::CCDRootFindingMethod::BREADTH_FIRST_SEARCH
+                                        : ticcd::CCDRootFindingMethod::DEPTH_FIRST_SEARCH);
 
         // double u0 = -1, v0 = -1;
         // double discrepancy = -1;
@@ -186,7 +225,9 @@ namespace sccd {
                                       const T e4[3],
                                       T &t,
                                       T &u,
-                                      T &v) {
+                                      T &v,
+                                      const T t_max = T(1),
+                                      const bool breadth_first = false) {
         ticcd::Vector3 e1_t0(s1[0], s1[1], s1[2]);
         ticcd::Vector3 e2_t0(s2[0], s2[1], s2[2]);
         ticcd::Vector3 e3_t0(s3[0], s3[1], s3[2]);
@@ -214,12 +255,13 @@ namespace sccd {
                                   ms,
                                   t,
                                   atol,
-                                  1,
-                                  max_iter,
+                                  t_max,
+                                  breadth_first ? -1 : static_cast<long>(max_iter),
                                   output_tolerance,
                                   no_zero_toi,
-                                  //   ticcd::CCDRootFindingMethod::BREADTH_FIRST_SEARCH);
-                                  ticcd::CCDRootFindingMethod::DEPTH_FIRST_SEARCH);
+                                  breadth_first
+                                      ? ticcd::CCDRootFindingMethod::BREADTH_FIRST_SEARCH
+                                      : ticcd::CCDRootFindingMethod::DEPTH_FIRST_SEARCH);
     }
 
 #endif
