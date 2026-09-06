@@ -281,6 +281,25 @@ reporting more hits is a false positive, which costs work and is never unsafe.
 Its own answer is a lower bound on the truth rather than the truth, which is why
 the conservativeness table above is measured against the exact roots instead.
 
+**How the reference is configured.** A ratio against a baseline is only worth
+reading if the baseline was allowed to do what the measured code does, so both
+sides here are given the same task and the same machine:
+
+- **The same question.** Both compute a time of impact for *every* query — SCCD
+  at `ToiOutput::PerPair`, TightInclusion unbounded over the whole step. Neither
+  prunes against a shared running minimum, so neither is answering the cheaper
+  "earliest over the set" question the other is not.
+- **The same scheduler.** Both loops run through
+  `sccd::parallel_for_br_dynamic`, the skew-aware helper the narrow phase uses
+  for its own root finding. Timing a parallel narrow phase against a serial
+  reference would report the thread count as though it were an algorithmic
+  result.
+- **Unmodified.** TightInclusion is used exactly as released; everything above
+  is arranged on SCCD's side of the interface.
+
+The hit counts are unchanged by the threading — verified identical at 1, 8 and
+64 threads — so only the times move.
+
 <!-- sccd:begin reference -->
 
 | scene             | phase | mode           |   queries |      hits |        time ms |     vs. TI |
