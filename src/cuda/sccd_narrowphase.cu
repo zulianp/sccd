@@ -1844,7 +1844,19 @@ namespace sccd {
                 evaluate_cell_3d_policy<is_vf, conservative, TC, Vec4>(
                     root, sx, sy, sz, ex, ey, ez, tol, atol, aerr, contains, accept);
 
-                if (contains && is_domain_valid<is_vf>(root, (TC)toi[0], atol)) {
+                // toi[qid] with one bound per query, toi[0] when they share
+                // one. Reading toi[0] unconditionally made every query prune its
+                // root box against *query zero's* answer, and since a root box
+                // has tlower == 0 and is_domain_valid is `tlower < toi`, it bit
+                // exactly when query zero reported 0 -- a contact already present
+                // at the start of the step, which these datasets produce
+                // constantly. Every query whose block seeded after that answer
+                // was published saw `0 < 0`, never became active, and was
+                // reported as no collision. Whether it happened depended on
+                // block scheduling, so the same input missed collisions in one
+                // run and not the next.
+                const TC seed_bound = (TC)toi[per_query ? qid : 0];
+                if (contains && is_domain_valid<is_vf>(root, seed_bound, atol)) {
                     cur = root;
                     level = 0;
                     active = 1;
