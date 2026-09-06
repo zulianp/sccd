@@ -11,7 +11,17 @@ Two frames of the same scene share a connectivity, which is what lets the
 scaling benchmark refine both consistently: it refines each mesh independently
 and relies on refinement being a deterministic function of the topology.
 
-    ply_to_smesh.py <in.ply> <out_dir>
+    ply_to_smesh.py <in.ply> <out_dir> [--precision float64|float32|both]
+
+smesh reads whichever of ``x.float32`` / ``x.float64`` matches the ``geom_t`` it
+was built with (``SMESH_GEOM_TYPE``), so both may sit in the same directory and
+each build picks its own. Writing both is what lets one prepared dataset serve a
+float32 and a float64 smesh without reconverting.
+
+Precision is preserved, not invented: the coordinates are widened or narrowed
+from whatever the PLY declares. armadillo-rollers and puffer-ball ship
+``property double``, so float64 keeps data that float32 discards; cloth-ball and
+cloth-funnel ship floats, where float64 is merely exact re-encoding.
 """
 
 import struct
@@ -125,24 +135,52 @@ def read_ply(path):
     return n_vertices, coords, faces
 
 
-def write_smesh_folder(out_dir, coords, faces):
+_PRECISION_CODE = {"float64": "d", "float32": "f"}
+
+
+def write_smesh_folder(out_dir, coords, faces, precisions=("float64",)):
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    for name, values in zip(("x", "y", "z"), coords):
-        with open(out / f"{name}.float64", "wb") as handle:
-            handle.write(struct.pack(f"<{len(values)}d", *values))
+    for precision in precisions:
+        code = _PRECISION_CODE[precision]
+        for name, values in zip(("x", "y", "z"), coords):
+            # Through a temporary and renamed: a run interrupted here would
+            # otherwise leave a short coordinate file that still looks like a
+            # converted frame, and smesh would read it as a truncated mesh.
+            target = out / f"{name}.{precision}"
+            tmp = target.with_suffix(target.suffix + ".partial")
+            with open(tmp, "wb") as handle:
+                handle.write(struct.pack(f"<{len(values)}{code}", *values))
+            tmp.replace(target)
     for k, values in enumerate(faces):
-        with open(out / f"i{k}.int32", "wb") as handle:
+        target = out / f"i{k}.int32"
+        tmp = target.with_suffix(target.suffix + ".partial")
+        with open(tmp, "wb") as handle:
             handle.write(struct.pack(f"<{len(values)}i", *values))
+        tmp.replace(target)
 
 
 def main():
-    if len(sys.argv) != 3:
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    precisions = ("float64",)
+    for flag in sys.argv[1:]:
+        if flag.startswith("--precision="):
+            choice = flag.split("=", 1)[1]
+            if choice == "both":
+                precisions = ("float64", "float32")
+            elif choice in _PRECISION_CODE:
+                precisions = (choice,)
+            else:
+                print(f"error: unknown precision {choice!r}", file=sys.stderr)
+                return 2
+
+    if len(args) != 2:
         print(__doc__)
         return 1
-    n_vertices, coords, faces = read_ply(sys.argv[1])
-    write_smesh_folder(sys.argv[2], coords, faces)
-    print(f"{sys.argv[1]}: {n_vertices} vertices, {len(faces[0])} triangles -> {sys.argv[2]}")
+    n_vertices, coords, faces = read_ply(args[0])
+    write_smesh_folder(args[1], coords, faces, precisions)
+    print(f"{args[0]}: {n_vertices} vertices, {len(faces[0])} triangles "
+          f"-> {args[1]} ({', '.join(precisions)})")
     return 0
 
 
