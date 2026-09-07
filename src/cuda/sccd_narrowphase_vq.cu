@@ -566,8 +566,9 @@ namespace sccd {
 
                 if (found) {
                     if (toi_output == ToiOutput::Earliest) {
-                        const double previous = atomic_min_double(shared_toi, (double)t);
-                        (void)previous;
+                        // The prior value is not needed: the shared minimum is
+                        // read once after the block finishes.
+                        atomic_min_double(shared_toi, (double)t);
                     } else {
                         // Narrow toward negative infinity: an earlier time of impact
                         // is safe, a later one is the failure this exists to prevent.
