@@ -181,8 +181,7 @@ namespace sccd {
                                                                               t,
                                                                               u,
                                                                               v,
-                                                                              stack,
-                                                                              /*refine=*/false);
+                                                                              stack);
 
                     if (found) {
                         if (toi_output == ToiOutput::Earliest) {

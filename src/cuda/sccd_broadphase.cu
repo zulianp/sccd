@@ -90,8 +90,8 @@ namespace sccd {
             dim3 block(SCCD_BP_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
             dim3 grid((n + block.x - 1) / block.x);
 
-            // One cached allocation holding [mean | var]; these used to be two
-            // cudaMalloc/cudaFree pairs on every call.
+            // One cached allocation holding [mean | var], rather than a
+            // cudaMalloc/cudaFree pair per array on every call.
             T* const mean = workspace(WorkspaceSlot::TempStorage).get_as<T>(2 * SCCD_DIM);
             T* const var = mean + SCCD_DIM;
 
