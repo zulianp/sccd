@@ -62,6 +62,7 @@ def phase_breakdown(summaries: dict[tuple[str, str], SceneSummary],
     bar_width = group_width / max(len(modes), 1)
     x = np.arange(len(scenes), dtype=float)
 
+    tallest = 0.0
     for i, mode in enumerate(modes):
         offset = -group_width / 2 + bar_width * (i + 0.5)
         broad_med, narrow_med, err_lo, err_hi = [], [], [], []
@@ -87,11 +88,18 @@ def phase_breakdown(summaries: dict[tuple[str, str], SceneSummary],
         totals = [b + n for b, n in zip(broad_med, narrow_med)]
         ax.errorbar(x + offset, totals, yerr=[err_lo, err_hi], fmt="none",
                     ecolor="#2A2F35", elinewidth=0.8, capsize=2.0)
+        tallest = max([tallest] + [t + e for t, e in zip(totals, err_hi)])
 
     ax.set_xticks(x)
     ax.set_xticklabels([SCENE_LABEL.get(s, s) for s in scenes])
     ax.set_ylabel("time for the whole scene (ms)")
     ax.set_xlim(-0.5, len(scenes) - 0.5)
+    # Headroom above the tallest bar *including its whisker*. Autoscaling put
+    # the top of the axes at a round tick that the largest scene's stacked bar
+    # then ran into, so puffer-ball's GPU bars were drawn clipped against the
+    # spine and read as truncated data.
+    if tallest > 0:
+        ax.set_ylim(0, tallest * 1.08)
     # The legend sits above the axes rather than inside them: with the tallest
     # bar near the top of the frame there is no interior corner it does not
     # cover, and covering the data to label it is not a trade worth making.
@@ -184,8 +192,16 @@ def earliness_distribution(case_series: dict, out_dir: Path) -> Figure:
         # An empirical CDF says more than a histogram here: the reader wants
         # "what fraction of cases report within X of the truth", and it does not
         # depend on a bin width nobody chose deliberately.
+        # Tight and Tight (GPU) run the identical search and their curves land
+        # on top of each other, which drew one of them as a legend entry with
+        # no visible line. Dashing the device modes and drawing them over the
+        # host ones keeps both readable where they coincide.
+        is_device = mode.startswith("device-")
         ax.step(values, np.arange(1, len(values) + 1) / len(values),
-                where="post", color=mode_color(mode), label=mode_label(mode))
+                where="post", color=mode_color(mode), label=mode_label(mode),
+                linestyle="--" if is_device else "-",
+                linewidth=1.3 if is_device else 2.0,
+                zorder=3 if is_device else 2)
 
     if not drew:
         ax.text(0.5, 0.5, "no case reported a positive earliness",
