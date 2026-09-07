@@ -59,22 +59,6 @@ namespace sccd {
             __syncthreads();
         }
 
-        template <typename T>
-        __device__ T warp_max_32(const T in) {
-            static_assert(SCCD_WARP_SIZE == 32, "Only implemented for CUDA with warp size of 32!");
-            T out = in;
-            out = device::max(out,
-                              __shfl_xor_sync(SCCD_WARP_FULL_MASK, out, 16, SCCD_WARP_SIZE));  // 0-16, 1-17, ..., 15-31
-            out = device::max(
-                out, __shfl_xor_sync(SCCD_WARP_FULL_MASK, out, 8, SCCD_WARP_SIZE));  // 0-8, ..., 1-7, ..., 23-31
-            out = device::max(out, __shfl_xor_sync(SCCD_WARP_FULL_MASK, out, 4, SCCD_WARP_SIZE));
-            out = device::max(out, __shfl_xor_sync(SCCD_WARP_FULL_MASK, out, 2, SCCD_WARP_SIZE));
-            out = device::max(out, __shfl_xor_sync(SCCD_WARP_FULL_MASK, out, 1, SCCD_WARP_SIZE));
-            return out;
-        }
-
-
-
     }  // namespace device
 }  // namespace sccd
 

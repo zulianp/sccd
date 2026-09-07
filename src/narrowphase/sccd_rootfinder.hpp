@@ -12,7 +12,6 @@
 
 #include "sccd_aabb.hpp"
 
-#include "sccd_objective.hpp"
 #include "sccd_numerical_error.hpp"
 #include "sccd_tolerance.hpp"
 

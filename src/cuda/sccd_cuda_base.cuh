@@ -53,10 +53,6 @@ namespace sccd {
         }
 
         template <typename T>
-        static inline __device__ T pow2(const T x) {
-            return x * x;
-        }
-        template <typename T>
         static inline __device__ T pow3(const T x) {
             return x * x * x;
         }
