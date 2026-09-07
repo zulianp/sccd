@@ -396,11 +396,13 @@ def broadphase_table(per_strategy: dict[str, dict[tuple[str, str], SceneSummary]
     names = sorted(per_strategy)
     table = Table(
         label="tab:broadphase",
-        caption=("Broad-phase strategies over the same cases, median over "
-                 "repeats. \\emph{prep} builds the acceleration structure and "
-                 "\\emph{broad} is the whole broad phase including it. Both "
-                 "strategies report identical candidate pairs, so the "
-                 "difference is entirely in how they are found."),
+        caption=("Broad-phase strategies over the same cases on the host, "
+                 "median over repeats. \\emph{prep} builds the acceleration "
+                 "structure and \\emph{broad} is the whole broad phase "
+                 "including it. Both strategies report identical candidate "
+                 "pairs, so the difference is entirely in how they are found. "
+                 "The device is not listed: its broad phase does not implement "
+                 "the choice."),
         columns=([Column("scene", "l"), Column("mode", "l")]
                  + [Column(f"{n} prep ms", tex_header=f"{n} prep") for n in names]
                  + [Column(f"{n} broad ms", tex_header=f"{n} broad") for n in names]
@@ -410,7 +412,14 @@ def broadphase_table(per_strategy: dict[str, dict[tuple[str, str], SceneSummary]
                "broad phase. A margin inside the run-to-run spread is reported "
                "as a tie rather than a winner."),
     )
-    keys = sorted({k for s in per_strategy.values() for k in s})
+    # Host modes only. `use_cell2d_` is read in broad_phase_prep_host_,
+    # broad_phase_fv_step_host_ and broad_phase_ee_step_host_ and nowhere else:
+    # the device steps have no branch on it, so SCCD_BROADPHASE does not reach
+    # them and a GPU row here would compare one implementation against itself.
+    # Measured, they come out as ties to within a millisecond, which is the
+    # evidence for the statement rather than an interesting result.
+    keys = sorted({k for s in per_strategy.values() for k in s
+                   if not k[1].startswith("device-")})
     for scene, mode in keys:
         prep, broad, spreads = {}, {}, {}
         for n in names:
