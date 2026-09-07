@@ -143,27 +143,6 @@ namespace sccd {
                                         ? ticcd::CCDRootFindingMethod::BREADTH_FIRST_SEARCH
                                         : ticcd::CCDRootFindingMethod::DEPTH_FIRST_SEARCH);
 
-        // double u0 = -1, v0 = -1;
-        // double discrepancy = -1;
-        // if (test_ok) {
-        //     auto f0 = f0_t0 * (1 - toi) + toi * (f0_t1);
-        //     auto f1 = f1_t0 * (1 - toi) + toi * (f1_t1);
-        //     auto f2 = f2_t0 * (1 - toi) + toi * (f2_t1);
-        //     auto pt = (1 - toi) * v_t0 + toi * v_t1;
-
-        //     const bool inplane = barycentric_triangle_3d(f0.eval(), f1.eval(), f2.eval(), pt.eval(), u0, v0);
-        //     assert(inplane);
-
-        //     test_ok = (u0 >= -1e-8 && v0 >= -1e-8 && u0 + v0 <= 1 + 1e-8 && toi >= -1e-8 && toi <= 1 + 1e-8);
-
-        //     auto pt_rec = (1 - u0 - v0) * f0 + u0 * f1 + v0 * f2;
-        //     auto diff = pt_rec - pt;
-
-        //     discrepancy = diff.dot(diff);
-        //     t = toi;
-        //     u = u0;
-        //     v = v0;
-        // }
     }
 
     template <typename T>
@@ -309,12 +288,6 @@ namespace sccd {
                 Interval{tuv[split_dim].lower, (tuv[split_dim].lower + tuv[split_dim].upper) * T(0.5)},
                 Interval{(tuv[split_dim].lower + tuv[split_dim].upper) * T(0.5), tuv[split_dim].upper}};
 
-            // // NEW
-            // if (split_dim == 0) {
-            //     split_intervals.first.lower = std::min(split_intervals.first.lower, toi);
-            //     split_intervals.second.lower = std::min(split_intervals.second.lower, toi);
-            // }
-
             if (split_intervals.first.is_terminal() || split_intervals.second.is_terminal()) {
                 return true;
             }
@@ -436,21 +409,6 @@ namespace sccd {
         return codomain_acceptance<T>(fmin, fmax, tol, tols, numerical_error, accept);
     }
 
-    // template <typename T>
-    // inline bool codomain_acceptance(const T fmin[3], const T fmax[3], const T tol, const T tols[3], bool &accept) {
-    //     // Replicates predicates of TI
-    //     accept = true;
-    //     bool contains_zero = true;
-
-    //     for (int d = 0; d < 3; ++d) {
-    //         contains_zero = contains_zero &&  //
-    //                         (fmin[d] <= tols[d]) && (fmax[d] >= -tols[d]);
-    //         accept = accept && ((fmin[d] >= -tols[d]) && (fmax[d] <= tols[d]));
-    //     }
-
-    //     accept = contains_zero && accept;
-    //     return contains_zero;
-    // }
 
     template <typename T>
     inline bool accept_grid_root_vf(const Box<T> &box,
