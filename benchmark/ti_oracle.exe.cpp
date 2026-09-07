@@ -33,6 +33,7 @@
 #endif
 
 #include <algorithm>
+#include <limits>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -512,7 +513,12 @@ namespace {
         double max_early = 0;
 
         double med_early() const {
-            if (file_med_early.empty()) return 0.0;
+            // NaN, not 0: "no query contributed" and "the median earliness is
+            // exactly zero" are different answers, and the second one is a
+            // result -- it says the search landed on the true root itself.
+            if (file_med_early.empty()) {
+                return std::numeric_limits<double>::quiet_NaN();
+            }
             std::vector<double> v = file_med_early;
             std::sort(v.begin(), v.end());
             const std::size_t mid = v.size() / 2;

@@ -113,7 +113,7 @@ def read(csv_path: Path) -> dict[tuple[str, str, str], OracleRow]:
             row.relerr_median = _f(raw.get("relerr_median"))
             row.abserr_max = _f(raw.get("abserr_max"))
             med = _f(raw.get("med_early"))
-            if math.isfinite(med) and med > 0:
+            if math.isfinite(med) and med >= 0:
                 row.med_early = med if not math.isfinite(row.med_early) \
                     else min(row.med_early, med)
             mx = _f(raw.get("max_early"))
@@ -235,7 +235,9 @@ def earliness_table(rows: dict[tuple[str, str, str], OracleRow], source: str) ->
         r = rows[(scene, phase, mode)]
         if r.gt_checked == 0:
             continue
-        med = f"{r.med_early:.2e}" if math.isfinite(r.med_early) else "--"
+        # 0 is a result, not a gap: the search landed on the true root.
+        med = ("0" if r.med_early == 0 else f"{r.med_early:.2e}") \
+            if math.isfinite(r.med_early) else "--"
         mx = f"{r.max_early:.2e}" if r.max_early > 0 else "--"
         table.add(SCENE_LABEL.get(scene, scene), phase, mode_label(mode), med, mx)
     return table
