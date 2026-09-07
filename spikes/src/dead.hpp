@@ -21,6 +21,7 @@
 #include "sccd_aabb.hpp"
 #include "sccd_broadphase_sweep.hpp"
 #include "sccd_broadphase_strategy.hpp"
+#include "sccd_rootfinder.hpp"
 #include "sccd_base.hpp"
 #include "sccd_math.hpp"
 
@@ -889,6 +890,259 @@ namespace sccd {
             if (forced != BroadPhaseStrategy::Auto) return forced;
             return BroadPhaseStrategy::Cell2D;
         }
+
+
+    // ---------------------------------------------------------------------
+    // Narrow-phase code with no caller.
+    //
+    // `find_root_newton` polished an accepted box with a Newton step, behind an
+    // undocumented `SCCD_REFINE` environment variable that defaulted to off. It
+    // is here rather than in src/ for two reasons beyond being unreachable.
+    //
+    // It was **unsound when enabled**: on accepting it reported
+    // `min(upper, max(lower, 0.99 * t_approx))` rather than the box's `t` lower
+    // bound. That lower bound is at or before any root inside the box, which is
+    // what makes accepting safe however loose the test was; a value above it can
+    // land after a root the box contains, which is a time of impact reported
+    // late -- the one failure the search exists to prevent.
+    //
+    // And it was half-wired: the edge-edge path took the same `refine` flag and
+    // opened with `(void)refine;`, so setting the variable changed vertex-face
+    // results and silently did nothing for edge-edge.
+    //
+    // `norm_diff_vf` and `project_uv_simplex` were its helpers and had no other
+    // caller. `diff_vf`, which they use, stays in the shipped header because the
+    // inclusion function needs it.
+    // ---------------------------------------------------------------------
+
+    template <typename T>
+    inline void project_uv_simplex(T &u, T &v) {
+        u = sccd::max<T>(u, 0);
+        v = sccd::max<T>(v, 0);
+        const T s = u + v;
+        if (s <= static_cast<T>(1)) {
+            return;
+        }
+
+        T u_proj = static_cast<T>(0.5) * (u - v + 1);
+        u_proj = sccd::min<T>(static_cast<T>(1), sccd::max<T>(0, u_proj));
+        v = static_cast<T>(1) - u_proj;
+        u = u_proj;
+    }
+
+    template <typename T>
+    inline T norm_diff_vf(const T sv[3],
+                          const T s1[3],
+                          const T s2[3],
+                          const T s3[3],
+                          const T ev[3],
+                          const T e1[3],
+                          const T e2[3],
+                          const T e3[3],
+                          T &t,
+                          T &u,
+                          T &v) {
+        T diff[3];
+        diff_vf(sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, diff);
+        return sqrt(diff[0] * diff[0] + diff[1] * diff[1] + diff[2] * diff[2]);
+    }
+
+    template <typename T>
+    bool find_root_newton(const int max_iter,
+                          const T atol,
+                          const T sv[3],
+                          const T s1[3],
+                          const T s2[3],
+                          const T s3[3],
+                          const T ev[3],
+                          const T e1[3],
+                          const T e2[3],
+                          const T e3[3],
+                          T &t,
+                          T &u,
+                          T &v) {
+        project_uv_simplex<T>(u, v);
+        t = sccd::min<T>(static_cast<T>(1), sccd::max<T>(0, t));
+
+        T s4[3] = {0, 0, 0};
+        T e4[3] = {0, 0, 0};
+
+        T f = 0;
+        vf_objective<T>(sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, t, u, v, &f);
+
+        for (int k = 0; k < max_iter; k++) {
+            T p[3] = {0, 0, 0};
+            vf_objective_dir<T>(sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, t, u, v, &f, p);
+
+            T best_t = t;
+            T best_u = u;
+            T best_v = v;
+            T best_f = f;
+
+            T alpha = 1;
+            bool improved = false;
+            for (int j = 0; j < 12; j++) {
+                T cand_t = t - alpha * p[0];
+                T cand_u = u - alpha * p[1];
+                T cand_v = v - alpha * p[2];
+
+                cand_t = sccd::min<T>(static_cast<T>(1), sccd::max<T>(0, cand_t));
+                project_uv_simplex<T>(cand_u, cand_v);
+
+                T fnext = 0;
+                vf_objective<T>(sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, cand_t, cand_u, cand_v, &fnext);
+
+                if (fnext < best_f) {
+                    best_t = cand_t;
+                    best_u = cand_u;
+                    best_v = cand_v;
+                    best_f = fnext;
+                    improved = true;
+                    break;
+                }
+
+                alpha *= static_cast<T>(0.5);
+            }
+
+            t = best_t;
+            u = best_u;
+            v = best_v;
+            f = best_f;
+
+            const T norm_diff = norm_diff_vf<T>(sv, s1, s2, s3, ev, e1, e2, e3, t, u, v);
+            if (norm_diff < atol) {
+                return (u >= -atol && v >= -atol && u + v <= 1 + atol && t >= 0 && t <= 1);
+            }
+
+            if (!improved) {
+                break;
+            }
+        }
+
+        return false;
+    }
+
+    // Was `Box<T>::bisect_ee`. Box keeps `bisect_vf`, which is used; this one
+    // had no caller. A member cannot be moved out of its class, so it takes the
+    // box as an argument; the body is otherwise unchanged.
+    template <typename T>
+        inline bool bisect_ee(const Box<T> &box,
+                          int split_dim,
+                          const T toi,
+                          std::vector<Box<T>> &stack) {
+            using Interval = sccd::Interval<T>;
+            std::pair<Interval, Interval> split_intervals{
+                Interval{box.tuv[split_dim].lower, (box.tuv[split_dim].lower + box.tuv[split_dim].upper) * T(0.5)},
+                Interval{(box.tuv[split_dim].lower + box.tuv[split_dim].upper) * T(0.5), box.tuv[split_dim].upper}};
+
+            // // NEW
+            // if (split_dim == 0) {
+            //     split_intervals.first.lower = std::min(split_intervals.first.lower, toi);
+            //     split_intervals.second.lower = std::min(split_intervals.second.lower, toi);
+            // }
+
+            if (split_intervals.first.is_terminal() || split_intervals.second.is_terminal()) {
+                return true;
+            }
+
+            stack.push_back(box);
+            stack.back().box.tuv[split_dim] = split_intervals.first;
+            stack.back().depth++;
+
+            if (split_dim == 0) {
+                if (split_intervals.second.lower < toi) {
+                    stack.push_back(box);
+                    stack.back().box.tuv[split_dim] = split_intervals.second;
+                    stack.back().depth++;
+                }
+            } else {
+                stack.push_back(box);
+                stack.back().box.tuv[split_dim] = split_intervals.second;
+                stack.back().depth++;
+            }
+
+            return false;
+        }
+
+    // Never called: the edge-edge search takes its codomain widths elsewhere.
+    template <typename T>
+    inline void compute_edge_edge_codomain_widths(const T s1[3],
+                                                  const T s2[3],
+                                                  const T s3[3],
+                                                  const T s4[3],
+                                                  const T e1[3],
+                                                  const T e2[3],
+                                                  const T e3[3],
+                                                  const T e4[3],
+                                                  T widths[3]) {
+        T wt = T(0);
+        T wu = T(0);
+        T wv = T(0);
+        for (int d = 0; d < 3; ++d) {
+            const T a0 = e1[d] - s1[d];
+            const T a1 = e2[d] - s2[d];
+            const T b0 = e3[d] - s3[d];
+            const T b1 = e4[d] - s4[d];
+            wt = sccd::max<T>(wt,
+                              sccd::max<T>(sccd::max<T>(sccd::abs<T>(a0 - b0), sccd::abs<T>(a0 - b1)),
+                                           sccd::max<T>(sccd::abs<T>(a1 - b0), sccd::abs<T>(a1 - b1))));
+            wu = sccd::max<T>(wu, sccd::max<T>(sccd::abs<T>(s2[d] - s1[d]), sccd::abs<T>(e2[d] - e1[d])));
+            wv = sccd::max<T>(wv, sccd::max<T>(sccd::abs<T>(s4[d] - s3[d]), sccd::abs<T>(e4[d] - e3[d])));
+        }
+        widths[0] = wt;
+        widths[1] = wu;
+        widths[2] = wv;
+    }
+
+#ifdef SCCD_ENABLE_TIGHT_INCLUSION
+    // Both are guarded by SCCD_ENABLE_TIGHT_INCLUSION, which is OFF by default,
+    // and neither had a caller even with it ON.
+    static bool isInsideTriangle(const ticcd::Vector3 &lambda, ticcd::Scalar tol = ticcd::Scalar(1e-6)) {
+        return (lambda.array() >= -tol).all() && (lambda.array() <= ticcd::Scalar(1) + tol).all() &&
+               std::abs(lambda.sum() - ticcd::Scalar(1)) <= ticcd::Scalar(1e-6);
+    }
+
+    static bool barycentric_triangle_3d(const ticcd::Vector3 &A,
+                                        const ticcd::Vector3 &B,
+                                        const ticcd::Vector3 &C,
+                                        const ticcd::Vector3 &P,
+                                        double &u,
+                                        double &v) {
+        using std::abs;
+
+        ticcd::Vector3 e1 = B - A;
+        ticcd::Vector3 e2 = C - A;
+        ticcd::Vector3 n = e1.cross(e2).eval();
+
+        ticcd::Vector3 dir = P - A;
+        double dist = n.dot(dir);
+        if (dist * dist > 1e-5) {
+            return false;
+        }
+
+        // Compute local coordinates u and v: (P - A) = u * (B - A) + v * (C - A)
+        // Solve: dir = u * e1 + v * e2
+        // Using dot product method (more numerically stable):
+        // dir · e1 = u * (e1 · e1) + v * (e2 · e1)
+        // dir · e2 = u * (e1 · e2) + v * (e2 · e2)
+        double d00 = e1.dot(e1);
+        double d01 = e1.dot(e2);
+        double d11 = e2.dot(e2);
+        double d20 = dir.dot(e1);
+        double d21 = dir.dot(e2);
+
+        double denom = d00 * d11 - d01 * d01;
+        if (abs(denom) < 1e-10) {
+            // Degenerate triangle
+            return false;
+        }
+
+        u = (d11 * d20 - d01 * d21) / denom;
+        v = (d00 * d21 - d01 * d20) / denom;
+
+        return true;
+    }
+#endif
 
     }  // namespace dead
 }  // namespace sccd
