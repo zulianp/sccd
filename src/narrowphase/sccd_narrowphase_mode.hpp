@@ -59,10 +59,6 @@ namespace sccd {
         PerPair = 1
     };
 
-    static inline const char* toi_output_name(const ToiOutput out) {
-        return out == ToiOutput::Earliest ? "earliest" : "per-pair";
-    }
-
     enum class NarrowPhaseMode : int {
         /// Scalar search with the looser acceptance test: it compares codomain
         /// widths against domain tolerances, so it accepts sooner and reports a
@@ -132,15 +128,13 @@ namespace sccd {
      * `sccd_narrowphase_cuda_test` both do -- so the warnings below are one-shot flags
      * rather than a resolved-once result.
      *
-     * Two requests used to be swallowed in silence, which is the thing worth
-     * fixing here. A value that is not 0-3, or not a number at all, fell straight
-     * through to the legacy variables, so `SCCD_NARROWPHASE_MODE=banana` selected
-     * a kernel via `atoi` returning 0 and a typo'd `SCCD_NARROWPHASE_MODE=20` ran
-     * whatever the legacy path decided. And asking for a validation-only mode in a
-     * build without TightInclusion silently downgraded to the scalar reference.
-     * Both are still handled the same way -- the caller asked for a time of impact
-     * and gets one -- but they now say so once on stderr, because a caller who
-     * measures the wrong kernel and concludes something about it is a worse
+     * Two requests are answered rather than swallowed. A value that is not 0-3,
+     * or not a number at all, would otherwise select a kernel by whatever `atoi`
+     * returns -- `SCCD_NARROWPHASE_MODE=banana` reads as 0 -- and asking for a
+     * validation-only mode in a build without TightInclusion would quietly give
+     * the scalar reference instead. Both still return a time of impact, which is
+     * what the caller asked for, but each says so once on stderr: a caller who
+     * measures the wrong kernel and draws a conclusion from it is a worse
      * outcome than a line of output.
      */
     static inline NarrowPhaseMode narrow_phase_mode() {
@@ -216,13 +210,12 @@ namespace sccd {
 /**
  * \brief Scale the split-axis choice by the per-axis codomain widths.
  *
- * Defined here because all three narrow phases -- triangle host, quad host and
- * the device kernels -- consume it, and they previously each defined it for
- * themselves in a different spelling. The triangle header defined it
- * unconditionally and tested it with #ifndef, so -DSCCD_ENABLE_CODOMAIN_SCALING=0
- * both provoked a non-identical macro redefinition and left the scaling ON for
- * triangles while turning it OFF for quads: the same flag, opposite effects on
- * the two paths.
+ * Defined here, once, because all three narrow phases -- triangle host, quad
+ * host and the device kernels -- consume it and must agree. A per-header
+ * definition cannot: one that is unconditional but tested with #ifndef makes
+ * -DSCCD_ENABLE_CODOMAIN_SCALING=0 both a non-identical macro redefinition and
+ * a flag with opposite effects on the two paths, leaving the scaling on for
+ * triangles and off for quads.
  *
  * Guarded, and tested by VALUE (`#if SCCD_ENABLE_CODOMAIN_SCALING`), so setting
  * it to 0 on the command line does what it says everywhere.

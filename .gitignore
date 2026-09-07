@@ -53,12 +53,19 @@ benchmark/alps/
 benchmark/reports/
 # Everything benchmark/scripts/bench.sh produces, in one place.
 benchmark/out/
+# And everything benchmark/scripts/sweep.sh produces: one CSV per chunk, the
+# merged CSV, the job logs, and the report generated from them.
+benchmark/sweep/
 **/figures/
 *.csv
 # Two exceptions: CSVs that are inputs or evidence rather than output -- the
 # oracle's query sets, and the measurement tables their write-ups cite.
 !benchmark/oracle/*.csv
 !benchmark/assessment/*.csv
+# The sweep a published table was computed from. docs/BENCHMARKS.md names the
+# file each of its tables came from, and the claim that a number is reproducible
+# is only worth making if the rows behind it are in the repository.
+!benchmark/results/*.csv
 !spikes/research/**/*.csv
 *.pdf
 *.aux
@@ -68,6 +75,11 @@ benchmark/out/
 # docs/ holds both written documentation and rendered output; keep the writing.
 docs/*
 !docs/*.md
+# ...and the figures BENCHMARKS.md embeds, which are part of the document rather
+# than leavings. The directory has to be re-included before anything in it can
+# be: git does not descend into an excluded directory to rescue its contents,
+# which is why a `!docs/figures/**` further up did nothing.
+!docs/figures/
 
 # Python bytecode and macOS directory metadata.
 __pycache__/
@@ -112,3 +124,13 @@ build*/
 /*.csv
 /*.tar.gz
 .DS_Store
+
+# The figures docs/BENCHMARKS.md embeds are part of the document, not leavings,
+# so they are re-included last: git takes the final matching rule, and the
+# blanket *.png and *.pdf rules above would otherwise win.
+!docs/figures/*.png
+!docs/figures/*.pdf
+# The stylesheet for the rendered documents is source, not output. The HTML it
+# renders is output and stays ignored.
+!docs/assets/
+!docs/assets/*.css

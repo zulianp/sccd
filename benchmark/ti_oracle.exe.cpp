@@ -11,7 +11,7 @@
 // Deliberately free of smesh: it reads the raw rational query CSVs directly, so
 // it builds with nothing but SCCD + TightInclusion.
 //
-//   ti_oracle <dataset-dir> [--phase vf|ee|both] [--max-files N]
+//   ti_oracle <dataset-dir> [--phase vf|ee|both] [--max-files N] [--file-begin N]
 //             [--tol T] [--max-depth N] [--csv out.csv]
 //
 // Built with SCCD_ENABLE_CUDA it also runs the device narrow phase as a fourth
@@ -20,6 +20,9 @@
 // else changes.
 
 #include "sccd_narrowphase.hpp"
+#include "sccd_parallel.hpp"
+
+#include <atomic>
 #include "sccd_math.hpp"
 #include "sccd_rootfinder.hpp"
 
@@ -30,6 +33,7 @@
 #endif
 
 #include <algorithm>
+#include <limits>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -54,7 +58,8 @@ namespace {
         fs::path dataset_dir;
         bool do_vf = true;
         bool do_ee = true;
-        std::size_t max_files = 0;  // 0 == all
+        std::size_t max_files = 0;   // 0 == all
+        std::size_t file_begin = 0;  // skip this many files first
         scalar_t tol = 3e-8;
         int max_depth = 96;
         fs::path csv;
@@ -76,6 +81,11 @@ namespace {
         // the true root; this makes that effect visible on the host rows too,
         // which is the only way to tell it apart from a kernel defect.
         bool float_geometry = false;
+        // Which search TightInclusion runs for the reference answer. Its own
+        // default is breadth-first; this tool has always asked for depth-first,
+        // which is both slower here and the only one of the two that ignores a
+        // time bound.
+        bool ti_breadth_first = false;
         // > 0 selects throughput mode: merge every query file into one batch and
         // time the device kernels with CUDA events instead of scoring accuracy.
         int bench_repeats = 0;
@@ -495,6 +505,36 @@ namespace {
         std::vector<Violation> violations;
         double seconds = 0;
 
+        // Earliness against the exact root: how far before the truth the answer
+        // lands. Kept per file (median within a file, largest anywhere) rather
+        // than as one vector of every query, which would be millions of doubles
+        // per mode, and which matches how the sweep reports the same quantity.
+        std::vector<double> file_med_early;
+        double max_early = 0;
+
+        double med_early() const {
+            // NaN, not 0: "no query contributed" and "the median earliness is
+            // exactly zero" are different answers, and the second one is a
+            // result -- it says the search landed on the true root itself.
+            if (file_med_early.empty()) {
+                return std::numeric_limits<double>::quiet_NaN();
+            }
+            std::vector<double> v = file_med_early;
+            std::sort(v.begin(), v.end());
+            const std::size_t mid = v.size() / 2;
+            return v.size() % 2 ? v[mid] : 0.5 * (v[mid - 1] + v[mid]);
+        }
+
+        void add_file_earliness(std::vector<double>& early) {
+            if (early.empty()) return;
+            std::sort(early.begin(), early.end());
+            const std::size_t mid = early.size() / 2;
+            file_med_early.push_back(early.size() % 2
+                                         ? early[mid]
+                                         : 0.5 * (early[mid - 1] + early[mid]));
+            if (early.back() > max_early) max_early = early.back();
+        }
+
         void add(const double reference, const double value) {
             const double err = value - reference;
             abs_err.push_back(std::abs(err));
@@ -601,6 +641,18 @@ int main(int argc, char** argv) {
             opt.do_ee = (p == "ee" || p == "both");
         } else if (a == "--max-files") {
             opt.max_files = static_cast<std::size_t>(std::stoul(next()));
+        } else if (a == "--ti-method") {
+            const std::string m = next();
+            if (m == "bfs") {
+                opt.ti_breadth_first = true;
+            } else if (m == "dfs") {
+                opt.ti_breadth_first = false;
+            } else {
+                std::cerr << "error: --ti-method takes bfs or dfs\n";
+                return 1;
+            }
+        } else if (a == "--file-begin") {
+            opt.file_begin = static_cast<std::size_t>(std::stoul(next()));
         } else if (a == "--tol") {
             opt.tol = std::stod(next());
         } else if (a == "--max-depth") {
@@ -629,6 +681,7 @@ int main(int argc, char** argv) {
 
     if (opt.dataset_dir.empty()) {
         std::cerr << "usage: ti_oracle <dataset-dir> [--phase vf|ee|both] [--max-files N]\n"
+                     "                 [--file-begin N] [--ti-method bfs|dfs]\n"
                      "                 [--tol T] [--max-depth N] [--csv out.csv]\n"
                      "                 [--violations-csv out.csv] [--no-strict] [--gate MODE]\n"
 #ifdef SCCD_ENABLE_CUDA
@@ -687,6 +740,19 @@ int main(int argc, char** argv) {
             }
         }
         std::sort(files.begin(), files.end());
+        // A half-open file range, so a scene with more files than fit in one
+        // scheduler allocation can be checked in pieces. rod-twist is 4,571
+        // query files and takes over half an hour in one go -- not because it
+        // has many queries (it has fewer than cloth-ball) but because the
+        // per-file work dominates.
+        if (opt.file_begin > 0) {
+            if (opt.file_begin >= files.size()) {
+                files.clear();
+            } else {
+                files.erase(files.begin(),
+                            files.begin() + static_cast<std::ptrdiff_t>(opt.file_begin));
+            }
+        }
         if (opt.max_files && files.size() > opt.max_files) {
             files.resize(opt.max_files);
         }
@@ -719,7 +785,100 @@ int main(int argc, char** argv) {
             // 0's single shared toi lets every query prune against every other
             // query's progress. Timed side by side because production callers
             // choose between them.
-            std::printf("%-12s %12s %12s %10s\n", "mode", "stride1_ms", "stride0_ms", "ratio");
+            std::printf("%-12s %12s %12s %10s\n", "mode", "per_pair_ms", "earliest_ms", "ratio");
+
+            // TightInclusion in three configurations, so the comparison against
+            // ToiOutput::Earliest is like for like and the two variables are
+            // separated.
+            //
+            // SCCD's Earliest prunes every query against the earliest time of
+            // impact found so far. TightInclusion can do the same -- `t_max` is
+            // its own parameter and needs no change to it -- but only on the
+            // breadth-first path: interval_root_finder_DFS takes no max_time and
+            // ccd.cpp returns from the DFS branch before t_max is read. So a
+            // bound passed with depth-first search does nothing at all, and the
+            // reference SCCD has always compared against ran depth-first over
+            // the whole interval. Breadth-first is TightInclusion's own default.
+            //
+            // The per-query column runs TightInclusion as the accuracy table
+            // does; the earliest column carries the running minimum forward.
+            {
+                struct TiConfig {
+                    const char* name;
+                    bool breadth_first;
+                    bool prune;
+                };
+                const TiConfig configs[3] = {
+                    {"TI dfs", false, false},   // what the reference has always been
+                    {"TI bfs", true, false},    // method changed, no bound
+                    {"TI bfs+max", true, true}, // method changed and bounded
+                };
+                for (const TiConfig& cfg : configs) {
+                    double per_pair_ms = 0.0;
+                    double earliest_ms = 0.0;
+                    for (int k = 0; k < 2; ++k) {
+                        const bool earliest = (k == 1);
+                        double best = 1e30;
+                        for (int r = 0; r < opt.bench_repeats; ++r) {
+                            // Shared, as Earliest keeps it: every worker prunes
+                            // against the best time of impact found so far by
+                            // any of them, which is what makes the bound worth
+                            // anything. Relaxed ordering is all the bound needs
+                            // -- reading a stale (larger) value only prunes less.
+                            std::atomic<double> running(1.0);
+                            const double t0 = now_seconds();
+                            sccd::parallel_for_br_dynamic(
+                                0, (ptrdiff_t)batch.n_queries,
+                                [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+                            for (std::size_t i = (std::size_t)rbegin; i < (std::size_t)rend; ++i) {
+                                const idx_t bi = static_cast<idx_t>(4 * i);
+                                auto P0 = [&](int c, int d) { return batch.p0[d][bi + c]; };
+                                auto P1 = [&](int c, int d) { return batch.p1[d][bi + c]; };
+                                const double a0[3] = {P0(0, 0), P0(0, 1), P0(0, 2)};
+                                const double a1[3] = {P0(1, 0), P0(1, 1), P0(1, 2)};
+                                const double a2[3] = {P0(2, 0), P0(2, 1), P0(2, 2)};
+                                const double a3[3] = {P0(3, 0), P0(3, 1), P0(3, 2)};
+                                const double b0[3] = {P1(0, 0), P1(0, 1), P1(0, 2)};
+                                const double b1[3] = {P1(1, 0), P1(1, 1), P1(1, 2)};
+                                const double b2[3] = {P1(2, 0), P1(2, 1), P1(2, 2)};
+                                const double b3[3] = {P1(3, 0), P1(3, 1), P1(3, 2)};
+
+                                // The bound only applies to the earliest question;
+                                // asking for a time of impact per candidate means
+                                // each is searched over the whole step.
+                                const double bound =
+                                    (earliest && cfg.prune)
+                                        ? running.load(std::memory_order_relaxed)
+                                        : 1.0;
+                                double t = bound, u = 0, v = 0;
+                                const bool hit =
+                                    phase.is_vf
+                                        ? sccd::find_root_tight_inclusion_vf<double>(
+                                              opt.max_depth, opt.tol, a0, a1, a2, a3, b0, b1, b2, b3,
+                                              t, u, v, bound, cfg.breadth_first)
+                                        : sccd::find_root_tight_inclusion_ee<double>(
+                                              opt.max_depth, opt.tol, a0, a1, a2, a3, b0, b1, b2, b3,
+                                              t, u, v, bound, cfg.breadth_first);
+                                if (earliest && cfg.prune && hit) {
+                                    // CAS-min: retry only while some other worker
+                                    // published a value that is still worse than ours.
+                                    double cur = running.load(std::memory_order_relaxed);
+                                    while (t < cur &&
+                                           !running.compare_exchange_weak(
+                                               cur, t, std::memory_order_relaxed)) {
+                                    }
+                                }
+                            }
+                            });
+                            const double ms_run = (now_seconds() - t0) * 1e3;
+                            if (ms_run < best) best = ms_run;
+                        }
+                        (earliest ? earliest_ms : per_pair_ms) = best;
+                    }
+                    std::printf("%-12s %12.3f %12.3f %9.2fx\n", cfg.name, per_pair_ms, earliest_ms,
+                                earliest_ms > 0 ? per_pair_ms / earliest_ms : 0.0);
+                }
+            }
             for (int m = 0; m < N_MODES; ++m) {
                 const Mode mode = mode_of(m);
                 const bool is_device = (mode == Mode::DeviceRelaxed || mode == Mode::DeviceTight);
@@ -737,12 +896,13 @@ int main(int argc, char** argv) {
                 if (is_device) {
                     double ms_s[2] = {0.0, 0.0};
                     for (int k = 0; k < 2; ++k) {
-                        const int stride = (k == 0) ? 1 : 0;
+                        const sccd::ToiOutput toi_output =
+                            (k == 0) ? sccd::ToiOutput::PerPair : sccd::ToiOutput::Earliest;
                         ms_s[k] = opt.device_float
                                       ? bench_device<float>(batch, phase.is_vf, opt.max_depth, opt.tol,
-                                                            opt.bench_repeats, stride)
+                                                            opt.bench_repeats, toi_output)
                                       : bench_device<double>(batch, phase.is_vf, opt.max_depth, opt.tol,
-                                                             opt.bench_repeats, stride);
+                                                             opt.bench_repeats, toi_output);
                     }
                     std::printf("%-12s %12.3f %12.3f %9.2fx\n", mode_name(mode), ms_s[0], ms_s[1],
                                 ms_s[1] > 0 ? ms_s[0] / ms_s[1] : 0.0);
@@ -754,8 +914,10 @@ int main(int argc, char** argv) {
                 {
                     double ms_s[2] = {0.0, 0.0};
                     for (int k = 0; k < 2; ++k) {
-                        const int stride = (k == 0) ? 1 : 0;
-                        std::vector<scalar_t> toi(stride == 0 ? 1 : batch.n_queries, 1.0);
+                        const sccd::ToiOutput toi_output =
+                            (k == 0) ? sccd::ToiOutput::PerPair : sccd::ToiOutput::Earliest;
+                        std::vector<scalar_t> toi(
+                            toi_output == sccd::ToiOutput::Earliest ? 1 : batch.n_queries, 1.0);
                         double best = 1e30;
                         for (int r = 0; r < opt.bench_repeats; ++r) {
                             std::fill(toi.begin(), toi.end(), scalar_t(1));
@@ -763,11 +925,11 @@ int main(int argc, char** argv) {
                             if (phase.is_vf) {
                                 sccd::narrow_phase_vf<scalar_t, idx_t>(
                                     batch.n_queries, batch.q0.data(), batch.q1.data(), batch.p0_ptr, batch.p1_ptr, 1,
-                                    batch.prim_ptr, scalar_t(1), toi.data(), opt.max_depth, opt.tol, stride);
+                                    batch.prim_ptr, scalar_t(1), toi.data(), opt.max_depth, opt.tol, toi_output);
                             } else {
                                 sccd::narrow_phase_ee<scalar_t, idx_t>(
                                     batch.n_queries, batch.q0.data(), batch.q1.data(), batch.p0_ptr, batch.p1_ptr, 1,
-                                    batch.prim_ptr, scalar_t(1), toi.data(), opt.max_depth, opt.tol, stride);
+                                    batch.prim_ptr, scalar_t(1), toi.data(), opt.max_depth, opt.tol, toi_output);
                             }
                             best = std::min(best, (now_seconds() - t0) * 1e3);
                         }
@@ -782,6 +944,12 @@ int main(int argc, char** argv) {
         }
 
         Stats stats[N_MODES];
+        // TightInclusion scored against the exact roots on exactly the same
+        // terms as every mode. It is the reference for hit-versus-miss, but it
+        // is not the truth: its own answer is a conservative lower bound, so
+        // "how early is the reference" is a fair question and one the accuracy
+        // table cannot answer without measuring it.
+        Stats ti_stats;
         double ti_seconds = 0;
         std::size_t ti_hits = 0;
         std::size_t total_queries = 0;
@@ -803,11 +971,29 @@ int main(int argc, char** argv) {
             const bool have_gt_toi =
                 read_ground_truth_toi(opt.dataset_dir, key, gt_toi) && gt_toi.size() >= qs.n_queries;
 
-            // --- reference: TightInclusion, one query at a time ---
+            // --- reference: TightInclusion, over the same queries ---
+            //
+            // The loop is scheduled with the *same* helper the narrow phase
+            // uses for its own root finding (parallel_for_br_dynamic, chosen
+            // there because per-query CCD cost is heavily skewed), so the
+            // reference column compares two parallel implementations rather
+            // than a parallel one against a serial one. Running TI serially
+            // here inflated every "vs. TI" ratio by roughly the thread count.
+            //
+            // This calls TightInclusion concurrently but does not modify it.
+            // That is sound for the way it is configured: the only namespace
+            // scope mutable state in the library is the timing accumulators in
+            // interval_root_finder.cpp, written solely through
+            // TIGHT_INCLUSION_SCOPED_TIMER, which expands to nothing unless
+            // TIGHT_INCLUSION_WITH_TIMER is defined -- and SCCDDependencies
+            // forces it OFF. The remaining statics are a magic static logger
+            // and an unused timer constant. Each query writes only its own slot.
             std::vector<double> ti_toi(qs.n_queries, 1.0);
             std::vector<std::uint8_t> ti_hit(qs.n_queries, 0);
             const double t_ti0 = now_seconds();
-            for (std::size_t i = 0; i < qs.n_queries; ++i) {
+            sccd::parallel_for_br_dynamic(0, (ptrdiff_t)qs.n_queries,
+                                          [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+            for (std::size_t i = (std::size_t)rbegin; i < (std::size_t)rend; ++i) {
                 const idx_t b = static_cast<idx_t>(4 * i);
                 auto P0 = [&](int k, int d) { return qs.p0[d][b + k]; };
                 auto P1 = [&](int k, int d) { return qs.p1[d][b + k]; };
@@ -821,16 +1007,53 @@ int main(int argc, char** argv) {
                 const double b3[3] = {P1(3, 0), P1(3, 1), P1(3, 2)};
 
                 double t = 1, u = 0, v = 0;
-                const bool hit = phase.is_vf
-                                     ? sccd::find_root_tight_inclusion_vf<double>(
-                                           opt.max_depth, opt.tol, a0, a1, a2, a3, b0, b1, b2, b3, t, u, v)
-                                     : sccd::find_root_tight_inclusion_ee<double>(
-                                           opt.max_depth, opt.tol, a0, a1, a2, a3, b0, b1, b2, b3, t, u, v);
+                const bool hit =
+                    phase.is_vf
+                        ? sccd::find_root_tight_inclusion_vf<double>(
+                              opt.max_depth, opt.tol, a0, a1, a2, a3, b0, b1, b2, b3, t, u, v,
+                              1.0, opt.ti_breadth_first)
+                        : sccd::find_root_tight_inclusion_ee<double>(
+                              opt.max_depth, opt.tol, a0, a1, a2, a3, b0, b1, b2, b3, t, u, v,
+                              1.0, opt.ti_breadth_first);
                 ti_hit[i] = hit ? 1 : 0;
                 ti_toi[i] = hit ? t : 1.0;
-                ti_hits += hit ? 1 : 0;
             }
+            });
             ti_seconds += now_seconds() - t_ti0;
+            // Counted after the fact rather than accumulated in the loop, so the
+            // total does not depend on the schedule.
+            for (std::size_t i = 0; i < qs.n_queries; ++i) ti_hits += ti_hit[i] ? 1 : 0;
+
+            // The reference, scored against the exact roots on the same terms as
+            // every mode below. TightInclusion is the reference for hit versus
+            // miss, but it is not the truth -- its answer is itself a
+            // conservative lower bound -- so how early it lands is a fair
+            // question, and one the accuracy table cannot answer without asking.
+            ti_stats.n += qs.n_queries;
+            for (std::size_t i = 0; i < qs.n_queries; ++i) {
+                ti_stats.hits += ti_hit[i] ? 1 : 0;
+            }
+            if (have_gt_toi) {
+                std::vector<double> ti_early;
+                ti_early.reserve(qs.n_queries);
+                for (std::size_t i = 0; i < qs.n_queries; ++i) {
+                    const double truth = gt_toi[i];
+                    if (sccd::is_nan_bits(truth)) continue;
+                    ti_stats.gt_checked += 1;
+                    if (!ti_hit[i]) {
+                        ti_stats.gt_missed += 1;
+                    } else if (ti_toi[i] > truth) {
+                        ti_stats.gt_late += 1;
+                        const double over = ti_toi[i] - truth;
+                        if (over > ti_stats.gt_worst_overshoot) {
+                            ti_stats.gt_worst_overshoot = over;
+                        }
+                    } else {
+                        ti_early.push_back(truth - ti_toi[i]);
+                    }
+                }
+                ti_stats.add_file_earliness(ti_early);
+            }
 
             if (have_gt) {
                 gt_available += qs.n_queries;
@@ -880,6 +1103,8 @@ int main(int argc, char** argv) {
                 stats[m].seconds += now_seconds() - t0;
 
                 const std::size_t late_before = stats[m].late;
+                std::vector<double> early;
+                early.reserve(qs.n_queries);
                 for (std::size_t i = 0; i < qs.n_queries; ++i) {
                     const bool hit = toi[i] < scalar_t(1);
                     stats[m].n += 1;
@@ -912,7 +1137,10 @@ int main(int argc, char** argv) {
                                     stats[m].violations.push_back(
                                         {key, i, "missed(truth)", truth, double(toi[i])});
                                 }
-                            } else if (double(toi[i]) > truth) {
+                            } else if (double(toi[i]) <= truth) {
+                                early.push_back(truth - double(toi[i]));
+                            }
+                            if (hit && double(toi[i]) > truth) {
                                 stats[m].gt_late += 1;
                                 const double over = double(toi[i]) - truth;
                                 if (over > stats[m].gt_worst_overshoot) {
@@ -926,6 +1154,7 @@ int main(int argc, char** argv) {
                         }
                     }
                 }
+                stats[m].add_file_earliness(early);
             }
         }
 
@@ -949,12 +1178,12 @@ int main(int argc, char** argv) {
             char row[640];
             std::snprintf(row, sizeof(row),
                           "%s,%s,%s,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%.17g,%.17g,%.17g,%.17g,%.17g,%.6f,"
-                          "%zu,%zu,%zu,%.17g",
+                          "%zu,%zu,%zu,%.17g,%.17g,%.17g",
                           dataset.c_str(), phase.name, name, s.n, s.hits, s.false_negative,
                           s.false_positive, s.late, s.near_zero_ref, s.gt_false_negative,
                           Stats::mean_of(s.rel_err), rel_med, rel_p95, abs_p95, abs_max,
                           s.seconds * 1e3, s.gt_checked, s.gt_missed, s.gt_late,
-                          s.gt_worst_overshoot);
+                          s.gt_worst_overshoot, s.med_early(), s.max_early);
             csv_rows.push_back(row);
         }
         std::printf("%-8s %9zu %8zu %6s %6s %6s   %10s %10s   %10s %10s %9.1f\n",
@@ -966,9 +1195,12 @@ int main(int argc, char** argv) {
         {
             char row[640];
             std::snprintf(row, sizeof(row),
-                          "%s,%s,%s,%zu,%zu,0,0,0,0,0,0,0,0,0,0,%.6f,0,0,0,0",
+                          "%s,%s,%s,%zu,%zu,0,0,0,0,0,0,0,0,0,0,%.6f,"
+                          "%zu,%zu,%zu,%.17g,%.17g,%.17g",
                           dataset.c_str(), phase.name, "ti-reference", total_queries, ti_hits,
-                          ti_seconds * 1e3);
+                          ti_seconds * 1e3, ti_stats.gt_checked, ti_stats.gt_missed,
+                          ti_stats.gt_late, ti_stats.gt_worst_overshoot,
+                          ti_stats.med_early(), ti_stats.max_early);
             csv_rows.push_back(row);
         }
         std::printf("  gtMISS!/gtLATE! are measured against the dataset's exact roots and are the\n"
@@ -1027,7 +1259,8 @@ int main(int argc, char** argv) {
         std::ofstream out(opt.csv);
         out << "dataset,phase,mode,queries,hits,false_negative,false_positive,late,near_zero_ref,"
                "gt_false_negative,relerr_mean,relerr_median,relerr_p95,abserr_p95,abserr_max,ms,"
-               "gt_checked,gt_missed,gt_late,gt_worst_overshoot\n";
+               "gt_checked,gt_missed,gt_late,gt_worst_overshoot,"
+               "med_early,max_early\n";
         for (const std::string& r : csv_rows) {
             out << r << "\n";
         }

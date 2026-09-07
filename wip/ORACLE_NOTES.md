@@ -25,14 +25,217 @@ Options: `--phase vf|ee|both`, `--max-files N`, `--tol T`, `--max-depth N`,
 CUDA `--device-float` and `--bench N` (see "Throughput"). `--float-geometry` narrows the input for every mode; see
 "Why there is no float row to gate on".
 
-`--gate tight` restricts the exit code to the `tight` kernel, which is
-what a CI check should use: modes 0 and 1 are known to violate the invariant, so
-the default `--gate all` always fails while they are still present.
+`--gate MODE` restricts the exit code to one kernel. The default `--gate all`
+is what a CI check should use: both shipped modes are conservative by
+construction and both pass it. (This paragraph used to say modes 0 and 1 were
+"known to violate the invariant" and that `--gate all` therefore always failed.
+Mode 1 no longer exists, and mode 0 does not violate anything: the full sweep
+below records zero missed collisions and zero late times of impact for Relaxed
+and Tight across all three scenes. A kernel that is not conservative has a
+defect to fix, not a property to document.)
 
 It reads `data/<scene>/queries/*.csv` (exact rationals, 8 rows per query, the
 same layout `benchmark/bench.exe.cpp` uses) and, when present,
 `data/<scene>/mma_bool/<key>/mma_bool.uint8` for the Mathematica ground truth.
 It does not need smesh.
+
+## cloth-funnel's oracle was 47% incomplete, and why
+
+Of cloth-funnel's 7,552 queries, 3,572 carried `mma_bool = true` with a NaN time
+of impact, so `ti_oracle` scored them as "no collision" and every accuracy figure
+published for the scene rested on the other 53%. armadillo-rollers and cloth-ball
+agreed bit for bit, which is what made it look like a cloth-funnel quirk rather
+than a bug in the reader.
+
+Those 3,572 are exactly the queries whose **coplanarity cubic vanishes
+identically over the step** — the count matches to the query, verified by
+evaluating the cubic's four coefficients in exact rational arithmetic for every
+query in the scene. The element stays coplanar for the whole step, so contact
+holds over an interval rather than at an instant and the root set is a continuum.
+Mathematica records that in one of two shapes, and neither survived
+`read_wxf_roots`:
+
+- **3,549** give a concrete `t` — all but thirteen of them `0`, contact from the
+  start of the step — alongside an `a` and `b` that stay unevaluated. The reader
+  required all three keys and discarded the whole root for the sake of two fields
+  that `roots_to_raw.py` never reads; it writes `toi[query] = root["t"]` and
+  nothing else.
+- **23** give `t -> First[False]` with `a` and `b` as exact rational-linear
+  functions of the scoped time variable Mathematica renamed (`t$3013` and
+  friends). The time of impact is still fully determined: contact holds where the
+  barycentric coordinates are admissible, so it is
+  `inf { t in [0,1] : a(t) >= 0, b(t) >= 0, a(t)+b(t) <= 1 }`, computed exactly
+  and rounded down on the way to double.
+
+Confirmed on the geometry: every point of 419vf's degenerate queries sits at
+`z = -2` at both ends of the step, and at the recovered time of impact the vertex
+is inside the triangle with an exactly zero out-of-plane residual.
+
+### The check that mattered
+
+A reference **later** than the true time of impact is the dangerous direction: it
+does not cause a false alarm, it makes the gate too permissive and hides a real
+violation. So the recovered roots were checked one-sidedly and exactly — contact
+evaluated in rational arithmetic at grid points strictly before each recorded
+time, so a positive result is a certain witness of lateness. Across the whole
+degenerate population there is none. All but thirteen of them record `t = 0`,
+which is the earliest possible answer and cannot be late at all.
+
+`benchmark/verify_oracle.py` now enforces `mma_bool[i] == isfinite(toi[i])` on
+every query of every scene and exits non-zero on a gap, so this class of hole
+cannot reappear unnoticed.
+
+## What float32 mesh geometry costs, measured
+
+`SMESH_GEOM_TYPE` defaults to `float32`, so the mesh path hands the kernels
+float-rounded coordinates while the curated query sets are exact dyadic
+rationals. `ti_oracle --float-geometry` narrows the query geometry to float and
+reruns every mode, which isolates that one variable. armadillo-rollers
+edge-edge, the same 98,757 queries both times:
+
+| geometry | `relaxed` missed / late | `tight` missed / late |
+|---|---|---|
+| double (as shipped) | 0 / 0 | 0 / 0 |
+| float32-narrowed | 0 / 1,902 | 4 / 25,485 |
+
+float32 geometry alone manufactures 25,485 apparent late times of impact, and
+four apparent missed collisions, from kernels that are exactly conservative on
+double geometry. `tight` is hurt fourteen times more than `relaxed` because it
+reports closer to the true root, so a perturbed root crosses its answer far more
+often.
+
+This is what the `s0_late` column in the benchmark CSV is seeing, at smaller
+scale: the mesh answer compared against roots belonging to the rational
+geometry. It is the input differing, not the kernel.
+
+### Which scenes have anything to gain from a double build
+
+From the PLY headers. armadillo-rollers and puffer-ball declare
+`property double x`, so float32 storage genuinely discards data — measured at up
+to 5.95e-8 relative, float32 epsilon. cloth-ball (`property float x`) and
+cloth-funnel (`property float32 x`) are float at source, so nothing is lost for
+them. That is consistent with the mesh divergence being confined to
+armadillo-rollers.
+
+Note also that converting the frames matters as much as the build switch:
+smesh's `db_to_raw` writes `x.float32`, while `benchmark/ply_to_smesh.py` writes
+`x.float64` and round-trips a double PLY bit-exactly. Converting through float32
+and widening afterwards would measure nothing.
+
+### What a double-geometry build would and would not change
+
+`benchmark/bench.exe.cpp` uses `scalar_t = double`, and its curated-query path
+builds its own double buffers straight from the CSV rationals; smesh appears
+there only as a buffer container. So `fp`, `fn`, `toi_late`, `toi_med_early` and
+the whole accuracy and conservativeness table are independent of
+`SMESH_GEOM_TYPE`. The mesh path -- `prep_ms`, `broad_ms`, `broad_fp`, `s0_*` --
+is what depends on it.
+
+### What geom_t=double actually changes, measured
+
+smesh built from its `double_geom` branch at `SMESH_GEOM_TYPE=float64`, frames
+converted to `x.float64`, against the stock float32 build over the same cases.
+armadillo-rollers, first 200 cases, Tight, one GH200 node:
+
+| geometry | s0_late | toi_late | fp | broad_fp | candidate pairs | time |
+|---|---:|---:|---:|---:|---:|---:|
+| float32 | 66 | 0 | 7 | 14,637,582 | 14,674,883 | 57 s |
+| float64 | **0** | 0 | 7 | 14,613,187 | 14,650,488 | 34 s |
+
+Three things, and the first is the point of the exercise.
+
+**The mesh-path divergence is entirely a precision artefact.** `s0_late` goes
+66 to zero. Those cases were never a kernel defect: the reported time of impact
+was being compared against roots belonging to the exact rational geometry while
+the mesh held a float32 copy of it. Give the mesh the coordinates the roots
+belong to and the discrepancy disappears. Per case the answer moves from just
+above the exact root to just below it -- 100ee reports 1.03297e-3 at float32
+against a root of 1.031e-3, and 1.02986e-3 at float64.
+
+**Narrow-phase false positives do not move: 7 either way.** As expected from the
+code -- `fp` comes from the curated-query path, which is double end to end and
+never reads mesh geometry. No amount of geom_t changes it.
+
+**The broad phase does move, slightly and in the useful direction.** 24,395
+fewer false positives out of 14.6 M, 0.17%, because tighter coordinates give
+tighter swept boxes. That is also why the double run is *faster* despite the
+wider type: 34 s against 57 s, from having fewer candidate pairs to carry into
+the narrow phase.
+
+### Building smesh at geom_t=double
+
+Supported on smesh's `double_geom` branch, which adds the explicit template
+instantiations the default branch lacks for the double-geometry combinations
+(`adjugate_fill<f32, f64>` and friends). Without them `libsmesh.a` compiles but
+the CLI tools do not link, and the install aborts before `smeshConfig.cmake` is
+written, so `find_package(smesh)` cannot see the build at all.
+
+```sh
+git clone --branch double_geom https://github.com/zulianp/smesh.git
+cmake -S smesh -B smesh/build-f64 -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_INSTALL_PREFIX=<prefix> \
+  -DSMESH_GEOM_TYPE=float64 -DSMESH_REAL_TYPE=float64 \
+  -DSMESH_SCALAR_TYPE=float64 -DSMESH_ACCUMULATOR_TYPE=float64 \
+  -DSMESH_ENABLE_OPENMP=ON -DSMESH_ENABLE_CUDA=OFF \
+  -DSMESH_ENABLE_MPI=OFF -DSMESH_ENABLE_MPISORT=OFF \
+  -DSMESH_ENABLE_DEMO=OFF -DSMESH_ENABLE_TESTING=OFF \
+  -DSMESH_ENABLE_RYAML=OFF -DSMESH_ENABLE_DEV_MODE=OFF
+```
+
+then point SCCD at it with `-Dsmesh_DIR=<prefix>/lib64/cmake/smesh`. Two flags
+matter beyond the type: a fresh cache defaults MPI, demos and tests **on**, which
+pulls in far more code than the reference float32 install was built with, and
+`SMESH_ENABLE_DEV_MODE=OFF` is needed because dev mode adds `-Werror` and the
+tree does not build warning-free.
+
+The frames must be converted to match. `prepare_data.sh` writes both `x.float32`
+and `x.float64` through `benchmark/ply_to_smesh.py`, and smesh reads whichever
+matches its `geom_t`, so one prepared dataset serves either build.
+
+## A non-deterministic missed collision, and what found it
+
+The first accuracy run over every scene caught the device Relaxed kernel
+missing collisions on rod-twist: 2 missed and 5 late of 15,957 vertex-face
+queries in one repeat and none in the next, over identical input. Host Relaxed,
+host Tight and device Tight were clean, as were the other five scenes --
+65,079,040 checks.
+
+One index. With `ToiOutput::PerPair` the kernel keeps a bound per query, but the
+seed of `narrow_phase_dfs_zero_stride_kernel` pruned the root box against
+`toi[0]` rather than `toi[qid]`. `is_domain_valid` is `tlower < toi` and a root
+box has `tlower == 0`, so it only bites when `toi[0]` is exactly zero -- which is
+what a query already in contact at the start of the step reports, and these
+datasets are full of them. From that moment every query whose block ran its seed
+saw `0 < 0`, never became active, and came back as no collision. Whether it
+happened depended on whether the thread owning query zero had published before
+the other blocks seeded: hence non-deterministic, and hence Relaxed only, since
+Tight refines that query to a small positive value instead of exactly zero.
+
+The sibling kernel already had this right, with a comment about the index that
+"used to collapse every query onto toi[0]". The seed was missed by that fix.
+
+### What this says about the harness
+
+The bug is four years' worth of "runs fine" away from being noticed by a single
+benchmark run. What found it was **repeats over every case of every scene**: it
+appeared in one repeat of one file range of one scene. A 16-case subsample, or
+one repeat, would have missed it, and so would any comparison against another
+implementation rather than against exact roots -- a kernel that silently drops a
+query agrees with nothing, but only the exact root says so.
+
+`src/tests/cuda/sccd_narrowphase_cuda_test.exe.cpp` now carries a case for it: a
+scene whose first query touches at t = 0 alongside 800 ordinary crossings, run
+twelve times because a scheduling-dependent failure makes a single green run
+worthless as evidence. Before the fix it failed 5 of 12 runs, worst case 158
+missed of 801; after, 0 of 12.
+
+### Consequence for measurements taken before the fix
+
+Any device `PerPair` figure taken with the unfixed kernel is suspect in both
+directions: accuracy, because queries were dropped, and *timing*, because a
+dropped query costs nothing, so the kernel looked faster than it is. Device
+`Earliest` numbers are unaffected -- there `toi[0]` is the correct shared bound --
+and so is every host figure.
 
 ## The device rows
 

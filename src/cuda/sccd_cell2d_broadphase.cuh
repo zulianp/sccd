@@ -9,7 +9,7 @@
  * \file
  * \brief Device port of the two-dimensional cell-list broad phase.
  *
- * The host version is `src/cell2d_broadphase.hpp`; the reasoning for two axes
+ * The host version is `src/broadphase/sccd_broadphase_cell2d.hpp`; the reasoning for two axes
  * rather than three, and for binning rather than sorting, is written up there and
  * in `wip/BROADPHASE.md`. On the host it took the broad phase from 4,467 ms
  * to 1,063 ms at 1.5M triangles.

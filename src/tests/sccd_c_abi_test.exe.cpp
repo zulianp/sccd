@@ -13,10 +13,11 @@
 // the property under test: a reported time of impact must never be later than the
 // true one, misses are illegal, and earlier is fine.
 //
-// The declarations come from sccd.h rather than being re-typed here. They used
-// to be re-typed, which meant this file could compile and link against a
-// signature the library no longer had -- C linkage does not mangle, so the
-// mismatch would have surfaced as wrong answers rather than as a build error.
+// The declarations come from sccd.h rather than being re-typed here. Re-typing
+// them would let this file compile and link against a signature the library does
+// not have -- C linkage does not mangle, so the mismatch surfaces as wrong
+// answers rather than as a build error, which is the one thing an ABI test must
+// not allow.
 
 #include "sccd.h"
 

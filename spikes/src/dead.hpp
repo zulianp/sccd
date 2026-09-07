@@ -21,6 +21,8 @@
 #include "sccd_aabb.hpp"
 #include "sccd_broadphase_sweep.hpp"
 #include "sccd_broadphase_strategy.hpp"
+#include "sccd_narrowphase_mode.hpp"
+#include "sccd_rootfinder.hpp"
 #include "sccd_base.hpp"
 #include "sccd_math.hpp"
 
@@ -889,6 +891,371 @@ namespace sccd {
             if (forced != BroadPhaseStrategy::Auto) return forced;
             return BroadPhaseStrategy::Cell2D;
         }
+
+
+    // ---------------------------------------------------------------------
+    // Narrow-phase code with no caller.
+    //
+    // `find_root_newton` polished an accepted box with a Newton step, behind an
+    // undocumented `SCCD_REFINE` environment variable that defaulted to off. It
+    // is here rather than in src/ for two reasons beyond being unreachable.
+    //
+    // It was **unsound when enabled**: on accepting it reported
+    // `min(upper, max(lower, 0.99 * t_approx))` rather than the box's `t` lower
+    // bound. That lower bound is at or before any root inside the box, which is
+    // what makes accepting safe however loose the test was; a value above it can
+    // land after a root the box contains, which is a time of impact reported
+    // late -- the one failure the search exists to prevent.
+    //
+    // And it was half-wired: the edge-edge path took the same `refine` flag and
+    // opened with `(void)refine;`, so setting the variable changed vertex-face
+    // results and silently did nothing for edge-edge.
+    //
+    // `norm_diff_vf` and `project_uv_simplex` were its helpers and had no other
+    // caller. `diff_vf`, which they use, stays in the shipped header because the
+    // inclusion function needs it.
+    // ---------------------------------------------------------------------
+
+    template <typename T>
+    inline void project_uv_simplex(T &u, T &v) {
+        u = sccd::max<T>(u, 0);
+        v = sccd::max<T>(v, 0);
+        const T s = u + v;
+        if (s <= static_cast<T>(1)) {
+            return;
+        }
+
+        T u_proj = static_cast<T>(0.5) * (u - v + 1);
+        u_proj = sccd::min<T>(static_cast<T>(1), sccd::max<T>(0, u_proj));
+        v = static_cast<T>(1) - u_proj;
+        u = u_proj;
+    }
+
+    template <typename T>
+    inline T norm_diff_vf(const T sv[3],
+                          const T s1[3],
+                          const T s2[3],
+                          const T s3[3],
+                          const T ev[3],
+                          const T e1[3],
+                          const T e2[3],
+                          const T e3[3],
+                          T &t,
+                          T &u,
+                          T &v) {
+        T diff[3];
+        diff_vf(sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, diff);
+        return sqrt(diff[0] * diff[0] + diff[1] * diff[1] + diff[2] * diff[2]);
+    }
+
+    template <typename T>
+    bool find_root_newton(const int max_iter,
+                          const T atol,
+                          const T sv[3],
+                          const T s1[3],
+                          const T s2[3],
+                          const T s3[3],
+                          const T ev[3],
+                          const T e1[3],
+                          const T e2[3],
+                          const T e3[3],
+                          T &t,
+                          T &u,
+                          T &v) {
+        project_uv_simplex<T>(u, v);
+        t = sccd::min<T>(static_cast<T>(1), sccd::max<T>(0, t));
+
+        T s4[3] = {0, 0, 0};
+        T e4[3] = {0, 0, 0};
+
+        T f = 0;
+        vf_objective<T>(sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, t, u, v, &f);
+
+        for (int k = 0; k < max_iter; k++) {
+            T p[3] = {0, 0, 0};
+            vf_objective_dir<T>(sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, t, u, v, &f, p);
+
+            T best_t = t;
+            T best_u = u;
+            T best_v = v;
+            T best_f = f;
+
+            T alpha = 1;
+            bool improved = false;
+            for (int j = 0; j < 12; j++) {
+                T cand_t = t - alpha * p[0];
+                T cand_u = u - alpha * p[1];
+                T cand_v = v - alpha * p[2];
+
+                cand_t = sccd::min<T>(static_cast<T>(1), sccd::max<T>(0, cand_t));
+                project_uv_simplex<T>(cand_u, cand_v);
+
+                T fnext = 0;
+                vf_objective<T>(sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, cand_t, cand_u, cand_v, &fnext);
+
+                if (fnext < best_f) {
+                    best_t = cand_t;
+                    best_u = cand_u;
+                    best_v = cand_v;
+                    best_f = fnext;
+                    improved = true;
+                    break;
+                }
+
+                alpha *= static_cast<T>(0.5);
+            }
+
+            t = best_t;
+            u = best_u;
+            v = best_v;
+            f = best_f;
+
+            const T norm_diff = norm_diff_vf<T>(sv, s1, s2, s3, ev, e1, e2, e3, t, u, v);
+            if (norm_diff < atol) {
+                return (u >= -atol && v >= -atol && u + v <= 1 + atol && t >= 0 && t <= 1);
+            }
+
+            if (!improved) {
+                break;
+            }
+        }
+
+        return false;
+    }
+
+    // Was `Box<T>::bisect_ee`. Box keeps `bisect_vf`, which is used; this one
+    // had no caller. A member cannot be moved out of its class, so it takes the
+    // box as an argument; the body is otherwise unchanged.
+    template <typename T>
+        inline bool bisect_ee(const Box<T> &box,
+                          int split_dim,
+                          const T toi,
+                          std::vector<Box<T>> &stack) {
+            using Interval = sccd::Interval<T>;
+            std::pair<Interval, Interval> split_intervals{
+                Interval{box.tuv[split_dim].lower, (box.tuv[split_dim].lower + box.tuv[split_dim].upper) * T(0.5)},
+                Interval{(box.tuv[split_dim].lower + box.tuv[split_dim].upper) * T(0.5), box.tuv[split_dim].upper}};
+
+            // // NEW
+            // if (split_dim == 0) {
+            //     split_intervals.first.lower = std::min(split_intervals.first.lower, toi);
+            //     split_intervals.second.lower = std::min(split_intervals.second.lower, toi);
+            // }
+
+            if (split_intervals.first.is_terminal() || split_intervals.second.is_terminal()) {
+                return true;
+            }
+
+            stack.push_back(box);
+            stack.back().box.tuv[split_dim] = split_intervals.first;
+            stack.back().depth++;
+
+            if (split_dim == 0) {
+                if (split_intervals.second.lower < toi) {
+                    stack.push_back(box);
+                    stack.back().box.tuv[split_dim] = split_intervals.second;
+                    stack.back().depth++;
+                }
+            } else {
+                stack.push_back(box);
+                stack.back().box.tuv[split_dim] = split_intervals.second;
+                stack.back().depth++;
+            }
+
+            return false;
+        }
+
+    // Never called: the edge-edge search takes its codomain widths elsewhere.
+    template <typename T>
+    inline void compute_edge_edge_codomain_widths(const T s1[3],
+                                                  const T s2[3],
+                                                  const T s3[3],
+                                                  const T s4[3],
+                                                  const T e1[3],
+                                                  const T e2[3],
+                                                  const T e3[3],
+                                                  const T e4[3],
+                                                  T widths[3]) {
+        T wt = T(0);
+        T wu = T(0);
+        T wv = T(0);
+        for (int d = 0; d < 3; ++d) {
+            const T a0 = e1[d] - s1[d];
+            const T a1 = e2[d] - s2[d];
+            const T b0 = e3[d] - s3[d];
+            const T b1 = e4[d] - s4[d];
+            wt = sccd::max<T>(wt,
+                              sccd::max<T>(sccd::max<T>(sccd::abs<T>(a0 - b0), sccd::abs<T>(a0 - b1)),
+                                           sccd::max<T>(sccd::abs<T>(a1 - b0), sccd::abs<T>(a1 - b1))));
+            wu = sccd::max<T>(wu, sccd::max<T>(sccd::abs<T>(s2[d] - s1[d]), sccd::abs<T>(e2[d] - e1[d])));
+            wv = sccd::max<T>(wv, sccd::max<T>(sccd::abs<T>(s4[d] - s3[d]), sccd::abs<T>(e4[d] - e3[d])));
+        }
+        widths[0] = wt;
+        widths[1] = wu;
+        widths[2] = wv;
+    }
+
+#ifdef SCCD_ENABLE_TIGHT_INCLUSION
+    // Both are guarded by SCCD_ENABLE_TIGHT_INCLUSION, which is OFF by default,
+    // and neither had a caller even with it ON.
+    static bool isInsideTriangle(const ticcd::Vector3 &lambda, ticcd::Scalar tol = ticcd::Scalar(1e-6)) {
+        return (lambda.array() >= -tol).all() && (lambda.array() <= ticcd::Scalar(1) + tol).all() &&
+               std::abs(lambda.sum() - ticcd::Scalar(1)) <= ticcd::Scalar(1e-6);
+    }
+
+    static bool barycentric_triangle_3d(const ticcd::Vector3 &A,
+                                        const ticcd::Vector3 &B,
+                                        const ticcd::Vector3 &C,
+                                        const ticcd::Vector3 &P,
+                                        double &u,
+                                        double &v) {
+        using std::abs;
+
+        ticcd::Vector3 e1 = B - A;
+        ticcd::Vector3 e2 = C - A;
+        ticcd::Vector3 n = e1.cross(e2).eval();
+
+        ticcd::Vector3 dir = P - A;
+        double dist = n.dot(dir);
+        if (dist * dist > 1e-5) {
+            return false;
+        }
+
+        // Compute local coordinates u and v: (P - A) = u * (B - A) + v * (C - A)
+        // Solve: dir = u * e1 + v * e2
+        // Using dot product method (more numerically stable):
+        // dir · e1 = u * (e1 · e1) + v * (e2 · e1)
+        // dir · e2 = u * (e1 · e2) + v * (e2 · e2)
+        double d00 = e1.dot(e1);
+        double d01 = e1.dot(e2);
+        double d11 = e2.dot(e2);
+        double d20 = dir.dot(e1);
+        double d21 = dir.dot(e2);
+
+        double denom = d00 * d11 - d01 * d01;
+        if (abs(denom) < 1e-10) {
+            // Degenerate triangle
+            return false;
+        }
+
+        u = (d11 * d20 - d01 * d21) / denom;
+        v = (d00 * d21 - d01 * d20) / denom;
+
+        return true;
+    }
+#endif
+
+
+    // ---- the last of sccd_objective.hpp ----
+    //
+    // The generated header kept these two while `find_root_newton` used
+    // `vf_objective_dir`; the other eight moved here earlier. With the Newton
+    // step gone, `vf_objective` has no caller anywhere and `vf_objective_dir`
+    // has exactly one, above, in this file. The shipped header is therefore
+    // empty of live code and no longer exists.
+
+template <typename T>
+static inline void vf_objective(const T sv[3],
+                                const T s1[3],
+                                const T s2[3],
+                                const T s3[3],
+                                const T s4[3],
+                                const T ev[3],
+                                const T e1[3],
+                                const T e2[3],
+                                const T e3[3],
+                                const T e4[3],
+                                const T t,
+                                const T u,
+                                const T v,
+                                T *out_f) {
+    const T ssa0 = t - 1;
+    const T ssa1 = u + v - 1;
+    *out_f = (1.0 / 2.0) * sccd::pow2<T>(-ev[0] * t + ssa0 * sv[0] - ssa1 * (e1[0] * t - s1[0] * ssa0) +
+                                         u * (e2[0] * t - s2[0] * ssa0) + v * (e3[0] * t - s3[0] * ssa0)) +
+             (1.0 / 2.0) * sccd::pow2<T>(-ev[1] * t + ssa0 * sv[1] - ssa1 * (e1[1] * t - s1[1] * ssa0) +
+                                         u * (e2[1] * t - s2[1] * ssa0) + v * (e3[1] * t - s3[1] * ssa0)) +
+             (1.0 / 2.0) * sccd::pow2<T>(-ev[2] * t + ssa0 * sv[2] - ssa1 * (e1[2] * t - s1[2] * ssa0) +
+                                         u * (e2[2] * t - s2[2] * ssa0) + v * (e3[2] * t - s3[2] * ssa0));
+}
+
+
+template <typename T>
+static inline void vf_objective_dir(const T sv[3],
+                                    const T s1[3],
+                                    const T s2[3],
+                                    const T s3[3],
+                                    const T s4[3],
+                                    const T ev[3],
+                                    const T e1[3],
+                                    const T e2[3],
+                                    const T e3[3],
+                                    const T e4[3],
+                                    const T t,
+                                    const T u,
+                                    const T v,
+                                    T *out_f,
+                                    T out_p[3]) {
+    const T ssa0 = t - 1;
+    const T ssa1 = e2[0] * t;
+    const T ssa2 = s2[0] * ssa0;
+    const T ssa3 = e3[0] * t;
+    const T ssa4 = s3[0] * ssa0;
+    const T ssa5 = u + v - 1;
+    const T ssa6 = e1[0] * t - s1[0] * ssa0;
+    const T ssa7 = -ev[0] * t + ssa0 * sv[0] - ssa5 * ssa6 + u * (ssa1 - ssa2) + v * (ssa3 - ssa4);
+    const T ssa8 = e2[1] * t;
+    const T ssa9 = s2[1] * ssa0;
+    const T ssa10 = e3[1] * t;
+    const T ssa11 = s3[1] * ssa0;
+    const T ssa12 = e1[1] * t - s1[1] * ssa0;
+    const T ssa13 = -ev[1] * t + ssa0 * sv[1] - ssa12 * ssa5 + u * (ssa8 - ssa9) + v * (ssa10 - ssa11);
+    const T ssa14 = e2[2] * t;
+    const T ssa15 = s2[2] * ssa0;
+    const T ssa16 = e3[2] * t;
+    const T ssa17 = s3[2] * ssa0;
+    const T ssa18 = e1[2] * t - s1[2] * ssa0;
+    const T ssa19 = -ev[2] * t + ssa0 * sv[2] - ssa18 * ssa5 + u * (ssa14 - ssa15) + v * (ssa16 - ssa17);
+    const T ssa20 = e1[0] - s1[0];
+    const T ssa21 = -ev[0] - ssa20 * ssa5 + sv[0] + u * (e2[0] - s2[0]) + v * (e3[0] - s3[0]);
+    const T ssa22 = e1[1] - s1[1];
+    const T ssa23 = -ev[1] - ssa22 * ssa5 + sv[1] + u * (e2[1] - s2[1]) + v * (e3[1] - s3[1]);
+    const T ssa24 = e1[2] - s1[2];
+    const T ssa25 = -ev[2] - ssa24 * ssa5 + sv[2] + u * (e2[2] - s2[2]) + v * (e3[2] - s3[2]);
+    const T ssa26 = 1.0 / (sccd::pow2<T>(ssa21) + sccd::pow2<T>(ssa23) + sccd::pow2<T>(ssa25));
+    const T ssa27 = -ssa1 + ssa2 + ssa6;
+    const T ssa28 = ssa12 - ssa8 + ssa9;
+    const T ssa29 = -ssa14 + ssa15 + ssa18;
+    const T ssa30 = -ssa13 * (-e2[1] + s2[1] + ssa22) - ssa19 * (-e2[2] + s2[2] + ssa24) - ssa21 * ssa27 -
+                    ssa23 * ssa28 - ssa25 * ssa29 - ssa7 * (-e2[0] + s2[0] + ssa20);
+    const T ssa31 =
+        1.0 / (-ssa26 * sccd::pow2<T>(ssa30) + sccd::pow2<T>(ssa27) + sccd::pow2<T>(ssa28) + sccd::pow2<T>(ssa29));
+    const T ssa32 = -ssa3 + ssa4 + ssa6;
+    const T ssa33 = -ssa10 + ssa11 + ssa12;
+    const T ssa34 = -ssa16 + ssa17 + ssa18;
+    const T ssa35 = -ssa13 * (-e3[1] + s3[1] + ssa22) - ssa19 * (-e3[2] + s3[2] + ssa24) - ssa21 * ssa32 -
+                    ssa23 * ssa33 - ssa25 * ssa34 - ssa7 * (-e3[0] + s3[0] + ssa20);
+    const T ssa36 = ssa26 * ssa30;
+    const T ssa37 = ssa27 * ssa32 + ssa28 * ssa33 + ssa29 * ssa34 - ssa35 * ssa36;
+    const T ssa38 = ssa13 * ssa23 + ssa19 * ssa25 + ssa21 * ssa7;
+    const T ssa39 = ssa13 * ssa28 + ssa19 * ssa29 + ssa27 * ssa7 + ssa36 * ssa38;
+    const T ssa40 = (-ssa13 * ssa33 - ssa19 * ssa34 - ssa26 * ssa35 * ssa38 + ssa31 * ssa37 * ssa39 - ssa32 * ssa7) /
+                    (-ssa26 * sccd::pow2<T>(ssa35) - ssa31 * sccd::pow2<T>(ssa37) + sccd::pow2<T>(ssa32) +
+                     sccd::pow2<T>(ssa33) + sccd::pow2<T>(ssa34));
+    const T ssa41 = ssa31 * (-ssa37 * ssa40 - ssa39);
+    *out_f =
+        (1.0 / 2.0) * sccd::pow2<T>(ssa13) + (1.0 / 2.0) * sccd::pow2<T>(ssa19) + (1.0 / 2.0) * sccd::pow2<T>(ssa7);
+    out_p[0] = ssa26 * (-ssa30 * ssa41 - ssa35 * ssa40 + ssa38);
+    out_p[1] = ssa41;
+    out_p[2] = ssa40;
+}
+
+
+    // Never called. `narrow_phase_mode_name` is its live sibling -- the mode is
+    // printed in benchmark headers, the output selector is not.
+    static inline const char* toi_output_name(const ToiOutput out) {
+        return out == ToiOutput::Earliest ? "earliest" : "per-pair";
+    }
 
     }  // namespace dead
 }  // namespace sccd
