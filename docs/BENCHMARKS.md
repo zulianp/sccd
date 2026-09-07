@@ -394,6 +394,26 @@ Comparisons above are made within a processor for that reason: ranking every mod
 of a scene together would compare host `Relaxed` against GPU `Tight` and report
 the sum of two unrelated effects as if it were the mode trade.
 
+## Broad phase
+
+Two strategies produce the candidate pairs: a **sweep** over sorted intervals and
+a **cell list** over a uniform grid. They return identical pair sets, so the
+choice is purely about cost, and the shipped default does not fix a winner — it
+races the two per scene and keeps the faster, re-probing periodically so a scene
+that changes character can change the answer.
+
+The sweep below is that race run offline over the whole benchmark, with both
+strategies sampled on every scene, both processors and every mode. `prep` builds
+the acceleration structure — the sorted intervals or the grid — and is separated
+from the traversal that follows it, because that is where the two differ rather
+than in the total.
+
+<!-- sccd:begin broadphase -->
+<!-- sccd:end broadphase -->
+
+The refinement study below sweeps element count over two and a half orders of
+magnitude and pins down the scaling behind these numbers.
+
 ## Against TightInclusion
 
 TightInclusion is the reference implementation of a certified conservative
