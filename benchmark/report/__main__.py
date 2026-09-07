@@ -87,8 +87,22 @@ def main(argv: list[str]) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    scenes = data.by_scene(rows)
-    cases = data.by_case(rows)
+    # A CSV may hold more than one broad-phase strategy. Summarising across them
+    # would sum two runs of the same cases into one scene total, so a strategy is
+    # chosen for the headline tables and the rest are compared against it in a
+    # table of their own. The cell list is preferred when present because it is
+    # what the shipped default probes first.
+    strategies = data.broadphases(rows)
+    primary = None
+    if strategies:
+        primary = "cell2d" if "cell2d" in strategies else strategies[0]
+    scenes = data.by_scene(rows, primary)
+    cases = data.by_case([r for r in rows
+                          if primary is None
+                          or (r.get("broadphase") or primary) == primary])
+    if len(strategies) > 1:
+        print(f"broad-phase strategies in the sweep: {', '.join(strategies)}; "
+              f"headline tables use {primary}")
     # Cite the CSV by its path in the repository, not by wherever it happened to
     # be read from: a "Source:" line naming a scratch directory tells a reader
     # nothing they can act on.
@@ -121,6 +135,9 @@ def main(argv: list[str]) -> int:
         tables.conservativeness_table(scenes, source),
         tables.accuracy_table(scenes, source),
     ]
+    if len(strategies) > 1:
+        built.append(tables.broadphase_table(
+            {n: data.by_scene(rows, n) for n in strategies}, source))
     oracle_rows = oracle_rows_early
     if oracle_rows:
         oracle_source = _repo_relative(oracle_csv)

@@ -379,3 +379,56 @@ def write_tables(tables: list[Table], out_dir: Path, stem: str = "tables") -> di
     md_path.write_text("\n\n".join(
         f"### {t.caption}\n\n{render_markdown(t)}" for t in tables))
     return {"tex": tex_path, "md": md_path}
+
+
+def broadphase_table(per_strategy: dict[str, dict[tuple[str, str], SceneSummary]],
+                     source: str) -> Table:
+    """
+    The two broad-phase strategies over the same scenes.
+
+    They return identical pair sets, so whichever is faster on a given geometry
+    is simply the right one -- which is what the shipped default races for, per
+    scene, rather than fixing a winner. This table is that race run offline over
+    the whole benchmark, with the preparation split out from the traversal
+    because that is where the two differ: the sweep builds its sorted intervals
+    more cheaply, the cell list traverses its grid more cheaply.
+    """
+    names = sorted(per_strategy)
+    table = Table(
+        label="tab:broadphase",
+        caption=("Broad-phase strategies over the same cases, median over "
+                 "repeats. \\emph{prep} builds the acceleration structure and "
+                 "\\emph{broad} is the whole broad phase including it. Both "
+                 "strategies report identical candidate pairs, so the "
+                 "difference is entirely in how they are found."),
+        columns=([Column("scene", "l"), Column("mode", "l")]
+                 + [Column(f"{n} prep ms", tex_header=f"{n} prep") for n in names]
+                 + [Column(f"{n} broad ms", tex_header=f"{n} broad") for n in names]
+                 + [Column("faster", "l")]),
+        source=source,
+        notes=("`faster` names the winning strategy and by how much on the whole "
+               "broad phase. A margin inside the run-to-run spread is reported "
+               "as a tie rather than a winner."),
+    )
+    keys = sorted({k for s in per_strategy.values() for k in s})
+    for scene, mode in keys:
+        prep, broad, spreads = {}, {}, {}
+        for n in names:
+            s = per_strategy[n].get((scene, mode))
+            prep[n] = s.totals["prep_ms"] if s else Stat()
+            broad[n] = s.totals["broad_ms"] if s else Stat()
+            spreads[n] = broad[n].spread if broad[n].n else 0.0
+        if not all(broad[n].n for n in names):
+            continue
+        ranked = sorted(names, key=lambda n: broad[n].median)
+        best, worst = ranked[0], ranked[-1]
+        gap = broad[worst].median / broad[best].median if broad[best].median else 0.0
+        # The same discipline as the mode comparison: a difference smaller than
+        # the noise is not a result, and naming a winner there would invent one.
+        noise = 1.0 + max(spreads[best], spreads[worst])
+        verdict = f"{best} {gap:.2f}x" if gap > noise else "tie"
+        table.add(SCENE_LABEL.get(scene, scene), mode_label(mode),
+                  *[f"{prep[n].median:.0f}" for n in names],
+                  *[f"{broad[n].median:.0f}" for n in names],
+                  verdict)
+    return table
