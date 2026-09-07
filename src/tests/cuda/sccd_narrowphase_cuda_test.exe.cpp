@@ -59,13 +59,13 @@
 //
 // The second pass runs every query again at tol = 1e-16, below the certified
 // numerical error bound, which in double is at most
-// (vf ? 30 : 28) * eps * min(max_coord, 1)^3 ~ 6.7e-15. That is the regime the
-// device's mode-0 rejection used to get wrong: it padded the origin-containment
-// test with the caller's tolerance instead of the bound, so a pad of 1e-16 was
-// narrower than the error in the corner values it was testing and a box holding
-// a root could be discarded. At the usual 3e-8 the pad was four and a half
-// million times *wider* than it needed to be, which is why no scene ever showed
-// it.
+// (vf ? 30 : 28) * eps * min(max_coord, 1)^3 ~ 6.7e-15. That is the regime this
+// pass exists to cover: a rejection that pads the origin-containment test with
+// the caller's tolerance instead of the bound is unsound here, because a pad of
+// 1e-16 is narrower than the error in the corner values it tests, so a box
+// holding a root can be discarded. At the usual 3e-8 such a pad is four and a
+// half million times *wider* than it needs to be, which is why no scene shows
+// the defect and why this pass has to ask for a tolerance no scene would.
 //
 // Be clear about what this pass does and does not establish: the pre-fix kernel
 // **passes** it. Reverting the pad to `tol` alone and re-running changes nothing,

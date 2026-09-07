@@ -300,11 +300,10 @@ namespace sccd {
          * \brief Run only the EE narrow phase, using the latest EE broad-phase result.
          *
          * `max_toi` is in/out exactly as in `narrow_phase_vf`: it bounds the
-         * search on the way in and, for `toi_output == sccd::ToiOutput::Earliest`, comes back holding the
-         * earliest time of impact. It used to be `const scalar_t` -- by value --
-         * so the caller's variable was never written and the answer was reachable
-         * only through `ee_tois`. Code written symmetrically against the two
-         * calls then read whatever it had initialised, silently, for edge-edge.
+         * search on the way in and, for `toi_output == sccd::ToiOutput::Earliest`,
+         * comes back holding the earliest time of impact. Take it by reference in
+         * any wrapper -- passing it by value leaves the caller's variable
+         * untouched while `ee_tois` still fills, so the miss is silent.
          */
         int narrow_phase_ee(scalar_t& max_toi,
                             smesh::SharedBuffer<scalar_t>& ee_tois,

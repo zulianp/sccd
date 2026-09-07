@@ -377,7 +377,7 @@ namespace sccd {
      * A thin array-taking wrapper over the 30-scalar form above, so that callers
      * can compute it once per query and hand the same three numbers to every
      * box. It depends only on the query's coordinates, so recomputing it per box
-     * -- which is what the search used to do -- is pure waste.
+     * is pure waste.
      */
     template <typename T>
     inline void vq_numerical_error(const T sv[3],
@@ -556,26 +556,16 @@ namespace sccd {
                                                    T &toi,
                                                    T &u,
                                                    T &v,
-                                                   std::vector<sccd::Box<T>> &stack,
-                                                   const bool refine) {
+                                                   std::vector<sccd::Box<T>> &stack) {
         // The certified numerical error bound is what makes the rejection below
-        // sound, and it depends only on the query's coordinates -- not on the
-        // box. It used to be recomputed here, on every box popped from the
-        // stack: 30 absolute values, 30 maxima and three cubes per split, to
-        // arrive at the same three numbers every time. It is now computed once
-        // per query and passed in.
+        // sound. It is passed in rather than computed here because it depends
+        // only on the query's coordinates, not on the box: recomputing it per
+        // box costs 30 absolute values, 30 maxima and three cubes per split to
+        // arrive at the same three numbers every time.
         //
-        // (It also used to not be called at all. The acceptance test padded with
-        // machine epsilon instead, roughly 30x too small for unit-scale
-        // geometry, which let it discard boxes that contained a root.)
-
-        // The quad search has no Newton polish, so `refine` is accepted for
-        // signature parity with the vertex-face and edge-edge root finders and
-        // then ignored -- as edge-edge also ignores it. narrow_phase_vq used to
-        // read SCCD_REFINE from the environment and thread it down to this line,
-        // which advertised a knob that could not be turned; it now passes false
-        // explicitly.
-        (void)refine;
+        // It is also the only sound pad for this test. Machine epsilon is
+        // roughly 30x too small for unit-scale geometry, and padding by it
+        // discards boxes that contain a root.
 
         const T lo = domain.tuv[SplitDim].lower;
         const T hi = domain.tuv[SplitDim].upper;
@@ -741,19 +731,18 @@ namespace sccd {
                                               T &toi,
                                               T &u,
                                               T &v,
-                                              std::vector<sccd::Box<T>> &stack,
-                                              const bool refine) {
+                                              std::vector<sccd::Box<T>> &stack) {
         const int split_dim = domain.widest_dimension(codomain_widths);
         if (split_dim == 0) {
             return grid_search_adaptive_split_vq_axis<0, N, T>(
-                domain, max_iter, tol, tols, numerical_error, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, toi, u, v, stack, refine);
+                domain, max_iter, tol, tols, numerical_error, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, toi, u, v, stack);
         }
         if (split_dim == 1) {
             return grid_search_adaptive_split_vq_axis<1, N, T>(
-                domain, max_iter, tol, tols, numerical_error, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, toi, u, v, stack, refine);
+                domain, max_iter, tol, tols, numerical_error, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, toi, u, v, stack);
         }
         return grid_search_adaptive_split_vq_axis<2, N, T>(
-            domain, max_iter, tol, tols, numerical_error, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, toi, u, v, stack, refine);
+            domain, max_iter, tol, tols, numerical_error, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, toi, u, v, stack);
     }
 
     template <int N, typename T>
@@ -774,13 +763,12 @@ namespace sccd {
                                               T &toi,
                                               T &u,
                                               T &v,
-                                              std::vector<sccd::Box<T>> &stack,
-                                              const bool refine) {
+                                              std::vector<sccd::Box<T>> &stack) {
         const T codomain_widths[3] = {T(1), T(1), T(1)};
         T numerical_error[3];
         vq_numerical_error<T>(sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, numerical_error);
         return grid_search_adaptive_split_vq<N, T>(
-            domain, max_iter, tol, tols, numerical_error, codomain_widths, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, toi, u, v, stack, refine);
+            domain, max_iter, tol, tols, numerical_error, codomain_widths, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, toi, u, v, stack);
     }
 
     template <typename T>
@@ -803,14 +791,13 @@ namespace sccd {
                                           T &t,
                                           T &u,
                                           T &v,
-                                          std::vector<Box<T>> &stack,
-                                          const bool refine = false) {
+                                          std::vector<Box<T>> &stack) {
         if (initial_domain.tuv[0].lower >= t) {
             return false;
         }
 
         return grid_search_adaptive_split_vq<SCCD_ADAPTIVE_NUM_SPLITS, T>(
-            initial_domain, max_iter, tol, tols, numerical_error, codomain_widths, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, t, u, v, stack, refine);
+            initial_domain, max_iter, tol, tols, numerical_error, codomain_widths, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, t, u, v, stack);
     }
 
     template <typename T>
@@ -831,13 +818,12 @@ namespace sccd {
                                           T &t,
                                           T &u,
                                           T &v,
-                                          std::vector<Box<T>> &stack,
-                                          const bool refine = false) {
+                                          std::vector<Box<T>> &stack) {
         const T codomain_widths[3] = {T(1), T(1), T(1)};
         T numerical_error[3];
         vq_numerical_error<T>(sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, numerical_error);
         return find_root_grid_adaptive_split_vq<T>(
-            max_iter, tol, tols, numerical_error, codomain_widths, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, initial_domain, t, u, v, stack, refine);
+            max_iter, tol, tols, numerical_error, codomain_widths, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, initial_domain, t, u, v, stack);
     }
 
     template <typename T>
@@ -857,8 +843,7 @@ namespace sccd {
                                           T &t,
                                           T &u,
                                           T &v,
-                                          std::vector<Box<T>> &stack,
-                                          const bool refine = false) {
+                                          std::vector<Box<T>> &stack) {
         T tols[3];
         T codomain_widths[3];
         compute_vertex_quad_tolerance<T>(tol, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, tols);
@@ -867,7 +852,7 @@ namespace sccd {
         T numerical_error[3];
         vq_numerical_error<T>(sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, numerical_error);
         return find_root_grid_adaptive_split_vq<T>(
-            max_iter, tol, tols, numerical_error, codomain_widths, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, initial_domain, t, u, v, stack, refine);
+            max_iter, tol, tols, numerical_error, codomain_widths, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, initial_domain, t, u, v, stack);
     }
 
     template <typename T>
@@ -886,10 +871,9 @@ namespace sccd {
                                           T &t,
                                           T &u,
                                           T &v,
-                                          std::vector<Box<T>> &stack,
-                                          const bool refine = false) {
+                                          std::vector<Box<T>> &stack) {
         return find_root_grid_adaptive_split_vq<T>(
-            max_iter, tol, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, unit_domain_box<T>(), t, u, v, stack, refine);
+            max_iter, tol, sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, unit_domain_box<T>(), t, u, v, stack);
     }
 
 } // namespace sccd

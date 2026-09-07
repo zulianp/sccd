@@ -523,11 +523,11 @@ namespace sccd {
          * \brief Mode-0 acceptance test.
          *
          * The origin-containment test -- the only test here whose failure
-         * *rejects* a box -- is padded by `max(tol, aerr[d])`. It used to be
-         * padded by `tol` alone, and that is unsound whenever the caller asks for
-         * a distance tolerance below the certified numerical error bound: the pad
-         * is then narrower than the error in the corner values, and a box holding
-         * a root can be discarded. In double, with the bound at
+         * *rejects* a box -- is padded by `max(tol, aerr[d])` and not by `tol`
+         * alone. Padding by the tolerance alone is unsound whenever the caller
+         * asks for a distance tolerance below the certified numerical error
+         * bound: the pad is then narrower than the error in the corner values,
+         * and a box holding a root can be discarded. In double, with the bound at
          * `(vf ? 30 : 28) * eps * min(max_coord, 1)^3 <= 6.7e-15`, a typical
          * tolerance of 3e-8 is far wider and nothing changes -- which is why the
          * scenes measured never saw it. Taking the max makes that structural
@@ -599,13 +599,13 @@ namespace sccd {
         // The kernels above implement the host's mode-0 acceptance test. It is
         // looser than TightInclusion's -- it compares a *codomain* width against a
         // *domain* tolerance -- but looseness is on the accepting side and costs
-        // accuracy, not safety. Its rejection is now padded by the same certified
-        // error bound as the kernels below (see evaluate_cell_3d); it used to be
-        // padded by the caller's distance tolerance alone, which is the unsound
-        // rejection that cost late times of impact in single precision on GH200
+        // accuracy, not safety. Its rejection is padded by the same certified
+        // error bound as the kernels below (see evaluate_cell_3d). Padding it by
+        // the caller's distance tolerance instead is the unsound rejection that
+        // costs late times of impact in single precision on GH200
         // (benchmark/oracle/README.md).
         //
-        // What follows is the device twin of src/sccd_vnarrowphase_ti.hpp, which
+        // What follows is the device twin of src/narrowphase/sccd_narrowphase_tight.hpp, which
         // reproduces TightInclusion exactly and is the host's mode 2.
         // ---------------------------------------------------------------------
 
@@ -652,7 +652,7 @@ namespace sccd {
          * \brief TightInclusion's acceptance test on one box.
          *
          * Three conditions and nothing else, transcribed from tight_classify in
-         * src/sccd_vnarrowphase_ti.hpp:
+         * src/narrowphase/sccd_narrowphase_tight.hpp:
          *   reject  if the origin is outside the padded range on any axis;
          *   accept  if the whole range is inside the error box on every axis;
          *   accept  if the DOMAIN width is within the domain tolerance on every
@@ -2419,10 +2419,10 @@ namespace sccd {
             //             noverlaps for ToiOutput::PerPair (one per candidate).
             const size_t toi_n = (toi_output == ToiOutput::Earliest) ? 1 : noverlaps;
 
-            // SCCD_READ_ENV stringifies the variable name, so this used to read a
-            // bare lowercase `alpha` from the environment -- an unprefixed name in
-            // a library's process, which is a collision waiting to happen. Read
-            // the prefixed name instead.
+            // SCCD_READ_ENV stringifies the variable name, so the local must
+            // carry the prefixed spelling: a local named `alpha` would read a
+            // bare lowercase `alpha` from the environment, and an unprefixed
+            // name in a library's process is a collision waiting to happen.
             double SCCD_NP_ALPHA = 0.5;
             SCCD_READ_ENV(SCCD_NP_ALPHA, atof);
             const T np_alpha = (T)SCCD_NP_ALPHA;
@@ -2622,12 +2622,13 @@ namespace sccd {
                     // ToiOutput::PerPair runs one thread per query, as Earliest does,
                     // with a per-thread bound and a per-query output slot.
                     //
-                    // It used to give each query a whole block. That is bound by
-                    // scheduling the blocks rather than by the search -- 843,414
-                    // of them on cloth-funnel, each classifying 63 boxes across
-                    // 128 threads, half a box per thread. One thread per query
-                    // measured 4.47x, 2.76x and 4.43x faster on the three scenes
-                    // with identical false positives and no missed collisions.
+                    // A block per query is the obvious alternative and is
+                    // slower: it is bound by scheduling the blocks rather than by
+                    // the search -- 843,414 of them on cloth-funnel, each
+                    // classifying 63 boxes across 128 threads, half a box per
+                    // thread. One thread per query measures 4.47x, 2.76x and
+                    // 4.43x faster on the three scenes, with identical false
+                    // positives and no missed collisions.
                     //
                     // SCCD_NP_S1_BLOCK_PER_QUERY=1 restores the old kernel. It is
                     // kept because the thread-per-query path has one session's
@@ -2718,13 +2719,13 @@ namespace sccd {
                         SCCD_CHECK_CUDA(cudaMemsetAsync(g_cursor[write_half ^ 1], 0, sizeof(int)));
                         g_out = make_buf(write_half, 0);
 
-                        // The grid must cover every entry in the read buffer. It
-                        // used to be capped at base_grid_blocks and the loop
-                        // relaunched against the same stack until it emptied; with
-                        // two buffers the unread remainder would be discarded at
-                        // the swap instead, so the cap has to go. One thread per
-                        // entry for the earliest-impact kernel; the block-per-query
-                        // kernel claims up to SCCD_NP_DRAIN_PER_BLOCK each.
+                        // The grid must cover every entry in the read buffer,
+                        // uncapped. A cap works only when the loop relaunches
+                        // against the same stack until it empties; with two
+                        // buffers the unread remainder is discarded at the swap.
+                        // One thread per entry for the earliest-impact kernel;
+                        // the block-per-query kernel claims up to
+                        // SCCD_NP_DRAIN_PER_BLOCK each.
                         long long need = (toi_output == ToiOutput::Earliest || s1_thread_per_query)
                                              ? ((long long)h_g_top + N - 1) / N
                                              : ((long long)h_g_top + SCCD_NP_DRAIN_PER_BLOCK - 1) /
