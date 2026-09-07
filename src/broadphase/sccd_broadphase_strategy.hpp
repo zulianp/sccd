@@ -5,6 +5,9 @@
 #include "sccd_math.hpp"
 
 #include <chrono>
+// ptrdiff_t is used below; the header must not rely on a previous include in
+// the translation unit for it. Including this header first exposed that.
+#include <cstddef>
 #include <cstdlib>
 #include <cstring>
 
@@ -61,13 +64,13 @@
  *
  * ## So: Auto measures, it does not guess
  *
- * Four heuristics are refuted above, and the end-to-end assessment refuted the
- * constant that stood in for them. `Auto` used to resolve to the cell list
- * unconditionally, on the strength of synthetic box-list benchmarks where it
- * wins by 4-7x and where the worst case for choosing it is 1.8 ms on a broad
- * phase costing 1.3 ms. On real scenes that argument does not hold: the sweep
- * wins two of three, by 1.36x on cloth-ball and 1.59x on armadillo-rollers,
- * which is 13 ms and 78 ms rather than 1.8 ms (`wip/ASSESSMENT.md`).
+ * Four heuristics are refuted above, and so is resolving `Auto` to a fixed
+ * choice. Picking the cell list unconditionally is defensible on synthetic
+ * box-list benchmarks, where it wins by 4-7x and the worst case for choosing it
+ * is 1.8 ms on a broad phase costing 1.3 ms. On real scenes the argument does
+ * not hold: the sweep wins two of three, by 1.36x on cloth-ball and 1.59x on
+ * armadillo-rollers, which is 13 ms and 78 ms rather than 1.8 ms
+ * (`wip/ASSESSMENT.md`).
  *
  * Neither constant is right and no cheap statistic has separated the cases. But
  * the two produce **identical pair sets**, so they can simply be raced: run one
@@ -243,10 +246,6 @@ namespace sccd {
         }
 
         /** \brief The verdict, or Auto while a race is still in progress. */
-        BroadPhaseStrategy decided() const {
-            if (sweep_ms_ < 0.0 || cell2d_ms_ < 0.0) return BroadPhaseStrategy::Auto;
-            return sweep_ms_ <= cell2d_ms_ ? BroadPhaseStrategy::Sweep : BroadPhaseStrategy::Cell2D;
-        }
 
         double sweep_ms() const { return sweep_ms_; }
         double cell2d_ms() const { return cell2d_ms_; }

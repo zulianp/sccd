@@ -215,7 +215,6 @@ set(SCCD_PUBLIC_HEADERS
   src/core/sccd_base.hpp
   src/narrowphase/sccd_narrowphase_mode.hpp
   # Implementation headers, public because the entry points include them.
-  src/narrowphase/sccd_objective.hpp
   src/narrowphase/sccd_rootfinder.hpp
   src/narrowphase/sccd_rootfinder_quad.hpp
   src/narrowphase/sccd_narrowphase_tight.hpp
@@ -308,6 +307,18 @@ add_executable(sccd_minimal "${CMAKE_CURRENT_SOURCE_DIR}/demo/sccd_minimal.exe.c
 target_link_libraries(sccd_minimal PRIVATE sccd)
 add_test(NAME sccd_minimal COMMAND $<TARGET_FILE:sccd_minimal>)
 
+# The same pipeline on the GPU. Gated on CUDA and nothing else: like its host
+# counterpart it needs the library alone, so it is not filed with the demos that
+# require smesh. It exits 0 with a message when no device is present, so it is
+# registered as a test on any CUDA build rather than only where a GPU is
+# attached.
+if(SCCD_ENABLE_CUDA)
+  add_executable(sccd_minimal_cuda
+                 "${CMAKE_CURRENT_SOURCE_DIR}/demo/cuda/sccd_minimal_cuda.exe.cpp")
+  target_link_libraries(sccd_minimal_cuda PRIVATE sccd)
+  add_test(NAME sccd_minimal_cuda COMMAND $<TARGET_FILE:sccd_minimal_cuda>)
+endif()
+
 # The ctypes binding is installed as public surface, so it is tested like public
 # surface. It needs nothing but the standard library -- no NumPy, no SymPy -- so
 # any python3 on PATH will do, and the test is simply skipped when there is none.
@@ -341,6 +352,8 @@ if(SCCD_ENABLE_SMESH)
 
   if(SCCD_ENABLE_CUDA)
     file(GLOB_RECURSE SCCD_CUDA_DEMOS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/demo/cuda/*.exe.cpp")
+    # Registered above, on CUDA alone; it must not be defined twice.
+    list(FILTER SCCD_CUDA_DEMOS EXCLUDE REGEX "sccd_minimal_cuda\\.exe\\.cpp$")
     foreach(SCCD_CUDA_DEMO ${SCCD_CUDA_DEMOS})
       get_filename_component(SCCD_CUDA_DEMO_TARGET ${SCCD_CUDA_DEMO} NAME_WE)
       string(REGEX REPLACE "\\.exe$" "" SCCD_CUDA_DEMO_TARGET "${SCCD_CUDA_DEMO_TARGET}")

@@ -185,8 +185,12 @@ if __name__ == "__main__":
 
                 if expected_hit:
                     gt = root_map[i]
-                    eFx, eFy, eFz = F_eval(s0, s1, s2, s3, e0, e1, e2, e3, gt["t"], gt["a"], gt["b"])
-                    print(f'{key}:{i}/{n}) false negative: ret={ret[1:]}, gt=({gt["t"]}, {gt["a"]}, {gt["b"]}), F=({eFx}, {eFy}, {eFz})')
+                    if "a" in gt and "b" in gt:
+                        eF = F_eval(s0, s1, s2, s3, e0, e1, e2, e3, gt["t"], gt["a"], gt["b"])
+                        print(f'{key}:{i}/{n}) false negative: ret={ret[1:]}, '
+                              f'gt=({gt["t"]}, {gt["a"]}, {gt["b"]}), F={eF}')
+                    else:
+                        print(f'{key}:{i}/{n}) false negative: ret={ret[1:]}, gt t={gt["t"]}')
                     false_negatives += 1
                     assert False
                 # continue
@@ -196,8 +200,13 @@ if __name__ == "__main__":
                 if i in root_map:
                     gt = root_map[i]
                     t_diff = abs(ret[1] - gt["t"])
-                    a_diff = abs(ret[2] - gt["a"])
-                    b_diff = abs(ret[3] - gt["b"])
+                    # `a` and `b` are optional: a root whose parameter
+                    # coordinates did not evaluate still carries a usable time
+                    # of impact, and the time of impact is what the
+                    # conservativeness check is about.
+                    has_uv = "a" in gt and "b" in gt
+                    a_diff = abs(ret[2] - gt["a"]) if has_uv else 0.0
+                    b_diff = abs(ret[3] - gt["b"]) if has_uv else 0.0
                     expected_toi = gt["t"]
                     min_toi_expected = min(min_toi_expected, expected_toi)
                     if ret[1] > gt["t"]:
@@ -205,14 +214,18 @@ if __name__ == "__main__":
                         worst_late = max(worst_late, ret[1] - gt["t"])
                         print(f'  {key}:{i}/{n}) LATE: toi={ret[1]} after the exact '
                               f'root {gt["t"]} by {ret[1] - gt["t"]:.3e}')
-                    if t_diff > tol_t or a_diff > tol_uv or b_diff > tol_uv:
+                    if t_diff > tol_t or (has_uv and (a_diff > tol_uv or b_diff > tol_uv)):
                         print("-"*80)
-                        print(f'  {key}:{i}/{n}) root_mismatch: ret={ret[1:]}, gt=({gt["t"]}, {gt["a"]}, {gt["b"]})')
+                        print(f'  {key}:{i}/{n}) root_mismatch: ret={ret[1:]}, gt=({gt["t"]}, {gt.get("a", "-")}, {gt.get("b", "-")})')
                         print(f'             diffs: t={t_diff} u={a_diff} v={b_diff}')
 
-                        eFx, eFy, eFz = F_eval(s0, s1, s2, s3, e0, e1, e2, e3, gt["t"], gt["a"], gt["b"])
                         Fx, Fy, Fz = F_eval(s0, s1, s2, s3, e0, e1, e2, e3, ret[1], ret[2], ret[3])
-                        print(f'  ({Fx}, {Fy}, {Fz}) vs expected ({eFx}, {eFy}, {eFz})')
+                        if has_uv:
+                            eFx, eFy, eFz = F_eval(
+                                s0, s1, s2, s3, e0, e1, e2, e3, gt["t"], gt["a"], gt["b"])
+                            print(f'  ({Fx}, {Fy}, {Fz}) vs expected ({eFx}, {eFy}, {eFz})')
+                        else:
+                            print(f'  ({Fx}, {Fy}, {Fz}); no reference (u, v) for this root')
                         print("-"*80)
 
                         assert ret[1] <= gt["t"]

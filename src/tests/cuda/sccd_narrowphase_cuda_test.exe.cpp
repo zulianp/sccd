@@ -59,13 +59,13 @@
 //
 // The second pass runs every query again at tol = 1e-16, below the certified
 // numerical error bound, which in double is at most
-// (vf ? 30 : 28) * eps * min(max_coord, 1)^3 ~ 6.7e-15. That is the regime the
-// device's mode-0 rejection used to get wrong: it padded the origin-containment
-// test with the caller's tolerance instead of the bound, so a pad of 1e-16 was
-// narrower than the error in the corner values it was testing and a box holding
-// a root could be discarded. At the usual 3e-8 the pad was four and a half
-// million times *wider* than it needed to be, which is why no scene ever showed
-// it.
+// (vf ? 30 : 28) * eps * min(max_coord, 1)^3 ~ 6.7e-15. That is the regime this
+// pass exists to cover: a rejection that pads the origin-containment test with
+// the caller's tolerance instead of the bound is unsound here, because a pad of
+// 1e-16 is narrower than the error in the corner values it tests, so a box
+// holding a root can be discarded. At the usual 3e-8 such a pad is four and a
+// half million times *wider* than it needs to be, which is why no scene shows
+// the defect and why this pass has to ask for a tolerance no scene would.
 //
 // Be clear about what this pass does and does not establish: the pre-fix kernel
 // **passes** it. Reverting the pad to `tol` alone and re-running changes nothing,
@@ -273,6 +273,54 @@ namespace {
             s.q1.push_back(f);
             s.t_star.push_back(crossing_upper_bound(v0[2], v1[2]));
         }
+        return s;
+    }
+
+
+    /**
+     * \brief A scene whose *first* query touches at t = 0, and many that do not.
+     *
+     * Built to exercise one specific thing. With ToiOutput::PerPair the device
+     * kernel keeps a bound per query, but its seed prunes the root box against
+     * `toi[0]` rather than against `toi[qid]`:
+     *
+     *     if (contains && is_domain_valid<is_vf>(root, (TC)toi[0], atol))
+     *
+     * `is_domain_valid` is `tlower < toi`, and a root box has `tlower == 0`, so
+     * the test only bites when `toi[0]` reaches exactly zero -- which is what a
+     * query already in contact at the start of the step reports. From then on
+     * every query whose block runs its seed sees `0 < 0`, never becomes active,
+     * and is reported as no collision.
+     *
+     * Whether that happens depends on whether the thread owning query 0 has
+     * published its answer before the other blocks seed, so the failure is
+     * non-deterministic and a single run can pass. That is why the caller
+     * repeats it.
+     *
+     * Query 0 is a vertex sitting exactly on the triangle at t = 0 and
+     * descending; the rest are ordinary crossings at t* in (0, 1).
+     */
+    Scene make_vf_first_query_touching(const int ncases) {
+        Scene s = make_vf(ncases);
+
+        // Prepend a query that is already in contact: same triangle geometry as
+        // the others so nothing else about the scene is special.
+        Scene head_case;
+        head_case.nxe = 3;
+        scalar_t tri0[3][3] = {{-0.5, -0.5, 0}, {0.5, -0.4, 0}, {-0.4, 0.5, 0}};
+        idx_t nodes[3];
+        for (int k = 0; k < 3; ++k) nodes[k] = s.add_vertex(tri0[k], tri0[k]);
+        const idx_t f = s.add_element(nodes);
+
+        // On the triangle at t = 0, descending through it. z(0) = 0 exactly, so
+        // the contact is at t = 0 and the kernel reports toi = 0.
+        const scalar_t on[3] = {scalar_t(-0.15), scalar_t(-0.13), scalar_t(0)};
+        const scalar_t below[3] = {scalar_t(-0.15), scalar_t(-0.13), scalar_t(-1)};
+        const idx_t v = s.add_vertex(on, below);
+
+        s.q0.insert(s.q0.begin(), v);
+        s.q1.insert(s.q1.begin(), f);
+        s.t_star.insert(s.t_star.begin(), scalar_t(0));
         return s;
     }
 
@@ -653,6 +701,36 @@ int main() {
             bad += report(label, ee, check(ee, host_ee(ee, tol)));
             std::snprintf(label, sizeof(label), "device edge-edge    mode %d", mode);
             bad += report(label, ee, check(ee, device_run(ee, Kind::EE, tol)));
+        }
+
+        // A query already in contact at the start of the step must not silence
+        // the others. Repeated because the failure depends on block scheduling:
+        // it needs query 0's answer of zero to be published before another
+        // block seeds, so one run proves nothing and a green single run is not
+        // evidence. Cheap -- the scene is small and the search on it is short.
+        for (const int mode : {0, 2}) {
+            set_mode(mode);
+            const Scene touch = make_vf_first_query_touching(tight ? 200 : 800);
+            Verdict worst;
+            Verdict last;
+            int failing_runs = 0;
+            const int runs = 12;
+            for (int run = 0; run < runs; ++run) {
+                last = check(touch, device_run(touch, Kind::VF, tol));
+                if (last.missed != 0 || last.late != 0) {
+                    ++failing_runs;
+                    if (last.missed > worst.missed) worst = last;
+                }
+            }
+            char tlabel[128];
+            std::snprintf(tlabel, sizeof(tlabel),
+                          "device vf first-touching mode %d (%d/%d runs bad)",
+                          mode, failing_runs, runs);
+            // The worst run when any failed, the last otherwise -- reporting an
+            // empty verdict on success printed hit=0, which reads as though
+            // nothing ran and makes a green line impossible to distinguish from
+            // a broken one.
+            bad += report(tlabel, touch, failing_runs ? worst : last);
         }
 
         // Quads have one root-finder variant on each side and never consult the

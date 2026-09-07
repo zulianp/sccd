@@ -22,6 +22,7 @@
 #include "smesh_path.hpp"
 
 #include "sccd_config.hpp"
+#include "sccd_broadphase_strategy.hpp"
 #include "sccd_narrowphase_mode.hpp"
 #include "sccd_smesh_ccd.hpp"
 
@@ -214,13 +215,19 @@ int main(int argc, char** argv) {
 
     const bool base_is_surface = is_surface_mesh(base->block(0)->element_type());
 
-    printf("# mode=%s max_depth=%d tol=%g scale=%g space=%s base_topology=%s\n",
+    // The broad phase belongs in the header. Without it a recorded run does not
+    // say which of the two strategies produced it, and the default is not
+    // self-evident: this driver builds a fresh CCD per level, so the auto tuner
+    // never completes a race and every level runs its first probe.
+    printf("# mode=%s max_depth=%d tol=%g scale=%g space=%s base_topology=%s "
+           "broadphase=%s\n",
            sccd::narrow_phase_mode_name(sccd::narrow_phase_mode()),
            SCCD_MAX_DEPTH,
            (double)SCCD_TOL,
            SCCD_SCALE,
            space == smesh::EXECUTION_SPACE_DEVICE ? "device" : "host",
-           smesh::type_to_string(base->block(0)->element_type()));
+           smesh::type_to_string(base->block(0)->element_type()),
+           sccd::broadphase_strategy_name(sccd::broadphase_strategy_setting()));
     printf("%5s %10s %12s %12s %9s %9s %9s %9s %10s %10s %14s\n",
            "level",
            "faces",
