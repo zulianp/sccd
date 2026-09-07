@@ -5,6 +5,9 @@
 #include "sccd_math.hpp"
 
 #include <chrono>
+// ptrdiff_t is used below; the header must not rely on a previous include in
+// the translation unit for it. Including this header first exposed that.
+#include <cstddef>
 #include <cstdlib>
 #include <cstring>
 
