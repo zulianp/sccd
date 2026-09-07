@@ -215,7 +215,6 @@ set(SCCD_PUBLIC_HEADERS
   src/core/sccd_base.hpp
   src/narrowphase/sccd_narrowphase_mode.hpp
   # Implementation headers, public because the entry points include them.
-  src/narrowphase/sccd_objective.hpp
   src/narrowphase/sccd_rootfinder.hpp
   src/narrowphase/sccd_rootfinder_quad.hpp
   src/narrowphase/sccd_narrowphase_tight.hpp

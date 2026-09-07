@@ -246,10 +246,6 @@ namespace sccd {
         }
 
         /** \brief The verdict, or Auto while a race is still in progress. */
-        BroadPhaseStrategy decided() const {
-            if (sweep_ms_ < 0.0 || cell2d_ms_ < 0.0) return BroadPhaseStrategy::Auto;
-            return sweep_ms_ <= cell2d_ms_ ? BroadPhaseStrategy::Sweep : BroadPhaseStrategy::Cell2D;
-        }
 
         double sweep_ms() const { return sweep_ms_; }
         double cell2d_ms() const { return cell2d_ms_; }

@@ -92,28 +92,6 @@ namespace sccd {
         }
 
         // FV + EE broad_phase (prep, then face–vertex overlaps, then edge–edge).
-        int broad_phase(const smesh::SharedBuffer<scalar_t*>& points_t0,
-                        const smesh::SharedBuffer<scalar_t*>& points_t1,
-                        smesh::SharedBuffer<smesh::idx_t>& v_overlap,
-                        smesh::SharedBuffer<smesh::idx_t>& f_overlap,
-                        smesh::SharedBuffer<smesh::idx_t>& e0_overlap,
-                        smesh::SharedBuffer<smesh::idx_t>& e1_overlap) {
-            points_t0_ = points_t0;
-            points_t1_ = points_t1;
-
-            int err = SCCD_SUCCESS;
-            if (execution_space_ == smesh::EXECUTION_SPACE_HOST) {
-                err |= broad_phase_host(sccd::ToiOutput::Earliest);
-            } else {
-                err |= broad_phase_device(sccd::ToiOutput::Earliest);
-            }
-
-            v_overlap = v_overlap_;
-            f_overlap = f_overlap_;
-            e0_overlap = e0_overlap_;
-            e1_overlap = e1_overlap_;
-            return err;
-        }
 
         // FV + EE narrow_phase; `max_toi` is updated after FV when toi_output == sccd::ToiOutput::Earliest.
         int narrow_phase(scalar_t& max_toi,
@@ -235,16 +213,6 @@ namespace sccd {
             int err = SCCD_SUCCESS;
             err |= broad_phase_prep(points_t0, points_t1);
             err |= broad_phase_fv_step(v_overlap, f_overlap);
-            return err;
-        }
-
-        int broad_phase_ee(const smesh::SharedBuffer<scalar_t*>& points_t0,
-                           const smesh::SharedBuffer<scalar_t*>& points_t1,
-                           smesh::SharedBuffer<smesh::idx_t>& e0_overlap,
-                           smesh::SharedBuffer<smesh::idx_t>& e1_overlap) {
-            int err = SCCD_SUCCESS;
-            err |= broad_phase_prep(points_t0, points_t1);
-            err |= broad_phase_ee_step(e0_overlap, e1_overlap);
             return err;
         }
 
@@ -1186,40 +1154,6 @@ namespace sccd {
             }
         }
 
-
-        std::pair<smesh::SharedBuffer<smesh::idx_t>, smesh::SharedBuffer<smesh::idx_t>> create_shell_edges_host_()
-            const {
-            const auto element_type = face_element_type_;
-            const int nxe = mesh_->block(0)->n_nodes_per_element();
-            if (element_type != smesh::TRISHELL3 && element_type != smesh::QUADSHELL4) {
-                SMESH_ERROR("Unsupported CCD face element type: %s\n", smesh::type_to_string(element_type));
-            }
-
-            auto faces = mesh_->block(0)->elements();
-            const ptrdiff_t n_faces = mesh_->block(0)->n_elements();
-
-            std::vector<std::pair<smesh::idx_t, smesh::idx_t>> edge_pairs;
-            edge_pairs.reserve(static_cast<std::size_t>(nxe * n_faces));
-            for (ptrdiff_t f = 0; f < n_faces; ++f) {
-                for (int local_edge = 0; local_edge < nxe; ++local_edge) {
-                    const smesh::idx_t a = faces->data()[local_edge][f];
-                    const smesh::idx_t b = faces->data()[(local_edge + 1) % nxe][f];
-                    edge_pairs.emplace_back(std::min(a, b), std::max(a, b));
-                }
-            }
-
-            std::sort(edge_pairs.begin(), edge_pairs.end());
-            edge_pairs.erase(std::unique(edge_pairs.begin(), edge_pairs.end()), edge_pairs.end());
-
-            auto e0 = smesh::create_host_buffer<smesh::idx_t>(edge_pairs.size());
-            auto e1 = smesh::create_host_buffer<smesh::idx_t>(edge_pairs.size());
-            for (std::size_t i = 0; i < edge_pairs.size(); ++i) {
-                e0->data()[i] = edge_pairs[i].first;
-                e1->data()[i] = edge_pairs[i].second;
-            }
-
-            return {e0, e1};
-        }
 
         void init() {
             SMESH_TRACE_SCOPE("CCD::init");

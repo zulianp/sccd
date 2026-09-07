@@ -234,26 +234,6 @@ namespace sccd {
          * \param len Number of AABBs to load.
          * \param B_minx..B_maxz Output arrays of length at least \p len.
          */
-        template <typename T>
-        static inline void prepare_B_block(T **const SCCD_RESTRICT aabbs,
-                                           const ptrdiff_t start,
-                                           const ptrdiff_t len,
-                                           T *const SCCD_RESTRICT B_minx,
-                                           T *const SCCD_RESTRICT B_miny,
-                                           T *const SCCD_RESTRICT B_minz,
-                                           T *const SCCD_RESTRICT B_maxx,
-                                           T *const SCCD_RESTRICT B_maxy,
-                                           T *const SCCD_RESTRICT B_maxz) {
-            for (ptrdiff_t lane = 0; lane < len; ++lane) {
-                const ptrdiff_t j = start + lane;
-                B_minx[lane] = aabbs[0][j];
-                B_miny[lane] = aabbs[1][j];
-                B_minz[lane] = aabbs[2][j];
-                B_maxx[lane] = aabbs[3][j];
-                B_maxy[lane] = aabbs[4][j];
-                B_maxz[lane] = aabbs[5][j];
-            }
-        }
 
         /**
          * \brief Force remaining SIMD lanes (len..chunk_size) to be disjoint.
@@ -261,26 +241,6 @@ namespace sccd {
          * \param len Number of valid lanes already filled [0..len).
          * \param B_minx..B_maxz In/out buffers to tail-fill.
          */
-        template <typename T>
-        static inline void tail_fill_B(const T amaxx0,
-                                       const T amaxy0,
-                                       const T amaxz0,
-                                       const ptrdiff_t len,
-                                       T *const SCCD_RESTRICT B_minx,
-                                       T *const SCCD_RESTRICT B_miny,
-                                       T *const SCCD_RESTRICT B_minz,
-                                       T *const SCCD_RESTRICT B_maxx,
-                                       T *const SCCD_RESTRICT B_maxy,
-                                       T *const SCCD_RESTRICT B_maxz) {
-            for (ptrdiff_t lane = len; lane < SCCD_AABB_DISJOINT_CHUNK_SIZE; ++lane) {
-                B_minx[lane] = amaxx0 + 1;
-                B_miny[lane] = amaxy0 + 1;
-                B_minz[lane] = amaxz0 + 1;
-                B_maxx[lane] = amaxx0;
-                B_maxy[lane] = amaxy0;
-                B_maxz[lane] = amaxz0;
-            }
-        }
 
 
 
@@ -387,124 +347,12 @@ namespace sccd {
          * \brief Scalar reference: count candidate overlaps in [begin,end) for two
          * lists. \return Number of non-disjoint, non-shared-vertex candidates.
          */
-        template <int F, int S, typename T, typename I>
-        static inline ptrdiff_t scalar_count_range_two_lists(T **const SCCD_RESTRICT first_aabbs,
-                                                             const ptrdiff_t fi,
-                                                             T **const SCCD_RESTRICT second_aabbs,
-                                                             const I *const SCCD_RESTRICT second_idx,
-                                                             I **const SCCD_RESTRICT second_elements,
-                                                             const ptrdiff_t second_element_stride,
-                                                             const I (&ev)[F],
-                                                             const ptrdiff_t begin,
-                                                             const ptrdiff_t end) {
-            ptrdiff_t count = 0;
-            const T aminx = first_aabbs[0][fi];
-            const T aminy = first_aabbs[1][fi];
-            const T aminz = first_aabbs[2][fi];
-            const T amaxx = first_aabbs[3][fi];
-            const T amaxy = first_aabbs[4][fi];
-            const T amaxz = first_aabbs[5][fi];
-            for (ptrdiff_t j = begin; j < end; ++j) {
-                if (disjoint(aminx,
-                             aminy,
-                             aminz,
-                             amaxx,
-                             amaxy,
-                             amaxz,
-                             second_aabbs[0][j],
-                             second_aabbs[1][j],
-                             second_aabbs[2][j],
-                             second_aabbs[3][j],
-                             second_aabbs[4][j],
-                             second_aabbs[5][j])) {
-                    continue;
-                }
-                bool share = false;
-                if constexpr (S > 1) {
-                    const I jidx = second_idx[j];
-                    I sev[S];
-                    for (int v = 0; v < S; ++v) {
-                        sev[v] = second_elements[v][jidx * second_element_stride];
-                    }
-                    share = shares_vertex<F, S>(ev, sev);
-                } else {
-                    for (int a = 0; a < F; ++a) {
-                        if (ev[a] == second_idx[j]) {
-                            share = true;
-                            break;
-                        }
-                    }
-                }
-                count += share ? 0 : 1;
-            }
-            return count;
-        }
 
         /**
          * \brief Scalar reference: collect candidate overlaps in [begin,end) for
          * two lists. \return Number of pairs written to \p first_out and \p
          * second_out.
          */
-        template <int F, int S, typename T, typename I>
-        static inline ptrdiff_t scalar_collect_range_two_lists(T **const SCCD_RESTRICT first_aabbs,
-                                                               const ptrdiff_t fi,
-                                                               const I first_idxi,
-                                                               T **const SCCD_RESTRICT second_aabbs,
-                                                               const I *const SCCD_RESTRICT second_idx,
-                                                               I **const SCCD_RESTRICT second_elements,
-                                                               const ptrdiff_t second_element_stride,
-                                                               const I (&ev)[F],
-                                                               const ptrdiff_t begin,
-                                                               const ptrdiff_t end,
-                                                               I *const SCCD_RESTRICT first_out,
-                                                               I *const SCCD_RESTRICT second_out) {
-            ptrdiff_t count = 0;
-            const T aminx = first_aabbs[0][fi];
-            const T aminy = first_aabbs[1][fi];
-            const T aminz = first_aabbs[2][fi];
-            const T amaxx = first_aabbs[3][fi];
-            const T amaxy = first_aabbs[4][fi];
-            const T amaxz = first_aabbs[5][fi];
-            for (ptrdiff_t j = begin; j < end; ++j) {
-                if (disjoint(aminx,
-                             aminy,
-                             aminz,
-                             amaxx,
-                             amaxy,
-                             amaxz,
-                             second_aabbs[0][j],
-                             second_aabbs[1][j],
-                             second_aabbs[2][j],
-                             second_aabbs[3][j],
-                             second_aabbs[4][j],
-                             second_aabbs[5][j])) {
-                    continue;
-                }
-                const I jidx = second_idx[j];
-                int match = 0;
-                if constexpr (S > 1) {
-                    I sev[S];
-                    for (int v = 0; v < S; ++v) {
-                        sev[v] = second_elements[v][jidx * second_element_stride];
-                    }
-                    for (int a = 0; a < F; ++a) {
-                        for (int b = 0; b < S; ++b) {
-                            match |= (ev[a] == sev[b]);
-                        }
-                    }
-                } else {
-                    for (int a = 0; a < F; ++a) {
-                        match |= (ev[a] == jidx);
-                    }
-                }
-                if (!match) {
-                    first_out[count] = first_idxi;
-                    second_out[count] = jidx;
-                    count += 1;
-                }
-            }
-            return count;
-        }
 
         // -----------------------------
 
