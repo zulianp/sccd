@@ -54,51 +54,6 @@ namespace sccd {
 
 
 #ifdef SCCD_ENABLE_TIGHT_INCLUSION
-    static bool barycentric_triangle_3d(const ticcd::Vector3 &A,
-                                        const ticcd::Vector3 &B,
-                                        const ticcd::Vector3 &C,
-                                        const ticcd::Vector3 &P,
-                                        double &u,
-                                        double &v) {
-        using std::abs;
-
-        ticcd::Vector3 e1 = B - A;
-        ticcd::Vector3 e2 = C - A;
-        ticcd::Vector3 n = e1.cross(e2).eval();
-
-        ticcd::Vector3 dir = P - A;
-        double dist = n.dot(dir);
-        if (dist * dist > 1e-5) {
-            return false;
-        }
-
-        // Compute local coordinates u and v: (P - A) = u * (B - A) + v * (C - A)
-        // Solve: dir = u * e1 + v * e2
-        // Using dot product method (more numerically stable):
-        // dir · e1 = u * (e1 · e1) + v * (e2 · e1)
-        // dir · e2 = u * (e1 · e2) + v * (e2 · e2)
-        double d00 = e1.dot(e1);
-        double d01 = e1.dot(e2);
-        double d11 = e2.dot(e2);
-        double d20 = dir.dot(e1);
-        double d21 = dir.dot(e2);
-
-        double denom = d00 * d11 - d01 * d01;
-        if (abs(denom) < 1e-10) {
-            // Degenerate triangle
-            return false;
-        }
-
-        u = (d11 * d20 - d01 * d21) / denom;
-        v = (d00 * d21 - d01 * d20) / denom;
-
-        return true;
-    }
-
-    static bool isInsideTriangle(const ticcd::Vector3 &lambda, ticcd::Scalar tol = ticcd::Scalar(1e-6)) {
-        return (lambda.array() >= -tol).all() && (lambda.array() <= ticcd::Scalar(1) + tol).all() &&
-               std::abs(lambda.sum() - ticcd::Scalar(1)) <= ticcd::Scalar(1e-6);
-    }
 
     /**
      * \brief TightInclusion's answer, optionally bounded above in time.
@@ -267,21 +222,6 @@ namespace sccd {
 #endif
 
     template <typename T>
-    inline void project_uv_simplex(T &u, T &v) {
-        u = sccd::max<T>(u, 0);
-        v = sccd::max<T>(v, 0);
-        const T s = u + v;
-        if (s <= static_cast<T>(1)) {
-            return;
-        }
-
-        T u_proj = static_cast<T>(0.5) * (u - v + 1);
-        u_proj = sccd::min<T>(static_cast<T>(1), sccd::max<T>(0, u_proj));
-        v = static_cast<T>(1) - u_proj;
-        u = u_proj;
-    }
-
-    template <typename T>
     inline void diff_vf(const T sv[3],
                         const T s1[3],
                         const T s2[3],
@@ -304,98 +244,6 @@ namespace sccd {
             T f = f0 + f1;
             diff[d] = v_pos - f;
         }
-    }
-
-    template <typename T>
-    inline T norm_diff_vf(const T sv[3],
-                          const T s1[3],
-                          const T s2[3],
-                          const T s3[3],
-                          const T ev[3],
-                          const T e1[3],
-                          const T e2[3],
-                          const T e3[3],
-                          T &t,
-                          T &u,
-                          T &v) {
-        T diff[3];
-        diff_vf(sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, diff);
-        return sqrt(diff[0] * diff[0] + diff[1] * diff[1] + diff[2] * diff[2]);
-    }
-
-    template <typename T>
-    bool find_root_newton(const int max_iter,
-                          const T atol,
-                          const T sv[3],
-                          const T s1[3],
-                          const T s2[3],
-                          const T s3[3],
-                          const T ev[3],
-                          const T e1[3],
-                          const T e2[3],
-                          const T e3[3],
-                          T &t,
-                          T &u,
-                          T &v) {
-        project_uv_simplex<T>(u, v);
-        t = sccd::min<T>(static_cast<T>(1), sccd::max<T>(0, t));
-
-        T s4[3] = {0, 0, 0};
-        T e4[3] = {0, 0, 0};
-
-        T f = 0;
-        vf_objective<T>(sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, t, u, v, &f);
-
-        for (int k = 0; k < max_iter; k++) {
-            T p[3] = {0, 0, 0};
-            vf_objective_dir<T>(sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, t, u, v, &f, p);
-
-            T best_t = t;
-            T best_u = u;
-            T best_v = v;
-            T best_f = f;
-
-            T alpha = 1;
-            bool improved = false;
-            for (int j = 0; j < 12; j++) {
-                T cand_t = t - alpha * p[0];
-                T cand_u = u - alpha * p[1];
-                T cand_v = v - alpha * p[2];
-
-                cand_t = sccd::min<T>(static_cast<T>(1), sccd::max<T>(0, cand_t));
-                project_uv_simplex<T>(cand_u, cand_v);
-
-                T fnext = 0;
-                vf_objective<T>(sv, s1, s2, s3, s4, ev, e1, e2, e3, e4, cand_t, cand_u, cand_v, &fnext);
-
-                if (fnext < best_f) {
-                    best_t = cand_t;
-                    best_u = cand_u;
-                    best_v = cand_v;
-                    best_f = fnext;
-                    improved = true;
-                    break;
-                }
-
-                alpha *= static_cast<T>(0.5);
-            }
-
-            t = best_t;
-            u = best_u;
-            v = best_v;
-            f = best_f;
-
-            const T norm_diff = norm_diff_vf<T>(sv, s1, s2, s3, ev, e1, e2, e3, t, u, v);
-            if (norm_diff < atol) {
-                return (u >= -atol && v >= -atol && u + v <= 1 + atol && t >= 0 && t <= 1);
-            }
-
-            if (!improved) {
-                break;
-            }
-        }
-
-        return false;
     }
 
     template <typename T>
@@ -501,39 +349,6 @@ namespace sccd {
             return false;
         }
 
-        bool bisect_ee(int split_dim, const T toi, std::vector<Box> &stack) const {
-            std::pair<Interval, Interval> split_intervals{
-                Interval{tuv[split_dim].lower, (tuv[split_dim].lower + tuv[split_dim].upper) * T(0.5)},
-                Interval{(tuv[split_dim].lower + tuv[split_dim].upper) * T(0.5), tuv[split_dim].upper}};
-
-            // // NEW
-            // if (split_dim == 0) {
-            //     split_intervals.first.lower = std::min(split_intervals.first.lower, toi);
-            //     split_intervals.second.lower = std::min(split_intervals.second.lower, toi);
-            // }
-
-            if (split_intervals.first.is_terminal() || split_intervals.second.is_terminal()) {
-                return true;
-            }
-
-            stack.push_back(*this);
-            stack.back().tuv[split_dim] = split_intervals.first;
-            stack.back().depth++;
-
-            if (split_dim == 0) {
-                if (split_intervals.second.lower < toi) {
-                    stack.push_back(*this);
-                    stack.back().tuv[split_dim] = split_intervals.second;
-                    stack.back().depth++;
-                }
-            } else {
-                stack.push_back(*this);
-                stack.back().tuv[split_dim] = split_intervals.second;
-                stack.back().depth++;
-            }
-
-            return false;
-        }
     };
 
     template <typename T>
@@ -652,29 +467,15 @@ namespace sccd {
                                     const T e3[3],
                                     T &toi,
                                     T &u,
-                                    T &v,
-                                    const bool refine) {
-        T t_approx = box.tuv[0].lower;
+                                    T &v) {
+        const T t_approx = box.tuv[0].lower;
         if (t_approx < toi && box.tuv[1].lower + box.tuv[2].lower < T(1) + tols[1] + tols[2]) {
-            T u_approx = box.tuv[1].lower;
-            T v_approx = box.tuv[2].lower;
-
-            if (refine) {
-                const bool refined =
-                    find_root_newton<T>(40, tol, sv, s1, s2, s3, ev, e1, e2, e3, t_approx, u_approx, v_approx);
-
-                if (refined && t_approx < toi) {
-                    toi = sccd::min<T>(box.tuv[0].upper, sccd::max<T>(box.tuv[0].lower, T(0.99) * t_approx));
-                    u = u_approx;
-                    v = v_approx;
-                    return true;
-                }
-            } else {
-                toi = t_approx;
-                u = u_approx;
-                v = v_approx;
-                return true;
-            }
+            // The box's `t` lower bound, which is at or before any root inside
+            // it. That is what makes accepting safe however loose the test was.
+            toi = t_approx;
+            u = box.tuv[1].lower;
+            v = box.tuv[2].lower;
+            return true;
         }
         return false;
     }
@@ -1105,8 +906,7 @@ namespace sccd {
                                                    T &toi,
                                                    T &u,
                                                    T &v,
-                                                   std::vector<sccd::Box<T>> &stack,
-                                                   const bool refine) {
+                                                   std::vector<sccd::Box<T>> &stack) {
         const T lo = domain.tuv[SplitDim].lower;
         const T hi = domain.tuv[SplitDim].upper;
 
@@ -1185,7 +985,7 @@ namespace sccd {
 
             Box<T> box = split_axis_box<SplitDim, T>(domain, sample_min, sample_max);
             if (accepted || box.depth > max_iter) {
-                found |= accept_grid_root_vf<T>(box, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, toi, u, v, refine);
+                found |= accept_grid_root_vf<T>(box, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, toi, u, v);
                 continue;
             }
 
@@ -1218,19 +1018,18 @@ namespace sccd {
                                               T &toi,
                                               T &u,
                                               T &v,
-                                              std::vector<sccd::Box<T>> &stack,
-                                              const bool refine) {
+                                              std::vector<sccd::Box<T>> &stack) {
         const int split_dim = domain.widest_dimension(codomain_widths);
         if (split_dim == 0) {
             return grid_search_adaptive_split_vf_axis<0, N, T>(
-                domain, max_iter, tol, tols, numerical_error, sv, s1, s2, s3, ev, e1, e2, e3, toi, u, v, stack, refine);
+                domain, max_iter, tol, tols, numerical_error, sv, s1, s2, s3, ev, e1, e2, e3, toi, u, v, stack);
         }
         if (split_dim == 1) {
             return grid_search_adaptive_split_vf_axis<1, N, T>(
-                domain, max_iter, tol, tols, numerical_error, sv, s1, s2, s3, ev, e1, e2, e3, toi, u, v, stack, refine);
+                domain, max_iter, tol, tols, numerical_error, sv, s1, s2, s3, ev, e1, e2, e3, toi, u, v, stack);
         }
         return grid_search_adaptive_split_vf_axis<2, N, T>(
-            domain, max_iter, tol, tols, numerical_error, sv, s1, s2, s3, ev, e1, e2, e3, toi, u, v, stack, refine);
+            domain, max_iter, tol, tols, numerical_error, sv, s1, s2, s3, ev, e1, e2, e3, toi, u, v, stack);
     }
 
     template <int N, typename T>
@@ -1249,13 +1048,12 @@ namespace sccd {
                                               T &toi,
                                               T &u,
                                               T &v,
-                                              std::vector<sccd::Box<T>> &stack,
-                                              const bool refine) {
+                                              std::vector<sccd::Box<T>> &stack) {
         const T codomain_widths[3] = {T(1), T(1), T(1)};
         T numerical_error[3];
         numerical_error_bound<true, T>(sv, s1, s2, s3, ev, e1, e2, e3, numerical_error);
         return grid_search_adaptive_split_vf<N, T>(
-            domain, max_iter, tol, tols, numerical_error, codomain_widths, sv, s1, s2, s3, ev, e1, e2, e3, toi, u, v, stack, refine);
+            domain, max_iter, tol, tols, numerical_error, codomain_widths, sv, s1, s2, s3, ev, e1, e2, e3, toi, u, v, stack);
     }
 
     template <typename T>
@@ -1276,14 +1074,13 @@ namespace sccd {
                                           T &t,
                                           T &u,
                                           T &v,
-                                          std::vector<Box<T>> &stack,
-                                          const bool refine = false) {
+                                          std::vector<Box<T>> &stack) {
         if (initial_domain.tuv[0].lower >= t) {
             return false;
         }
 
         return grid_search_adaptive_split_vf<SCCD_ADAPTIVE_NUM_SPLITS, T>(
-            initial_domain, max_iter, tol, tols, numerical_error, codomain_widths, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack, refine);
+            initial_domain, max_iter, tol, tols, numerical_error, codomain_widths, sv, s1, s2, s3, ev, e1, e2, e3, t, u, v, stack);
     }
 
     template <typename T>
@@ -1302,13 +1099,12 @@ namespace sccd {
                                           T &t,
                                           T &u,
                                           T &v,
-                                          std::vector<Box<T>> &stack,
-                                          const bool refine = false) {
+                                          std::vector<Box<T>> &stack) {
         const T codomain_widths[3] = {T(1), T(1), T(1)};
         T numerical_error[3];
         numerical_error_bound<true, T>(sv, s1, s2, s3, ev, e1, e2, e3, numerical_error);
         return find_root_grid_adaptive_split_vf<T>(
-            max_iter, tol, tols, numerical_error, codomain_widths, sv, s1, s2, s3, ev, e1, e2, e3, initial_domain, t, u, v, stack, refine);
+            max_iter, tol, tols, numerical_error, codomain_widths, sv, s1, s2, s3, ev, e1, e2, e3, initial_domain, t, u, v, stack);
     }
 
     template <typename T>
@@ -1326,12 +1122,11 @@ namespace sccd {
                                           T &t,
                                           T &u,
                                           T &v,
-                                          std::vector<Box<T>> &stack,
-                                          const bool refine = false) {
+                                          std::vector<Box<T>> &stack) {
         T tols[3];
         compute_face_vertex_tolerance<T>(tol, sv, s1, s2, s3, ev, e1, e2, e3, tols);
         return find_root_grid_adaptive_split_vf<T>(
-            max_iter, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, initial_domain, t, u, v, stack, refine);
+            max_iter, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, initial_domain, t, u, v, stack);
     }
 
     template <typename T>
@@ -1348,10 +1143,9 @@ namespace sccd {
                                           T &t,
                                           T &u,
                                           T &v,
-                                          std::vector<Box<T>> &stack,
-                                          const bool refine = false) {
+                                          std::vector<Box<T>> &stack) {
         return find_root_grid_adaptive_split_vf<T>(
-            max_iter, tol, sv, s1, s2, s3, ev, e1, e2, e3, unit_domain_box<T>(), t, u, v, stack, refine);
+            max_iter, tol, sv, s1, s2, s3, ev, e1, e2, e3, unit_domain_box<T>(), t, u, v, stack);
     }
 
 
@@ -1375,35 +1169,6 @@ namespace sccd {
             const T eb1 = (e4[d] - s4[d]) * t + s4[d];
             diff[d] = ((ea1 - ea0) * u + ea0) - ((eb1 - eb0) * v + eb0);
         }
-    }
-
-    template <typename T>
-    inline void compute_edge_edge_codomain_widths(const T s1[3],
-                                                  const T s2[3],
-                                                  const T s3[3],
-                                                  const T s4[3],
-                                                  const T e1[3],
-                                                  const T e2[3],
-                                                  const T e3[3],
-                                                  const T e4[3],
-                                                  T widths[3]) {
-        T wt = T(0);
-        T wu = T(0);
-        T wv = T(0);
-        for (int d = 0; d < 3; ++d) {
-            const T a0 = e1[d] - s1[d];
-            const T a1 = e2[d] - s2[d];
-            const T b0 = e3[d] - s3[d];
-            const T b1 = e4[d] - s4[d];
-            wt = sccd::max<T>(wt,
-                              sccd::max<T>(sccd::max<T>(sccd::abs<T>(a0 - b0), sccd::abs<T>(a0 - b1)),
-                                           sccd::max<T>(sccd::abs<T>(a1 - b0), sccd::abs<T>(a1 - b1))));
-            wu = sccd::max<T>(wu, sccd::max<T>(sccd::abs<T>(s2[d] - s1[d]), sccd::abs<T>(e2[d] - e1[d])));
-            wv = sccd::max<T>(wv, sccd::max<T>(sccd::abs<T>(s4[d] - s3[d]), sccd::abs<T>(e4[d] - e3[d])));
-        }
-        widths[0] = wt;
-        widths[1] = wu;
-        widths[2] = wv;
     }
 
     template <int SplitDim, int N, typename T>
@@ -1485,10 +1250,7 @@ namespace sccd {
                                                    T &toi,
                                                    T &u,
                                                    T &v,
-                                                   std::vector<sccd::Box<T>> &stack,
-                                                   const bool refine) {
-        (void)refine;
-
+                                                   std::vector<sccd::Box<T>> &stack) {
         const T lo = domain.tuv[SplitDim].lower;
         const T hi = domain.tuv[SplitDim].upper;
 
@@ -1586,19 +1348,18 @@ namespace sccd {
                                               T &toi,
                                               T &u,
                                               T &v,
-                                              std::vector<sccd::Box<T>> &stack,
-                                              const bool refine) {
+                                              std::vector<sccd::Box<T>> &stack) {
         const int split_dim = domain.widest_dimension(codomain_widths);
         if (split_dim == 0) {
             return grid_search_adaptive_split_ee_axis<0, N, T>(
-                domain, max_iter, tol, tols, numerical_error, s1, s2, s3, s4, e1, e2, e3, e4, toi, u, v, stack, refine);
+                domain, max_iter, tol, tols, numerical_error, s1, s2, s3, s4, e1, e2, e3, e4, toi, u, v, stack);
         }
         if (split_dim == 1) {
             return grid_search_adaptive_split_ee_axis<1, N, T>(
-                domain, max_iter, tol, tols, numerical_error, s1, s2, s3, s4, e1, e2, e3, e4, toi, u, v, stack, refine);
+                domain, max_iter, tol, tols, numerical_error, s1, s2, s3, s4, e1, e2, e3, e4, toi, u, v, stack);
         }
         return grid_search_adaptive_split_ee_axis<2, N, T>(
-            domain, max_iter, tol, tols, numerical_error, s1, s2, s3, s4, e1, e2, e3, e4, toi, u, v, stack, refine);
+            domain, max_iter, tol, tols, numerical_error, s1, s2, s3, s4, e1, e2, e3, e4, toi, u, v, stack);
     }
 
     template <int N, typename T>
@@ -1617,13 +1378,12 @@ namespace sccd {
                                               T &toi,
                                               T &u,
                                               T &v,
-                                              std::vector<sccd::Box<T>> &stack,
-                                              const bool refine) {
+                                              std::vector<sccd::Box<T>> &stack) {
         const T codomain_widths[3] = {T(1), T(1), T(1)};
         T numerical_error[3];
         numerical_error_bound<false, T>(s1, s2, s3, s4, e1, e2, e3, e4, numerical_error);
         return grid_search_adaptive_split_ee<N, T>(
-            domain, max_iter, tol, tols, numerical_error, codomain_widths, s1, s2, s3, s4, e1, e2, e3, e4, toi, u, v, stack, refine);
+            domain, max_iter, tol, tols, numerical_error, codomain_widths, s1, s2, s3, s4, e1, e2, e3, e4, toi, u, v, stack);
     }
 
     template <typename T>
@@ -1644,14 +1404,13 @@ namespace sccd {
                                           T &t,
                                           T &u,
                                           T &v,
-                                          std::vector<Box<T>> &stack,
-                                          const bool refine = false) {
+                                          std::vector<Box<T>> &stack) {
         if (initial_domain.tuv[0].lower >= t) {
             return false;
         }
 
         return grid_search_adaptive_split_ee<SCCD_ADAPTIVE_NUM_SPLITS, T>(
-            initial_domain, max_iter, tol, tols, numerical_error, codomain_widths, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v, stack, refine);
+            initial_domain, max_iter, tol, tols, numerical_error, codomain_widths, s1, s2, s3, s4, e1, e2, e3, e4, t, u, v, stack);
     }
 
     template <typename T>
@@ -1670,13 +1429,12 @@ namespace sccd {
                                           T &t,
                                           T &u,
                                           T &v,
-                                          std::vector<Box<T>> &stack,
-                                          const bool refine = false) {
+                                          std::vector<Box<T>> &stack) {
         const T codomain_widths[3] = {T(1), T(1), T(1)};
         T numerical_error[3];
         numerical_error_bound<false, T>(s1, s2, s3, s4, e1, e2, e3, e4, numerical_error);
         return find_root_grid_adaptive_split_ee<T>(
-            max_iter, tol, tols, numerical_error, codomain_widths, s1, s2, s3, s4, e1, e2, e3, e4, initial_domain, t, u, v, stack, refine);
+            max_iter, tol, tols, numerical_error, codomain_widths, s1, s2, s3, s4, e1, e2, e3, e4, initial_domain, t, u, v, stack);
     }
 
     template <typename T>
@@ -1694,12 +1452,11 @@ namespace sccd {
                                           T &t,
                                           T &u,
                                           T &v,
-                                          std::vector<Box<T>> &stack,
-                                          const bool refine = false) {
+                                          std::vector<Box<T>> &stack) {
         T tols[3];
         compute_edge_edge_tolerance<T>(tol, s1, s2, s3, s4, e1, e2, e3, e4, tols);
         return find_root_grid_adaptive_split_ee<T>(
-            max_iter, tol, tols, s1, s2, s3, s4, e1, e2, e3, e4, initial_domain, t, u, v, stack, refine);
+            max_iter, tol, tols, s1, s2, s3, s4, e1, e2, e3, e4, initial_domain, t, u, v, stack);
     }
 
     template <typename T>
@@ -1716,10 +1473,9 @@ namespace sccd {
                                           T &t,
                                           T &u,
                                           T &v,
-                                          std::vector<Box<T>> &stack,
-                                          const bool refine = false) {
+                                          std::vector<Box<T>> &stack) {
         return find_root_grid_adaptive_split_ee<T>(
-            max_iter, tol, s1, s2, s3, s4, e1, e2, e3, e4, unit_domain_box<T>(), t, u, v, stack, refine);
+            max_iter, tol, s1, s2, s3, s4, e1, e2, e3, e4, unit_domain_box<T>(), t, u, v, stack);
     }
 
 
