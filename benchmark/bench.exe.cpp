@@ -1,3 +1,4 @@
+#include "sccd_broadphase_strategy.hpp"
 #include "sccd_narrowphase_mode.hpp"
 #include "sccd_smesh_ccd.hpp"
 #include "smesh_buffer.hpp"
@@ -58,8 +59,14 @@ namespace {
         int err = SCCD_SUCCESS;
         double prep_elapsed_ms = 0.0;
         double elapsed_ms = 0.0;
-        std::unordered_set<std::uint64_t> pairs;
+        // Which expected pairs the broad phase produced, indexed as
+        // ExpectedPairs::index_of returns. Not a set of every pair it produced:
+        // that set was the single most expensive thing the benchmark did.
+        std::vector<std::uint8_t> expected_found;
         std::uint64_t false_positives = 0;
+        // Only filled when SCCD_BENCH_DUMP_FP_PAIRS asks for it.
+        std::vector<std::int32_t> fp_c0;
+        std::vector<std::int32_t> fp_c1;
         smesh::SharedBuffer<idx_t> v_overlap;
         smesh::SharedBuffer<idx_t> f_overlap;
         smesh::SharedBuffer<idx_t> e0_overlap;
@@ -219,6 +226,24 @@ namespace {
             }
             cases.swap(subset);
         }
+
+        // A chunk of the case list, so a long sweep can be cut into jobs that fit
+        // the 30-minute debug partition and be resumed one chunk at a time.
+        // Half-open [begin, end) over the list left by the subsampling above, so
+        // the two compose: MAX_CASES still means "this many spread across the
+        // trajectory", and the range then slices whatever that produced.
+        int SCCD_BENCH_CASE_BEGIN = 0;
+        int SCCD_BENCH_CASE_END = 0;
+        SCCD_READ_ENV(SCCD_BENCH_CASE_BEGIN, atoi);
+        SCCD_READ_ENV(SCCD_BENCH_CASE_END, atoi);
+        if (SCCD_BENCH_CASE_BEGIN > 0 || SCCD_BENCH_CASE_END > 0) {
+            const int total = static_cast<int>(cases.size());
+            const int begin = std::max(0, std::min(SCCD_BENCH_CASE_BEGIN, total));
+            const int end =
+                (SCCD_BENCH_CASE_END > 0) ? std::max(begin, std::min(SCCD_BENCH_CASE_END, total))
+                                          : total;
+            cases = std::vector<CaseFile>(cases.begin() + begin, cases.begin() + end);
+        }
         return cases;
     }
 
@@ -271,7 +296,16 @@ namespace {
             return false;
         }
 
-        for (const char* required : {"x.float32", "y.float32", "z.float32", "i0.int32", "i1.int32", "i2.int32"}) {
+        // The coordinate files are named for the precision they hold, and smesh
+        // reads only the one matching the geom_t it was built with -- it does
+        // not fall back to the other. Asking for float32 unconditionally made a
+        // float64 build declare every prepared frame stale and shell out to
+        // db_to_raw for each one, which is not on PATH inside a scheduler job.
+        // dtype_GEOM_T is smesh's own spelling of that suffix.
+        const std::string coord_suffix = std::string(".") + dtype_GEOM_T;
+        for (const std::string required : {"x" + coord_suffix, "y" + coord_suffix,
+                                           "z" + coord_suffix, std::string("i0.int32"),
+                                           std::string("i1.int32"), std::string("i2.int32")}) {
             const fs::path raw_file = output_dir / required;
             if (!fs::exists(raw_file, ec)) {
                 return false;
@@ -318,48 +352,121 @@ namespace {
         return dataset_dir / "queries" / (key + ".csv");
     }
 
-    bool parse_query_row(const std::string& line, scalar_t coords[3]) {
-        long double values[6];
+    // The packed form of the same queries, written by benchmark/queries_to_raw.py:
+    // one float64 per coordinate, rows in CSV order, no header -- the row count
+    // follows from the file size, as it does for toi.float64.
+    fs::path raw_query_path(const fs::path& dataset_dir, const std::string& key) {
+        return dataset_dir / "queries_raw" / (key + ".f64");
+    }
+
+    // Each row is three rationals, written as six integers. They are divided in
+    // `double` rather than `long double` because `long double` is not one type:
+    // it is `double` on Apple ARM64, 80-bit on x86-64, and software-emulated
+    // 128-bit quad on AArch64 Linux, which is where the benchmark's GPU runs.
+    // The coordinate is stored as `scalar_t` -- double at widest -- so the extra
+    // width bought nothing except a different answer per platform and, on the
+    // GH200, an emulated division per coordinate. Fixing the arithmetic to
+    // double also makes the packed cache exact rather than merely close: Python
+    // divides in double too, so the two paths agree bit for bit.
+    bool parse_query_row(const std::string& line, double coords[3]) {
+        double values[6];
         const char* cursor = line.c_str();
         for (int i = 0; i < 6; ++i) {
             char* end = nullptr;
-            values[i] = std::strtold(cursor, &end);
+            values[i] = std::strtod(cursor, &end);
             if (end == cursor || (i < 5 && *end != ',')) {
                 return false;
             }
             cursor = (i < 5) ? end + 1 : end;
         }
-        coords[0] = static_cast<scalar_t>(values[0] / values[1]);
-        coords[1] = static_cast<scalar_t>(values[2] / values[3]);
-        coords[2] = static_cast<scalar_t>(values[4] / values[5]);
+        coords[0] = values[0] / values[1];
+        coords[1] = values[2] / values[3];
+        coords[2] = values[4] / values[5];
         return true;
     }
 
-    bool read_query_geometry(const fs::path& path, const bool is_vf, QueryGeometry& query) {
-        std::ifstream in(path);
-        if (!in) {
-            std::cerr << "error: failed to open " << path << "\n";
+    void append_query_row(const std::size_t row, const double coords[3],
+                          QueryGeometry& query) {
+        auto& points = (row % 8 < 4) ? query.points0 : query.points1;
+        for (int d = 0; d < 3; ++d) {
+            points[d].push_back(static_cast<scalar_t>(coords[d]));
+        }
+    }
+
+    // Read the packed cache if it is present and no older than the CSV it came
+    // from. Returns false when there is no usable cache, which is not an error --
+    // the caller falls back to parsing the text.
+    bool read_packed_queries(const fs::path& raw_path, const fs::path& csv_path,
+                             QueryGeometry& query, std::size_t& row) {
+        std::error_code ec;
+        if (!fs::exists(raw_path, ec)) {
+            return false;
+        }
+        const auto raw_time = fs::last_write_time(raw_path, ec);
+        if (ec) {
+            return false;
+        }
+        const auto csv_time = fs::last_write_time(csv_path, ec);
+        if (!ec && csv_time > raw_time) {
+            return false;  // stale: the CSV was rewritten after the cache
+        }
+
+        const auto bytes = fs::file_size(raw_path, ec);
+        if (ec || bytes == 0 || bytes % (3 * sizeof(double)) != 0) {
             return false;
         }
 
-        std::string line;
-        std::size_t row = 0;
-        while (std::getline(in, line)) {
-            if (line.empty()) {
-                continue;
-            }
+        std::ifstream in(raw_path, std::ios::binary);
+        if (!in) {
+            return false;
+        }
 
-            scalar_t coords[3];
-            if (!parse_query_row(line, coords)) {
-                std::cerr << "error: invalid query row in " << path << "\n";
+        const std::size_t rows = static_cast<std::size_t>(bytes) / (3 * sizeof(double));
+        std::vector<double> buffer(3 * rows);
+        in.read(reinterpret_cast<char*>(buffer.data()),
+                static_cast<std::streamsize>(bytes));
+        if (!in) {
+            return false;
+        }
+
+        for (int d = 0; d < 3; ++d) {
+            query.points0[d].reserve(rows / 2);
+            query.points1[d].reserve(rows / 2);
+        }
+        for (std::size_t r = 0; r < rows; ++r) {
+            append_query_row(r, &buffer[3 * r], query);
+        }
+        row = rows;
+        return true;
+    }
+
+    bool read_query_geometry(const fs::path& dataset_dir, const std::string& key,
+                             const bool is_vf, QueryGeometry& query) {
+        const fs::path path = query_path(dataset_dir, key);
+        std::size_t row = 0;
+
+        if (!read_packed_queries(raw_query_path(dataset_dir, key), path, query, row)) {
+            std::ifstream in(path);
+            if (!in) {
+                std::cerr << "error: failed to open " << path << "\n";
                 return false;
             }
 
-            auto& points = (row % 8 < 4) ? query.points0 : query.points1;
-            for (int d = 0; d < 3; ++d) {
-                points[d].push_back(coords[d]);
+            std::string line;
+            while (std::getline(in, line)) {
+                if (line.empty()) {
+                    continue;
+                }
+
+                double coords[3];
+                if (!parse_query_row(line, coords)) {
+                    std::cerr << "error: invalid query row in " << path << "\n";
+                    return false;
+                }
+
+                append_query_row(row, coords, query);
+                ++row;
             }
-            ++row;
         }
 
         if (row % 8 != 0 || query.points0[0].size() != query.points1[0].size()) {
@@ -457,20 +564,43 @@ namespace {
         return true;
     }
 
-    std::unordered_set<std::uint64_t> expected_pairs(const std::vector<std::int32_t>& c0,
-                                                     const std::vector<std::int32_t>& c1) {
-        std::unordered_set<std::uint64_t> set;
-        set.reserve(c0.size() * 2 + 1);
-        for (std::size_t i = 0; i < c0.size(); ++i) {
-            set.insert(pair_key(c0[i], c1[i]));
-        }
-        return set;
-    }
+    /**
+     * \brief The benchmark's own candidate list, as a lookup keyed by pair.
+     *
+     * This is the *small* side of the comparison -- one entry per curated query,
+     * hundreds to thousands -- while the broad phase can produce tens of
+     * millions. Everything is therefore arranged to stream the large side once
+     * and probe this, rather than to materialise the large side.
+     *
+     * Both orientations of a pair map to the same slot, so a single probe
+     * answers what used to take two set lookups. Duplicate pairs share a slot,
+     * which is what we want: if the broad phase found the pair, every query
+     * naming it was found.
+     */
+    struct ExpectedPairs {
+        std::unordered_map<std::uint64_t, std::uint32_t> index;
+        std::uint32_t slots = 0;
 
-    bool contains_pair(const std::unordered_set<std::uint64_t>& set, const std::uint64_t pair) {
-        const std::uint64_t reversed = (pair << 32) | (pair >> 32);
-        return set.find(pair) != set.end() || set.find(reversed) != set.end();
-    }
+        void build(const std::vector<std::int32_t>& c0, const std::vector<std::int32_t>& c1) {
+            index.reserve(c0.size() * 4 + 1);
+            for (std::size_t i = 0; i < c0.size(); ++i) {
+                const std::uint64_t key = pair_key(c0[i], c1[i]);
+                const std::uint64_t reversed = (key << 32) | (key >> 32);
+                if (index.find(key) != index.end()) {
+                    continue;
+                }
+                index.emplace(key, slots);
+                index.emplace(reversed, slots);
+                ++slots;
+            }
+        }
+
+        // -1 when the pair is not one the benchmark expected.
+        std::int64_t index_of(const std::uint64_t pair) const {
+            const auto it = index.find(pair);
+            return (it == index.end()) ? -1 : static_cast<std::int64_t>(it->second);
+        }
+    };
 
     std::array<std::vector<idx_t>, 2> benchmark_ordered_edges(const std::shared_ptr<smesh::Mesh>& mesh) {
         auto faces = mesh->block(0)->elements();
@@ -566,6 +696,16 @@ namespace {
         return smesh::EXECUTION_SPACE_HOST;
     }
 
+    // The mode name a row carries has to say which processor produced it, or a
+    // sweep that ran both concatenates into a CSV where host and device rows are
+    // indistinguishable and get averaged together. ti_oracle already names them
+    // this way; this matches it.
+    std::string benchmark_mode_name(const smesh::ExecutionSpace execution_space) {
+        const std::string base = sccd::narrow_phase_mode_name(sccd::narrow_phase_mode());
+        return (execution_space == smesh::EXECUTION_SPACE_DEVICE) ? ("device-" + base)
+                                                                  : base;
+    }
+
     CCDRun make_ccd_run(const MeshPair& meshes, const smesh::ExecutionSpace execution_space) {
         CCDRun run;
         run.ccd = sccd::CCD<scalar_t>::create(meshes.t0, execution_space);
@@ -603,9 +743,25 @@ namespace {
         return result;
     }
 
+    bool dump_fp_pairs() {
+        const char* env = std::getenv("SCCD_BENCH_DUMP_FP_PAIRS");
+        return env != nullptr && env[0] != '\0' && env[0] != '0';
+    }
+
+    /**
+     * \brief Classify the broad phase's output against the benchmark's.
+     *
+     * One pass over the pairs, one hash probe each into the small expected set,
+     * and nothing retained. It used to build an unordered_set of every pair --
+     * 28.9 M nodes for a puffer-ball case -- purely to count how many were not
+     * expected and to answer membership for the false-negative check. That set
+     * cost roughly twenty seconds a case against 0.9 s of the work the benchmark
+     * exists to measure, and it happened outside every timed region, so it never
+     * appeared in a column and made the largest scenes impractical to sweep.
+     */
     void populate_broadphase_pairs(const MeshPair& meshes,
                                    const bool is_vf,
-                                   const std::unordered_set<std::uint64_t>& expected,
+                                   const ExpectedPairs& expected,
                                    const std::vector<idx_t>& edge_id_map,
                                    BroadphaseResult& result) {
         const ptrdiff_t n_nodes = meshes.t0->n_nodes();
@@ -614,28 +770,36 @@ namespace {
         const ptrdiff_t face_offset = n_nodes + n_edges;
         const ptrdiff_t edge_offset = n_nodes;
 
+        result.expected_found.assign(expected.slots, 0);
+        result.false_positives = 0;
+        const bool dump = dump_fp_pairs();
+
+        auto classify = [&](const std::uint64_t pair) {
+            const std::int64_t slot = expected.index_of(pair);
+            if (slot < 0) {
+                ++result.false_positives;
+                if (dump) {
+                    result.fp_c0.push_back(static_cast<std::int32_t>(pair >> 32));
+                    result.fp_c1.push_back(static_cast<std::int32_t>(pair & 0xffffffffu));
+                }
+            } else {
+                result.expected_found[static_cast<std::size_t>(slot)] = 1;
+            }
+        };
+
         if (is_vf) {
             auto v_overlap = smesh::to_host(result.v_overlap);
             auto f_overlap = smesh::to_host(result.f_overlap);
-            result.pairs.reserve(v_overlap->size() * 2 + 1);
             for (std::size_t i = 0; i < v_overlap->size(); ++i) {
-                result.pairs.insert(pair_key(v_overlap->data()[i], f_overlap->data()[i] + face_offset));
+                classify(pair_key(v_overlap->data()[i], f_overlap->data()[i] + face_offset));
             }
         } else {
             auto e0_overlap = smesh::to_host(result.e0_overlap);
             auto e1_overlap = smesh::to_host(result.e1_overlap);
-            result.pairs.reserve(e0_overlap->size() * 2 + 1);
             for (std::size_t i = 0; i < e0_overlap->size(); ++i) {
                 const idx_t e0 = edge_id_map.empty() ? e0_overlap->data()[i] : edge_id_map[e0_overlap->data()[i]];
                 const idx_t e1 = edge_id_map.empty() ? e1_overlap->data()[i] : edge_id_map[e1_overlap->data()[i]];
-                result.pairs.insert(pair_key(e0 + edge_offset, e1 + edge_offset));
-            }
-        }
-
-        result.false_positives = 0;
-        for (const auto pair : result.pairs) {
-            if (!contains_pair(expected, pair)) {
-                ++result.false_positives;
+                classify(pair_key(e0 + edge_offset, e1 + edge_offset));
             }
         }
     }
@@ -823,7 +987,7 @@ namespace {
                             const std::vector<idx_t>& q0,
                             QueryGeometry& query_geometry,
                             const std::vector<idx_t>& edge_id_map,
-                            const std::unordered_set<std::uint64_t>& broad_expected,
+                            const ExpectedPairs& broad_expected,
                             const double prep_ms,
                             const double broad_ms,
                             const double narrow_ms,
@@ -863,9 +1027,7 @@ namespace {
         std::vector<std::int32_t> fp_broad_c1;
         std::vector<std::int32_t> fn_broad_c0;
         std::vector<std::int32_t> fn_broad_c1;
-        fp_broad.reserve(static_cast<std::size_t>(broadphase.false_positives));
-        fp_broad_c0.reserve(static_cast<std::size_t>(broadphase.false_positives));
-        fp_broad_c1.reserve(static_cast<std::size_t>(broadphase.false_positives));
+
 
         // Signed error against the exact roots. Unsigned error would hide the
         // only failure that matters: a time of impact *after* the true one lets a
@@ -911,7 +1073,9 @@ namespace {
                 }
             }
 
-            const bool broad_found = contains_pair(broadphase.pairs, pair_key(c0[i], c1[i]));
+            const std::int64_t slot = broad_expected.index_of(pair_key(c0[i], c1[i]));
+            const bool broad_found =
+                slot >= 0 && broadphase.expected_found[static_cast<std::size_t>(slot)] != 0;
             if (!broad_found) {
                 fn_broad[i] = 1;
                 fn_broad_c0.push_back(c0[i]);
@@ -919,14 +1083,13 @@ namespace {
             }
         }
 
-        if (broadphase.false_positives != 0) {
-            for (const auto pair : broadphase.pairs) {
-                if (!contains_pair(broad_expected, pair)) {
-                    fp_broad.push_back(1);
-                    fp_broad_c0.push_back(static_cast<std::int32_t>(pair >> 32));
-                    fp_broad_c1.push_back(static_cast<std::int32_t>(pair & 0xffffffffu));
-                }
-            }
+        // The individual false-positive pairs are only materialised when asked
+        // for: there can be tens of millions of them per case, nothing in the
+        // repository reads the files, and writing them dominated the run.
+        if (!broadphase.fp_c0.empty()) {
+            fp_broad.assign(broadphase.fp_c0.size(), 1);
+            fp_broad_c0 = broadphase.fp_c0;
+            fp_broad_c1 = broadphase.fp_c1;
         }
 
         const std::uint64_t broad_fn_count = static_cast<std::uint64_t>(fn_broad_c0.size());
@@ -980,7 +1143,11 @@ namespace {
             toi_med_early = toi_early[toi_early.size() / 2];
         }
 
-        std::cout << dataset << ',' << sccd::narrow_phase_mode_name(sccd::narrow_phase_mode()) << ','
+        std::cout << dataset << ',' << benchmark_mode_name(benchmark_execution_space()) << ','
+                  // The broad phase is part of what produced the row. Without it
+                  // a sweep that varies the strategy cannot be told apart, and
+                  // the default is not self-evident.
+                  << sccd::broadphase_strategy_name(sccd::broadphase_strategy_setting()) << ','
                   << case_file.key << ',' << (case_file.is_vf ? "vf" : "ee") << ',' << narrow_queries
                   << ',' << prep_ms << ',' << broad_ms << ',' << narrow_ms << ',' << query_narrow_ms << ','
                   << fp_count << ',' << fn_count << ',' << broadphase.false_positives << ',' << broad_fn_count
@@ -1026,7 +1193,8 @@ namespace {
 
         QueryGeometry query_geometry;
         const fs::path query_file = query_path(dataset_dir, case_file.key);
-        if (!read_query_geometry(query_file, case_file.is_vf, query_geometry)) {
+        if (!read_query_geometry(dataset_dir, case_file.key, case_file.is_vf,
+                                 query_geometry)) {
             return false;
         }
         if (query_geometry.q0.size() != q0.size()) {
@@ -1041,7 +1209,8 @@ namespace {
 
         const smesh::ExecutionSpace execution_space = benchmark_execution_space();
         CCDRun ccd_run = make_ccd_run(meshes, execution_space);
-        const auto broad_expected = expected_pairs(c0, c1);
+        ExpectedPairs broad_expected;
+        broad_expected.build(c0, c1);
         const bool warmup_first_case = timings_ms.empty();
         if (warmup_first_case) {
             BroadphaseResult warmup = run_broadphase(case_file.is_vf, ccd_run);
@@ -1104,10 +1273,26 @@ namespace {
 
 }  // namespace
 
+// The one definition of the result schema. bench.sh asks for it with --header.
+static constexpr const char* kCsvHeader =
+    "dataset,mode,broadphase,case,type,queries,prep_ms,broad_ms,narrow_ms,query_narrow_ms,fp,fn,broad_fp,broad_fn,"
+    "narrow_ms_s1,toi_n,toi_late,toi_max_late,toi_max_early,toi_med_early,s0_late,s0_margin,"
+    "s0_toi,gt_earliest,root_n,s1_min";
+
 int main(int argc, char** argv) {
     auto ctx = smesh::initialize(argc, argv);
+    // --header prints the CSV schema and exits. A consumer that has to know the
+    // column names should ask for them rather than keep its own copy: this file
+    // and benchmark/scripts/bench.sh disagreed for long enough that every toi_*
+    // accuracy column was being dropped from the report unnamed.
+    if (argc == 2 && std::string(argv[1]) == "--header") {
+        std::cout << kCsvHeader << "\n";
+        return EXIT_SUCCESS;
+    }
+
     if (argc < 3) {
         std::cerr << "usage: " << argv[0] << " <data-dir> <dataset> [<dataset> ...]\n";
+        std::cerr << "       " << argv[0] << " --header\n";
         return EXIT_FAILURE;
     }
 
@@ -1125,9 +1310,7 @@ int main(int argc, char** argv) {
     if (using_global_missing_pairs_report) {
         ok = initialize_missing_pairs_report(data_dir) && ok;
     }
-    std::cout << "dataset,mode,case,type,queries,prep_ms,broad_ms,narrow_ms,query_narrow_ms,fp,fn,broad_fp,broad_fn,"
-              "narrow_ms_s1,toi_n,toi_late,toi_max_late,toi_max_early,toi_med_early,s0_late,s0_margin,"
-              "s0_toi,gt_earliest,root_n,s1_min\n";
+    std::cout << kCsvHeader << "\n";
     for (int i = 2; i < argc; ++i) {
         const std::string dataset = argv[i];
         const fs::path dataset_dir = data_dir / dataset;

@@ -5,7 +5,6 @@
 
 #include "assert.h"
 
-#include "sccd_objective.hpp"
 #include "sccd_parallel.hpp"
 #include "sccd_base.hpp"
 #include "sccd_narrowphase_mode.hpp"
@@ -54,9 +53,6 @@ namespace sccd {
 
         int SCCD_USE_TI = 0;
         SCCD_READ_ENV(SCCD_USE_TI, atoi);
-
-        int SCCD_REFINE = 0;
-        SCCD_READ_ENV(SCCD_REFINE, atoi);
 
 
         std::atomic<T> min_t = max_toi;
@@ -202,8 +198,7 @@ namespace sccd {
                                                                    t,
                                                                    u,
                                                                    v,
-                                                                   stack,
-                                                                   SCCD_REFINE);
+                                                                   stack);
 
                     if (found) {
                         if (toi_output == ToiOutput::Earliest) {
@@ -284,9 +279,6 @@ namespace sccd {
 
         int SCCD_USE_TI = 0;
         SCCD_READ_ENV(SCCD_USE_TI, atoi);
-
-        int SCCD_REFINE = 0;
-        SCCD_READ_ENV(SCCD_REFINE, atoi);
 
 
         std::atomic<T> min_t = max_toi;
@@ -416,8 +408,7 @@ namespace sccd {
                                                                    t,
                                                                    u,
                                                                    v,
-                                                                   stack,
-                                                                   SCCD_REFINE);
+                                                                   stack);
 
                     if (found) {
                         if (toi_output == ToiOutput::Earliest) {

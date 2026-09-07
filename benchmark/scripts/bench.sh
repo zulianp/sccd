@@ -35,10 +35,7 @@ exec 3>&1
 exec 1>&2
 
 DATA_DIR="${SCCD_DATA_DIR:-"${BENCHMARK_DIR}/../data"}"
-JSON_PROJECT_DIR="${BENCHMARK_DIR}/json"
-JSON_BUILD_DIR="${SCCD_JSON_BUILD_DIR:-"${BENCHMARK_DIR}/../build_json"}"
 SCCD_BUILD_DIR="${SCCD_BUILD_DIR:-"${BENCHMARK_DIR}/../build_benchmark"}"
-PYTHON_DIR="${BENCHMARK_DIR}/../python"
 PYTHON="${PYTHON:-python3}"
 ROOT_DIR="${BENCHMARK_DIR}/.."
 
@@ -59,35 +56,12 @@ parallel_jobs() {
     fi
 }
 
-if is_enabled "${SCCD_SKIP_DOWNLOAD}"; then
-    printf 'note: SCCD_SKIP_DOWNLOAD is set; assuming %s is already populated\n' "${DATA_DIR}" >&2
-else
-    "${SCRIPT_DIR}/download_datasets.sh"
-fi
-
-# A CMake cache remembers the source directory it was generated from and refuses
-# to be reused with another -- a hard error, not a reconfigure. Drop a build tree
-# that points elsewhere rather than making the caller work that out from CMake's
-# "does not match the source used to generate cache".
-if [[ -f "${JSON_BUILD_DIR}/CMakeCache.txt" ]]; then
-    cached_home="$(sed -n 's/^CMAKE_HOME_DIRECTORY:INTERNAL=//p' "${JSON_BUILD_DIR}/CMakeCache.txt" | tail -n 1)"
-    if [[ -n "${cached_home}" && "${cached_home}" != "${JSON_PROJECT_DIR}" ]]; then
-        printf 'note: %s was configured from %s; reconfiguring\n' "${JSON_BUILD_DIR}" "${cached_home}" >&2
-        rm -rf "${JSON_BUILD_DIR}"
-    fi
-fi
-
-cmake -S "${JSON_PROJECT_DIR}" -B "${JSON_BUILD_DIR}" -DCMAKE_BUILD_TYPE=Release
-cmake --build "${JSON_BUILD_DIR}" --config Release --target boxes_json_to_raw mma_bool_json_to_raw --parallel "$(parallel_jobs)"
-
-BOXES_JSON_TO_RAW="${JSON_BUILD_DIR}/boxes_json_to_raw"
-if [[ ! -x "${BOXES_JSON_TO_RAW}" && -x "${JSON_BUILD_DIR}/Release/boxes_json_to_raw" ]]; then
-    BOXES_JSON_TO_RAW="${JSON_BUILD_DIR}/Release/boxes_json_to_raw"
-fi
-MMA_BOOL_JSON_TO_RAW="${JSON_BUILD_DIR}/mma_bool_json_to_raw"
-if [[ ! -x "${MMA_BOOL_JSON_TO_RAW}" && -x "${JSON_BUILD_DIR}/Release/mma_bool_json_to_raw" ]]; then
-    MMA_BOOL_JSON_TO_RAW="${JSON_BUILD_DIR}/Release/mma_bool_json_to_raw"
-fi
+# Downloading, converting and verifying the datasets is prepare_data.sh's job.
+# Every step there skips work that is already current, so this costs a few
+# seconds on a repeat run -- and it exits non-zero if the ground truth is
+# incomplete, which stops a benchmark from quietly scoring unconverted roots as
+# "no collision" the way cloth-funnel's half-converted oracle did.
+"${SCRIPT_DIR}/prepare_data.sh"
 
 datasets=()
 is_enabled "${SCCD_ENABLE_ARMADILLO_ROLLERS}" && datasets+=("armadillo-rollers")
@@ -96,30 +70,6 @@ is_enabled "${SCCD_ENABLE_CLOTH_FUNNEL}" && datasets+=("cloth-funnel")
 is_enabled "${SCCD_ENABLE_N_BODY_SIMULATION}" && datasets+=("n-body-simulation")
 is_enabled "${SCCD_ENABLE_PUFFER_BALL}" && datasets+=("puffer-ball")
 is_enabled "${SCCD_ENABLE_ROD_TWIST}" && datasets+=("rod-twist")
-
-for dataset in ${datasets[@]+"${datasets[@]}"}; do
-    boxes_dir="${DATA_DIR}/${dataset}/boxes"
-    [[ -d "${boxes_dir}" ]] || continue
-    find "${boxes_dir}" -maxdepth 1 -name '*.json' -print0 | xargs -0 sh -c '
-        if [ "$#" -gt 0 ]; then
-            "$0" "$@"
-        fi
-    ' "${BOXES_JSON_TO_RAW}"
-done
-
-"${PYTHON}" "${BENCHMARK_DIR}/roots_to_raw.py" "${DATA_DIR}" "${PYTHON_DIR}" ${datasets[@]+"${datasets[@]}"}
-
-is_enabled "${SCCD_ENABLE_CLOTH_FUNNEL}" && "${PYTHON}" "${PYTHON_DIR}"/sccd_strip_nonascii.py "${DATA_DIR}"/cloth-funnel/frames/*.ply
-
-for dataset in ${datasets[@]+"${datasets[@]}"}; do
-    mma_bool_dir="${DATA_DIR}/${dataset}/mma_bool"
-    [[ -d "${mma_bool_dir}" ]] || continue
-    find "${mma_bool_dir}" -maxdepth 1 -name '*_mma_bool.json' -print0 | xargs -0 sh -c '
-        if [ "$#" -gt 0 ]; then
-            "$0" "$@"
-        fi
-    ' "${MMA_BOOL_JSON_TO_RAW}"
-done
 
 cmake_bench_args=(-DCMAKE_BUILD_TYPE=Release -DSCCD_ENABLE_SMESH=ON -DSCCD_ENABLE_OPENMP=ON -DSCCD_ENABLE_TIGHT_INCLUSION=ON)
 if [[ -n "${SCCD_SMESH_DIR:-}" ]]; then
@@ -171,28 +121,20 @@ exec 1>&3
 BENCH_OUT_DIR="${SCCD_BENCH_OUT_DIR:-"${BENCHMARK_DIR}/out"}"
 
 BENCH_CSV="${SCCD_BENCH_CSV:-"${BENCH_OUT_DIR}/bench.csv"}"
-BENCH_AGG_CSV="${SCCD_BENCH_AGG_CSV:-"${BENCH_OUT_DIR}/bench_aggregate.csv"}"
-BENCH_PAIRED_CSV="${BENCH_AGG_CSV/_aggregate/_paired}"
-if [[ "${BENCH_PAIRED_CSV}" == "${BENCH_AGG_CSV}" ]]; then
-    BENCH_PAIRED_CSV="$(dirname "${BENCH_AGG_CSV}")/$(basename "${BENCH_AGG_CSV%.*}")_paired.${BENCH_AGG_CSV##*.}"
-fi
-BENCH_NP_QUERY_TIMING_CSV="${BENCH_AGG_CSV/_aggregate/_np_query_timing}"
-if [[ "${BENCH_NP_QUERY_TIMING_CSV}" == "${BENCH_AGG_CSV}" ]]; then
-    BENCH_NP_QUERY_TIMING_CSV="$(dirname "${BENCH_AGG_CSV}")/$(basename "${BENCH_AGG_CSV%.*}")_np_query_timing.${BENCH_AGG_CSV##*.}"
-fi
-BENCH_TOI_ERROR_CSV="${BENCH_AGG_CSV/_aggregate/_toi_error}"
-if [[ "${BENCH_TOI_ERROR_CSV}" == "${BENCH_AGG_CSV}" ]]; then
-    BENCH_TOI_ERROR_CSV="$(dirname "${BENCH_AGG_CSV}")/$(basename "${BENCH_AGG_CSV%.*}")_toi_error.${BENCH_AGG_CSV##*.}"
-fi
-BENCH_MISSING_PAIRS_CSV="${SCCD_MISSING_PAIRS_CSV:-"${BENCH_AGG_CSV/_aggregate/_missing_pairs}"}"
-if [[ "${BENCH_MISSING_PAIRS_CSV}" == "${BENCH_AGG_CSV}" ]]; then
-    BENCH_MISSING_PAIRS_CSV="$(dirname "${BENCH_AGG_CSV}")/$(basename "${BENCH_AGG_CSV%.*}")_missing_pairs.${BENCH_AGG_CSV##*.}"
-fi
-BENCH_FIGURE_DIR="${SCCD_BENCH_FIGURE_DIR:-"${BENCH_OUT_DIR}/figures"}"
-BENCH_REPORT_TEX="${SCCD_BENCH_REPORT_TEX:-"${BENCH_OUT_DIR}/bench_report.tex"}"
-mkdir -p "$(dirname "${BENCH_CSV}")" "$(dirname "${BENCH_AGG_CSV}")" "$(dirname "${BENCH_MISSING_PAIRS_CSV}")" "${BENCH_FIGURE_DIR}" "$(dirname "${BENCH_REPORT_TEX}")"
+BENCH_MISSING_PAIRS_CSV="${SCCD_MISSING_PAIRS_CSV:-"${BENCH_OUT_DIR}/bench_missing_pairs.csv"}"
+mkdir -p "$(dirname "${BENCH_CSV}")" "$(dirname "${BENCH_MISSING_PAIRS_CSV}")"
 
-BENCH_HEADER='dataset,mode,case,type,queries,prep_ms,broad_ms,narrow_ms,query_narrow_ms,fp,fn,broad_fp,broad_fn'
+# The header comes from the driver, never from here.
+#
+# This used to be a hardcoded 13-column string while sccd_bench printed 25, and
+# the run appended the driver's rows with `tail -n +2`. Columns 14-25 --
+# narrow_ms_s1 and every toi_* accuracy column -- therefore landed unnamed, and
+# csv.DictReader filed them under the None key where no report ever saw them.
+# The driver prints its header before it touches a dataset, so invoking it with
+# no dataset arguments yields exactly the current header and nothing else.
+bench_header() {
+    "${SCCD_BENCH}" --header 2>/dev/null
+}
 
 mode_label() {
     case "$1" in
@@ -201,6 +143,12 @@ mode_label() {
         *) echo "mode$1" ;;
     esac
 }
+
+BENCH_HEADER="$(bench_header)"
+if [[ -z "${BENCH_HEADER}" ]]; then
+    printf 'error: %s printed no header; refusing to write a CSV with no schema\n' "${SCCD_BENCH}" >&2
+    exit 1
+fi
 
 if [[ "${#datasets[@]}" -gt 0 ]]; then
     : > "${BENCH_CSV}"
@@ -220,9 +168,6 @@ else
 fi
 
 exec 1>&2
-
-"${PYTHON}" "${BENCHMARK_DIR}/bench_postprocess.py" \
-    "${BENCH_CSV}" "${BENCH_AGG_CSV}" "${BENCH_FIGURE_DIR}" "${BENCH_REPORT_TEX}" "${DATA_DIR}"
 
 # --- accuracy against TightInclusion, per mode -----------------------------
 # Timing alone cannot tell you whether a mode is safe to use. The oracle checks
@@ -261,23 +206,21 @@ else
     printf 'note: ti_oracle was not built; skipping the accuracy comparison\n' >&2
 fi
 
-# --- HTML report ------------------------------------------------------------
-BENCH_REPORT_HTML="${SCCD_BENCH_REPORT_HTML:-"${BENCH_OUT_DIR}/bench_report.html"}"
-"${PYTHON}" "${BENCHMARK_DIR}/bench_report_html.py" \
-    --aggregate "${BENCH_AGG_CSV}" \
-    --toi-error "${BENCH_TOI_ERROR_CSV}" \
-    --oracle "${ORACLE_CSV}" \
-    --out "${BENCH_REPORT_HTML}" \
-  && printf 'report: %s\n' "${BENCH_REPORT_HTML}" >&2
+# --- report -----------------------------------------------------------------
+# One module over the two CSVs this run produced: figures as PDF and PNG,
+# booktabs tables, and the Markdown summary. It exits non-zero if any mode
+# reported a late time of impact, so a bad run fails here rather than being
+# read off a table by someone who did not think to look.
+( cd "${BENCHMARK_DIR}" && "${PYTHON}" -m report \
+    "${BENCH_CSV}" "${BENCH_OUT_DIR}/report" "${ORACLE_CSV}" ) \
+  && printf 'report: %s\n' "${BENCH_OUT_DIR}/report/summary.md" >&2
 
+# Everything needed to reproduce and to read the run: the two CSVs it was
+# computed from, and the report generated off them.
 BENCH_ARCHIVE="${BENCH_OUT_DIR}/sccd-benchmark-$(date +%Y-%m-%d).tar.gz"
 tar -czf "${BENCH_ARCHIVE}" \
     -C "$(dirname "${BENCH_CSV}")" "$(basename "${BENCH_CSV}")" \
-    -C "$(dirname "${BENCH_AGG_CSV}")" "$(basename "${BENCH_AGG_CSV}")" \
-    -C "$(dirname "${BENCH_PAIRED_CSV}")" "$(basename "${BENCH_PAIRED_CSV}")" \
-    -C "$(dirname "${BENCH_NP_QUERY_TIMING_CSV}")" "$(basename "${BENCH_NP_QUERY_TIMING_CSV}")" \
-    -C "$(dirname "${BENCH_TOI_ERROR_CSV}")" "$(basename "${BENCH_TOI_ERROR_CSV}")" \
     -C "$(dirname "${BENCH_MISSING_PAIRS_CSV}")" "$(basename "${BENCH_MISSING_PAIRS_CSV}")" \
-    -C "$(dirname "${BENCH_REPORT_TEX}")" "$(basename "${BENCH_REPORT_TEX}")" \
-    -C "$(dirname "${BENCH_FIGURE_DIR}")" "$(basename "${BENCH_FIGURE_DIR}")" \
-    -C "$(dirname "${BENCH_REPORT_HTML}")" "$(basename "${BENCH_REPORT_HTML}")"
+    -C "${BENCH_OUT_DIR}" "$(basename "${ORACLE_DIR}")" \
+    -C "${BENCH_OUT_DIR}" report
+printf 'archive: %s\n' "${BENCH_ARCHIVE}" >&2

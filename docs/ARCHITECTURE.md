@@ -95,7 +95,9 @@ scene with the same tolerances. Part of that is the price of the guarantee, whic
 the host pays too; part is that the device re-evaluates all eight corners of both
 children at every split where the host inherits four of them from the parent.
 
-Figures for all of this are in [`BENCHMARKS.md`](BENCHMARKS.md).
+Figures for all of this are in [`BENCHMARKS.md`](BENCHMARKS.md), and
+[`CUDA.md`](CUDA.md) is the guide to using the device path rather than to how it
+works.
 
 Root finding computes in double regardless of the storage type: in single
 precision the certified error bound and the tolerances that terminate the search

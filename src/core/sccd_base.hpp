@@ -89,10 +89,9 @@
  * An AABB table is 2 * SCCD_DIM rows of n -- the minima first, then the maxima,
  * so the maximum of axis d is row `SCCD_DIM + d`.
  *
- * This is a constant rather than a parameter on purpose. The device broad phase
- * used to take a runtime `dim` its host counterpart did not, and it could not
- * honour any value but 3: the overlap predicate is structurally three
- * dimensional -- sccd::disjoint and vaabb_overlap_one_to_many_bits take x, y and
+ * This is a constant rather than a parameter on purpose. A runtime `dim` could
+ * not be honoured at any value but 3, because the overlap predicate is
+ * structurally three dimensional -- sccd::disjoint and vaabb_overlap_one_to_many_bits take x, y and
  * z as separate positional arguments, and their SIMD forms load three min rows
  * and three max rows. A measured run at dim = 2 returns zero pairs, because the
  * predicate reads row 2 (an x maximum) as a z minimum. An interface should not
