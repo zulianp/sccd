@@ -242,14 +242,30 @@ class SceneSummary:
     toi_max_early: list[float] = field(default_factory=list)
 
 
-def by_scene(rows: list[dict]) -> dict[tuple[str, str], SceneSummary]:
+def broadphases(rows: list[dict]) -> list[str]:
+    """Which broad-phase strategies the CSV holds, in a stable order."""
+    seen = {r.get("broadphase") or "" for r in rows}
+    seen.discard("")
+    return sorted(seen)
+
+
+def by_scene(rows: list[dict],
+             broadphase: str | None = None) -> dict[tuple[str, str], SceneSummary]:
     """
-    Scene-level summary per mode.
+    Scene-level summary per mode, for one broad-phase strategy.
 
     Timings are totalled within a repeat first and only then compared across
     repeats. Adding up per-case medians would produce a scene total that no
     single run ever produced, and would understate the spread besides.
+
+    `broadphase` selects a strategy and must be given whenever the CSV holds
+    more than one. Without it the rows of two strategies would be summed into
+    a single scene total, which is not a measurement of anything: they run the
+    same cases and produce the same pairs, so the total would simply be double
+    and the spread would be the difference between the two implementations.
     """
+    if broadphase is not None:
+        rows = [r for r in rows if (r.get("broadphase") or broadphase) == broadphase]
     # (dataset, mode) -> repeat index -> column -> running total
     per_repeat: dict[tuple[str, str], list[dict[str, float]]] = defaultdict(list)
     seen_case_repeat: dict[tuple[str, str, str], int] = defaultdict(int)
