@@ -88,14 +88,14 @@ while cloth-ball contributes 79.
 
 | scene             | cases | candidate pairs/step |   queries | with a root |
 |-------------------|------:|---------------------:|----------:|------------:|
-| armadillo-rollers |   781 |              109,214 |   131,441 |     130,859 |
-| cloth-ball        |    79 |            2,217,099 |   664,940 |     664,919 |
-| cloth-funnel      |   577 |               43,661 |     7,552 |       6,773 |
-| n-body            |   146 |           15,436,757 | 2,947,719 |   2,947,611 |
-| puffer-ball       |   240 |           30,529,227 | 1,514,172 |   1,486,790 |
-| rod-twist         | 4,571 |              847,250 |   549,208 |     285,431 |
+| armadillo-rollers |   779 |              109,134 |   131,441 |     130,859 |
+| cloth-ball        |    78 |            2,244,329 |   664,940 |     664,919 |
+| cloth-funnel      |   575 |               43,723 |     7,552 |       6,773 |
+| n-body            |   145 |           15,403,679 | 2,947,719 |   2,947,611 |
+| puffer-ball       |   239 |           30,535,962 | 1,514,172 |   1,486,790 |
+| rod-twist         | 4,559 |              846,976 |   549,208 |     285,431 |
 
-Source: `benchmark/results/sweep-gh200-all.csv`
+Source: `benchmark/results/sweep-gh200-bp.csv`
 
 <!-- sccd:end dataset -->
 
@@ -215,34 +215,34 @@ one column that is not part of the gate:
 
 | scene             | mode          |   queries | toi compared | late | false pos. | false neg. | mesh-path divergence |
 |-------------------|---------------|----------:|-------------:|-----:|-----------:|-----------:|---------------------:|
-| armadillo-rollers | Relaxed (GPU) |   131,441 |      130,859 |    0 |        322 |          0 |                    0 |
+| armadillo-rollers | Relaxed (GPU) |   131,261 |      130,681 |    0 |        322 |          0 |                    0 |
 | armadillo-rollers | Tight (GPU)   |   131,441 |      130,859 |    0 |         24 |          0 |                    0 |
-| armadillo-rollers | Relaxed       |   131,441 |      130,859 |    0 |        232 |          0 |                    0 |
+| armadillo-rollers | Relaxed       |   131,261 |      130,681 |    0 |        232 |          0 |                    0 |
 | armadillo-rollers | Tight         |   131,441 |      130,859 |    0 |         24 |          0 |                    0 |
-| cloth-ball        | Relaxed (GPU) |   664,940 |      664,919 |    0 |          2 |          0 |                    0 |
+| cloth-ball        | Relaxed (GPU) |   664,939 |      664,918 |    0 |          2 |          0 |                    0 |
 | cloth-ball        | Tight (GPU)   |   664,940 |      664,919 |    0 |          1 |          0 |                    0 |
-| cloth-ball        | Relaxed       |   664,940 |      664,919 |    0 |          2 |          0 |                    0 |
+| cloth-ball        | Relaxed       |   664,939 |      664,918 |    0 |          2 |          0 |                    0 |
 | cloth-ball        | Tight         |   664,940 |      664,919 |    0 |          1 |          0 |                    0 |
-| cloth-funnel      | Relaxed (GPU) |     7,552 |        6,773 |    0 |        742 |          0 |                    0 |
+| cloth-funnel      | Relaxed (GPU) |     7,544 |        6,766 |    0 |        741 |          0 |                    0 |
 | cloth-funnel      | Tight (GPU)   |     7,552 |        6,773 |    0 |         15 |          0 |                    0 |
-| cloth-funnel      | Relaxed       |     7,552 |        6,773 |    0 |        687 |          0 |                    0 |
+| cloth-funnel      | Relaxed       |     7,544 |        6,766 |    0 |        686 |          0 |                    0 |
 | cloth-funnel      | Tight         |     7,552 |        6,773 |    0 |         15 |          0 |                    0 |
-| n-body            | Relaxed (GPU) | 2,947,719 |    2,947,611 |    0 |         28 |          0 |                    0 |
+| n-body            | Relaxed (GPU) | 2,921,071 |    2,920,965 |    0 |         28 |          0 |                    0 |
 | n-body            | Tight (GPU)   | 2,947,719 |    2,947,611 |    0 |         12 |          0 |                    0 |
-| n-body            | Relaxed       | 2,947,719 |    2,947,611 |    0 |          9 |          0 |                    0 |
+| n-body            | Relaxed       | 2,921,071 |    2,920,965 |    0 |          9 |          0 |                    0 |
 | n-body            | Tight         | 2,947,719 |    2,947,611 |    0 |         11 |          0 |                    0 |
-| puffer-ball       | Relaxed (GPU) | 1,514,172 |    1,486,790 |    0 |     27,380 |          0 |                    0 |
+| puffer-ball       | Relaxed (GPU) | 1,513,963 |    1,486,587 |    0 |     27,374 |          0 |                    0 |
 | puffer-ball       | Tight (GPU)   | 1,514,172 |    1,486,790 |    0 |        558 |          0 |                    0 |
-| puffer-ball       | Relaxed       | 1,514,172 |    1,486,790 |    0 |     27,380 |          0 |                    0 |
+| puffer-ball       | Relaxed       | 1,513,963 |    1,486,587 |    0 |     27,374 |          0 |                    0 |
 | puffer-ball       | Tight         | 1,514,172 |    1,486,790 |    0 |        536 |          0 |                    0 |
-| rod-twist         | Relaxed (GPU) |   549,208 |      285,431 |    0 |    244,973 |          0 |                    0 |
+| rod-twist         | Relaxed (GPU) |   546,081 |      283,655 |    0 |    243,717 |          0 |                    0 |
 | rod-twist         | Tight (GPU)   |   549,208 |      285,431 |    0 |      1,245 |          0 |                    0 |
-| rod-twist         | Relaxed       |   549,208 |      285,431 |    0 |    228,608 |          0 |                    0 |
+| rod-twist         | Relaxed       |   546,081 |      283,655 |    0 |    227,441 |          0 |                    0 |
 | rod-twist         | Tight         |   549,208 |      285,431 |    0 |      1,243 |          0 |                    0 |
 
 Measured against the exact roots shipped with the dataset, not against TightInclusion: TightInclusion's own answer is itself a lower bound on the truth, so comparing against it over-reports lateness. The last column is not part of the gate. It counts cases where the earliest-impact answer computed over the *mesh* is later than the earliest exact root of the *curated queries*, which are two separately stored geometries: the mesh is read from PLY, the queries are exact dyadic rationals. It is a measure of the agreement between those two inputs rather than of the kernel, and with the mesh stored in double it is zero everywhere.
 
-Source: `benchmark/results/sweep-gh200-all.csv`
+Source: `benchmark/results/sweep-gh200-bp.csv`
 
 <!-- sccd:end conservativeness -->
 
@@ -265,34 +265,34 @@ runs with the full run-to-run range beside it.
 
 | scene             | mode          | cases |         pairs | rep |           prep ms |          broad ms |       earliest ms |       per-pair ms |            total ms |
 |-------------------|---------------|------:|--------------:|----:|------------------:|------------------:|------------------:|------------------:|--------------------:|
-| armadillo-rollers | Relaxed (GPU) |   781 |    85,296,282 |   3 |   2167.9 / 2205.4 |     978.5 / 985.2 |   1828.5 / 1832.7 |   2842.3 / 2846.6 |     4970.4 / 5019.1 |
-| armadillo-rollers | Tight (GPU)   |   781 |    85,296,282 |   3 |   2084.0 / 2102.5 |     974.0 / 982.9 |   2097.9 / 2119.9 |   3235.1 / 3236.8 |     5174.5 / 5186.8 |
-| armadillo-rollers | Relaxed       |   781 |    85,296,282 |   3 |   8048.7 / 8056.8 |   3294.5 / 3299.1 |     739.7 / 745.2 |   2925.5 / 2935.8 |   12082.6 / 12091.1 |
-| armadillo-rollers | Tight         |   781 |    85,296,282 |   3 |   8089.9 / 8118.1 |   3281.4 / 3281.5 |   1037.7 / 1041.0 |   3535.9 / 3546.2 |   12412.3 / 12423.5 |
-| cloth-ball        | Relaxed (GPU) |    79 |   175,150,856 |   3 |     540.0 / 543.5 |     432.3 / 436.3 |     507.2 / 518.2 |   1130.0 / 1131.1 |     1483.1 / 1488.6 |
-| cloth-ball        | Tight (GPU)   |    79 |   175,150,856 |   3 |     539.9 / 540.5 |     422.0 / 425.5 |     521.8 / 528.8 |   1076.5 / 1076.9 |     1485.3 / 1488.3 |
-| cloth-ball        | Relaxed       |    79 |   175,150,856 |   3 |   1240.5 / 1246.9 |     943.4 / 949.2 |     385.5 / 390.9 |     811.9 / 815.9 |     2573.4 / 2580.5 |
-| cloth-ball        | Tight         |    79 |   175,150,856 |   3 |   1255.1 / 1256.7 |     930.1 / 932.8 |     214.3 / 214.7 |   1207.3 / 1213.0 |     2398.0 / 2402.8 |
-| cloth-funnel      | Relaxed (GPU) |   577 |    25,192,698 |   3 |   1392.3 / 1395.7 |     588.7 / 643.4 |     876.7 / 937.9 |     779.1 / 796.6 |     2857.7 / 2977.0 |
-| cloth-funnel      | Tight (GPU)   |   577 |    25,192,698 |   3 |   1318.7 / 1363.0 |     584.7 / 642.4 |   1008.8 / 1085.2 |   1161.0 / 1213.0 |     2956.4 / 3046.3 |
-| cloth-funnel      | Relaxed       |   577 |    25,192,698 |   3 |   5600.3 / 5622.1 |   2141.7 / 2152.0 |     521.6 / 527.2 |    996.2 / 1002.3 |     8273.9 / 8291.0 |
-| cloth-funnel      | Tight         |   577 |    25,192,698 |   3 |   5656.6 / 5678.7 |   2156.1 / 2161.2 |     657.3 / 660.2 |   1282.9 / 1288.8 |     8436.1 / 8492.1 |
-| n-body            | Relaxed (GPU) |   146 | 2,253,766,609 |   3 |   1568.1 / 1575.0 |   1731.4 / 1731.6 |   5510.6 / 5561.2 |   5131.9 / 5218.4 |     8810.1 / 8867.8 |
-| n-body            | Tight (GPU)   |   146 | 2,253,766,609 |   3 |   1590.7 / 1590.7 |   1776.2 / 1784.4 |   5512.7 / 5760.3 |   4689.2 / 4823.7 |     8877.5 / 8983.7 |
-| n-body            | Relaxed       |   146 | 2,253,766,609 |   3 |   2529.1 / 2607.4 |   7218.4 / 7250.1 |   3506.9 / 3562.4 | 10143.0 / 10207.3 |   13332.7 / 13341.6 |
-| n-body            | Tight         |   146 | 2,253,766,609 |   3 |   2605.5 / 2641.3 |   7167.6 / 7244.2 |   1728.7 / 1734.5 | 19545.5 / 19820.8 |   11537.6 / 11584.2 |
-| puffer-ball       | Relaxed (GPU) |   240 | 7,327,014,600 |   3 | 17279.7 / 17383.1 | 34320.7 / 34397.6 | 44845.0 / 45389.0 | 11324.8 / 11859.4 |   96548.8 / 97066.4 |
-| puffer-ball       | Tight (GPU)   |   240 | 7,327,014,600 |   3 | 17177.2 / 17225.4 | 34169.6 / 34786.8 | 45823.5 / 46331.1 | 12025.8 / 12053.6 |   97381.8 / 97585.0 |
-| puffer-ball       | Relaxed       |   240 | 7,327,014,600 |   3 | 19210.1 / 20116.2 | 28195.8 / 28675.9 | 12216.3 / 12498.6 | 14243.4 / 14443.4 |   59355.3 / 61290.7 |
-| puffer-ball       | Tight         |   240 | 7,327,014,600 |   3 | 18903.1 / 19701.0 | 28180.7 / 28348.7 |   6099.9 / 6115.2 | 56649.4 / 56767.5 |   53180.4 / 54164.8 |
-| rod-twist         | Relaxed (GPU) |  4571 | 3,872,779,843 |   3 | 26351.6 / 26404.9 |   7270.5 / 7416.1 | 10631.1 / 11069.8 | 22397.6 / 22889.0 |   44306.5 / 44837.6 |
-| rod-twist         | Tight (GPU)   |  4571 | 3,872,779,843 |   3 | 25123.6 / 26371.0 |   7072.9 / 7459.7 | 20088.8 / 20585.9 | 31786.9 / 32696.7 |   52285.3 / 54416.6 |
-| rod-twist         | Relaxed       |  4571 | 3,872,779,843 |   3 | 67525.1 / 67546.4 | 28924.7 / 28955.8 | 13372.9 / 13380.9 | 40385.1 / 40454.8 | 109852.0 / 109853.7 |
-| rod-twist         | Tight         |  4571 | 3,872,779,843 |   3 | 67670.2 / 69161.1 | 28687.3 / 28880.4 | 18538.1 / 18609.7 | 65466.3 / 65512.7 | 114672.1 / 116651.2 |
+| armadillo-rollers | Relaxed (GPU) |   779 |    85,015,700 |   3 |   2069.6 / 2071.3 |     838.6 / 841.4 |   1533.7 / 1536.7 |   2324.8 / 2333.5 |     4393.4 / 4446.4 |
+| armadillo-rollers | Tight (GPU)   |   781 |    85,296,282 |   3 |   1848.8 / 1960.1 |     813.1 / 838.0 |   1735.9 / 1763.2 |   2650.0 / 2663.7 |     4417.8 / 4509.0 |
+| armadillo-rollers | Relaxed       |   779 |    85,015,700 |   3 |   8106.5 / 8135.7 |   3322.1 / 3354.3 |     759.8 / 771.9 |   2942.3 / 2959.0 |   12188.4 / 12262.0 |
+| armadillo-rollers | Tight         |   781 |    85,296,282 |   3 |   8088.8 / 8212.7 |   3331.1 / 3376.8 |   1036.6 / 1040.4 |   3565.9 / 3587.7 |   12456.6 / 12629.9 |
+| cloth-ball        | Relaxed (GPU) |    78 |   175,057,694 |   3 |     525.1 / 526.1 |     367.1 / 369.8 |     425.6 / 428.9 |     920.2 / 935.3 |     1316.7 / 1324.8 |
+| cloth-ball        | Tight (GPU)   |    79 |   175,150,856 |   3 |     530.4 / 533.7 |     369.1 / 371.3 |     441.2 / 442.2 |     883.1 / 889.4 |     1343.4 / 1343.8 |
+| cloth-ball        | Relaxed       |    78 |   175,057,694 |   3 |   1212.5 / 1218.4 |     932.9 / 937.5 |     385.5 / 387.8 |     789.9 / 802.9 |     2530.8 / 2543.6 |
+| cloth-ball        | Tight         |    79 |   175,150,856 |   3 |   1230.0 / 1231.1 |     945.3 / 946.7 |     214.7 / 216.6 |   1206.8 / 1220.8 |     2388.0 / 2393.3 |
+| cloth-funnel      | Relaxed (GPU) |   575 |    25,141,046 |   3 |   1358.4 / 1376.9 |     540.9 / 545.7 |     818.3 / 837.9 |     727.4 / 728.4 |     2694.1 / 2760.5 |
+| cloth-funnel      | Tight (GPU)   |   577 |    25,192,698 |   3 |   1353.5 / 1358.1 |     540.6 / 541.4 |     943.9 / 969.6 |   1071.1 / 1074.4 |     2836.1 / 2836.5 |
+| cloth-funnel      | Relaxed       |   575 |    25,141,046 |   3 |   5687.6 / 5764.2 |   2181.2 / 2191.1 |     553.7 / 568.0 |   1026.8 / 1038.2 |     8422.4 / 8523.4 |
+| cloth-funnel      | Tight         |   577 |    25,192,698 |   3 |   5661.3 / 5701.0 |   2185.8 / 2198.8 |     658.6 / 664.2 |   1298.2 / 1298.4 |     8524.3 / 8545.5 |
+| n-body            | Relaxed (GPU) |   145 | 2,233,533,498 |   3 |     967.8 / 978.7 |   1326.4 / 1330.1 |   4709.9 / 4717.8 |   4335.3 / 4455.1 |     6983.6 / 7015.0 |
+| n-body            | Tight (GPU)   |   146 | 2,253,766,609 |   3 |   1004.8 / 1010.8 |   1311.7 / 1337.1 |   4720.7 / 4722.7 |   3976.9 / 4065.0 |     7043.2 / 7062.6 |
+| n-body            | Relaxed       |   145 | 2,233,533,498 |   3 |   2482.9 / 2492.2 |   7183.8 / 7189.1 |   3497.6 / 3554.2 | 10002.6 / 10064.4 |   13164.3 / 13228.7 |
+| n-body            | Tight         |   146 | 2,253,766,609 |   3 |   2607.7 / 2618.8 |   7223.9 / 7286.5 |   1738.0 / 1756.1 | 19258.3 / 19443.3 |   11555.4 / 11650.2 |
+| puffer-ball       | Relaxed (GPU) |   239 | 7,298,095,145 |   3 | 16853.8 / 16990.3 | 27239.6 / 27256.6 | 38127.0 / 38131.4 | 10667.8 / 10669.8 |   81789.3 / 82356.9 |
+| puffer-ball       | Tight (GPU)   |   240 | 7,327,014,600 |   3 | 16975.7 / 17124.0 | 27521.8 / 27584.2 | 38657.9 / 38794.1 | 10752.3 / 11037.2 |   83171.7 / 83354.0 |
+| puffer-ball       | Relaxed       |   239 | 7,298,095,145 |   3 | 18928.3 / 19590.4 | 27289.2 / 27356.9 | 12063.1 / 12188.8 | 14353.1 / 14739.7 |   58172.0 / 58854.7 |
+| puffer-ball       | Tight         |   240 | 7,327,014,600 |   3 | 18898.1 / 19172.8 | 27335.1 / 27640.5 |   6049.4 / 6154.7 | 56908.1 / 56970.6 |   52374.1 / 52503.0 |
+| rod-twist         | Relaxed (GPU) |  4559 | 3,861,367,133 |   3 | 26191.6 / 26628.1 |   6780.7 / 7013.1 |   9715.2 / 9723.6 | 19749.6 / 19844.2 |   42687.5 / 43286.8 |
+| rod-twist         | Tight (GPU)   |  4571 | 3,872,779,843 |   3 | 25140.3 / 25800.2 |   6742.8 / 6908.7 | 17368.0 / 17514.2 | 27523.3 / 27625.2 |   49397.4 / 50076.9 |
+| rod-twist         | Relaxed       |  4559 | 3,861,367,133 |   3 | 66897.1 / 66993.6 | 28867.0 / 28918.5 | 13293.1 / 13373.1 | 39888.5 / 39892.8 | 109044.9 / 109285.3 |
+| rod-twist         | Tight         |  4571 | 3,872,779,843 |   3 | 66765.3 / 67399.4 | 28680.1 / 28853.0 | 18480.3 / 18549.3 | 65174.0 / 65384.2 | 113887.7 / 114732.7 |
 
 Each cell is the median over repeats and the slowest of them. A difference smaller than the gap between the two does not separate two modes and is not reported as a ratio anywhere in this document. Which mode is faster depends on the output mode as well as the scene, so the two are given side by side rather than one standing for the other.
 
-Source: `benchmark/results/sweep-gh200-all.csv`
+Source: `benchmark/results/sweep-gh200-bp.csv`
 
 <!-- sccd:end timing -->
 
@@ -303,32 +303,32 @@ Whole-scene milliseconds cannot be compared between a 79-case scene and a
 
 | scene             | mode          | broad Mpair/s | narrow Mpair/s |
 |-------------------|---------------|--------------:|---------------:|
-| armadillo-rollers | Relaxed (GPU) |          87.2 |           46.6 |
-| armadillo-rollers | Tight (GPU)   |          87.6 |           40.7 |
-| armadillo-rollers | Relaxed       |          25.9 |          115.3 |
-| armadillo-rollers | Tight         |          26.0 |           82.2 |
-| cloth-ball        | Relaxed (GPU) |         405.2 |          345.3 |
-| cloth-ball        | Tight (GPU)   |         415.1 |          335.7 |
-| cloth-ball        | Relaxed       |         185.7 |          454.4 |
-| cloth-ball        | Tight         |         188.3 |          817.5 |
-| cloth-funnel      | Relaxed (GPU) |          42.8 |           28.7 |
-| cloth-funnel      | Tight (GPU)   |          43.1 |           25.0 |
-| cloth-funnel      | Relaxed       |          11.8 |           48.3 |
-| cloth-funnel      | Tight         |          11.7 |           38.3 |
-| n-body            | Relaxed (GPU) |        1301.7 |          409.0 |
-| n-body            | Tight (GPU)   |        1268.9 |          408.8 |
-| n-body            | Relaxed       |         312.2 |          642.7 |
-| n-body            | Tight         |         314.4 |         1303.7 |
-| puffer-ball       | Relaxed (GPU) |         213.5 |          163.4 |
-| puffer-ball       | Tight (GPU)   |         214.4 |          159.9 |
-| puffer-ball       | Relaxed       |         259.9 |          599.8 |
-| puffer-ball       | Tight         |         260.0 |         1201.2 |
-| rod-twist         | Relaxed (GPU) |         532.7 |          364.3 |
-| rod-twist         | Tight (GPU)   |         547.5 |          192.8 |
-| rod-twist         | Relaxed       |         133.9 |          289.6 |
-| rod-twist         | Tight         |         135.0 |          208.9 |
+| armadillo-rollers | Relaxed (GPU) |         101.4 |           55.4 |
+| armadillo-rollers | Tight (GPU)   |         104.9 |           49.1 |
+| armadillo-rollers | Relaxed       |          25.6 |          111.9 |
+| armadillo-rollers | Tight         |          25.6 |           82.3 |
+| cloth-ball        | Relaxed (GPU) |         476.9 |          411.3 |
+| cloth-ball        | Tight (GPU)   |         474.5 |          397.0 |
+| cloth-ball        | Relaxed       |         187.7 |          454.1 |
+| cloth-ball        | Tight         |         185.3 |          815.7 |
+| cloth-funnel      | Relaxed (GPU) |          46.5 |           30.7 |
+| cloth-funnel      | Tight (GPU)   |          46.6 |           26.7 |
+| cloth-funnel      | Relaxed       |          11.5 |           45.4 |
+| cloth-funnel      | Tight         |          11.5 |           38.3 |
+| n-body            | Relaxed (GPU) |        1683.9 |          474.2 |
+| n-body            | Tight (GPU)   |        1718.2 |          477.4 |
+| n-body            | Relaxed       |         310.9 |          638.6 |
+| n-body            | Tight         |         312.0 |         1296.8 |
+| puffer-ball       | Relaxed (GPU) |         267.9 |          191.4 |
+| puffer-ball       | Tight (GPU)   |         266.2 |          189.5 |
+| puffer-ball       | Relaxed       |         267.4 |          605.0 |
+| puffer-ball       | Tight         |         268.0 |         1211.2 |
+| rod-twist         | Relaxed (GPU) |         569.5 |          397.5 |
+| rod-twist         | Tight (GPU)   |         574.4 |          223.0 |
+| rod-twist         | Relaxed       |         133.8 |          290.5 |
+| rod-twist         | Tight         |         135.0 |          209.6 |
 
-Source: `benchmark/results/sweep-gh200-all.csv`
+Source: `benchmark/results/sweep-gh200-bp.csv`
 
 <!-- sccd:end throughput -->
 
@@ -337,30 +337,30 @@ the reason the trade is worth stating as a trade:
 
 <!-- sccd:begin comparison -->
 
-- **armadillo-rollers (CPU, earliest)**: Relaxed is 1.40× faster than Tight in the narrow phase (740 ms against 1038 ms; run-to-run spread 1.6%).
-- **armadillo-rollers (CPU, per-pair)**: Relaxed is 1.21× faster than Tight in the narrow phase (2925 ms against 3536 ms; run-to-run spread 0.6%).
-- **armadillo-rollers (GPU, earliest)**: Relaxed (GPU) is 1.15× faster than Tight (GPU) in the narrow phase (1828 ms against 2098 ms; run-to-run spread 1.2%).
-- **armadillo-rollers (GPU, per-pair)**: Relaxed (GPU) is 1.14× faster than Tight (GPU) in the narrow phase (2842 ms against 3235 ms; run-to-run spread 0.9%).
-- **cloth-ball (CPU, earliest)**: Tight is 1.80× faster than Relaxed in the narrow phase (214 ms against 385 ms; run-to-run spread 2.0%).
-- **cloth-ball (CPU, per-pair)**: Relaxed is 1.49× faster than Tight in the narrow phase (812 ms against 1207 ms; run-to-run spread 1.7%).
-- **cloth-ball (GPU, earliest)**: Relaxed (GPU) and Tight (GPU) are inside noise (507 ms against 522 ms, spread 2.8%); this does not separate them.
-- **cloth-ball (GPU, per-pair)**: Tight (GPU) is 1.05× faster than Relaxed (GPU) in the narrow phase (1077 ms against 1130 ms; run-to-run spread 0.8%).
-- **cloth-funnel (CPU, earliest)**: Relaxed is 1.26× faster than Tight in the narrow phase (522 ms against 657 ms; run-to-run spread 6.4%).
-- **cloth-funnel (CPU, per-pair)**: Relaxed is 1.29× faster than Tight in the narrow phase (996 ms against 1283 ms; run-to-run spread 0.9%).
-- **cloth-funnel (GPU, earliest)**: Relaxed (GPU) and Tight (GPU) are inside noise (877 ms against 1009 ms, spread 13.9%); this does not separate them.
-- **cloth-funnel (GPU, per-pair)**: Relaxed (GPU) is 1.49× faster than Tight (GPU) in the narrow phase (779 ms against 1161 ms; run-to-run spread 13.7%).
-- **n-body (CPU, earliest)**: Tight is 2.03× faster than Relaxed in the narrow phase (1729 ms against 3507 ms; run-to-run spread 1.7%).
-- **n-body (CPU, per-pair)**: Relaxed is 1.93× faster than Tight in the narrow phase (10143 ms against 19546 ms; run-to-run spread 1.8%).
-- **n-body (GPU, earliest)**: Relaxed (GPU) and Tight (GPU) are inside noise (5511 ms against 5513 ms, spread 5.0%); this does not separate them.
-- **n-body (GPU, per-pair)**: Tight (GPU) is 1.09× faster than Relaxed (GPU) in the narrow phase (4689 ms against 5132 ms; run-to-run spread 3.9%).
-- **puffer-ball (CPU, earliest)**: Tight is 2.00× faster than Relaxed in the narrow phase (6100 ms against 12216 ms; run-to-run spread 4.5%).
-- **puffer-ball (CPU, per-pair)**: Relaxed is 3.98× faster than Tight in the narrow phase (14243 ms against 56649 ms; run-to-run spread 3.9%).
-- **puffer-ball (GPU, earliest)**: Relaxed (GPU) and Tight (GPU) are inside noise (44845 ms against 45823 ms, spread 2.3%); this does not separate them.
-- **puffer-ball (GPU, per-pair)**: Relaxed (GPU) and Tight (GPU) are inside noise (11325 ms against 12026 ms, spread 6.0%); this does not separate them.
-- **rod-twist (CPU, earliest)**: Relaxed is 1.39× faster than Tight in the narrow phase (13373 ms against 18538 ms; run-to-run spread 1.0%).
-- **rod-twist (CPU, per-pair)**: Relaxed is 1.62× faster than Tight in the narrow phase (40385 ms against 65466 ms; run-to-run spread 1.3%).
-- **rod-twist (GPU, earliest)**: Relaxed (GPU) is 1.89× faster than Tight (GPU) in the narrow phase (10631 ms against 20089 ms; run-to-run spread 11.9%).
-- **rod-twist (GPU, per-pair)**: Relaxed (GPU) is 1.42× faster than Tight (GPU) in the narrow phase (22398 ms against 31787 ms; run-to-run spread 13.2%).
+- **armadillo-rollers (CPU, earliest)**: Relaxed is 1.36× faster than Tight in the narrow phase (760 ms against 1037 ms; run-to-run spread 4.2%).
+- **armadillo-rollers (CPU, per-pair)**: Relaxed is 1.21× faster than Tight in the narrow phase (2942 ms against 3566 ms; run-to-run spread 1.6%).
+- **armadillo-rollers (GPU, earliest)**: Relaxed (GPU) is 1.13× faster than Tight (GPU) in the narrow phase (1534 ms against 1736 ms; run-to-run spread 2.1%).
+- **armadillo-rollers (GPU, per-pair)**: Relaxed (GPU) is 1.14× faster than Tight (GPU) in the narrow phase (2325 ms against 2650 ms; run-to-run spread 0.9%).
+- **cloth-ball (CPU, earliest)**: Tight is 1.80× faster than Relaxed in the narrow phase (215 ms against 385 ms; run-to-run spread 2.2%).
+- **cloth-ball (CPU, per-pair)**: Relaxed is 1.53× faster than Tight in the narrow phase (790 ms against 1207 ms; run-to-run spread 2.0%).
+- **cloth-ball (GPU, earliest)**: Relaxed (GPU) is 1.04× faster than Tight (GPU) in the narrow phase (426 ms against 441 ms; run-to-run spread 1.1%).
+- **cloth-ball (GPU, per-pair)**: Tight (GPU) is 1.04× faster than Relaxed (GPU) in the narrow phase (883 ms against 920 ms; run-to-run spread 1.9%).
+- **cloth-funnel (CPU, earliest)**: Relaxed is 1.19× faster than Tight in the narrow phase (554 ms against 659 ms; run-to-run spread 6.1%).
+- **cloth-funnel (CPU, per-pair)**: Relaxed is 1.26× faster than Tight in the narrow phase (1027 ms against 1298 ms; run-to-run spread 2.9%).
+- **cloth-funnel (GPU, earliest)**: Relaxed (GPU) is 1.15× faster than Tight (GPU) in the narrow phase (818 ms against 944 ms; run-to-run spread 5.2%).
+- **cloth-funnel (GPU, per-pair)**: Relaxed (GPU) is 1.47× faster than Tight (GPU) in the narrow phase (727 ms against 1071 ms; run-to-run spread 1.5%).
+- **n-body (CPU, earliest)**: Tight is 2.01× faster than Relaxed in the narrow phase (1738 ms against 3498 ms; run-to-run spread 2.4%).
+- **n-body (CPU, per-pair)**: Relaxed is 1.93× faster than Tight in the narrow phase (10003 ms against 19258 ms; run-to-run spread 1.2%).
+- **n-body (GPU, earliest)**: Relaxed (GPU) and Tight (GPU) are inside noise (4710 ms against 4721 ms, spread 0.7%); this does not separate them.
+- **n-body (GPU, per-pair)**: Tight (GPU) is 1.09× faster than Relaxed (GPU) in the narrow phase (3977 ms against 4335 ms; run-to-run spread 5.5%).
+- **puffer-ball (CPU, earliest)**: Tight is 1.99× faster than Relaxed in the narrow phase (6049 ms against 12063 ms; run-to-run spread 2.5%).
+- **puffer-ball (CPU, per-pair)**: Relaxed is 3.96× faster than Tight in the narrow phase (14353 ms against 56908 ms; run-to-run spread 6.1%).
+- **puffer-ball (GPU, earliest)**: Relaxed (GPU) is 1.01× faster than Tight (GPU) in the narrow phase (38127 ms against 38658 ms; run-to-run spread 0.8%).
+- **puffer-ball (GPU, per-pair)**: Relaxed (GPU) and Tight (GPU) are inside noise (10668 ms against 10752 ms, spread 4.8%); this does not separate them.
+- **rod-twist (CPU, earliest)**: Relaxed is 1.39× faster than Tight in the narrow phase (13293 ms against 18480 ms; run-to-run spread 0.7%).
+- **rod-twist (CPU, per-pair)**: Relaxed is 1.63× faster than Tight in the narrow phase (39889 ms against 65174 ms; run-to-run spread 0.3%).
+- **rod-twist (GPU, earliest)**: Relaxed (GPU) is 1.79× faster than Tight (GPU) in the narrow phase (9715 ms against 17368 ms; run-to-run spread 0.9%).
+- **rod-twist (GPU, per-pair)**: Relaxed (GPU) is 1.39× faster than Tight (GPU) in the narrow phase (19750 ms against 27523 ms; run-to-run spread 2.1%).
 
 <!-- sccd:end comparison -->
 
@@ -402,17 +402,55 @@ choice is purely about cost, and the shipped default does not fix a winner — i
 races the two per scene and keeps the faster, re-probing periodically so a scene
 that changes character can change the answer.
 
-The sweep below is that race run offline over the whole benchmark, with both
-strategies sampled on every scene, both processors and every mode. `prep` builds
-the acceleration structure — the sorted intervals or the grid — and is separated
-from the traversal that follows it, because that is where the two differ rather
-than in the total.
+The table below is that race run offline over the whole benchmark, with both
+strategies sampled on every scene and every mode. `prep` builds the acceleration
+structure — the sorted intervals or the grid — and is separated from the
+traversal that follows it, because that is where the two differ rather than in
+the total. Across 25,538 case-mode combinations the two report **identical
+candidate pair counts**, so nothing here is a difference in what is found.
+
+**The choice is a host one.** `SCCD_BROADPHASE` is read in the three host
+broad-phase functions and nowhere else; the device steps have no branch on it,
+so the device always runs its own path. Sampling both strategies on the GPU
+produces ties to within a millisecond, which is why only host rows are listed.
 
 <!-- sccd:begin broadphase -->
+
+| scene             | mode    | cell2d prep ms | sweep prep ms | cell2d broad ms | sweep broad ms | faster       |
+|-------------------|---------|---------------:|--------------:|----------------:|---------------:|--------------|
+| armadillo-rollers | Relaxed |           8106 |         26507 |            3322 |           3236 | sweep 1.03x  |
+| armadillo-rollers | Tight   |           8089 |         26637 |            3331 |           3231 | sweep 1.03x  |
+| cloth-ball        | Relaxed |           1212 |          2980 |             933 |            691 | sweep 1.35x  |
+| cloth-ball        | Tight   |           1230 |          3064 |             945 |            697 | sweep 1.36x  |
+| cloth-funnel      | Relaxed |           5688 |         19072 |            2181 |           2298 | cell2d 1.05x |
+| cloth-funnel      | Tight   |           5661 |         19460 |            2186 |           2340 | cell2d 1.07x |
+| n-body            | Relaxed |           2483 |          5717 |            7184 |           3818 | sweep 1.88x  |
+| n-body            | Tight   |           2608 |          5902 |            7224 |           3833 | sweep 1.88x  |
+| puffer-ball       | Relaxed |          18928 |         27304 |           27289 |         108994 | cell2d 3.99x |
+| puffer-ball       | Tight   |          18898 |         27213 |           27335 |         110588 | cell2d 4.05x |
+| rod-twist         | Relaxed |          66897 |        167942 |           28867 |          21534 | sweep 1.34x  |
+| rod-twist         | Tight   |          66765 |        169005 |           28680 |          21551 | sweep 1.33x  |
+
+`faster` names the winning strategy and by how much on the whole broad phase. A margin inside the run-to-run spread is reported as a tie rather than a winner.
+
+Source: `benchmark/results/sweep-gh200-bp.csv`
+
 <!-- sccd:end broadphase -->
 
-The refinement study below sweeps element count over two and a half orders of
-magnitude and pins down the scaling behind these numbers.
+**Neither strategy wins.** The sweep takes armadillo-rollers, cloth-ball,
+n-body and rod-twist by 1.03× to 1.88×; the cell list takes cloth-funnel by
+1.06× and puffer-ball by **4.0×**, and that last one is the reason the default
+does not simply pick the sweep: on the largest scene in the set the sweep's
+broad phase costs 109 s against the cell list's 27 s. A fixed choice is wrong
+somewhere, and wrong by a factor of four at the worst point, which is what makes
+racing them per scene worth its two probe steps.
+
+The two also divide their cost differently, and the split is the opposite of
+what the totals suggest. The sweep's `prep` — sorting the intervals — is two to
+three times the cell list's grid build on every scene, and it wins anyway
+wherever it wins, by traversing much less. The refinement study below sweeps
+element count over two and a half orders of magnitude and pins down that
+scaling.
 
 ## Against TightInclusion
 
@@ -535,32 +573,32 @@ implementations actually differ.
 
 | scene             | mode          | median earliness | worst case |
 |-------------------|---------------|-----------------:|-----------:|
-| armadillo-rollers | Relaxed (GPU) |         9.18e-05 |   9.42e-01 |
+| armadillo-rollers | Relaxed (GPU) |         9.33e-05 |   9.41e-01 |
 | armadillo-rollers | Tight (GPU)   |         3.41e-06 |   1.60e-02 |
 | armadillo-rollers | Relaxed       |         4.66e-05 |   9.41e-01 |
 | armadillo-rollers | Tight         |         3.39e-06 |   1.60e-02 |
-| cloth-ball        | Relaxed (GPU) |         1.10e-06 |   8.38e-04 |
-| cloth-ball        | Tight (GPU)   |         2.70e-07 |   1.77e-04 |
-| cloth-ball        | Relaxed       |         3.06e-07 |   5.40e-04 |
+| cloth-ball        | Relaxed (GPU) |         1.11e-06 |   8.38e-04 |
+| cloth-ball        | Tight (GPU)   |         2.71e-07 |   1.93e-04 |
+| cloth-ball        | Relaxed       |         3.09e-07 |   5.40e-04 |
 | cloth-ball        | Tight         |         2.72e-07 |   1.93e-04 |
-| cloth-funnel      | Relaxed (GPU) |         2.65e-02 |   1.00e+00 |
+| cloth-funnel      | Relaxed (GPU) |         2.64e-02 |   1.00e+00 |
 | cloth-funnel      | Tight (GPU)   |         3.22e-04 |   1.00e+00 |
-| cloth-funnel      | Relaxed       |         1.40e-02 |   1.00e+00 |
+| cloth-funnel      | Relaxed       |         1.39e-02 |   1.00e+00 |
 | cloth-funnel      | Tight         |         3.22e-04 |   1.00e+00 |
-| n-body            | Relaxed (GPU) |         1.04e-07 |   2.51e-03 |
-| n-body            | Tight (GPU)   |         3.02e-08 |   2.17e-04 |
+| n-body            | Relaxed (GPU) |         1.04e-07 |   2.52e-03 |
+| n-body            | Tight (GPU)   |         3.02e-08 |   2.16e-04 |
 | n-body            | Relaxed       |         1.82e-08 |   1.27e-03 |
 | n-body            | Tight         |         3.02e-08 |   2.40e-04 |
-| puffer-ball       | Relaxed (GPU) |         4.13e-02 |   9.75e-01 |
-| puffer-ball       | Tight (GPU)   |         4.00e-05 |   2.61e-01 |
-| puffer-ball       | Relaxed       |         3.98e-02 |   9.75e-01 |
+| puffer-ball       | Relaxed (GPU) |         4.16e-02 |   9.75e-01 |
+| puffer-ball       | Tight (GPU)   |         4.01e-05 |   2.61e-01 |
+| puffer-ball       | Relaxed       |         3.99e-02 |   9.75e-01 |
 | puffer-ball       | Tight         |         4.00e-05 |   2.61e-01 |
-| rod-twist         | Relaxed (GPU) |         2.94e-02 |   9.96e-01 |
+| rod-twist         | Relaxed (GPU) |         2.91e-02 |   9.96e-01 |
 | rod-twist         | Tight (GPU)   |         2.75e-04 |   9.93e-01 |
-| rod-twist         | Relaxed       |         2.68e-02 |   9.96e-01 |
+| rod-twist         | Relaxed       |         2.67e-02 |   9.96e-01 |
 | rod-twist         | Tight         |         2.75e-04 |   9.93e-01 |
 
-Source: `benchmark/results/sweep-gh200-all.csv`
+Source: `benchmark/results/sweep-gh200-bp.csv`
 
 <!-- sccd:end earliness -->
 
@@ -760,7 +798,7 @@ the safe direction and always costs a solver step size.
 
 <!-- sccd:begin provenance -->
 
-- Timings: `benchmark/results/sweep-gh200-all.csv`, 6394 cases over 6 scenes, 3 independent repeats.
+- Timings: `benchmark/results/sweep-gh200-bp.csv`, 6384 cases over 6 scenes, 3 independent repeats.
 - Accuracy: `benchmark/results/oracle-gh200-all.csv`, every query of every scene checked against the dataset's exact roots.
 - Regenerate with `python3 -m report <bench.csv> <out> <oracle.csv> --embed=docs/BENCHMARKS.md`; add `--check` to assert the document still matches the data.
 
