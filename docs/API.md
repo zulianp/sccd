@@ -53,6 +53,9 @@ for a whole step.
 | `sccd::device::narrow_phase_*` | `sccd_narrowphase.cuh`, `sccd_narrowphase_vq.cuh` | the same, on the GPU |
 
 Device entry points take **device** arrays of device pointers, not host arrays.
+[`CUDA.md`](CUDA.md) covers the device path in full: build flags, the pointer
+rule above and how it goes wrong, output ownership, and when the GPU is the
+right processor for a scene.
 
 Which kernel runs is chosen by `SCCD_NARROWPHASE_MODE`: `0` for
 `NarrowPhaseMode::Relaxed`, `2` for `NarrowPhaseMode::Tight`. Those are the two modes

@@ -109,6 +109,7 @@ wip/               open work, decision records, retractions
 | [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) | Full evaluation: timings, accuracy, occupancy, work counts. |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | How the guarantee is obtained. |
 | [`docs/API.md`](docs/API.md) | The kernels, the broad phase, the C ABI, Python, `CCD<T>`. |
+| [`docs/CUDA.md`](docs/CUDA.md) | Running on the GPU: build, entry points, data ownership, choosing a processor. |
 | [`python/README.md`](python/README.md) | The `ctypes` binding and the analysis tools. |
 | [`benchmark/README.md`](benchmark/README.md) | How the numbers are produced. |
 | [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md) | Every environment variable. None is needed. |
