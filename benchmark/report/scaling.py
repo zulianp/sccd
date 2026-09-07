@@ -33,6 +33,8 @@ class ScalingRun:
     faces: list[int] = field(default_factory=list)
     vf_pairs: list[int] = field(default_factory=list)
     ee_pairs: list[int] = field(default_factory=list)
+    prep_ms: list[float] = field(default_factory=list)
+    step_ms: list[float] = field(default_factory=list)
     broad_ms: list[float] = field(default_factory=list)
     narrow_ms: list[float] = field(default_factory=list)
     ns_per_pair: list[float] = field(default_factory=list)
@@ -43,7 +45,11 @@ class ScalingRun:
         space = self.meta.get("space", "host")
         topology = self.meta.get("base_topology", "")
         kind = "quad" if "QUAD" in topology.upper() else "tri"
-        return f"{mode} / {space} / {kind}"
+        # The broad phase is part of the identity of the run, not a footnote:
+        # the two strategies differ by 1.8x at the largest size measured.
+        bp = self.meta.get("broadphase")
+        base = f"{mode} / {space} / {kind}"
+        return f"{base} / {bp}" if bp else base
 
 
 def parse(path: Path) -> ScalingRun:
@@ -63,6 +69,8 @@ def parse(path: Path) -> ScalingRun:
             run.faces.append(int(fields[1]))
             run.vf_pairs.append(int(fields[2]))
             run.ee_pairs.append(int(fields[3]))
+            run.prep_ms.append(float(fields[4]))
+            run.step_ms.append(float(fields[5]) + float(fields[6]))
             run.broad_ms.append(float(fields[7]))
             run.narrow_ms.append(float(fields[8]))
             run.ns_per_pair.append(float(fields[9]))
@@ -104,6 +112,8 @@ def table(runs: list[ScalingRun], source: str):
                  "levels of that series."),
         columns=[Column("mode", "l"), Column("level"), Column("elements"),
                  Column("candidate pairs"),
+                 Column("prep ms", tex_header="prep (ms)"),
+                 Column("step ms", tex_header="step (ms)"),
                  Column("broad ms", tex_header="broad (ms)"),
                  Column("narrow ms", tex_header="narrow (ms)"),
                  Column("p")],
@@ -113,8 +123,12 @@ def table(runs: list[ScalingRun], source: str):
                "noise rather than by element count; what this measures is the "
                "broad phase and the preparation that feeds it. Narrow-phase cost "
                "against problem size is in the per-case figure, over cases that "
-               "do collide. The exponent is below 1 because the fixed cost "
-               "visible at the smallest size is amortised as the mesh grows."),
+               "do collide. Where the exponent is below 1 it is because the fixed "
+               "cost visible at the smallest size is amortised as the mesh "
+               "grows. `prep` builds the acceleration structure -- the cell "
+               "list's grid or the sweep's sorted intervals -- and `step` is "
+               "the traversal that reports pairs; the two strategies divide "
+               "the work between those columns quite differently."),
     )
     for run in runs:
         faces = [float(f) for f in run.faces]
@@ -123,6 +137,7 @@ def table(runs: list[ScalingRun], source: str):
         for i, level in enumerate(run.levels):
             t.add(run.label if i == 0 else "", f"{level}", f"{run.faces[i]:,}",
                   f"{run.vf_pairs[i] + run.ee_pairs[i]:,}",
+                  f"{run.prep_ms[i]:.1f}", f"{run.step_ms[i]:.1f}",
                   f"{run.broad_ms[i]:.1f}", f"{run.narrow_ms[i]:.1f}",
                   f"{p_fit:.2f}" if i == 0 else "")
     return t

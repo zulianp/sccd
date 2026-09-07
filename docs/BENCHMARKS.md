@@ -654,24 +654,58 @@ count at each level, and runs a collision step on each — the one question
 neither other driver can answer. Two consecutive cloth-ball frames, 92,230
 elements up to 23.6 million.
 
+Sweeping element count over two and a half orders of magnitude is also the
+cleanest way to separate the two broad-phase strategies, so both are run here
+rather than leaving the choice to the tuner. They are checked against each other
+by construction: at every level the two report **identical pair counts**, so what
+differs is only how the pairs are found.
+
+**The strategies divide their cost differently, and that is the whole result.**
+`prep` builds the acceleration structure — the cell list's grid, or the sweep's
+sorted intervals — and `step` is the traversal that reports pairs:
+
+- The **sweep** builds more cheaply and scales better doing it: exponent 0.73
+  against the cell list's 0.92, and at 23.6 M elements its prep is 1.45× the
+  cheaper of the two.
+- The **cell list** traverses far better: exponent 0.75 against the sweep's
+  1.19, and at the same size its step costs 515 ms against 4,957 ms — 9.6×.
+
+Traversal is what grows, so the cell list wins overall at every size measured,
+by 1.08× to 1.73×. The margin is narrowest in the middle and widens at both ends:
+at the smallest size the sweep pays a fixed setup cost it cannot amortise, and at
+the largest its traversal has become the dominant term. That is why the shipped
+default races the two per scene rather than fixing one, and why the first probe
+is the cell list — it is the choice that bounds the worst case for a caller who
+never completes a race.
+
 <!-- sccd:begin scaling -->
 
-| mode                 | level |   elements | candidate pairs | broad ms | narrow ms |    p |
-|----------------------|------:|-----------:|----------------:|---------:|----------:|-----:|
-| relaxed / host / tri |     0 |     92,230 |          17,982 |     35.3 |       8.6 | 0.86 |
-|                      |     1 |    368,920 |          87,848 |     65.3 |       5.2 |      |
-|                      |     2 |  1,475,680 |         380,924 |    241.8 |       1.9 |      |
-|                      |     3 |  5,902,720 |       1,581,142 |   1008.1 |       6.2 |      |
-|                      |     4 | 23,610,880 |       6,440,923 |   4424.2 |      19.9 |      |
-| tight / host / tri   |     0 |     92,230 |          17,982 |     35.2 |       4.8 | 0.87 |
-|                      |     1 |    368,920 |          87,848 |     62.2 |      10.6 |      |
-|                      |     2 |  1,475,680 |         380,924 |    202.0 |       4.2 |      |
-|                      |     3 |  5,902,720 |       1,581,142 |    964.3 |       4.5 |      |
-|                      |     4 | 23,610,880 |       6,440,923 |   4433.4 |      16.2 |      |
+| mode                          | level |   elements | candidate pairs | prep ms | step ms | broad ms | narrow ms |    p |
+|-------------------------------|------:|-----------:|----------------:|--------:|--------:|---------:|----------:|-----:|
+| relaxed / host / tri / cell2d |     0 |     92,230 |          17,982 |    27.9 |     8.8 |     36.7 |       8.9 | 0.85 |
+|                               |     1 |    368,920 |          87,771 |    50.8 |    14.6 |     65.4 |       6.2 |      |
+|                               |     2 |  1,475,680 |         379,818 |   200.1 |    45.5 |    245.5 |       2.0 |      |
+|                               |     3 |  5,902,720 |       1,573,741 |   852.6 |   142.6 |    995.2 |       5.4 |      |
+|                               |     4 | 23,610,880 |       6,402,081 |  3884.8 |   515.0 |   4399.8 |      20.2 |      |
+| relaxed / host / tri / sweep  |     0 |     92,230 |          17,982 |    53.9 |     7.4 |     61.3 |       7.5 | 0.86 |
+|                               |     1 |    368,920 |          87,771 |    68.8 |    13.3 |     82.1 |       5.5 |      |
+|                               |     2 |  1,475,680 |         379,818 |   195.8 |    69.0 |    264.8 |       2.1 |      |
+|                               |     3 |  5,902,720 |       1,573,741 |   720.5 |   411.2 |   1131.7 |       6.5 |      |
+|                               |     4 | 23,610,880 |       6,402,081 |  2671.7 |  4957.1 |   7628.8 |      22.4 |      |
+| tight / host / tri / cell2d   |     0 |     92,230 |          17,982 |    27.2 |     8.3 |     35.5 |       5.3 | 0.87 |
+|                               |     1 |    368,920 |          87,771 |    49.2 |    14.7 |     63.9 |       9.8 |      |
+|                               |     2 |  1,475,680 |         379,818 |   173.8 |    42.7 |    216.5 |       5.1 |      |
+|                               |     3 |  5,902,720 |       1,573,741 |   832.5 |   151.4 |    983.9 |       4.2 |      |
+|                               |     4 | 23,610,880 |       6,402,081 |  3915.5 |   640.2 |   4555.7 |      15.0 |      |
+| tight / host / tri / sweep    |     0 |     92,230 |          17,982 |    52.5 |     8.7 |     61.2 |       5.9 | 0.87 |
+|                               |     1 |    368,920 |          87,771 |    72.3 |    13.5 |     85.9 |       8.8 |      |
+|                               |     2 |  1,475,680 |         379,818 |   204.5 |    58.0 |    262.5 |       2.6 |      |
+|                               |     3 |  5,902,720 |       1,573,741 |   739.2 |   431.6 |   1170.8 |       7.0 |      |
+|                               |     4 | 23,610,880 |       6,402,081 |  2726.8 |  5024.1 |   7750.9 |      18.2 |      |
 
-The two frames used here do not come into contact, so the narrow phase has almost no work to do and its column is dominated by noise rather than by element count; what this measures is the broad phase and the preparation that feeds it. Narrow-phase cost against problem size is in the per-case figure, over cases that do collide. The exponent is below 1 because the fixed cost visible at the smallest size is amortised as the mesh grows.
+The two frames used here do not come into contact, so the narrow phase has almost no work to do and its column is dominated by noise rather than by element count; what this measures is the broad phase and the preparation that feeds it. Narrow-phase cost against problem size is in the per-case figure, over cases that do collide. Where the exponent is below 1 it is because the fixed cost visible at the smallest size is amortised as the mesh grows. `prep` builds the acceleration structure -- the cell list's grid or the sweep's sorted intervals -- and `step` is the traversal that reports pairs; the two strategies divide the work between those columns quite differently.
 
-Source: `benchmark/results/scaling/host-mode0.txt, benchmark/results/scaling/host-mode2.txt`
+Source: `benchmark/results/scaling/host-cell2d-mode0.txt, benchmark/results/scaling/host-sweep-mode0.txt, benchmark/results/scaling/host-cell2d-mode2.txt, benchmark/results/scaling/host-sweep-mode2.txt`
 
 <!-- sccd:end scaling -->
 
