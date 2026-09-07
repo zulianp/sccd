@@ -38,6 +38,13 @@ endif()
 # Header-only spikes are compiled by a translation unit that does nothing but
 # include them. Without this they would never be compiled at all, and a header
 # nobody compiles is a header that quietly stops building.
+#
+# Including a header is not enough for the templates in it. A call inside an
+# uninstantiated template is only parsed, not checked against the declaration it
+# names, so a spike can keep calling a shipped function whose signature has
+# changed and still compile. src/spike_instantiations.cpp instantiates the entry
+# points of the template-heavy spikes for exactly that reason -- it is what makes
+# the claim above true of templates and not only of ordinary functions.
 file(GLOB SCCD_SPIKE_HEADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp")
 if(SCCD_SPIKE_HEADERS)
   set(_spike_tu "${CMAKE_CURRENT_BINARY_DIR}/spike_headers.cpp")
@@ -47,7 +54,12 @@ if(SCCD_SPIKE_HEADERS)
     string(APPEND _spike_tu_content "#include \"${_spike_header_name}\"\n")
   endforeach()
   file(GENERATE OUTPUT "${_spike_tu}" CONTENT "${_spike_tu_content}")
-  add_library(sccd_spikes_headers OBJECT "${_spike_tu}")
+  set(_spike_inst "${CMAKE_CURRENT_SOURCE_DIR}/src/spike_instantiations.cpp")
+  if(EXISTS "${_spike_inst}")
+    add_library(sccd_spikes_headers OBJECT "${_spike_tu}" "${_spike_inst}")
+  else()
+    add_library(sccd_spikes_headers OBJECT "${_spike_tu}")
+  endif()
   target_include_directories(sccd_spikes_headers PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
   target_link_libraries(sccd_spikes_headers PRIVATE sccd)
 endif()
