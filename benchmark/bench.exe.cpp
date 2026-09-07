@@ -1,3 +1,4 @@
+#include "sccd_broadphase_strategy.hpp"
 #include "sccd_narrowphase_mode.hpp"
 #include "sccd_smesh_ccd.hpp"
 #include "smesh_buffer.hpp"
@@ -1143,6 +1144,10 @@ namespace {
         }
 
         std::cout << dataset << ',' << benchmark_mode_name(benchmark_execution_space()) << ','
+                  // The broad phase is part of what produced the row. Without it
+                  // a sweep that varies the strategy cannot be told apart, and
+                  // the default is not self-evident.
+                  << sccd::broadphase_strategy_name(sccd::broadphase_strategy_setting()) << ','
                   << case_file.key << ',' << (case_file.is_vf ? "vf" : "ee") << ',' << narrow_queries
                   << ',' << prep_ms << ',' << broad_ms << ',' << narrow_ms << ',' << query_narrow_ms << ','
                   << fp_count << ',' << fn_count << ',' << broadphase.false_positives << ',' << broad_fn_count
@@ -1270,7 +1275,7 @@ namespace {
 
 // The one definition of the result schema. bench.sh asks for it with --header.
 static constexpr const char* kCsvHeader =
-    "dataset,mode,case,type,queries,prep_ms,broad_ms,narrow_ms,query_narrow_ms,fp,fn,broad_fp,broad_fn,"
+    "dataset,mode,broadphase,case,type,queries,prep_ms,broad_ms,narrow_ms,query_narrow_ms,fp,fn,broad_fp,broad_fn,"
     "narrow_ms_s1,toi_n,toi_late,toi_max_late,toi_max_early,toi_med_early,s0_late,s0_margin,"
     "s0_toi,gt_earliest,root_n,s1_min";
 

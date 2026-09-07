@@ -32,13 +32,15 @@ set -euo pipefail
 #   --chunk N        cases per chunk, 0 = whole scene   (default 0)
 #   --scenes "..."   scenes to sweep         (default the three verified ones)
 #   --spaces "..."   host and/or device      (default host)
+#   --broadphases ".."  sweep, cell2d and/or auto (default cell2d)
 #   --modes "..."    narrow-phase modes      (default "0 2")
 #   --time HH:MM:SS  per-job limit           (default 00:29:00)
 #   --partition P    Slurm partition         (default debug)
 #   --account A      Slurm account           (default c40)
 #   --no-oracle      skip the accuracy stage (timings only)
 #   --oracle-chunk N query files per accuracy job, 0 = whole scene
-#   --pack N         chunks per Slurm job    (default 1)
+#   --pack N         chunks per Slurm job
+#   --jobs N         Slurm jobs in flight at once (default 1)    (default 1)
 #   --max-cases N    sweep an evenly spread subsample of N cases (default: all)
 #
 # --pack matters more than it looks. The account runs one job at a time and
@@ -52,6 +54,10 @@ CHUNK=0
 SCENES="armadillo-rollers cloth-ball cloth-funnel"
 SPACES="host"
 MODES="0 2"
+# Broad-phase strategies to sample. "auto" races them per scene, which is what
+# a caller gets by default; naming them explicitly is what makes the two
+# comparable, because a raced run reports whichever won and not which ran.
+BROADPHASES="cell2d"
 TIME_LIMIT="00:29:00"
 PARTITION="debug"
 ACCOUNT="c40"
@@ -62,6 +68,11 @@ LOCAL=0
 ORACLE=1
 ORACLE_CHUNK=0
 PACK=1
+# How many submitted jobs may be in flight at once. One is right when the
+# account's QOS admits a single running job, which is what the debug queue
+# amounted to; on a partition with idle nodes it leaves the whole sweep
+# serialised behind one worker for no reason.
+JOBS=1
 MAX_CASES=0
 TI_ORACLE=""
 
@@ -72,6 +83,7 @@ while [[ $# -gt 0 ]]; do
         --chunk) CHUNK="$2"; shift 2 ;;
         --scenes) SCENES="$2"; shift 2 ;;
         --spaces) SPACES="$2"; shift 2 ;;
+        --broadphases) BROADPHASES="$2"; shift 2 ;;
         --modes) MODES="$2"; shift 2 ;;
         --time) TIME_LIMIT="$2"; shift 2 ;;
         --partition) PARTITION="$2"; shift 2 ;;
@@ -82,6 +94,7 @@ while [[ $# -gt 0 ]]; do
         --local) LOCAL=1; shift ;;
         --no-oracle) ORACLE=0; shift ;;
         --pack) PACK="$2"; shift 2 ;;
+        --jobs) JOBS="$2"; shift 2 ;;
         --oracle-chunk) ORACLE_CHUNK="$2"; shift 2 ;;
         --max-cases) MAX_CASES="$2"; shift 2 ;;
         -h|--help) sed -n '3,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -183,12 +196,14 @@ for scene in ${SCENES}; do
     span="${CHUNK}"
     [[ "${span}" -le 0 ]] && span="${total}"
     for space in ${SPACES}; do
-        for ((r = 1; r <= REPEATS; ++r)); do
-            for ((begin = 0; begin < total; begin += span)); do
-                end=$((begin + span))
-                [[ "${end}" -gt "${total}" ]] && end="${total}"
-                chunk_keys+=("${scene}|${space}|${r}|${begin}|${end}")
-                chunk_paths+=("${OUT_DIR}/${scene}/${space}/r${r}/$(printf '%06d-%06d' "${begin}" "${end}").csv")
+        for bp in ${BROADPHASES}; do
+            for ((r = 1; r <= REPEATS; ++r)); do
+                for ((begin = 0; begin < total; begin += span)); do
+                    end=$((begin + span))
+                    [[ "${end}" -gt "${total}" ]] && end="${total}"
+                    chunk_keys+=("${scene}|${space}|${bp}|${r}|${begin}|${end}")
+                    chunk_paths+=("${OUT_DIR}/${scene}/${space}/${bp}/r${r}/$(printf '%06d-%06d' "${begin}" "${end}").csv")
+                done
             done
         done
     done
@@ -245,13 +260,14 @@ merge() {
     while IFS= read -r -d '' f; do
         tail -n +2 "${f}" >> "${merged}"
         n=$((n + 1))
-    # Only files matching the chunk layout, <scene>/<space>/r<N>/<range>.csv.
+    # Only files matching the chunk layout,
+    # <scene>/<space>/<broadphase>/r<N>/<range>.csv.
     # Excluding a directory by name instead ("everything but oracle/") let a
     # sibling holding CSVs of another schema be swept in: 26 accuracy files
     # parked under the sweep tree merged into the timing CSV and added 250 rows
     # to it. Naming what belongs cannot go wrong that way.
-    done < <(find "${OUT_DIR}" -mindepth 4 -maxdepth 4 \
-                  -path "${OUT_DIR}/*/*/r*/*.csv" -print0 | sort -z)
+    done < <(find "${OUT_DIR}" -mindepth 5 -maxdepth 5 \
+                  -path "${OUT_DIR}/*/*/*/r*/*.csv" -print0 | sort -z)
     printf 'merged %d chunk files -> %s (%d rows)\n' \
         "${n}" "${merged}" "$(( $(wc -l < "${merged}") - 1 ))"
 
@@ -309,9 +325,9 @@ fi
 if [[ "${DRY_RUN}" -eq 1 ]]; then
     for i in "${todo[@]:-}"; do
         [[ -n "${i}" ]] || continue
-        IFS='|' read -r scene space r begin end <<< "${chunk_keys[$i]}"
-        printf '  TODO timing   %-20s %-6s r%-2s cases [%s, %s)\n' \
-            "${scene}" "${space}" "${r}" "${begin}" "${end}"
+        IFS='|' read -r scene space bp r begin end <<< "${chunk_keys[$i]}"
+        printf '  TODO timing   %-20s %-6s %-6s r%-2s cases [%s, %s)\n' \
+            "${scene}" "${space}" "${bp}" "${r}" "${begin}" "${end}"
     done
     for i in "${oracle_todo[@]:-}"; do
         [[ -n "${i}" ]] || continue
@@ -351,13 +367,14 @@ MAX_CASES_ENV=""
 [[ "${MAX_CASES}" -gt 0 ]] && MAX_CASES_ENV="${MAX_CASES}"
 
 run_chunk_body() {
-    local scene="$1" space="$2" begin="$3" end="$4" out="$5"
+    local scene="$1" space="$2" bp="$3" begin="$4" end="$5" out="$6"
     local tmp="${out}.partial"
     mkdir -p "$(dirname "${out}")"
     header > "${tmp}"
     for mode in ${MODES}; do
         SCCD_NARROWPHASE_MODE="${mode}" \
         SCCD_BENCH_EXECUTION_SPACE="${space}" \
+        SCCD_BROADPHASE="${bp}" \
         SCCD_BENCH_CASE_BEGIN="${begin}" \
         SCCD_BENCH_CASE_END="${end}" \
         SCCD_BENCH_MAX_CASES="${MAX_CASES_ENV}" \
@@ -414,6 +431,40 @@ flush_pack() {
     printf '==> submitting %s\n' "${label}"
     local body
     body="$(printf '%s; ' "${pack_calls[@]}")"
+
+    # With --jobs > 1 the blocking submit runs in a subshell so several packs
+    # are in flight at once. Each records its own exit status in a file, because
+    # a background job's status cannot be attributed to its label by `wait -n`
+    # alone, and a silently dropped failure is the one outcome a sweep must not
+    # have.
+    if [[ "${JOBS}" -gt 1 ]]; then
+        while [[ "$(jobs -rp | wc -l)" -ge "${JOBS}" ]]; do wait -n 2>/dev/null || true; done
+        mkdir -p "${OUT_DIR}/logs"
+        local status_file="${OUT_DIR}/logs/${pack_name}.status"
+        (
+            if submit_with_retry \
+                    --account="${ACCOUNT}" --partition="${PARTITION}" \
+                    --nodes=1 --ntasks=1 "${pack_gpu_args[@]}" \
+                    --time="${TIME_LIMIT}" \
+                    --uenv="${UENV}" --view=default \
+                    --job-name="sccd-${pack_name}" \
+                    --output="${OUT_DIR}/logs/${pack_name}.out" \
+                    --error="${OUT_DIR}/logs/${pack_name}.err" \
+                    --wrap="$(declare -f run_chunk_body); \
+                             export SCCD_BENCH='${SCCD_BENCH}' DATA_DIR='${DATA_DIR}' MODES='${MODES}'; \
+                             export SCCD_DB_TO_RAW='${SCCD_DB_TO_RAW}'; \
+                             export MAX_CASES_ENV='${MAX_CASES_ENV}'; \
+                             export OMP_NUM_THREADS=\"\$(nproc)\"; \
+                             ${body}"; then
+                printf 'ok %s\n' "${label}" > "${status_file}"
+            else
+                printf 'FAILED %s\n' "${label}" > "${status_file}"
+            fi
+        ) &
+        pack_calls=(); pack_labels=()
+        return 0
+    fi
+
     if ! submit_with_retry \
             --account="${ACCOUNT}" --partition="${PARTITION}" \
             --nodes=1 --ntasks=1 "${pack_gpu_args[@]}" \
@@ -438,13 +489,13 @@ flush_pack() {
 
 for i in "${todo[@]:-}"; do
     [[ -n "${i}" ]] || continue
-    IFS='|' read -r scene space r begin end <<< "${chunk_keys[$i]}"
+    IFS='|' read -r scene space bp r begin end <<< "${chunk_keys[$i]}"
     out="${chunk_paths[$i]}"
-    label="${scene}/${space}/r${r}/${begin}-${end}"
+    label="${scene}/${space}/${bp}/r${r}/${begin}-${end}"
 
     if [[ "${LOCAL}" -eq 1 ]]; then
         printf '==> %s\n' "${label}"
-        if ! run_chunk_body "${scene}" "${space}" "${begin}" "${end}" "${out}"; then
+        if ! run_chunk_body "${scene}" "${space}" "${bp}" "${begin}" "${end}" "${out}"; then
             printf 'FAILED %s\n' "${label}" >&2
             failures=$((failures + 1))
         fi
@@ -453,8 +504,8 @@ for i in "${todo[@]:-}"; do
 
     pack_gpu_args=()
     [[ "${space}" == "device" ]] && pack_gpu_args=(--gpus-per-task=1)
-    pack_name="timing-${space}-r${r}-${begin}"
-    pack_calls+=("run_chunk_body '${scene}' '${space}' '${begin}' '${end}' '${out}'")
+    pack_name="timing-${space}-${bp}-r${r}-${begin}"
+    pack_calls+=("run_chunk_body '${scene}' '${space}' '${bp}' '${begin}' '${end}' '${out}'")
     pack_labels+=("${label}")
     if [[ "${#pack_calls[@]}" -ge "${PACK}" ]]; then
         flush_pack
@@ -519,6 +570,21 @@ for i in "${oracle_todo[@]:-}"; do
     fi
 done
 flush_oracle_pack
+
+# Concurrent submits are still running at this point; the merge must not see a
+# half-written tree, and a failure recorded in a background subshell has to be
+# counted here or it is lost.
+if [[ "${JOBS}" -gt 1 ]]; then
+    wait
+    while IFS= read -r sf; do
+        [[ -n "${sf}" ]] || continue
+        if [[ "$(head -c 6 "${sf}")" == FAILED ]]; then
+            cat "${sf}" >&2
+            failures=$((failures + 1))
+        fi
+        rm -f "${sf}"
+    done < <(find "${OUT_DIR}/logs" -name '*.status' 2>/dev/null)
+fi
 
 printf '\n%d runs attempted, %d failed\n' \
     "$(( ${#todo[@]} + ${#oracle_todo[@]} ))" "${failures}"
