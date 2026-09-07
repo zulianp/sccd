@@ -227,23 +227,6 @@ namespace sccd {
             }
         }
 
-        /**
-         * \brief Load a contiguous block of B AABBs into SoA buffers.
-         * \param aabbs SoA arrays [6][...].
-         * \param start Starting index in B.
-         * \param len Number of AABBs to load.
-         * \param B_minx..B_maxz Output arrays of length at least \p len.
-         */
-
-        /**
-         * \brief Force remaining SIMD lanes (len..chunk_size) to be disjoint.
-         * \param amaxx0,amaxy0,amaxz0 Max components of A used to place B outside.
-         * \param len Number of valid lanes already filled [0..len).
-         * \param B_minx..B_maxz In/out buffers to tail-fill.
-         */
-
-
-
 
         /**
          * \brief Packed overlap mask of AABB \p fi against a block of the second list.
@@ -355,8 +338,6 @@ namespace sccd {
          */
 
         // -----------------------------
-
-
 
     }  // namespace detail
 
