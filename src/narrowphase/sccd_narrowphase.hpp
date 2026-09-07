@@ -5,7 +5,6 @@
 
 #include "assert.h"
 
-#include "sccd_objective.hpp"
 #include "sccd_parallel.hpp"
 #include "sccd_base.hpp"
 #include "sccd_narrowphase_mode.hpp"

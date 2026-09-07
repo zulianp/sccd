@@ -59,10 +59,6 @@ namespace sccd {
         PerPair = 1
     };
 
-    static inline const char* toi_output_name(const ToiOutput out) {
-        return out == ToiOutput::Earliest ? "earliest" : "per-pair";
-    }
-
     enum class NarrowPhaseMode : int {
         /// Scalar search with the looser acceptance test: it compares codomain
         /// widths against domain tolerances, so it accepts sooner and reports a

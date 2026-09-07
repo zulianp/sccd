@@ -307,6 +307,33 @@ namespace sccd {
 
         }  // namespace dead
     }  // namespace device
+
+    // ---- from src/cuda/ ----
+    //
+    // `warp_max_32` is the max counterpart of the warp reductions the device
+    // kernels use; its only caller is the block reduction in this file, so it
+    // shipped for a spike. `pow2` is a device-side duplicate of sccd::pow2 in
+    // sccd_math.hpp and was called by nothing.
+
+        template <typename T>
+        __device__ T warp_max_32(const T in) {
+            static_assert(SCCD_WARP_SIZE == 32, "Only implemented for CUDA with warp size of 32!");
+            T out = in;
+            out = device::max(out,
+                              __shfl_xor_sync(SCCD_WARP_FULL_MASK, out, 16, SCCD_WARP_SIZE));  // 0-16, 1-17, ..., 15-31
+            out = device::max(
+                out, __shfl_xor_sync(SCCD_WARP_FULL_MASK, out, 8, SCCD_WARP_SIZE));  // 0-8, ..., 1-7, ..., 23-31
+            out = device::max(out, __shfl_xor_sync(SCCD_WARP_FULL_MASK, out, 4, SCCD_WARP_SIZE));
+            out = device::max(out, __shfl_xor_sync(SCCD_WARP_FULL_MASK, out, 2, SCCD_WARP_SIZE));
+            out = device::max(out, __shfl_xor_sync(SCCD_WARP_FULL_MASK, out, 1, SCCD_WARP_SIZE));
+            return out;
+        }
+
+        template <typename T>
+        static inline __device__ T pow2(const T x) {
+            return x * x;
+        }
+
 }  // namespace sccd
 
 #endif  // SCCD_SPIKES_DEAD_CUH
