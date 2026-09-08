@@ -134,7 +134,7 @@ namespace sccd {
 
             Box<T> box = split_axis_box<SplitDim, T>(domain, sample_lo, sample_hi);
             if (accept[i] || box.depth > max_iter) {
-                found |= accept_grid_root_vf<T>(box, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, toi, u, v, refine);
+                found |= accept_grid_root_vf<T>(box, tols, toi, u, v);
                 continue;
             }
 

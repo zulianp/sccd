@@ -985,12 +985,15 @@ namespace sccd {
             aerr[2] = numerical_error_bound_component<is_vf, TC, Vec4>(sz, ez);
         }
 
-        // Per-slot validity tag stored in the qid array.  Three states:
-        //   SCCD_QID_EMPTY   (-1): free, available to be claimed by a writer
-        //   SCCD_QID_WRITING (-2): claimed by a writer, fields being filled
-        //   qid >= 0             : committed, fields are safe to read
+        // Sentinel written into the qid array when the shared stack is
+        // initialised, so an unclaimed slot holds a determinate value.
+        //
+        // It is not a validity tag and is never tested: a slot is live exactly
+        // when its index is below `s_top`, which the pop path decides with an
+        // atomicCAS on that counter. What orders a writer against a reader is
+        // the push writing `qid` last, after the six interval bounds and the
+        // level, followed by the __syncthreads() that ends the push phase.
         static constexpr int SCCD_QID_EMPTY = -1;
-        static constexpr int SCCD_QID_WRITING = -2;
 
         template <typename T>
         __global__ void init_narrow_phase_kernel(const size_t toi_n, const T max_toi, T* SCCD_RESTRICT toi) {
@@ -1147,16 +1150,17 @@ namespace sccd {
         }
 
         template <typename T>
+        // Splits the longest axis in absolute width, not in units of the
+        // per-axis tolerance.
         static inline __device__ void bisect_longest_axis(const Domain<T>& in,
-                                                          const T* const SCCD_RESTRICT atol,
                                                           Domain<T>& left,
                                                           Domain<T>& right) {
             left = in;
             right = in;
 
-            const T dt = (in.tupper - in.tlower);  // / atol[0];
-            const T du = (in.uupper - in.ulower);  // / atol[1];
-            const T dv = (in.vupper - in.vlower);  // / atol[2];
+            const T dt = (in.tupper - in.tlower);
+            const T du = (in.uupper - in.ulower);
+            const T dv = (in.vupper - in.vlower);
 
             if (dt >= du && dt >= dv) {
                 const T m = (in.tlower + in.tupper) * T(0.5);
@@ -1498,7 +1502,7 @@ namespace sccd {
                 if (SCCD_CUDA_ADAPTIVE_SPLIT) {
                     adaptive_split_longest_axis<is_vf, T, Vec4>(cur, sx, sy, sz, ex, ey, ez, left, right);
                 } else {
-                    bisect_longest_axis<T>(cur, atol, left, right);
+                    bisect_longest_axis<T>(cur, left, right);
                 }
                 return true;
             }
