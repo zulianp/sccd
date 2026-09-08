@@ -261,6 +261,22 @@ int main(int argc, char** argv) {
 
         smesh::SharedBuffer<smesh::idx_t> v_overlap, f_overlap, e0_overlap, e1_overlap;
 
+        // One untimed pass at the first level, as the benchmark driver does for
+        // its first case. On the device the first CCD call also creates the CUDA
+        // context, which measured 2.3 s against 41 ms for the next level -- a
+        // fixed start-up cost sitting in the smallest sample, where it inverts
+        // the fitted exponent. It is a real cost, but it is not a cost that
+        // scales with the element count, which is what this study measures.
+        if (level == 0) {
+            smesh::SharedBuffer<smesh::idx_t> w0, w1, w2, w3;
+            scalar_t warm_toi = 1;
+            smesh::SharedBuffer<scalar_t> warm_vf, warm_ee;
+            ccd->broad_phase_prep(points0, points1);
+            ccd->broad_phase_fv_step(w0, w1);
+            ccd->broad_phase_ee_step(w2, w3);
+            ccd->narrow_phase(warm_toi, warm_vf, warm_ee, SCCD_MAX_DEPTH, SCCD_TOL);
+        }
+
         // Broken out rather than timed as one call: the prep (AABBs + the sort
         // that sweep-and-prune needs) scales with elements, while the two sweeps
         // scale with how much the sorted intervals overlap. Those are different
