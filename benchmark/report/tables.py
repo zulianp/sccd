@@ -479,3 +479,44 @@ def processor_table(summaries: dict[tuple[str, str], SceneSummary],
                   f"{h_tot:,.0f}", f"{d_tot:,.0f}",
                   ratio(h_tot, d_tot), ratio(h_b, d_b), ratio(h_n, d_n))
     return table
+
+
+def per_frame_table(summaries: dict[tuple[str, str], SceneSummary],
+                    source: str) -> Table:
+    """
+    Mean cost of one simulation step.
+
+    The whole-scene totals answer "what does this dataset cost"; they cannot be
+    compared between a 79-case scene and a 4,571-case one, and they are not the
+    number a solver author needs. Dividing by the case count gives the per-frame
+    figure, which is what a step of that scene costs on this hardware.
+    """
+    table = Table(
+        label="tab:per-frame",
+        caption=("Mean time for one simulation step: the scene total, median "
+                 "over repeats, divided by the number of steps. \\emph{prep} "
+                 "builds the swept boxes and the acceleration structure, "
+                 "\\emph{broad} finds the candidate pairs, \\emph{narrow} turns "
+                 "them into a time of impact."),
+        columns=[Column("scene", "l"), Column("steps"), Column("mode", "l"),
+                 Column("prep ms"), Column("broad ms"), Column("narrow ms"),
+                 Column("total ms")],
+        source=source,
+        notes=("A mean rather than a median over steps: the scene total is what "
+               "a run costs, and the mean is the only average that divides back "
+               "into it."),
+    )
+    for scene, mode in sorted(summaries):
+        s = summaries[(scene, mode)]
+        if not s.cases:
+            continue
+
+        def per(col):
+            stat = s.totals.get(col)
+            return (stat.median / s.cases) if stat is not None and stat.n else 0.0
+
+        prep, broad, narrow = per("prep_ms"), per("broad_ms"), per("narrow_ms")
+        table.add(SCENE_LABEL.get(scene, scene), f"{s.cases:,}", mode_label(mode),
+                  f"{prep:.2f}", f"{broad:.2f}", f"{narrow:.2f}",
+                  f"{prep + broad + narrow:.2f}")
+    return table

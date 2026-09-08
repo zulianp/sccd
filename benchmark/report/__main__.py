@@ -161,6 +161,7 @@ def main(argv: list[str]) -> int:
         tables.throughput_table(scenes, source),
         tables.conservativeness_table(scenes, source),
         tables.accuracy_table(scenes, source),
+        tables.per_frame_table(scenes, source),
     ]
     # The processor comparison needs one mode to be about anything; with a
     # selection it is that mode, otherwise the tighter of the two.

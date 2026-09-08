@@ -243,6 +243,32 @@ slower and its broad phase gives nothing back. It is the largest scene in the se
 by candidate pairs, 30.5 million per step, so problem size is not a rule for
 choosing a processor.
 
+Per simulation step, which is the figure a solver budgets against and the only
+one comparable between a 79-step scene and a 4,571-step one:
+
+<!-- sccd:begin per-frame -->
+
+| scene             | steps | mode | prep ms | broad ms | narrow ms | total ms |
+|-------------------|------:|------|--------:|---------:|----------:|---------:|
+| armadillo-rollers |   781 | GPU  |    2.37 |     1.04 |      2.22 |     5.63 |
+| armadillo-rollers |   781 | CPU  |   10.36 |     4.27 |      1.33 |    15.95 |
+| cloth-ball        |    79 | GPU  |    6.71 |     4.67 |      5.58 |    16.97 |
+| cloth-ball        |    79 | CPU  |   15.57 |    11.97 |      2.72 |    30.25 |
+| cloth-funnel      |   577 | GPU  |    2.35 |     0.94 |      1.64 |     4.92 |
+| cloth-funnel      |   577 | CPU  |    9.81 |     3.79 |      1.14 |    14.74 |
+| n-body            |   146 | GPU  |    6.88 |     8.98 |     32.33 |    48.20 |
+| n-body            |   146 | CPU  |   17.86 |    49.48 |     11.90 |    79.24 |
+| puffer-ball       |   240 | GPU  |   70.73 |   114.67 |    161.07 |   346.48 |
+| puffer-ball       |   240 | CPU  |   78.74 |   113.90 |     25.21 |   217.84 |
+| rod-twist         | 4,571 | GPU  |    5.50 |     1.48 |      3.80 |    10.77 |
+| rod-twist         | 4,571 | CPU  |   14.61 |     6.27 |      4.04 |    24.92 |
+
+A mean rather than a median over steps: the scene total is what a run costs, and the mean is the only average that divides back into it.
+
+Source: `benchmark/results/sweep-gh200-bp.csv`
+
+<!-- sccd:end per-frame -->
+
 ## 5. Broad phase
 
 Two strategies produce the candidate pairs — a sweep over sorted intervals and a
