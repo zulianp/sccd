@@ -265,25 +265,17 @@ def conservativeness_table(summaries: dict[tuple[str, str], SceneSummary],
             Column("queries", tex_header=r"queries"),
             Column("toi compared", tex_header=r"toi compared"),
             Column("late"), Column("false pos."), Column("false neg."),
-            Column("mesh-path divergence", tex_header=r"mesh div."),
         ],
         source=source,
         notes=("Measured against the exact roots shipped with the dataset, not "
                "against TightInclusion: TightInclusion's own answer is itself a "
                "lower bound on the truth, so comparing against it over-reports "
-               "lateness. The last column is not part of the gate. It counts "
-               "cases where the earliest-impact answer computed over the *mesh* "
-               "is later than the earliest exact root of the *curated queries*, "
-               "which are two separately stored geometries: the mesh is read "
-               "from PLY, the queries are exact dyadic rationals. It is a "
-               "measure of the agreement between those two inputs rather than "
-               "of the kernel, and with the mesh stored in double it is zero "
-               "everywhere."),
+               "lateness."),
     )
     for (scene, mode), s in sorted(summaries.items()):
         table.add(SCENE_LABEL.get(scene, scene), mode_label(mode),
                   f"{s.gt_queries:,}", f"{s.toi_compared:,}",
-                  f"{s.toi_late}", f"{s.fp:,}", f"{s.fn}", f"{s.s0_late}")
+                  f"{s.toi_late}", f"{s.fp:,}", f"{s.fn}")
     return table
 
 
@@ -396,11 +388,13 @@ def broadphase_table(per_strategy: dict[str, dict[tuple[str, str], SceneSummary]
     names = sorted(per_strategy)
     table = Table(
         label="tab:broadphase",
-        caption=("Broad-phase strategies over the same cases, median over "
-                 "repeats. \\emph{prep} builds the acceleration structure and "
-                 "\\emph{broad} is the whole broad phase including it. Both "
-                 "strategies report identical candidate pairs, so the "
-                 "difference is entirely in how they are found."),
+        caption=("Broad-phase strategies over the same cases on the host, "
+                 "median over repeats. \\emph{prep} builds the acceleration "
+                 "structure and \\emph{broad} is the whole broad phase "
+                 "including it. Both strategies report identical candidate "
+                 "pairs, so the difference is entirely in how they are found. "
+                 "The device is not listed: its broad phase does not implement "
+                 "the choice."),
         columns=([Column("scene", "l"), Column("mode", "l")]
                  + [Column(f"{n} prep ms", tex_header=f"{n} prep") for n in names]
                  + [Column(f"{n} broad ms", tex_header=f"{n} broad") for n in names]
@@ -410,7 +404,14 @@ def broadphase_table(per_strategy: dict[str, dict[tuple[str, str], SceneSummary]
                "broad phase. A margin inside the run-to-run spread is reported "
                "as a tie rather than a winner."),
     )
-    keys = sorted({k for s in per_strategy.values() for k in s})
+    # Host modes only. `use_cell2d_` is read in broad_phase_prep_host_,
+    # broad_phase_fv_step_host_ and broad_phase_ee_step_host_ and nowhere else:
+    # the device steps have no branch on it, so SCCD_BROADPHASE does not reach
+    # them and a GPU row here would compare one implementation against itself.
+    # Measured, they come out as ties to within a millisecond, which is the
+    # evidence for the statement rather than an interesting result.
+    keys = sorted({k for s in per_strategy.values() for k in s
+                   if not k[1].startswith("device-")})
     for scene, mode in keys:
         prep, broad, spreads = {}, {}, {}
         for n in names:
@@ -431,4 +432,93 @@ def broadphase_table(per_strategy: dict[str, dict[tuple[str, str], SceneSummary]
                   *[f"{prep[n].median:.0f}" for n in names],
                   *[f"{broad[n].median:.0f}" for n in names],
                   verdict)
+    return table
+
+
+def processor_table(summaries: dict[tuple[str, str], SceneSummary],
+                    mode: str, source: str) -> Table:
+    """
+    CPU against GPU for one mode, with the phase that explains the difference.
+
+    A single end-to-end ratio hides the mechanism: the two processors do not win
+    the same phase, and on one scene they do not even agree on the sign. Giving
+    the per-phase ratios beside the total makes the total readable -- and makes
+    it obvious when a scene is the exception.
+    """
+    gpu = "device-" + mode
+    table = Table(
+        label="tab:processor",
+        caption=("Host against device for the same mode and the same cases. "
+                 "\\emph{total} is prep, broad and narrow together, median over "
+                 "repeats. A ratio above one means the GPU is faster."),
+        columns=[Column("scene", "l"), Column("CPU ms"), Column("GPU ms"),
+                 Column("total", tex_header=r"total$\times$"),
+                 Column("broad", tex_header=r"broad$\times$"),
+                 Column("narrow", tex_header=r"narrow$\times$")],
+        source=source,
+        notes=("A ratio is the host median over the device median, so 2.0 means "
+               "the device takes half the time. Ratios below 1.0 are the cases "
+               "where the host wins and are the ones worth reading."),
+    )
+    for scene in sorted({s for s, _ in summaries}):
+        host, dev = summaries.get((scene, mode)), summaries.get((scene, gpu))
+        if not host or not dev:
+            continue
+
+        def med(s_, col):
+            st = s_.totals.get(col)
+            return st.median if st is not None and st.n else float("nan")
+
+        parts = ("prep_ms", "broad_ms", "narrow_ms")
+        h_tot = sum(med(host, c) for c in parts)
+        d_tot = sum(med(dev, c) for c in parts)
+        h_b, d_b = med(host, "broad_ms"), med(dev, "broad_ms")
+        h_n, d_n = med(host, "narrow_ms"), med(dev, "narrow_ms")
+        ratio = lambda a, b: f"{a / b:.2f}x" if b else "--"
+        table.add(SCENE_LABEL.get(scene, scene),
+                  f"{h_tot:,.0f}", f"{d_tot:,.0f}",
+                  ratio(h_tot, d_tot), ratio(h_b, d_b), ratio(h_n, d_n))
+    return table
+
+
+def per_frame_table(summaries: dict[tuple[str, str], SceneSummary],
+                    source: str) -> Table:
+    """
+    Mean cost of one simulation step.
+
+    The whole-scene totals answer "what does this dataset cost"; they cannot be
+    compared between a 79-case scene and a 4,571-case one, and they are not the
+    number a solver author needs. Dividing by the case count gives the per-frame
+    figure, which is what a step of that scene costs on this hardware.
+    """
+    table = Table(
+        label="tab:per-frame",
+        caption=("Mean time for one simulation step: the scene total, median "
+                 "over repeats, divided by the number of frames. A step runs "
+                 "both query types, so this is the cost of the vertex-face and "
+                 "edge-edge work of that frame together. \\emph{prep} "
+                 "builds the swept boxes and the acceleration structure, "
+                 "\\emph{broad} finds the candidate pairs, \\emph{narrow} turns "
+                 "them into a time of impact."),
+        columns=[Column("scene", "l"), Column("frames"), Column("mode", "l"),
+                 Column("prep ms"), Column("broad ms"), Column("narrow ms"),
+                 Column("total ms")],
+        source=source,
+        notes=("A mean rather than a median over steps: the scene total is what "
+               "a run costs, and the mean is the only average that divides back "
+               "into it."),
+    )
+    for scene, mode in sorted(summaries):
+        s = summaries[(scene, mode)]
+        if not s.frames:
+            continue
+
+        def per(col):
+            stat = s.totals.get(col)
+            return (stat.median / s.frames) if stat is not None and stat.n else 0.0
+
+        prep, broad, narrow = per("prep_ms"), per("broad_ms"), per("narrow_ms")
+        table.add(SCENE_LABEL.get(scene, scene), f"{s.frames:,}", mode_label(mode),
+                  f"{prep:.2f}", f"{broad:.2f}", f"{narrow:.2f}",
+                  f"{prep + broad + narrow:.2f}")
     return table

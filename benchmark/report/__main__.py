@@ -61,9 +61,24 @@ def main(argv: list[str]) -> int:
     args = [a for a in argv[1:] if not a.startswith("--")]
     check_only = "--check" in flags
     embed_into = None
+    # Which narrow-phase modes the document covers. The two shipped modes answer
+    # different questions and are reported separately rather than side by side:
+    # `Tight` is the mode that reproduces the reference and is what
+    # docs/BENCHMARKS.md evaluates, `Relaxed` trades accuracy for speed and has
+    # its own document. Without the flag every mode present is included.
+    only_modes: set[str] | None = None
     for flag in flags:
         if flag.startswith("--embed="):
             embed_into = Path(flag.split("=", 1)[1])
+        if flag.startswith("--label="):
+            for pair in flag.split("=", 1)[1].split(","):
+                if ":" in pair:
+                    k, v = pair.split(":", 1)
+                    style.LABEL_OVERRIDE[k.strip()] = v.strip()
+        if flag.startswith("--figure-prefix="):
+            figures.PREFIX = flag.split("=", 1)[1]
+        if flag.startswith("--modes="):
+            only_modes = {m.strip() for m in flag.split("=", 1)[1].split(",") if m.strip()}
     if len(args) < 2:
         print(__doc__, file=sys.stderr)
         return 2
@@ -81,6 +96,11 @@ def main(argv: list[str]) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     rows = data.read_rows(bench_csv)
+    if only_modes is not None:
+        rows = [r for r in rows if r["mode"] in only_modes]
+        if not rows:
+            print(f"error: no rows for modes {sorted(only_modes)}", file=sys.stderr)
+            return 2
     try:
         data.check_schema(bench_csv, rows)
     except ValueError as exc:
@@ -113,12 +133,19 @@ def main(argv: list[str]) -> int:
     oracle_rows_early = {}
     if oracle_csv and oracle_csv.is_file():
         oracle_rows_early = oracle_mod.read(oracle_csv)
+        if only_modes is not None:
+            # The reference is kept whatever the mode selection: it is what the
+            # document compares against, not one of the subjects.
+            keep = set(only_modes) | {"tight-inclusion"}
+            oracle_rows_early = {k: v for k, v in oracle_rows_early.items()
+                                 if k[2] in keep}
 
     style.apply_rcparams()
     drawn = [
-        figures.phase_breakdown(scenes, figure_dir),
         figures.narrow_phase_per_case(cases, figure_dir),
-        figures.earliness_distribution(cases, figure_dir),
+        figures.results_grid(cases, figure_dir),
+        figures.runtime_breakdown(scenes, figure_dir),
+        figures.toi_error_histogram(cases, figure_dir),
     ]
     scaling_runs = []
     if scaling_files:
@@ -134,7 +161,15 @@ def main(argv: list[str]) -> int:
         tables.throughput_table(scenes, source),
         tables.conservativeness_table(scenes, source),
         tables.accuracy_table(scenes, source),
+        tables.per_frame_table(scenes, source),
     ]
+    # The processor comparison needs one mode to be about anything; with a
+    # selection it is that mode, otherwise the tighter of the two.
+    host_modes = sorted({m for _, m in scenes if not m.startswith("device-")})
+    if host_modes:
+        pick = "tight" if "tight" in host_modes else host_modes[0]
+        if (any(m == "device-" + pick for _, m in scenes)):
+            built.append(tables.processor_table(scenes, pick, source))
     if len(strategies) > 1:
         built.append(tables.broadphase_table(
             {n: data.by_scene(rows, n) for n in strategies}, source))
@@ -154,6 +189,22 @@ def main(argv: list[str]) -> int:
     # The gate is the same-geometry comparison only. `s0_late` compares the mesh
     # path against roots belonging to the curated query set, which are different
     # geometries, so it cannot decide conservativeness and does not gate.
+    # The mesh-path check is a tripwire on the inputs, not on the kernel: it
+    # fires when the answer computed over the mesh lands after the earliest
+    # exact root of the curated query set, which means the two paths were handed
+    # different geometry and the roots are not a reference for the mesh path at
+    # all. One boolean is the whole of what it has to say.
+    mesh_divergence = sum(s.s0_late for s in scenes.values())
+    blocks_extra = {
+        "mesh-check": ("The mesh path agrees with the curated query geometry on "
+                       "every case." if mesh_divergence == 0 else
+                       f"**{mesh_divergence} cases** where the mesh-path answer "
+                       "falls after the earliest exact root of the curated "
+                       "queries: the two paths are not being given the same "
+                       "geometry, so the exact roots are not a reference for the "
+                       "mesh path.")
+    }
+
     late = sum(s.toi_late for s in scenes.values())
     late += oracle_mod.violations(oracle_rows) if oracle_rows else 0
 
@@ -219,6 +270,7 @@ def main(argv: list[str]) -> int:
         blocks = {t.label.split(":", 1)[-1]: tables.render_markdown(t) for t in built}
         blocks["comparison"] = "\n".join(notes) if notes else "_No comparison available._"
         blocks["provenance"] = _provenance(bench_csv, oracle_csv, scenes)
+        blocks.update(blocks_extra)
         status = embed.apply(embed_into, blocks, check=check_only)
         if status:
             return status

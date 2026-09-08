@@ -106,7 +106,8 @@ wip/               open work, decision records, retractions
 
 | | |
 |---|---|
-| [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) | Full evaluation: timings, accuracy, occupancy, work counts. |
+| [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) | The evaluation: `Tight` against TightInclusion, CPU against GPU, six scenes. |
+| [`docs/BENCHMARKS_RELAXED.md`](docs/BENCHMARKS_RELAXED.md) | The same for `Relaxed`, the mode that trades accuracy for speed. |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | How the guarantee is obtained. |
 | [`docs/API.md`](docs/API.md) | The kernels, the broad phase, the C ABI, Python, `CCD<T>`. |
 | [`docs/CUDA.md`](docs/CUDA.md) | Running on the GPU: build, entry points, data ownership, choosing a processor. |

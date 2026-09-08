@@ -412,16 +412,7 @@ namespace sccd {
 
     template <typename T>
     inline bool accept_grid_root_vf(const Box<T> &box,
-                                    const T tol,
                                     const T tols[3],
-                                    const T sv[3],
-                                    const T s1[3],
-                                    const T s2[3],
-                                    const T s3[3],
-                                    const T ev[3],
-                                    const T e1[3],
-                                    const T e2[3],
-                                    const T e3[3],
                                     T &toi,
                                     T &u,
                                     T &v) {
@@ -942,7 +933,7 @@ namespace sccd {
 
             Box<T> box = split_axis_box<SplitDim, T>(domain, sample_min, sample_max);
             if (accepted || box.depth > max_iter) {
-                found |= accept_grid_root_vf<T>(box, tol, tols, sv, s1, s2, s3, ev, e1, e2, e3, toi, u, v);
+                found |= accept_grid_root_vf<T>(box, tols, toi, u, v);
                 continue;
             }
 
