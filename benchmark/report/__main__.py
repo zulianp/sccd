@@ -188,6 +188,22 @@ def main(argv: list[str]) -> int:
     # The gate is the same-geometry comparison only. `s0_late` compares the mesh
     # path against roots belonging to the curated query set, which are different
     # geometries, so it cannot decide conservativeness and does not gate.
+    # The mesh-path check is a tripwire on the inputs, not on the kernel: it
+    # fires when the answer computed over the mesh lands after the earliest
+    # exact root of the curated query set, which means the two paths were handed
+    # different geometry and the roots are not a reference for the mesh path at
+    # all. One boolean is the whole of what it has to say.
+    mesh_divergence = sum(s.s0_late for s in scenes.values())
+    blocks_extra = {
+        "mesh-check": ("The mesh path agrees with the curated query geometry on "
+                       "every case." if mesh_divergence == 0 else
+                       f"**{mesh_divergence} cases** where the mesh-path answer "
+                       "falls after the earliest exact root of the curated "
+                       "queries: the two paths are not being given the same "
+                       "geometry, so the exact roots are not a reference for the "
+                       "mesh path.")
+    }
+
     late = sum(s.toi_late for s in scenes.values())
     late += oracle_mod.violations(oracle_rows) if oracle_rows else 0
 
@@ -253,6 +269,7 @@ def main(argv: list[str]) -> int:
         blocks = {t.label.split(":", 1)[-1]: tables.render_markdown(t) for t in built}
         blocks["comparison"] = "\n".join(notes) if notes else "_No comparison available._"
         blocks["provenance"] = _provenance(bench_csv, oracle_csv, scenes)
+        blocks.update(blocks_extra)
         status = embed.apply(embed_into, blocks, check=check_only)
         if status:
             return status
