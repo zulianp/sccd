@@ -231,6 +231,32 @@ Source: `benchmark/results/sweep-gh200-bp.csv`
 
 ## 6. Timing
 
+Per simulation step:
+
+<!-- sccd:begin per-frame -->
+
+| scene             | steps | mode | prep ms | broad ms | narrow ms | total ms |
+|-------------------|------:|------|--------:|---------:|----------:|---------:|
+| armadillo-rollers |   779 | GPU  |    2.66 |     1.08 |      1.97 |     5.70 |
+| armadillo-rollers |   779 | CPU  |   10.41 |     4.26 |      0.98 |    15.65 |
+| cloth-ball        |    78 | GPU  |    6.73 |     4.71 |      5.46 |    16.90 |
+| cloth-ball        |    78 | CPU  |   15.54 |    11.96 |      4.94 |    32.45 |
+| cloth-funnel      |   575 | GPU  |    2.36 |     0.94 |      1.42 |     4.73 |
+| cloth-funnel      |   575 | CPU  |    9.89 |     3.79 |      0.96 |    14.65 |
+| n-body            |   145 | GPU  |    6.67 |     9.15 |     32.48 |    48.30 |
+| n-body            |   145 | CPU  |   17.12 |    49.54 |     24.12 |    90.79 |
+| puffer-ball       |   239 | GPU  |   70.52 |   113.97 |    159.53 |   344.02 |
+| puffer-ball       |   239 | CPU  |   79.20 |   114.18 |     50.47 |   243.85 |
+| rod-twist         | 4,559 | GPU  |    5.75 |     1.49 |      2.13 |     9.36 |
+| rod-twist         | 4,559 | CPU  |   14.67 |     6.33 |      2.92 |    23.92 |
+
+A mean rather than a median over steps: the scene total is what a run costs, and the mean is the only average that divides back into it.
+
+Source: `benchmark/results/sweep-gh200-bp.csv`
+
+<!-- sccd:end per-frame -->
+
+
 <!-- sccd:begin timing -->
 
 | scene             | mode | cases |         pairs | rep |           prep ms |          broad ms |       earliest ms |       per-pair ms |            total ms |
