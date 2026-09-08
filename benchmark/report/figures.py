@@ -40,10 +40,19 @@ def _ordered_modes(summaries: dict) -> list[str]:
     return ordered + sorted(present - set(ordered))
 
 
+# Prefix applied to every figure filename, so two documents generated from the
+# same data do not overwrite each other's figures.
+PREFIX = ""
+
+
+def _stem(name: str) -> str:
+    return f"{PREFIX}{name}"
+
+
 def _save(fig, out_dir: Path, stem: str) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_dir / f"{stem}.pdf")
-    fig.savefig(out_dir / f"{stem}.png")
+    fig.savefig(out_dir / f"{_stem(stem)}.pdf")
+    fig.savefig(out_dir / f"{_stem(stem)}.png")
 
 
 def narrow_phase_per_case(case_series: dict, out_dir: Path) -> Figure:
@@ -81,67 +90,11 @@ def narrow_phase_per_case(case_series: dict, out_dir: Path) -> Figure:
     plt.close(fig)
 
     return Figure(
-        "narrow-per-case", "fig:narrow-per-case",
+        _stem("narrow-per-case"), "fig:narrow-per-case",
         "Narrow-phase time for each individual case against the number of "
         "candidate pairs the broad phase handed it, on log-log axes. Each point "
         "is the median over repeats.",
         COLUMN_WIDTH_IN)
-
-
-    ordered = [m for m in MODE_ORDER if m in modes] + \
-              sorted(set(modes) - set(MODE_ORDER))
-    fig, ax = plt.subplots(figsize=figsize(COLUMN_WIDTH_IN, 0.62))
-
-    drew = False
-    for mode in ordered:
-        values = []
-        for s in case_series.values():
-            if s.mode != mode:
-                continue
-            stat = s.accuracy["toi_med_early"]
-            if stat.n and math.isfinite(stat.median) and stat.median > 0:
-                values.append(stat.median)
-        if not values:
-            continue
-        drew = True
-        values = np.sort(np.asarray(values))
-        # An empirical CDF says more than a histogram here: the reader wants
-        # "what fraction of cases report within X of the truth", and it does not
-        # depend on a bin width nobody chose deliberately.
-        # Tight and Tight (GPU) run the identical search and their curves land
-        # on top of each other, which drew one of them as a legend entry with
-        # no visible line. Dashing the device modes and drawing them over the
-        # host ones keeps both readable where they coincide.
-        is_device = mode.startswith("device-")
-        ax.step(values, np.arange(1, len(values) + 1) / len(values),
-                where="post", color=mode_color(mode), label=mode_label(mode),
-                linestyle="--" if is_device else "-",
-                linewidth=1.3 if is_device else 2.0,
-                zorder=3 if is_device else 2)
-
-    if not drew:
-        ax.text(0.5, 0.5, "no case reported a positive earliness",
-                ha="center", va="center", transform=ax.transAxes)
-    else:
-        ax.set_xscale("log")
-    ax.set_xlabel("earliness of the reported time of impact")
-    ax.set_ylabel("fraction of cases")
-    ax.set_ylim(0, 1.02)
-    ax.grid(True, which="both", axis="both")
-    ax.legend(loc="lower right")
-    fig.tight_layout()
-    _save(fig, out_dir, "earliness-cdf")
-    plt.close(fig)
-
-    return Figure(
-        "earliness-cdf", "fig:earliness",
-        "Empirical distribution over cases of how far before the true time of "
-        "impact each mode reports. Earliness is plotted on a log axis, so a "
-        "curve further left reports closer to the true root and a curve "
-        "further right reports earlier -- always the safe direction, and "
-        "always at the cost of a solver's step size.",
-        COLUMN_WIDTH_IN)
-
 
 
 def results_grid(case_series: dict, out_dir: Path) -> Figure:
@@ -164,7 +117,8 @@ def results_grid(case_series: dict, out_dir: Path) -> Figure:
     modes = [m for m in MODE_ORDER
              if m in {s.mode for s in case_series.values()}]
     if not scenes or not modes:
-        return Figure("results-grid", "fig:results", "no data", FULL_WIDTH_IN)
+        return Figure(
+        _stem("results-grid"), "fig:results", "no data", FULL_WIDTH_IN)
 
     rows = [("broad_ms", "broad phase (ms)"),
             ("narrow_ms", "narrow phase (ms)"),
@@ -240,7 +194,7 @@ def results_grid(case_series: dict, out_dir: Path) -> Figure:
     plt.close(fig)
 
     return Figure(
-        "results-grid", "fig:results",
+        _stem("results-grid"), "fig:results",
         "Per-case distributions for every mode over the six scenes (columns). "
         "Rows are broad-phase time, narrow-phase time, narrow-phase false "
         "positives, and earliness against the exact root. A star marks a "
@@ -269,7 +223,8 @@ def runtime_breakdown(summaries: dict[tuple[str, str], SceneSummary],
     scenes = sorted({sc for sc, _ in summaries})
     modes = [m for m in MODE_ORDER if m in {m2 for _, m2 in summaries}]
     if not scenes or not modes:
-        return Figure("runtime-breakdown", "fig:breakdown", "no data", FULL_WIDTH_IN)
+        return Figure(
+        _stem("runtime-breakdown"), "fig:breakdown", "no data", FULL_WIDTH_IN)
 
     parts = [("prep_ms", "prep"), ("broad_ms", "broad"), ("narrow_ms", "narrow")]
     part_ink = [SERIES[3], SERIES[0], SERIES[2]]
@@ -311,7 +266,7 @@ def runtime_breakdown(summaries: dict[tuple[str, str], SceneSummary],
     plt.close(fig)
 
     return Figure(
-        "runtime-breakdown", "fig:breakdown",
+        _stem("runtime-breakdown"), "fig:breakdown",
         "Runtime split by phase for every scene and mode: \\emph{prep} builds "
         "the swept boxes and the acceleration structure, \\emph{broad} finds "
         "the candidate pairs, \\emph{narrow} turns them into a time of impact. "
@@ -336,7 +291,8 @@ def toi_error_histogram(case_series: dict, out_dir: Path) -> Figure:
     scenes = sorted({s.dataset for s in case_series.values()})
     modes = [m for m in MODE_ORDER if m in {s.mode for s in case_series.values()}]
     if not scenes or not modes:
-        return Figure("toi-error", "fig:toi-error", "no data", FULL_WIDTH_IN)
+        return Figure(
+        _stem("toi-error"), "fig:toi-error", "no data", FULL_WIDTH_IN)
 
     # Not sharey: the scenes differ in case count by a factor of fifty-eight
     # (cloth-ball has 79, rod-twist 4,571), so a shared axis flattens five of the
@@ -382,7 +338,7 @@ def toi_error_histogram(case_series: dict, out_dir: Path) -> Figure:
     plt.close(fig)
 
     return Figure(
-        "toi-error", "fig:toi-error",
+        _stem("toi-error"), "fig:toi-error",
         "Distribution over cases of the time-of-impact error against the "
         "dataset's exact symbolic roots, on a log axis. The error is one-sided "
         "by construction -- it is how far before the true root the mode "
