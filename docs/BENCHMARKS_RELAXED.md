@@ -231,24 +231,27 @@ Source: `benchmark/results/sweep-gh200-bp.csv`
 
 ## 6. Timing
 
-Per simulation step:
+Phases are as defined in [`BENCHMARKS.md`](BENCHMARKS.md#2-what-each-phase-measures):
+*prep* builds the swept boxes and the acceleration structure, *broad* runs the
+overlap query, *narrow* finds the time of impact. Per simulation step, which
+runs both query types:
 
 <!-- sccd:begin per-frame -->
 
-| scene             | steps | mode | prep ms | broad ms | narrow ms | total ms |
-|-------------------|------:|------|--------:|---------:|----------:|---------:|
-| armadillo-rollers |   779 | GPU  |    2.66 |     1.08 |      1.97 |     5.70 |
-| armadillo-rollers |   779 | CPU  |   10.41 |     4.26 |      0.98 |    15.65 |
-| cloth-ball        |    78 | GPU  |    6.73 |     4.71 |      5.46 |    16.90 |
-| cloth-ball        |    78 | CPU  |   15.54 |    11.96 |      4.94 |    32.45 |
-| cloth-funnel      |   575 | GPU  |    2.36 |     0.94 |      1.42 |     4.73 |
-| cloth-funnel      |   575 | CPU  |    9.89 |     3.79 |      0.96 |    14.65 |
-| n-body            |   145 | GPU  |    6.67 |     9.15 |     32.48 |    48.30 |
-| n-body            |   145 | CPU  |   17.12 |    49.54 |     24.12 |    90.79 |
-| puffer-ball       |   239 | GPU  |   70.52 |   113.97 |    159.53 |   344.02 |
-| puffer-ball       |   239 | CPU  |   79.20 |   114.18 |     50.47 |   243.85 |
-| rod-twist         | 4,559 | GPU  |    5.75 |     1.49 |      2.13 |     9.36 |
-| rod-twist         | 4,559 | CPU  |   14.67 |     6.33 |      2.92 |    23.92 |
+| scene             | frames | mode | prep ms | broad ms | narrow ms | total ms |
+|-------------------|-------:|------|--------:|---------:|----------:|---------:|
+| armadillo-rollers |    396 | GPU  |    5.23 |     2.12 |      3.87 |    11.22 |
+| armadillo-rollers |    396 | CPU  |   20.47 |     8.39 |      1.92 |    30.78 |
+| cloth-ball        |     42 | GPU  |   12.50 |     8.74 |     10.13 |    31.38 |
+| cloth-ball        |     42 | CPU  |   28.87 |    22.21 |      9.18 |    60.26 |
+| cloth-funnel      |    372 | GPU  |    3.65 |     1.45 |      2.20 |     7.31 |
+| cloth-funnel      |    372 | CPU  |   15.29 |     5.86 |      1.49 |    22.64 |
+| n-body            |     74 | GPU  |   13.08 |    17.92 |     63.65 |    94.65 |
+| n-body            |     74 | CPU  |   33.55 |    97.08 |     47.27 |   177.90 |
+| puffer-ball       |    120 | GPU  |  140.45 |   227.00 |    317.73 |   685.17 |
+| puffer-ball       |    120 | CPU  |  157.74 |   227.41 |    100.53 |   485.67 |
+| rod-twist         |  2,553 | GPU  |   10.26 |     2.66 |      3.81 |    16.72 |
+| rod-twist         |  2,553 | CPU  |   26.20 |    11.31 |      5.21 |    42.72 |
 
 A mean rather than a median over steps: the scene total is what a run costs, and the mean is the only average that divides back into it.
 
