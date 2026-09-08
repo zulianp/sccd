@@ -116,9 +116,10 @@ def main(argv: list[str]) -> int:
 
     style.apply_rcparams()
     drawn = [
-        figures.phase_breakdown(scenes, figure_dir),
         figures.narrow_phase_per_case(cases, figure_dir),
-        figures.earliness_distribution(cases, figure_dir),
+        figures.results_grid(cases, figure_dir),
+        figures.runtime_breakdown(scenes, figure_dir),
+        figures.toi_error_histogram(cases, figure_dir),
     ]
     scaling_runs = []
     if scaling_files:
