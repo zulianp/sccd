@@ -169,6 +169,16 @@ def apply_rcparams() -> None:
 # dagger, so a reader can tell the processor from the legend without reading the
 # caption. The same convention is used here, on the same scenes.
 def mode_label_paper(mode: str) -> str:
-    """`Relaxed*` for a parallel CPU mode, `Relaxed\u2020` for a GPU one."""
+    """
+    The label a figure legend carries.
+
+    Belgrod et al. mark a parallel CPU method with a star and a GPU method with
+    a dagger, because their legend names thirteen methods and the processor is
+    not otherwise visible. A label that already says `CPU` or `GPU` says the
+    same thing in words, so the marker is not added on top of it -- two
+    notations for one fact is exactly the clutter the mark exists to avoid.
+    """
     base = mode_label(mode).replace(" (GPU)", "")
+    if "CPU" in base or "GPU" in base:
+        return base
     return base + ("\u2020" if mode.startswith("device-") else "*")

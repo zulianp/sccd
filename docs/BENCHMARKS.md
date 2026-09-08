@@ -18,7 +18,7 @@ Every number is generated from a committed CSV by a committed script:
 ```sh
 python3 -m report benchmark/results/sweep-gh200-bp.csv /tmp/report \
         benchmark/results/oracle-gh200-all.csv \
-        --modes=tight,device-tight --label="tight:Ours,device-tight:Ours (GPU)" \
+        --modes=tight,device-tight --label="tight:CPU,device-tight:GPU" \
         --embed=docs/BENCHMARKS.md --check
 ```
 
@@ -58,31 +58,40 @@ roots, on both processors, for every scene.
 
 <!-- sccd:begin conservativeness -->
 
-| scene             | mode       |   queries | toi compared | late | false pos. | false neg. | mesh-path divergence |
-|-------------------|------------|----------:|-------------:|-----:|-----------:|-----------:|---------------------:|
-| armadillo-rollers | Ours (GPU) |   131,441 |      130,859 |    0 |         24 |          0 |                    0 |
-| armadillo-rollers | Ours       |   131,441 |      130,859 |    0 |         24 |          0 |                    0 |
-| cloth-ball        | Ours (GPU) |   664,940 |      664,919 |    0 |          1 |          0 |                    0 |
-| cloth-ball        | Ours       |   664,940 |      664,919 |    0 |          1 |          0 |                    0 |
-| cloth-funnel      | Ours (GPU) |     7,552 |        6,773 |    0 |         15 |          0 |                    0 |
-| cloth-funnel      | Ours       |     7,552 |        6,773 |    0 |         15 |          0 |                    0 |
-| n-body            | Ours (GPU) | 2,947,719 |    2,947,611 |    0 |         12 |          0 |                    0 |
-| n-body            | Ours       | 2,947,719 |    2,947,611 |    0 |         11 |          0 |                    0 |
-| puffer-ball       | Ours (GPU) | 1,514,172 |    1,486,790 |    0 |        558 |          0 |                    0 |
-| puffer-ball       | Ours       | 1,514,172 |    1,486,790 |    0 |        536 |          0 |                    0 |
-| rod-twist         | Ours (GPU) |   549,208 |      285,431 |    0 |      1,245 |          0 |                    0 |
-| rod-twist         | Ours       |   549,208 |      285,431 |    0 |      1,243 |          0 |                    0 |
+| scene             | mode |   queries | toi compared | late | false pos. | false neg. |
+|-------------------|------|----------:|-------------:|-----:|-----------:|-----------:|
+| armadillo-rollers | GPU  |   131,441 |      130,859 |    0 |         24 |          0 |
+| armadillo-rollers | CPU  |   131,441 |      130,859 |    0 |         24 |          0 |
+| cloth-ball        | GPU  |   664,940 |      664,919 |    0 |          1 |          0 |
+| cloth-ball        | CPU  |   664,940 |      664,919 |    0 |          1 |          0 |
+| cloth-funnel      | GPU  |     7,552 |        6,773 |    0 |         15 |          0 |
+| cloth-funnel      | CPU  |     7,552 |        6,773 |    0 |         15 |          0 |
+| n-body            | GPU  | 2,947,719 |    2,947,611 |    0 |         12 |          0 |
+| n-body            | CPU  | 2,947,719 |    2,947,611 |    0 |         11 |          0 |
+| puffer-ball       | GPU  | 1,514,172 |    1,486,790 |    0 |        558 |          0 |
+| puffer-ball       | CPU  | 1,514,172 |    1,486,790 |    0 |        536 |          0 |
+| rod-twist         | GPU  |   549,208 |      285,431 |    0 |      1,245 |          0 |
+| rod-twist         | CPU  |   549,208 |      285,431 |    0 |      1,243 |          0 |
 
-Measured against the exact roots shipped with the dataset, not against TightInclusion: TightInclusion's own answer is itself a lower bound on the truth, so comparing against it over-reports lateness. The last column is not part of the gate. It counts cases where the earliest-impact answer computed over the *mesh* is later than the earliest exact root of the *curated queries*, which are two separately stored geometries: the mesh is read from PLY, the queries are exact dyadic rationals. It is a measure of the agreement between those two inputs rather than of the kernel, and with the mesh stored in double it is zero everywhere.
+Measured against the exact roots shipped with the dataset, not against TightInclusion: TightInclusion's own answer is itself a lower bound on the truth, so comparing against it over-reports lateness.
 
 Source: `benchmark/results/sweep-gh200-bp.csv`
 
 <!-- sccd:end conservativeness -->
 
-False positives cost work, never safety, and are reported for information. The
-last column compares the mesh path against roots belonging to the curated query
-set — two separately stored copies of the same frames — and is zero everywhere
-with the mesh stored in double.
+False positives cost work, never safety, and are reported for information.
+
+One further check, on the inputs rather than the kernel: the answer computed
+over the **mesh** is compared against the earliest exact root of the **curated
+query set**, which is a separately stored copy of the same frames. A
+disagreement would mean the two paths were handed different geometry, and that
+the exact roots are not a reference for the mesh path at all.
+
+<!-- sccd:begin mesh-check -->
+
+The mesh path agrees with the curated query geometry on every case.
+
+<!-- sccd:end mesh-check -->
 
 ## 3. Against TightInclusion
 
@@ -93,45 +102,49 @@ scheduled through `sccd::parallel_for_br_dynamic`, with TightInclusion used
 exactly as released and run depth-first, its faster configuration when there is
 no bound to exploit.
 
+TightInclusion runs on the host, so the **CPU** row is the like-for-like
+comparison and the **GPU** row is what the same search costs on the other
+processor.
+
 <!-- sccd:begin reference -->
 
 | scene             | phase | mode           |   queries |      hits |        time ms |     vs. TI |
 |-------------------|-------|----------------|----------:|----------:|---------------:|-----------:|
-| armadillo-rollers | EE    | Ours (GPU)     |    99,104 |    98,761 |    2908 / 2910 |       3.6× |
-| armadillo-rollers | EE    | Ours           |    99,104 |    98,761 |    6474 / 6502 |       1.6× |
+| armadillo-rollers | EE    | GPU            |    99,104 |    98,761 |    2908 / 2910 |       3.6× |
+| armadillo-rollers | EE    | CPU            |    99,104 |    98,761 |    6474 / 6502 |       1.6× |
 | armadillo-rollers | EE    | TightInclusion |    99,104 |    98,761 |  10499 / 10604 | 1.0× (ref) |
-| armadillo-rollers | VF    | Ours (GPU)     |    32,337 |    32,122 |    1987 / 2011 |       3.8× |
-| armadillo-rollers | VF    | Ours           |    32,337 |    32,122 |    2717 / 2743 |       2.8× |
+| armadillo-rollers | VF    | GPU            |    32,337 |    32,122 |    1987 / 2011 |       3.8× |
+| armadillo-rollers | VF    | CPU            |    32,337 |    32,122 |    2717 / 2743 |       2.8× |
 | armadillo-rollers | VF    | TightInclusion |    32,337 |    32,122 |    7609 / 7686 | 1.0× (ref) |
-| cloth-ball        | EE    | Ours (GPU)     |   557,683 |   557,668 |      609 / 612 |       2.5× |
-| cloth-ball        | EE    | Ours           |   557,683 |   557,668 |      955 / 961 |       1.6× |
+| cloth-ball        | EE    | GPU            |   557,683 |   557,668 |      609 / 612 |       2.5× |
+| cloth-ball        | EE    | CPU            |   557,683 |   557,668 |      955 / 961 |       1.6× |
 | cloth-ball        | EE    | TightInclusion |   557,683 |   557,668 |    1523 / 1529 | 1.0× (ref) |
-| cloth-ball        | VF    | Ours (GPU)     |   107,257 |   107,252 |      428 / 429 |       2.9× |
-| cloth-ball        | VF    | Ours           |   107,257 |   107,252 |      408 / 414 |       3.1× |
+| cloth-ball        | VF    | GPU            |   107,257 |   107,252 |      428 / 429 |       2.9× |
+| cloth-ball        | VF    | CPU            |   107,257 |   107,252 |      408 / 414 |       3.1× |
 | cloth-ball        | VF    | TightInclusion |   107,257 |   107,252 |    1255 / 1267 | 1.0× (ref) |
-| cloth-funnel      | EE    | Ours (GPU)     |     6,751 |     6,259 |    1358 / 1370 |       2.3× |
-| cloth-funnel      | EE    | Ours           |     6,751 |     6,259 |    1743 / 1746 |       1.8× |
+| cloth-funnel      | EE    | GPU            |     6,751 |     6,259 |    1358 / 1370 |       2.3× |
+| cloth-funnel      | EE    | CPU            |     6,751 |     6,259 |    1743 / 1746 |       1.8× |
 | cloth-funnel      | EE    | TightInclusion |     6,751 |     6,259 |    3130 / 3137 | 1.0× (ref) |
-| cloth-funnel      | VF    | Ours (GPU)     |       801 |       529 |      451 / 456 |       2.9× |
-| cloth-funnel      | VF    | Ours           |       801 |       529 |      394 / 395 |       3.4× |
+| cloth-funnel      | VF    | GPU            |       801 |       529 |      451 / 456 |       2.9× |
+| cloth-funnel      | VF    | CPU            |       801 |       529 |      394 / 395 |       3.4× |
 | cloth-funnel      | VF    | TightInclusion |       801 |       529 |    1321 / 1321 | 1.0× (ref) |
-| n-body            | EE    | Ours (GPU)     | 2,399,812 | 2,399,746 |     890 / 1077 |       3.0× |
-| n-body            | EE    | Ours           | 2,399,812 | 2,399,746 |    1176 / 1184 |       2.2× |
+| n-body            | EE    | GPU            | 2,399,812 | 2,399,746 |     890 / 1077 |       3.0× |
+| n-body            | EE    | CPU            | 2,399,812 | 2,399,746 |    1176 / 1184 |       2.2× |
 | n-body            | EE    | TightInclusion | 2,399,812 | 2,399,746 |    2633 / 2657 | 1.0× (ref) |
-| n-body            | VF    | Ours (GPU)     |   547,907 |   547,874 |      628 / 790 |       2.5× |
-| n-body            | VF    | Ours           |   547,907 |   547,873 |      507 / 511 |       3.1× |
+| n-body            | VF    | GPU            |   547,907 |   547,874 |      628 / 790 |       2.5× |
+| n-body            | VF    | CPU            |   547,907 |   547,873 |      507 / 511 |       3.1× |
 | n-body            | VF    | TightInclusion |   547,907 |   547,873 |    1577 / 1587 | 1.0× (ref) |
-| puffer-ball       | EE    | Ours (GPU)     | 1,206,952 | 1,187,650 |      941 / 943 |       2.8× |
-| puffer-ball       | EE    | Ours           | 1,206,952 | 1,187,650 |    1614 / 1629 |       1.6× |
+| puffer-ball       | EE    | GPU            | 1,206,952 | 1,187,650 |      941 / 943 |       2.8× |
+| puffer-ball       | EE    | CPU            | 1,206,952 | 1,187,650 |    1614 / 1629 |       1.6× |
 | puffer-ball       | EE    | TightInclusion | 1,206,952 | 1,187,650 |    2642 / 2662 | 1.0× (ref) |
-| puffer-ball       | VF    | Ours (GPU)     |   307,220 |   299,698 |      634 / 636 |       2.4× |
-| puffer-ball       | VF    | Ours           |   307,220 |   299,676 |      586 / 595 |       2.6× |
+| puffer-ball       | VF    | GPU            |   307,220 |   299,698 |      634 / 636 |       2.4× |
+| puffer-ball       | VF    | CPU            |   307,220 |   299,676 |      586 / 595 |       2.6× |
 | puffer-ball       | VF    | TightInclusion |   307,220 |   299,676 |    1544 / 1556 | 1.0× (ref) |
-| rod-twist         | EE    | Ours (GPU)     |   492,120 |   246,132 |    4913 / 8176 |      16.9× |
-| rod-twist         | EE    | Ours           |   492,120 |   246,132 | 37118 / 121624 |       2.2× |
+| rod-twist         | EE    | GPU            |   492,120 |   246,132 |    4913 / 8176 |      16.9× |
+| rod-twist         | EE    | CPU            |   492,120 |   246,132 | 37118 / 121624 |       2.2× |
 | rod-twist         | EE    | TightInclusion |   492,120 |   246,132 | 82987 / 249504 | 1.0× (ref) |
-| rod-twist         | VF    | Ours (GPU)     |    57,088 |    40,544 |    3014 / 3236 |       7.8× |
-| rod-twist         | VF    | Ours           |    57,088 |    40,542 |   6382 / 10301 |       3.7× |
+| rod-twist         | VF    | GPU            |    57,088 |    40,544 |    3014 / 3236 |       7.8× |
+| rod-twist         | VF    | CPU            |    57,088 |    40,542 |   6382 / 10301 |       3.7× |
 | rod-twist         | VF    | TightInclusion |    57,088 |    40,542 |  23528 / 43830 | 1.0× (ref) |
 
 Source: `benchmark/results/oracle-gh200-all.csv`
@@ -148,41 +161,41 @@ roots.
 
 | scene             | phase | mode           | median earliness | worst case |
 |-------------------|-------|----------------|-----------------:|-----------:|
-| armadillo-rollers | EE    | Ours           |         3.11e-06 |   1.60e-02 |
-| armadillo-rollers | EE    | Ours (GPU)     |         3.08e-06 |   1.60e-02 |
+| armadillo-rollers | EE    | CPU            |         3.11e-06 |   1.60e-02 |
+| armadillo-rollers | EE    | GPU            |         3.08e-06 |   1.60e-02 |
 | armadillo-rollers | EE    | TightInclusion |         3.11e-06 |   1.60e-02 |
-| armadillo-rollers | VF    | Ours           |         3.74e-06 |   9.39e-03 |
-| armadillo-rollers | VF    | Ours (GPU)     |         3.73e-06 |   9.39e-03 |
+| armadillo-rollers | VF    | CPU            |         3.74e-06 |   9.39e-03 |
+| armadillo-rollers | VF    | GPU            |         3.73e-06 |   9.39e-03 |
 | armadillo-rollers | VF    | TightInclusion |         3.74e-06 |   9.39e-03 |
-| cloth-ball        | EE    | Ours           |         1.05e-07 |   1.04e-04 |
-| cloth-ball        | EE    | Ours (GPU)     |         1.05e-07 |   1.04e-04 |
+| cloth-ball        | EE    | CPU            |         1.05e-07 |   1.04e-04 |
+| cloth-ball        | EE    | GPU            |         1.05e-07 |   1.04e-04 |
 | cloth-ball        | EE    | TightInclusion |         1.05e-07 |   1.04e-04 |
-| cloth-ball        | VF    | Ours           |         9.76e-08 |   2.88e-05 |
-| cloth-ball        | VF    | Ours (GPU)     |         9.75e-08 |   2.88e-05 |
+| cloth-ball        | VF    | CPU            |         9.76e-08 |   2.88e-05 |
+| cloth-ball        | VF    | GPU            |         9.75e-08 |   2.88e-05 |
 | cloth-ball        | VF    | TightInclusion |         9.76e-08 |   2.88e-05 |
-| cloth-funnel      | EE    | Ours           |                0 |   1.00e+00 |
-| cloth-funnel      | EE    | Ours (GPU)     |                0 |   1.00e+00 |
+| cloth-funnel      | EE    | CPU            |                0 |   1.00e+00 |
+| cloth-funnel      | EE    | GPU            |                0 |   1.00e+00 |
 | cloth-funnel      | EE    | TightInclusion |                0 |   1.00e+00 |
-| cloth-funnel      | VF    | Ours           |         3.33e-04 |   2.67e-02 |
-| cloth-funnel      | VF    | Ours (GPU)     |         3.33e-04 |   2.67e-02 |
+| cloth-funnel      | VF    | CPU            |         3.33e-04 |   2.67e-02 |
+| cloth-funnel      | VF    | GPU            |         3.33e-04 |   2.67e-02 |
 | cloth-funnel      | VF    | TightInclusion |         3.33e-04 |   2.67e-02 |
-| n-body            | EE    | Ours           |         1.14e-08 |   1.89e-04 |
-| n-body            | EE    | Ours (GPU)     |         1.14e-08 |   1.89e-04 |
+| n-body            | EE    | CPU            |         1.14e-08 |   1.89e-04 |
+| n-body            | EE    | GPU            |         1.14e-08 |   1.89e-04 |
 | n-body            | EE    | TightInclusion |         1.14e-08 |   1.89e-04 |
-| n-body            | VF    | Ours           |         1.17e-08 |   1.87e-05 |
-| n-body            | VF    | Ours (GPU)     |         1.17e-08 |   1.87e-05 |
+| n-body            | VF    | CPU            |         1.17e-08 |   1.87e-05 |
+| n-body            | VF    | GPU            |         1.17e-08 |   1.87e-05 |
 | n-body            | VF    | TightInclusion |         1.17e-08 |   1.87e-05 |
-| puffer-ball       | EE    | Ours           |         3.54e-05 |   2.61e-01 |
-| puffer-ball       | EE    | Ours (GPU)     |         3.54e-05 |   2.61e-01 |
+| puffer-ball       | EE    | CPU            |         3.54e-05 |   2.61e-01 |
+| puffer-ball       | EE    | GPU            |         3.54e-05 |   2.61e-01 |
 | puffer-ball       | EE    | TightInclusion |         3.54e-05 |   2.61e-01 |
-| puffer-ball       | VF    | Ours           |         4.58e-05 |   5.04e-02 |
-| puffer-ball       | VF    | Ours (GPU)     |         4.56e-05 |   5.04e-02 |
+| puffer-ball       | VF    | CPU            |         4.58e-05 |   5.04e-02 |
+| puffer-ball       | VF    | GPU            |         4.56e-05 |   5.04e-02 |
 | puffer-ball       | VF    | TightInclusion |         4.58e-05 |   5.04e-02 |
-| rod-twist         | EE    | Ours           |         2.47e-04 |   9.85e-01 |
-| rod-twist         | EE    | Ours (GPU)     |         2.47e-04 |   9.85e-01 |
+| rod-twist         | EE    | CPU            |         2.47e-04 |   9.85e-01 |
+| rod-twist         | EE    | GPU            |         2.47e-04 |   9.85e-01 |
 | rod-twist         | EE    | TightInclusion |         2.47e-04 |   9.85e-01 |
-| rod-twist         | VF    | Ours           |         1.28e-04 |   9.93e-01 |
-| rod-twist         | VF    | Ours (GPU)     |         1.28e-04 |   9.93e-01 |
+| rod-twist         | VF    | CPU            |         1.28e-04 |   9.93e-01 |
+| rod-twist         | VF    | GPU            |         1.28e-04 |   9.93e-01 |
 | rod-twist         | VF    | TightInclusion |         1.28e-04 |   9.93e-01 |
 
 Source: `benchmark/results/oracle-gh200-all.csv`
@@ -242,12 +255,12 @@ shipped default races them per scene rather than fixing a winner.
 
 | scene             | mode | cell2d prep ms | sweep prep ms | cell2d broad ms | sweep broad ms | faster       |
 |-------------------|------|---------------:|--------------:|----------------:|---------------:|--------------|
-| armadillo-rollers | Ours |           8089 |         26637 |            3331 |           3231 | sweep 1.03x  |
-| cloth-ball        | Ours |           1230 |          3064 |             945 |            697 | sweep 1.36x  |
-| cloth-funnel      | Ours |           5661 |         19460 |            2186 |           2340 | cell2d 1.07x |
-| n-body            | Ours |           2608 |          5902 |            7224 |           3833 | sweep 1.88x  |
-| puffer-ball       | Ours |          18898 |         27213 |           27335 |         110588 | cell2d 4.05x |
-| rod-twist         | Ours |          66765 |        169005 |           28680 |          21551 | sweep 1.33x  |
+| armadillo-rollers | CPU  |           8089 |         26637 |            3331 |           3231 | sweep 1.03x  |
+| cloth-ball        | CPU  |           1230 |          3064 |             945 |            697 | sweep 1.36x  |
+| cloth-funnel      | CPU  |           5661 |         19460 |            2186 |           2340 | cell2d 1.07x |
+| n-body            | CPU  |           2608 |          5902 |            7224 |           3833 | sweep 1.88x  |
+| puffer-ball       | CPU  |          18898 |         27213 |           27335 |         110588 | cell2d 4.05x |
+| rod-twist         | CPU  |          66765 |        169005 |           28680 |          21551 | sweep 1.33x  |
 
 `faster` names the winning strategy and by how much on the whole broad phase. A margin inside the run-to-run spread is reported as a tie rather than a winner.
 
@@ -301,15 +314,13 @@ logarithmic axes.
 ![Per-case results over the six scenes](figures/results-grid.png)
 
 **Figure 1.** Per-case distributions over the six scenes: broad-phase time,
-narrow-phase time, and error against the exact root. `*` marks a parallel CPU
-mode, `†` a GPU one. Each box spans the first to
+narrow-phase time, and error against the exact root. Each box spans the first to
 the third quartile with the median inside, whiskers reach the furthest case
 within 1.5 interquartile ranges, and cases beyond are drawn individually.
 
 ![Runtime split by phase](figures/runtime-breakdown.png)
 
-**Figure 2.** Runtime split into *prep*, *broad* and *narrow*, one bar per
-configuration: `*` is a parallel CPU mode, `†` a GPU one. Preparation dominates
+**Figure 2.** Runtime split into *prep*, *broad* and *narrow*. Preparation dominates
 on the host; on the GPU the narrow phase does.
 
 ![Error against the symbolic ground truth](figures/toi-error.png)
@@ -317,8 +328,8 @@ on the host; on the GPU the narrow phase does.
 **Figure 3.** Error against the exact symbolic roots, log axis. One-sided by
 construction — it is how far *before* the true root the answer falls — so every
 value shown is on the safe side, and nothing falls off the axis on the late side
-because no such case exists. `*` marks a parallel CPU mode, `†` a GPU one; the
-device curve is dashed because the two coincide.
+because no such case exists. The device curve is dashed because the
+two coincide.
 
 ![Cost against element count](figures/refine-scaling.png)
 
