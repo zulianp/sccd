@@ -107,10 +107,17 @@ def table(runs: list[ScalingRun], source: str):
     def _processor(r):
         return "GPU" if r.meta.get("space", "host") == "device" else "CPU"
 
+    def _broadphase(r):
+        # The device broad phase does not implement the strategy choice --
+        # SCCD_BROADPHASE is read only in the host functions -- so a device run
+        # records "auto" and means nothing by it. Naming a strategy on a GPU row
+        # would claim a choice that was never made.
+        return "" if _processor(r) == "GPU" else r.meta.get("broadphase", "")
+
     def _fields0(r):
         return (r.meta.get("mode", "?"), _processor(r),
                 "quad" if "QUAD" in r.meta.get("base_topology", "").upper() else "tri",
-                r.meta.get("broadphase", ""))
+                _broadphase(r))
     _varying0 = [i for i in range(4) if len({_fields0(r)[i] for r in runs}) > 1]
     _first_header = {0: "mode", 1: "processor", 2: "topology", 3: "broad phase"}.get(
         _varying0[0], "series") if len(_varying0) == 1 else "series"
@@ -147,7 +154,7 @@ def table(runs: list[ScalingRun], source: str):
     def _fields(r):
         return (r.meta.get("mode", "?"), _processor(r),
                 "quad" if "QUAD" in r.meta.get("base_topology", "").upper() else "tri",
-                r.meta.get("broadphase", ""))
+                _broadphase(r))
 
     varying = [i for i in range(4)
                if len({_fields(r)[i] for r in runs}) > 1]
