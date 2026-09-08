@@ -441,3 +441,49 @@ def broadphase_table(per_strategy: dict[str, dict[tuple[str, str], SceneSummary]
                   *[f"{broad[n].median:.0f}" for n in names],
                   verdict)
     return table
+
+
+def processor_table(summaries: dict[tuple[str, str], SceneSummary],
+                    mode: str, source: str) -> Table:
+    """
+    CPU against GPU for one mode, with the phase that explains the difference.
+
+    A single end-to-end ratio hides the mechanism: the two processors do not win
+    the same phase, and on one scene they do not even agree on the sign. Giving
+    the per-phase ratios beside the total makes the total readable -- and makes
+    it obvious when a scene is the exception.
+    """
+    gpu = "device-" + mode
+    table = Table(
+        label="tab:processor",
+        caption=("Host against device for the same mode and the same cases. "
+                 "\\emph{total} is prep, broad and narrow together, median over "
+                 "repeats. A ratio above one means the GPU is faster."),
+        columns=[Column("scene", "l"), Column("CPU ms"), Column("GPU ms"),
+                 Column("total", tex_header=r"total$\times$"),
+                 Column("broad", tex_header=r"broad$\times$"),
+                 Column("narrow", tex_header=r"narrow$\times$")],
+        source=source,
+        notes=("A ratio is the host median over the device median, so 2.0 means "
+               "the device takes half the time. Ratios below 1.0 are the cases "
+               "where the host wins and are the ones worth reading."),
+    )
+    for scene in sorted({s for s, _ in summaries}):
+        host, dev = summaries.get((scene, mode)), summaries.get((scene, gpu))
+        if not host or not dev:
+            continue
+
+        def med(s_, col):
+            st = s_.totals.get(col)
+            return st.median if st is not None and st.n else float("nan")
+
+        parts = ("prep_ms", "broad_ms", "narrow_ms")
+        h_tot = sum(med(host, c) for c in parts)
+        d_tot = sum(med(dev, c) for c in parts)
+        h_b, d_b = med(host, "broad_ms"), med(dev, "broad_ms")
+        h_n, d_n = med(host, "narrow_ms"), med(dev, "narrow_ms")
+        ratio = lambda a, b: f"{a / b:.2f}x" if b else "--"
+        table.add(SCENE_LABEL.get(scene, scene),
+                  f"{h_tot:,.0f}", f"{d_tot:,.0f}",
+                  ratio(h_tot, d_tot), ratio(h_b, d_b), ratio(h_n, d_n))
+    return table

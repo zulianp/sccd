@@ -61,9 +61,19 @@ def main(argv: list[str]) -> int:
     args = [a for a in argv[1:] if not a.startswith("--")]
     check_only = "--check" in flags
     embed_into = None
+    # Which narrow-phase modes the document covers. The two shipped modes answer
+    # different questions and are reported separately rather than side by side:
+    # `Tight` is the mode that reproduces the reference and is what
+    # docs/BENCHMARKS.md evaluates, `Relaxed` trades accuracy for speed and has
+    # its own document. Without the flag every mode present is included.
+    only_modes: set[str] | None = None
     for flag in flags:
         if flag.startswith("--embed="):
             embed_into = Path(flag.split("=", 1)[1])
+        if flag.startswith("--figure-prefix="):
+            figures.PREFIX = flag.split("=", 1)[1]
+        if flag.startswith("--modes="):
+            only_modes = {m.strip() for m in flag.split("=", 1)[1].split(",") if m.strip()}
     if len(args) < 2:
         print(__doc__, file=sys.stderr)
         return 2
@@ -81,6 +91,11 @@ def main(argv: list[str]) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     rows = data.read_rows(bench_csv)
+    if only_modes is not None:
+        rows = [r for r in rows if r["mode"] in only_modes]
+        if not rows:
+            print(f"error: no rows for modes {sorted(only_modes)}", file=sys.stderr)
+            return 2
     try:
         data.check_schema(bench_csv, rows)
     except ValueError as exc:
@@ -113,6 +128,12 @@ def main(argv: list[str]) -> int:
     oracle_rows_early = {}
     if oracle_csv and oracle_csv.is_file():
         oracle_rows_early = oracle_mod.read(oracle_csv)
+        if only_modes is not None:
+            # The reference is kept whatever the mode selection: it is what the
+            # document compares against, not one of the subjects.
+            keep = set(only_modes) | {"tight-inclusion"}
+            oracle_rows_early = {k: v for k, v in oracle_rows_early.items()
+                                 if k[2] in keep}
 
     style.apply_rcparams()
     drawn = [
@@ -136,6 +157,13 @@ def main(argv: list[str]) -> int:
         tables.conservativeness_table(scenes, source),
         tables.accuracy_table(scenes, source),
     ]
+    # The processor comparison needs one mode to be about anything; with a
+    # selection it is that mode, otherwise the tighter of the two.
+    host_modes = sorted({m for _, m in scenes if not m.startswith("device-")})
+    if host_modes:
+        pick = "tight" if "tight" in host_modes else host_modes[0]
+        if (any(m == "device-" + pick for _, m in scenes)):
+            built.append(tables.processor_table(scenes, pick, source))
     if len(strategies) > 1:
         built.append(tables.broadphase_table(
             {n: data.by_scene(rows, n) for n in strategies}, source))
