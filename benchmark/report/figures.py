@@ -120,10 +120,13 @@ def results_grid(case_series: dict, out_dir: Path) -> Figure:
         return Figure(
         _stem("results-grid"), "fig:results", "no data", FULL_WIDTH_IN)
 
+    # False positives are not a row here. They are almost always zero, so the
+    # box collapses onto the axis and the panel spends a quarter of the figure
+    # saying nothing; the count per scene is in the conservativeness table,
+    # which is the right place for a number that is usually the same number.
     rows = [("broad_ms", "broad phase (ms)"),
             ("narrow_ms", "narrow phase (ms)"),
-            ("fp", "false positives"),
-            ("toi_max_early", "earliness")]
+            ("toi_max_early", "error")]
 
     fig, axes = plt.subplots(len(rows), len(scenes), squeeze=False,
                              figsize=(FULL_WIDTH_IN, 1.35 * len(rows) + 0.9),
@@ -196,8 +199,8 @@ def results_grid(case_series: dict, out_dir: Path) -> Figure:
     return Figure(
         _stem("results-grid"), "fig:results",
         "Per-case distributions for every mode over the six scenes (columns). "
-        "Rows are broad-phase time, narrow-phase time, narrow-phase false "
-        "positives, and earliness against the exact root. A star marks a "
+        "Rows are broad-phase time, narrow-phase time, and error against "
+        "the exact root. A star marks a "
         "parallel CPU mode and a dagger a GPU one. Each box spans the first to "
         "the third quartile with the median inside it, the whiskers reach the "
         "furthest case within 1.5 interquartile ranges, and cases beyond that "
