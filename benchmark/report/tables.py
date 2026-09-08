@@ -265,25 +265,17 @@ def conservativeness_table(summaries: dict[tuple[str, str], SceneSummary],
             Column("queries", tex_header=r"queries"),
             Column("toi compared", tex_header=r"toi compared"),
             Column("late"), Column("false pos."), Column("false neg."),
-            Column("mesh-path divergence", tex_header=r"mesh div."),
         ],
         source=source,
         notes=("Measured against the exact roots shipped with the dataset, not "
                "against TightInclusion: TightInclusion's own answer is itself a "
                "lower bound on the truth, so comparing against it over-reports "
-               "lateness. The last column is not part of the gate. It counts "
-               "cases where the earliest-impact answer computed over the *mesh* "
-               "is later than the earliest exact root of the *curated queries*, "
-               "which are two separately stored geometries: the mesh is read "
-               "from PLY, the queries are exact dyadic rationals. It is a "
-               "measure of the agreement between those two inputs rather than "
-               "of the kernel, and with the mesh stored in double it is zero "
-               "everywhere."),
+               "lateness."),
     )
     for (scene, mode), s in sorted(summaries.items()):
         table.add(SCENE_LABEL.get(scene, scene), mode_label(mode),
                   f"{s.gt_queries:,}", f"{s.toi_compared:,}",
-                  f"{s.toi_late}", f"{s.fp:,}", f"{s.fn}", f"{s.s0_late}")
+                  f"{s.toi_late}", f"{s.fp:,}", f"{s.fn}")
     return table
 
 
