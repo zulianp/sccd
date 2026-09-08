@@ -104,12 +104,15 @@ def table(runs: list[ScalingRun], source: str):
     """Cost per refinement level, with the fitted exponent per series."""
     from .tables import Column, Table
 
+    def _processor(r):
+        return "GPU" if r.meta.get("space", "host") == "device" else "CPU"
+
     def _fields0(r):
-        return (r.meta.get("mode", "?"), r.meta.get("space", "host"),
+        return (r.meta.get("mode", "?"), _processor(r),
                 "quad" if "QUAD" in r.meta.get("base_topology", "").upper() else "tri",
                 r.meta.get("broadphase", ""))
     _varying0 = [i for i in range(4) if len({_fields0(r)[i] for r in runs}) > 1]
-    _first_header = {0: "mode", 1: "space", 2: "topology", 3: "broad phase"}.get(
+    _first_header = {0: "mode", 1: "processor", 2: "topology", 3: "broad phase"}.get(
         _varying0[0], "series") if len(_varying0) == 1 else "series"
 
     t = Table(
@@ -142,7 +145,7 @@ def table(runs: list[ScalingRun], source: str):
     # a mode, a space and a topology, repeating all three on every row is noise:
     # the reader is being shown one axis of variation, so name that one.
     def _fields(r):
-        return (r.meta.get("mode", "?"), r.meta.get("space", "host"),
+        return (r.meta.get("mode", "?"), _processor(r),
                 "quad" if "QUAD" in r.meta.get("base_topology", "").upper() else "tri",
                 r.meta.get("broadphase", ""))
 
