@@ -104,13 +104,21 @@ def table(runs: list[ScalingRun], source: str):
     """Cost per refinement level, with the fitted exponent per series."""
     from .tables import Column, Table
 
+    def _fields0(r):
+        return (r.meta.get("mode", "?"), r.meta.get("space", "host"),
+                "quad" if "QUAD" in r.meta.get("base_topology", "").upper() else "tri",
+                r.meta.get("broadphase", ""))
+    _varying0 = [i for i in range(4) if len({_fields0(r)[i] for r in runs}) > 1]
+    _first_header = {0: "mode", 1: "space", 2: "topology", 3: "broad phase"}.get(
+        _varying0[0], "series") if len(_varying0) == 1 else "series"
+
     t = Table(
         label="tab:scaling",
         caption=("Cost against element count on a repeatedly refined surface, "
                  "each level quadrupling the element count. $p$ is the "
                  "least-squares exponent in $t \\sim n^{p}$ fitted over all "
                  "levels of that series."),
-        columns=[Column("mode", "l"), Column("level"), Column("elements"),
+        columns=[Column(_first_header, "l"), Column("level"), Column("elements"),
                  Column("candidate pairs"),
                  Column("prep ms", tex_header="prep (ms)"),
                  Column("step ms", tex_header="step (ms)"),
@@ -130,12 +138,28 @@ def table(runs: list[ScalingRun], source: str):
                "the traversal that reports pairs; the two strategies divide "
                "the work between those columns quite differently."),
     )
+    # Label by what actually differs between the runs. When every series shares
+    # a mode, a space and a topology, repeating all three on every row is noise:
+    # the reader is being shown one axis of variation, so name that one.
+    def _fields(r):
+        return (r.meta.get("mode", "?"), r.meta.get("space", "host"),
+                "quad" if "QUAD" in r.meta.get("base_topology", "").upper() else "tri",
+                r.meta.get("broadphase", ""))
+
+    varying = [i for i in range(4)
+               if len({_fields(r)[i] for r in runs}) > 1]
+
+    def _label(r):
+        f = _fields(r)
+        parts = [f[i] for i in (varying or [0, 1, 2, 3]) if f[i]]
+        return " / ".join(parts) if parts else r.label
+
     for run in runs:
         faces = [float(f) for f in run.faces]
         totals = [b + n for b, n in zip(run.broad_ms, run.narrow_ms)]
         p_fit = fitted_exponent(faces, totals)
         for i, level in enumerate(run.levels):
-            t.add(run.label if i == 0 else "", f"{level}", f"{run.faces[i]:,}",
+            t.add(_label(run) if i == 0 else "", f"{level}", f"{run.faces[i]:,}",
                   f"{run.vf_pairs[i] + run.ee_pairs[i]:,}",
                   f"{run.prep_ms[i]:.1f}", f"{run.step_ms[i]:.1f}",
                   f"{run.broad_ms[i]:.1f}", f"{run.narrow_ms[i]:.1f}",

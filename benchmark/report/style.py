@@ -98,7 +98,15 @@ def mode_color(mode: str) -> str:
     return MODE_COLOR.get(mode, SERIES[hash(mode) % len(SERIES)])
 
 
+# Set from --label on the command line. A document that evaluates one mode names
+# it for what it is to the reader -- "Ours" -- rather than by the internal mode
+# name, which only means something next to the mode it is not being compared to.
+LABEL_OVERRIDE: dict[str, str] = {}
+
+
 def mode_label(mode: str) -> str:
+    if mode in LABEL_OVERRIDE:
+        return LABEL_OVERRIDE[mode]
     return MODE_LABEL.get(mode, mode)
 
 

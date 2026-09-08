@@ -70,6 +70,11 @@ def main(argv: list[str]) -> int:
     for flag in flags:
         if flag.startswith("--embed="):
             embed_into = Path(flag.split("=", 1)[1])
+        if flag.startswith("--label="):
+            for pair in flag.split("=", 1)[1].split(","):
+                if ":" in pair:
+                    k, v = pair.split(":", 1)
+                    style.LABEL_OVERRIDE[k.strip()] = v.strip()
         if flag.startswith("--figure-prefix="):
             figures.PREFIX = flag.split("=", 1)[1]
         if flag.startswith("--modes="):
