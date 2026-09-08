@@ -23,7 +23,7 @@ python3 -m report <sweep>.csv out <oracle>.csv
 sweep is resumable at chunk granularity, so an interrupted run is continued by
 running it again.
 
-## What is being measured
+## 1. What is being measured
 
 SCCD is a **conservative** continuous collision detector, and conservativeness is
 an invariant rather than a quality:
@@ -48,7 +48,7 @@ Distributions over cases carry their worst case for the same reason — a median
 describes the typical case, and the cost of this search is paid in the worst
 one.
 
-## Platform
+## 2. Platform
 
 One GH200 node on CSCS Alps: Grace (288 hardware threads, `OMP_NUM_THREADS` set
 to the node's core count) and Hopper sm_90 in the same allocation, built with
@@ -69,7 +69,7 @@ path takes its coordinates from the query sets, in double, and never reads the
 mesh. The double build is also the faster of the two here, 34 s against 57 s,
 because tighter coordinates give tighter swept boxes and fewer candidate pairs.
 
-## Scenes
+## 3. Dataset
 
 The dataset is the NYU CCD benchmark (archive 2451/74508), real simulation
 frames rather than synthetic motion. Each case is one step, with a curated query
@@ -104,7 +104,7 @@ to those coordinates specifically. The mesh path is a separately stored copy of
 the same frames, read from PLY, and is reported beside them rather than checked
 against them.
 
-### Ground-truth coverage
+### 3.1. Ground-truth coverage
 
 The dataset states each query's outcome twice — a boolean in `mma_bool` and a
 time of impact in `roots` — and `benchmark/verify_oracle.py` requires them to
@@ -123,7 +123,7 @@ varies by scene because it is the fraction of curated queries that collide, not
 a measure of how much of the oracle converted — rod-twist's 52% and cloth-ball's
 99.997% are both complete.
 
-## Modes
+### 3.2. Modes
 
 `Relaxed` (`SCCD_NARROWPHASE_MODE=0`) and `Tight` (`=2`) differ in **how early
 they accept a box**, not in how fast they run. `Relaxed` compares codomain widths
@@ -143,7 +143,9 @@ and the reported time of impact varies between runs of the same binary on the
 same input. It varies in tightness only — it is never later than the true root —
 but it is a reason to read the spread rather than a single figure.
 
-## Conservativeness
+## 4. Benchmark
+
+### 4.1. Conservativeness
 
 The invariant, checked against the dataset's exact symbolic roots for every mode
 on every scene, CPU and GPU. **Zero missed collisions and zero late times of
@@ -256,7 +258,7 @@ mesh stored in double it is **zero on every scene and every mode**; a float32
 mesh store puts it in the hundreds on the two scenes whose PLY files declare
 `property double`, which is what decided the storage type.
 
-## Timing
+### 4.2. Narrow phase
 
 Whole-scene wall clock, summed over every case, median of three independent
 runs with the full run-to-run range beside it.
@@ -394,7 +396,7 @@ Comparisons above are made within a processor for that reason: ranking every mod
 of a scene together would compare host `Relaxed` against GPU `Tight` and report
 the sum of two unrelated effects as if it were the mode trade.
 
-## Broad phase
+### 4.3. Broad phase
 
 Two strategies produce the candidate pairs: a **sweep** over sorted intervals and
 a **cell list** over a uniform grid. They return identical pair sets, so the
@@ -452,7 +454,9 @@ wherever it wins, by traversing much less. The refinement study below sweeps
 element count over two and a half orders of magnitude and pins down that
 scaling.
 
-## Against TightInclusion
+## 5. Evaluation
+
+### 5.1. Comparison against TightInclusion
 
 TightInclusion is the reference implementation of a certified conservative
 narrow phase. Matching its hit count is the strongest agreement available;
@@ -548,7 +552,7 @@ Source: `benchmark/results/oracle-gh200-all.csv`
 
 <!-- sccd:end reference -->
 
-## Accuracy
+### 5.2. Time of impact validation and accuracy
 
 How far before the true time of impact each mode reports. This is the axis the
 two modes trade against speed, and early is the safe direction.
@@ -602,7 +606,7 @@ Source: `benchmark/results/sweep-gh200-bp.csv`
 
 <!-- sccd:end earliness -->
 
-### Against TightInclusion, on accuracy
+#### 5.2.1. Against TightInclusion, on accuracy
 
 The tables above use TightInclusion as the reference for hit versus miss, which
 is what it is good for. It is **not** the reference for accuracy: its answer is a
@@ -705,7 +709,7 @@ Source: `benchmark/results/oracle-gh200-all.csv`
 <!-- sccd:end earliness-ref -->
 
 
-## Scaling with element count
+### 5.3. Scaling with element count
 
 `sccd_refine_scaling` refines one surface repeatedly, quadrupling the element
 count at each level, and runs a collision step on each — the one question
@@ -774,27 +778,47 @@ refinement levels of the same surface. The fitted exponent is on the broad
 phase; the narrow-phase series is flat and noisy because these two frames do not
 come into contact.
 
-## Figures
+## 6. Figures
 
-![Broad and narrow phase per scene and mode](figures/phase-breakdown.png)
+Figures follow the presentation of the dataset paper (Belgrod et al., *TOI
+dataset for CCD and a scalable conservative algorithm*), over the same six
+scenes: scenes across the columns, one measured quantity per row, distributions
+over cases drawn as box plots on logarithmic axes. A **star** marks a parallel
+CPU mode and a **dagger** a GPU one.
 
-Broad phase (pale) and narrow phase (solid) summed over every case, per mode.
-Bars are the median over three repeats; whiskers span the full run-to-run range
-of the total, so a difference smaller than a whisker is not a result.
+![Per-case results for every mode over the six scenes](figures/results-grid.png)
+
+**Figure 1.** Per-case distributions for every mode over the six scenes
+(columns). Rows are broad-phase time, narrow-phase time, narrow-phase false
+positives, and earliness against the exact root. Each box spans the first to the
+third quartile with the median inside it, the whiskers reach the furthest case
+within 1.5 interquartile ranges, and cases beyond that are drawn individually.
+Counts are on a symmetric-log axis so that a case with no false positive — the
+common outcome — is on the axis rather than dropped.
+
+![Runtime split by phase](figures/runtime-breakdown.png)
+
+**Figure 2.** Runtime split by phase for every scene and mode: *prep* builds the
+swept boxes and the acceleration structure, *broad* finds the candidate pairs,
+*narrow* turns them into a time of impact. Preparation dominates on the host;
+on the GPU the narrow phase does, and on n-body and puffer-ball it dominates
+outright.
+
+![Time-of-impact error against the symbolic ground truth](figures/toi-error.png)
+
+**Figure 3.** Distribution over cases of the time-of-impact error against the
+dataset's exact symbolic roots, on a log axis. The error is one-sided by
+construction — it is how far *before* the true root the mode reported — so every
+value shown is on the safe side, and nothing falls off the axis on the late side
+because no such case exists. `Tight` and `Tight (GPU)` coincide, which is why the
+device modes are dashed.
 
 ![Narrow-phase time per case against candidate pairs](figures/narrow-per-case.png)
 
-Narrow-phase time for each individual case against the number of candidate pairs
-the broad phase handed it, log-log, median over repeats.
+**Figure 4.** Narrow-phase time for each individual case against the number of
+candidate pairs the broad phase handed it, log-log, median over repeats.
 
-![Distribution of earliness](figures/earliness-cdf.png)
-
-Empirical distribution, over cases, of how far before the true time of impact
-each mode reports. Earliness is on a log axis, so a curve further left reports
-closer to the true root; a curve further right reports earlier, which is always
-the safe direction and always costs a solver step size.
-
-## Provenance
+## 7. Provenance
 
 <!-- sccd:begin provenance -->
 

@@ -154,3 +154,13 @@ def apply_rcparams() -> None:
         "pdf.fonttype": 42,
         "ps.fonttype": 42,
     })
+
+
+# --- the benchmark paper's labelling convention ----------------------------
+# Belgrod et al. mark a parallel CPU method with a star and a GPU method with a
+# dagger, so a reader can tell the processor from the legend without reading the
+# caption. The same convention is used here, on the same scenes.
+def mode_label_paper(mode: str) -> str:
+    """`Relaxed*` for a parallel CPU mode, `Relaxed\u2020` for a GPU one."""
+    base = mode_label(mode).replace(" (GPU)", "")
+    return base + ("\u2020" if mode.startswith("device-") else "*")
