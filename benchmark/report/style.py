@@ -98,7 +98,15 @@ def mode_color(mode: str) -> str:
     return MODE_COLOR.get(mode, SERIES[hash(mode) % len(SERIES)])
 
 
+# Set from --label on the command line. A document that evaluates one mode names
+# it for what it is to the reader -- "Ours" -- rather than by the internal mode
+# name, which only means something next to the mode it is not being compared to.
+LABEL_OVERRIDE: dict[str, str] = {}
+
+
 def mode_label(mode: str) -> str:
+    if mode in LABEL_OVERRIDE:
+        return LABEL_OVERRIDE[mode]
     return MODE_LABEL.get(mode, mode)
 
 
@@ -154,3 +162,23 @@ def apply_rcparams() -> None:
         "pdf.fonttype": 42,
         "ps.fonttype": 42,
     })
+
+
+# --- the benchmark paper's labelling convention ----------------------------
+# Belgrod et al. mark a parallel CPU method with a star and a GPU method with a
+# dagger, so a reader can tell the processor from the legend without reading the
+# caption. The same convention is used here, on the same scenes.
+def mode_label_paper(mode: str) -> str:
+    """
+    The label a figure legend carries.
+
+    Belgrod et al. mark a parallel CPU method with a star and a GPU method with
+    a dagger, because their legend names thirteen methods and the processor is
+    not otherwise visible. A label that already says `CPU` or `GPU` says the
+    same thing in words, so the marker is not added on top of it -- two
+    notations for one fact is exactly the clutter the mark exists to avoid.
+    """
+    base = mode_label(mode).replace(" (GPU)", "")
+    if "CPU" in base or "GPU" in base:
+        return base
+    return base + ("\u2020" if mode.startswith("device-") else "*")

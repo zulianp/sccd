@@ -217,6 +217,10 @@ class SceneSummary:
     dataset: str
     mode: str
     cases: int = 0
+    # A case is one query type on one frame: the dataset ships `100ee` and
+    # `100vf` separately. A simulation step runs both, so the cost of a step is
+    # the sum of its two cases and `frames` is the divisor for a per-step figure.
+    frames: int = 0
     queries: int = 0
     repeats: int = 0
     # Per-repeat scene totals, so the spread reported is the spread of the number
@@ -247,6 +251,14 @@ def broadphases(rows: list[dict]) -> list[str]:
     seen = {r.get("broadphase") or "" for r in rows}
     seen.discard("")
     return sorted(seen)
+
+
+def _frame_of(case: str) -> str:
+    """`100ee` and `100vf` are the two query types of frame `100`."""
+    for suffix in ("ee", "vf", "vq"):
+        if case.endswith(suffix):
+            return case[: -len(suffix)]
+    return case
 
 
 def by_scene(rows: list[dict],
@@ -325,6 +337,7 @@ def by_scene(rows: list[dict],
 
     for key, summary in summaries.items():
         summary.cases = len(cases_seen[key])
+        summary.frames = len({_frame_of(c) for c in cases_seen[key]})
         summary.queries = sum(queries_seen[key].values())
         bucket = per_repeat[key]
         summary.repeats = len(bucket)

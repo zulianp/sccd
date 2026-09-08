@@ -1060,6 +1060,22 @@ int main(int argc, char** argv) {
             }
             total_queries += qs.n_queries;
 
+#ifdef SCCD_ENABLE_CUDA
+            // Create the CUDA context before anything is timed. It costs about
+            // two seconds and is charged, untimed here, to whichever device mode
+            // happens to run first -- which made device-relaxed on the first
+            // phase read 2205 ms where device-tight on the same queries read
+            // 340. The cost is real but it is paid once per process, not per
+            // query, so it belongs outside the measurement.
+            static bool cuda_warmed = false;
+            if (!cuda_warmed && qs.n_queries > 0) {
+                std::vector<scalar_t> warm(qs.n_queries, 1.0);
+                run_device_narrow_phase<double>(qs, phase.is_vf, opt.max_depth, opt.tol, warm);
+                cudaDeviceSynchronize();
+                cuda_warmed = true;
+            }
+#endif
+
             // --- each mode, batched exactly as production calls it ---
             for (int m = 0; m < N_MODES; ++m) {
                 select_mode(mode_of(m));
