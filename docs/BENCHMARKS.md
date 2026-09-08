@@ -138,42 +138,42 @@ processor.
 
 | scene             | phase | mode           |   queries |      hits |        time ms |     vs. TI |
 |-------------------|-------|----------------|----------:|----------:|---------------:|-----------:|
-| armadillo-rollers | EE    | GPU            |    99,104 |    98,761 |    2908 / 2910 |       3.6× |
-| armadillo-rollers | EE    | CPU            |    99,104 |    98,761 |    6474 / 6502 |       1.6× |
-| armadillo-rollers | EE    | TightInclusion |    99,104 |    98,761 |  10499 / 10604 | 1.0× (ref) |
-| armadillo-rollers | VF    | GPU            |    32,337 |    32,122 |    1987 / 2011 |       3.8× |
-| armadillo-rollers | VF    | CPU            |    32,337 |    32,122 |    2717 / 2743 |       2.8× |
-| armadillo-rollers | VF    | TightInclusion |    32,337 |    32,122 |    7609 / 7686 | 1.0× (ref) |
-| cloth-ball        | EE    | GPU            |   557,683 |   557,668 |      609 / 612 |       2.5× |
-| cloth-ball        | EE    | CPU            |   557,683 |   557,668 |      955 / 961 |       1.6× |
-| cloth-ball        | EE    | TightInclusion |   557,683 |   557,668 |    1523 / 1529 | 1.0× (ref) |
-| cloth-ball        | VF    | GPU            |   107,257 |   107,252 |      428 / 429 |       2.9× |
-| cloth-ball        | VF    | CPU            |   107,257 |   107,252 |      408 / 414 |       3.1× |
-| cloth-ball        | VF    | TightInclusion |   107,257 |   107,252 |    1255 / 1267 | 1.0× (ref) |
-| cloth-funnel      | EE    | GPU            |     6,751 |     6,259 |    1358 / 1370 |       2.3× |
-| cloth-funnel      | EE    | CPU            |     6,751 |     6,259 |    1743 / 1746 |       1.8× |
-| cloth-funnel      | EE    | TightInclusion |     6,751 |     6,259 |    3130 / 3137 | 1.0× (ref) |
-| cloth-funnel      | VF    | GPU            |       801 |       529 |      451 / 456 |       2.9× |
-| cloth-funnel      | VF    | CPU            |       801 |       529 |      394 / 395 |       3.4× |
-| cloth-funnel      | VF    | TightInclusion |       801 |       529 |    1321 / 1321 | 1.0× (ref) |
-| n-body            | EE    | GPU            | 2,399,812 | 2,399,746 |     890 / 1077 |       3.0× |
-| n-body            | EE    | CPU            | 2,399,812 | 2,399,746 |    1176 / 1184 |       2.2× |
-| n-body            | EE    | TightInclusion | 2,399,812 | 2,399,746 |    2633 / 2657 | 1.0× (ref) |
-| n-body            | VF    | GPU            |   547,907 |   547,874 |      628 / 790 |       2.5× |
-| n-body            | VF    | CPU            |   547,907 |   547,873 |      507 / 511 |       3.1× |
-| n-body            | VF    | TightInclusion |   547,907 |   547,873 |    1577 / 1587 | 1.0× (ref) |
-| puffer-ball       | EE    | GPU            | 1,206,952 | 1,187,650 |      941 / 943 |       2.8× |
-| puffer-ball       | EE    | CPU            | 1,206,952 | 1,187,650 |    1614 / 1629 |       1.6× |
-| puffer-ball       | EE    | TightInclusion | 1,206,952 | 1,187,650 |    2642 / 2662 | 1.0× (ref) |
-| puffer-ball       | VF    | GPU            |   307,220 |   299,698 |      634 / 636 |       2.4× |
-| puffer-ball       | VF    | CPU            |   307,220 |   299,676 |      586 / 595 |       2.6× |
-| puffer-ball       | VF    | TightInclusion |   307,220 |   299,676 |    1544 / 1556 | 1.0× (ref) |
-| rod-twist         | EE    | GPU            |   492,120 |   246,132 |    4913 / 8176 |      16.9× |
-| rod-twist         | EE    | CPU            |   492,120 |   246,132 | 37118 / 121624 |       2.2× |
-| rod-twist         | EE    | TightInclusion |   492,120 |   246,132 | 82987 / 249504 | 1.0× (ref) |
-| rod-twist         | VF    | GPU            |    57,088 |    40,544 |    3014 / 3236 |       7.8× |
-| rod-twist         | VF    | CPU            |    57,088 |    40,542 |   6382 / 10301 |       3.7× |
-| rod-twist         | VF    | TightInclusion |    57,088 |    40,542 |  23528 / 43830 | 1.0× (ref) |
+| armadillo-rollers | EE    | GPU            |    99,104 |    98,761 |    2341 / 2346 |       4.5× |
+| armadillo-rollers | EE    | CPU            |    99,104 |    98,761 |    6392 / 6451 |       1.6× |
+| armadillo-rollers | EE    | TightInclusion |    99,104 |    98,761 |  10471 / 10554 | 1.0× (ref) |
+| armadillo-rollers | VF    | GPU            |    32,337 |    32,122 |    1619 / 1629 |       4.7× |
+| armadillo-rollers | VF    | CPU            |    32,337 |    32,122 |    2678 / 2714 |       2.8× |
+| armadillo-rollers | VF    | TightInclusion |    32,337 |    32,122 |    7569 / 7631 | 1.0× (ref) |
+| cloth-ball        | EE    | GPU            |   557,683 |   557,668 |      490 / 501 |       3.1× |
+| cloth-ball        | EE    | CPU            |   557,683 |   557,668 |      955 / 956 |       1.6× |
+| cloth-ball        | EE    | TightInclusion |   557,683 |   557,668 |    1521 / 1522 | 1.0× (ref) |
+| cloth-ball        | VF    | GPU            |   107,257 |   107,252 |      339 / 347 |       3.7× |
+| cloth-ball        | VF    | CPU            |   107,257 |   107,252 |      411 / 411 |       3.1× |
+| cloth-ball        | VF    | TightInclusion |   107,257 |   107,252 |    1255 / 1256 | 1.0× (ref) |
+| cloth-funnel      | EE    | GPU            |     6,751 |     6,259 |    1152 / 1160 |       2.7× |
+| cloth-funnel      | EE    | CPU            |     6,751 |     6,259 |    1732 / 1746 |       1.8× |
+| cloth-funnel      | EE    | TightInclusion |     6,751 |     6,259 |    3122 / 3143 | 1.0× (ref) |
+| cloth-funnel      | VF    | GPU            |       801 |       529 |      409 / 415 |       3.2× |
+| cloth-funnel      | VF    | CPU            |       801 |       529 |      385 / 391 |       3.4× |
+| cloth-funnel      | VF    | TightInclusion |       801 |       529 |    1305 / 1339 | 1.0× (ref) |
+| n-body            | EE    | GPU            | 2,399,812 | 2,399,746 |      883 / 888 |       3.0× |
+| n-body            | EE    | CPU            | 2,399,812 | 2,399,746 |    1176 / 1176 |       2.2× |
+| n-body            | EE    | TightInclusion | 2,399,812 | 2,399,746 |    2638 / 2642 | 1.0× (ref) |
+| n-body            | VF    | GPU            |   547,907 |   547,874 |      626 / 637 |       2.5× |
+| n-body            | VF    | CPU            |   547,907 |   547,873 |      507 / 507 |       3.1× |
+| n-body            | VF    | TightInclusion |   547,907 |   547,873 |    1581 / 1588 | 1.0× (ref) |
+| puffer-ball       | EE    | GPU            | 1,206,952 | 1,187,650 |      945 / 946 |       2.8× |
+| puffer-ball       | EE    | CPU            | 1,206,952 | 1,187,650 |    1612 / 1612 |       1.6× |
+| puffer-ball       | EE    | TightInclusion | 1,206,952 | 1,187,650 |    2657 / 2662 | 1.0× (ref) |
+| puffer-ball       | VF    | GPU            |   307,220 |   299,698 |      628 / 630 |       2.5× |
+| puffer-ball       | VF    | CPU            |   307,220 |   299,676 |      586 / 590 |       2.6× |
+| puffer-ball       | VF    | TightInclusion |   307,220 |   299,676 |    1544 / 1550 | 1.0× (ref) |
+| rod-twist         | EE    | GPU            |   492,120 |   246,132 |    4544 / 6571 |      18.2× |
+| rod-twist         | EE    | CPU            |   492,120 |   246,132 | 36596 / 121302 |       2.3× |
+| rod-twist         | EE    | TightInclusion |   492,120 |   246,132 | 82791 / 250085 | 1.0× (ref) |
+| rod-twist         | VF    | GPU            |    57,088 |    40,544 |    2516 / 3218 |       9.3× |
+| rod-twist         | VF    | CPU            |    57,088 |    40,542 |   6379 / 10345 |       3.7× |
+| rod-twist         | VF    | TightInclusion |    57,088 |    40,542 |  23363 / 43924 | 1.0× (ref) |
 
 Source: `benchmark/results/oracle-gh200-all.csv`
 
@@ -193,7 +193,7 @@ roots.
 | armadillo-rollers | EE    | GPU            |         3.08e-06 |   1.60e-02 |
 | armadillo-rollers | EE    | TightInclusion |         3.11e-06 |   1.60e-02 |
 | armadillo-rollers | VF    | CPU            |         3.74e-06 |   9.39e-03 |
-| armadillo-rollers | VF    | GPU            |         3.73e-06 |   9.39e-03 |
+| armadillo-rollers | VF    | GPU            |         3.63e-06 |   9.81e-03 |
 | armadillo-rollers | VF    | TightInclusion |         3.74e-06 |   9.39e-03 |
 | cloth-ball        | EE    | CPU            |         1.05e-07 |   1.04e-04 |
 | cloth-ball        | EE    | GPU            |         1.05e-07 |   1.04e-04 |
@@ -220,7 +220,7 @@ roots.
 | puffer-ball       | VF    | GPU            |         4.56e-05 |   5.04e-02 |
 | puffer-ball       | VF    | TightInclusion |         4.58e-05 |   5.04e-02 |
 | rod-twist         | EE    | CPU            |         2.47e-04 |   9.85e-01 |
-| rod-twist         | EE    | GPU            |         2.47e-04 |   9.85e-01 |
+| rod-twist         | EE    | GPU            |         2.48e-04 |   9.85e-01 |
 | rod-twist         | EE    | TightInclusion |         2.47e-04 |   9.85e-01 |
 | rod-twist         | VF    | CPU            |         1.28e-04 |   9.93e-01 |
 | rod-twist         | VF    | GPU            |         1.28e-04 |   9.93e-01 |
@@ -335,28 +335,57 @@ to 23.6 million.
 
 <!-- sccd:begin scaling -->
 
-| broad phase | level |   elements | candidate pairs | prep ms | step ms | broad ms | narrow ms |    p |
-|-------------|------:|-----------:|----------------:|--------:|--------:|---------:|----------:|-----:|
-| cell2d      |     0 |     92,230 |          17,982 |    27.2 |     8.3 |     35.5 |       5.3 | 0.87 |
-|             |     1 |    368,920 |          87,771 |    49.2 |    14.7 |     63.9 |       9.8 |      |
-|             |     2 |  1,475,680 |         379,818 |   173.8 |    42.7 |    216.5 |       5.1 |      |
-|             |     3 |  5,902,720 |       1,573,741 |   832.5 |   151.4 |    983.9 |       4.2 |      |
-|             |     4 | 23,610,880 |       6,402,081 |  3915.5 |   640.2 |   4555.7 |      15.0 |      |
-| sweep       |     0 |     92,230 |          17,982 |    52.5 |     8.7 |     61.2 |       5.9 | 0.87 |
-|             |     1 |    368,920 |          87,771 |    72.3 |    13.5 |     85.9 |       8.8 |      |
-|             |     2 |  1,475,680 |         379,818 |   204.5 |    58.0 |    262.5 |       2.6 |      |
-|             |     3 |  5,902,720 |       1,573,741 |   739.2 |   431.6 |   1170.8 |       7.0 |      |
-|             |     4 | 23,610,880 |       6,402,081 |  2726.8 |  5024.1 |   7750.9 |      18.2 |      |
+| series       | level |   elements | candidate pairs | prep ms | step ms | broad ms | narrow ms |    p |
+|--------------|------:|-----------:|----------------:|--------:|--------:|---------:|----------:|-----:|
+| CPU / cell2d |     0 |     92,230 |          17,982 |    15.7 |     8.6 |     24.2 |       5.0 | 0.91 |
+|              |     1 |    368,920 |          87,771 |    52.2 |    14.9 |     67.1 |       7.2 |      |
+|              |     2 |  1,475,680 |         379,818 |   207.4 |    41.9 |    249.2 |       4.6 |      |
+|              |     3 |  5,902,720 |       1,573,741 |   877.2 |   141.0 |   1018.2 |       4.2 |      |
+|              |     4 | 23,610,880 |       6,402,081 |  3905.1 |   530.1 |   4435.2 |      13.9 |      |
+| CPU / sweep  |     0 |     92,230 |          17,982 |    38.3 |     8.5 |     46.7 |       4.1 | 0.91 |
+|              |     1 |    368,920 |          87,771 |    71.3 |    12.9 |     84.2 |       6.6 |      |
+|              |     2 |  1,475,680 |         379,818 |   199.9 |    57.2 |    257.1 |       2.5 |      |
+|              |     3 |  5,902,720 |       1,573,741 |   724.0 |   431.1 |   1155.1 |       6.3 |      |
+|              |     4 | 23,610,880 |       6,402,081 |  2661.7 |  5052.9 |   7714.5 |      16.5 |      |
+| GPU          |     0 |     92,230 |          17,982 |     4.4 |     2.4 |      6.8 |       2.5 | 1.13 |
+|              |     1 |    368,920 |          87,771 |    42.6 |     7.6 |     50.2 |       5.2 |      |
+|              |     2 |  1,475,680 |         379,818 |   161.2 |    31.8 |    193.0 |      17.7 |      |
+|              |     3 |  5,902,720 |       1,573,741 |   682.5 |   222.6 |    905.1 |     138.0 |      |
+|              |     4 | 23,610,880 |       6,402,081 |  2711.4 |  1720.3 |   4431.8 |    1089.5 |      |
 
 The two frames used here do not come into contact, so the narrow phase has almost no work to do and its column is dominated by noise rather than by element count; what this measures is the broad phase and the preparation that feeds it. Narrow-phase cost against problem size is in the per-case figure, over cases that do collide. Where the exponent is below 1 it is because the fixed cost visible at the smallest size is amortised as the mesh grows. `prep` builds the acceleration structure -- the cell list's grid or the sweep's sorted intervals -- and `step` is the traversal that reports pairs; the two strategies divide the work between those columns quite differently.
 
-Source: `benchmark/results/scaling/host-cell2d-mode2.txt, benchmark/results/scaling/host-sweep-mode2.txt`
+Source: `benchmark/results/scaling/host-cell2d-mode2.txt, benchmark/results/scaling/host-sweep-mode2.txt, benchmark/results/scaling/device-mode2.txt`
 
 <!-- sccd:end scaling -->
 
-The strategies divide their cost oppositely: the sweep builds more cheaply and
-scales better doing it (exponent 0.73 against 0.92), the cell list traverses far
-better (0.75 against 1.19). Traversal is what grows.
+Three series: the host at each broad-phase strategy, and the device. The device
+row names no strategy because the device broad phase does not implement the
+choice.
+
+**The GPU's broad-phase advantage erodes with size.** It is 3.5× ahead at 92,230
+elements and level with the host cell list at 23.6 million:
+
+| elements | CPU (cell2d) | GPU | |
+|---:|---:|---:|---:|
+| 92,230 | 24 ms | 7 ms | 3.54× |
+| 1,475,680 | 249 ms | 193 ms | 1.29× |
+| 23,610,880 | 4,435 ms | 4,432 ms | 1.00× |
+
+The exponents say why: the GPU broad phase grows at 1.14 in the element count
+against the host cell list's 0.95. **This is the puffer-ball result of §5 in
+isolation** — that scene has the most candidate pairs per step in the benchmark,
+and it is where the GPU broad phase stops winning (0.99×).
+
+The narrow phase separates them further. These two frames do not come into
+contact, so the host has almost nothing to do and its narrow phase stays flat
+(exponent 0.11, 14 ms at 23.6 M elements). The device launches over every
+candidate pair regardless, and grows at 1.12 to 1,090 ms. A GPU pays for
+candidates it is given; a CPU pays for the ones that turn out to matter.
+
+Between the host strategies the cost divides oppositely: the sweep builds more
+cheaply and scales slightly better doing it, the cell list traverses far better,
+and traversal is what grows — 5,053 ms against 530 ms at the largest size.
 
 ## 8. Figures
 

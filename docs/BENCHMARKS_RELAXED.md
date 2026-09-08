@@ -118,16 +118,16 @@ The mesh path agrees with the curated query geometry on every case.
 | scene             | phase | mode           | median earliness | worst case |
 |-------------------|-------|----------------|-----------------:|-----------:|
 | armadillo-rollers | EE    | CPU            |         3.47e-05 |   7.37e-01 |
-| armadillo-rollers | EE    | GPU            |         7.47e-05 |   7.37e-01 |
+| armadillo-rollers | EE    | GPU            |         7.54e-05 |   7.37e-01 |
 | armadillo-rollers | EE    | TightInclusion |         3.11e-06 |   1.60e-02 |
 | armadillo-rollers | VF    | CPU            |         6.44e-05 |   9.41e-01 |
 | armadillo-rollers | VF    | GPU            |         1.06e-04 |   9.42e-01 |
 | armadillo-rollers | VF    | TightInclusion |         3.74e-06 |   9.39e-03 |
 | cloth-ball        | EE    | CPU            |         3.13e-07 |   5.40e-04 |
-| cloth-ball        | EE    | GPU            |         1.13e-06 |   9.22e-04 |
+| cloth-ball        | EE    | GPU            |         1.13e-06 |   8.96e-04 |
 | cloth-ball        | EE    | TightInclusion |         1.05e-07 |   1.04e-04 |
 | cloth-ball        | VF    | CPU            |         2.96e-07 |   7.86e-05 |
-| cloth-ball        | VF    | GPU            |         1.09e-06 |   2.15e-04 |
+| cloth-ball        | VF    | GPU            |         1.09e-06 |   2.16e-04 |
 | cloth-ball        | VF    | TightInclusion |         9.76e-08 |   2.88e-05 |
 | cloth-funnel      | EE    | CPU            |                0 |   1.00e+00 |
 | cloth-funnel      | EE    | GPU            |                0 |   1.00e+00 |
@@ -136,22 +136,22 @@ The mesh path agrees with the curated query geometry on every case.
 | cloth-funnel      | VF    | GPU            |         2.82e-02 |   9.97e-01 |
 | cloth-funnel      | VF    | TightInclusion |         3.33e-04 |   2.67e-02 |
 | n-body            | EE    | CPU            |         1.79e-08 |   1.27e-03 |
-| n-body            | EE    | GPU            |         1.10e-07 |   2.51e-03 |
+| n-body            | EE    | GPU            |         1.10e-07 |   2.60e-03 |
 | n-body            | EE    | TightInclusion |         1.14e-08 |   1.89e-04 |
 | n-body            | VF    | CPU            |         1.84e-08 |   1.53e-04 |
-| n-body            | VF    | GPU            |         1.03e-07 |   2.64e-04 |
+| n-body            | VF    | GPU            |         1.02e-07 |   2.59e-04 |
 | n-body            | VF    | TightInclusion |         1.17e-08 |   1.87e-05 |
 | puffer-ball       | EE    | CPU            |         3.57e-02 |   9.61e-01 |
 | puffer-ball       | EE    | GPU            |         3.64e-02 |   9.62e-01 |
 | puffer-ball       | EE    | TightInclusion |         3.54e-05 |   2.61e-01 |
 | puffer-ball       | VF    | CPU            |         4.68e-02 |   9.75e-01 |
-| puffer-ball       | VF    | GPU            |         4.60e-02 |   9.75e-01 |
+| puffer-ball       | VF    | GPU            |         4.61e-02 |   9.75e-01 |
 | puffer-ball       | VF    | TightInclusion |         4.58e-05 |   5.04e-02 |
 | rod-twist         | EE    | CPU            |         2.75e-02 |   9.93e-01 |
-| rod-twist         | EE    | GPU            |         2.94e-02 |   9.93e-01 |
+| rod-twist         | EE    | GPU            |         2.92e-02 |   9.93e-01 |
 | rod-twist         | EE    | TightInclusion |         2.47e-04 |   9.85e-01 |
 | rod-twist         | VF    | CPU            |         1.41e-02 |   9.96e-01 |
-| rod-twist         | VF    | GPU            |         1.64e-02 |   9.96e-01 |
+| rod-twist         | VF    | GPU            |         1.63e-02 |   9.96e-01 |
 | rod-twist         | VF    | TightInclusion |         1.28e-04 |   9.93e-01 |
 
 Source: `benchmark/results/oracle-gh200-all.csv`
@@ -169,42 +169,42 @@ what `Relaxed` gives up is the **median**, and it gives up about 17× of it.
 
 | scene             | phase | mode           |   queries |      hits |        time ms |     vs. TI |
 |-------------------|-------|----------------|----------:|----------:|---------------:|-----------:|
-| armadillo-rollers | EE    | GPU            |    99,104 |    98,933 |    2335 / 2349 |       4.5× |
-| armadillo-rollers | EE    | CPU            |    99,104 |    98,895 |    3377 / 3384 |       3.1× |
-| armadillo-rollers | EE    | TightInclusion |    99,104 |    98,761 |  10499 / 10604 | 1.0× (ref) |
-| armadillo-rollers | VF    | GPU            |    32,337 |    32,248 |    3469 / 3476 |       2.2× |
-| armadillo-rollers | VF    | CPU            |    32,337 |    32,196 |    2219 / 2242 |       3.4× |
-| armadillo-rollers | VF    | TightInclusion |    32,337 |    32,122 |    7609 / 7686 | 1.0× (ref) |
-| cloth-ball        | EE    | GPU            |   557,683 |   557,669 |      645 / 647 |       2.4× |
-| cloth-ball        | EE    | CPU            |   557,683 |   557,669 |      402 / 404 |       3.8× |
-| cloth-ball        | EE    | TightInclusion |   557,683 |   557,668 |    1523 / 1529 | 1.0× (ref) |
-| cloth-ball        | VF    | GPU            |   107,257 |   107,252 |    2212 / 2367 |       0.6× |
-| cloth-ball        | VF    | CPU            |   107,257 |   107,252 |      302 / 307 |       4.2× |
-| cloth-ball        | VF    | TightInclusion |   107,257 |   107,252 |    1255 / 1267 | 1.0× (ref) |
-| cloth-funnel      | EE    | GPU            |     6,751 |     6,734 |      768 / 793 |       4.1× |
-| cloth-funnel      | EE    | CPU            |     6,751 |     6,700 |    1111 / 1149 |       2.8× |
-| cloth-funnel      | EE    | TightInclusion |     6,751 |     6,259 |    3130 / 3137 | 1.0× (ref) |
-| cloth-funnel      | VF    | GPU            |       801 |       781 |    2124 / 2599 |       0.6× |
-| cloth-funnel      | VF    | CPU            |       801 |       760 |      402 / 410 |       3.3× |
-| cloth-funnel      | VF    | TightInclusion |       801 |       529 |    1321 / 1321 | 1.0× (ref) |
-| n-body            | EE    | GPU            | 2,399,812 | 2,399,762 |    1106 / 1351 |       2.4× |
-| n-body            | EE    | CPU            | 2,399,812 | 2,399,747 |    6576 / 6626 |       0.4× |
-| n-body            | EE    | TightInclusion | 2,399,812 | 2,399,746 |    2633 / 2657 | 1.0× (ref) |
-| n-body            | VF    | GPU            |   547,907 |   547,877 |    2883 / 2900 |       0.5× |
-| n-body            | VF    | CPU            |   547,907 |   547,873 |      423 / 424 |       3.7× |
-| n-body            | VF    | TightInclusion |   547,907 |   547,873 |    1577 / 1587 | 1.0× (ref) |
-| puffer-ball       | EE    | GPU            | 1,206,952 | 1,206,951 |      346 / 346 |       7.6× |
-| puffer-ball       | EE    | CPU            | 1,206,952 | 1,206,951 |      252 / 254 |      10.5× |
-| puffer-ball       | EE    | TightInclusion | 1,206,952 | 1,187,650 |    2642 / 2662 | 1.0× (ref) |
-| puffer-ball       | VF    | GPU            |   307,220 |   307,219 |    2518 / 2549 |       0.6× |
-| puffer-ball       | VF    | CPU            |   307,220 |   307,219 |      209 / 209 |       7.4× |
-| puffer-ball       | VF    | TightInclusion |   307,220 |   299,676 |    1544 / 1556 | 1.0× (ref) |
-| rod-twist         | EE    | GPU            |   492,120 |   474,114 |    2898 / 4493 |      28.6× |
-| rod-twist         | EE    | CPU            |   492,120 |   458,641 |   8100 / 22112 |      10.2× |
-| rod-twist         | EE    | TightInclusion |   492,120 |   246,132 | 82987 / 249504 | 1.0× (ref) |
-| rod-twist         | VF    | GPU            |    57,088 |    56,290 |    3618 / 4208 |       6.5× |
-| rod-twist         | VF    | CPU            |    57,088 |    55,398 |    2648 / 2974 |       8.9× |
-| rod-twist         | VF    | TightInclusion |    57,088 |    40,542 |  23528 / 43830 | 1.0× (ref) |
+| armadillo-rollers | EE    | GPU            |    99,104 |    98,933 |    1905 / 1925 |       5.5× |
+| armadillo-rollers | EE    | CPU            |    99,104 |    98,895 |    3442 / 3480 |       3.0× |
+| armadillo-rollers | EE    | TightInclusion |    99,104 |    98,761 |  10471 / 10554 | 1.0× (ref) |
+| armadillo-rollers | VF    | GPU            |    32,337 |    32,248 |    1441 / 1458 |       5.3× |
+| armadillo-rollers | VF    | CPU            |    32,337 |    32,196 |    2294 / 2306 |       3.3× |
+| armadillo-rollers | VF    | TightInclusion |    32,337 |    32,122 |    7569 / 7631 | 1.0× (ref) |
+| cloth-ball        | EE    | GPU            |   557,683 |   557,669 |      529 / 531 |       2.9× |
+| cloth-ball        | EE    | CPU            |   557,683 |   557,669 |      416 / 416 |       3.7× |
+| cloth-ball        | EE    | TightInclusion |   557,683 |   557,668 |    1521 / 1522 | 1.0× (ref) |
+| cloth-ball        | VF    | GPU            |   107,257 |   107,252 |      380 / 384 |       3.3× |
+| cloth-ball        | VF    | CPU            |   107,257 |   107,252 |      317 / 320 |       4.0× |
+| cloth-ball        | VF    | TightInclusion |   107,257 |   107,252 |    1255 / 1256 | 1.0× (ref) |
+| cloth-funnel      | EE    | GPU            |     6,751 |     6,734 |      705 / 716 |       4.4× |
+| cloth-funnel      | EE    | CPU            |     6,751 |     6,700 |    1146 / 1148 |       2.7× |
+| cloth-funnel      | EE    | TightInclusion |     6,751 |     6,259 |    3122 / 3143 | 1.0× (ref) |
+| cloth-funnel      | VF    | GPU            |       801 |       781 |      339 / 355 |       3.8× |
+| cloth-funnel      | VF    | CPU            |       801 |       760 |      391 / 406 |       3.3× |
+| cloth-funnel      | VF    | TightInclusion |       801 |       529 |    1305 / 1339 | 1.0× (ref) |
+| n-body            | EE    | GPU            | 2,399,812 | 2,399,762 |    1100 / 1109 |       2.4× |
+| n-body            | EE    | CPU            | 2,399,812 | 2,399,747 |    6688 / 6700 |       0.4× |
+| n-body            | EE    | TightInclusion | 2,399,812 | 2,399,746 |    2638 / 2642 | 1.0× (ref) |
+| n-body            | VF    | GPU            |   547,907 |   547,877 |      639 / 658 |       2.5× |
+| n-body            | VF    | CPU            |   547,907 |   547,873 |      434 / 435 |       3.6× |
+| n-body            | VF    | TightInclusion |   547,907 |   547,873 |    1581 / 1588 | 1.0× (ref) |
+| puffer-ball       | EE    | GPU            | 1,206,952 | 1,206,951 |      344 / 351 |       7.7× |
+| puffer-ball       | EE    | CPU            | 1,206,952 | 1,206,951 |      250 / 256 |      10.6× |
+| puffer-ball       | EE    | TightInclusion | 1,206,952 | 1,187,650 |    2657 / 2662 | 1.0× (ref) |
+| puffer-ball       | VF    | GPU            |   307,220 |   307,219 |      263 / 272 |       5.9× |
+| puffer-ball       | VF    | CPU            |   307,220 |   307,219 |      205 / 206 |       7.5× |
+| puffer-ball       | VF    | TightInclusion |   307,220 |   299,676 |    1544 / 1550 | 1.0× (ref) |
+| rod-twist         | EE    | GPU            |   492,120 |   474,114 |    2682 / 3761 |      30.9× |
+| rod-twist         | EE    | CPU            |   492,120 |   458,641 |   8292 / 22772 |      10.0× |
+| rod-twist         | EE    | TightInclusion |   492,120 |   246,132 | 82791 / 250085 | 1.0× (ref) |
+| rod-twist         | VF    | GPU            |    57,088 |    56,290 |    1685 / 1979 |      13.9× |
+| rod-twist         | VF    | CPU            |    57,088 |    55,398 |    2726 / 3076 |       8.6× |
+| rod-twist         | VF    | TightInclusion |    57,088 |    40,542 |  23363 / 43924 | 1.0× (ref) |
 
 Source: `benchmark/results/oracle-gh200-all.csv`
 
