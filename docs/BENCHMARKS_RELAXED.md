@@ -268,22 +268,24 @@ Source: `benchmark/results/sweep-gh200-bp.csv`
 ## 7. Figures
 
 Scenes across the columns, one quantity per row, distributions over cases as box
-plots on logarithmic axes. A **star** marks a parallel CPU mode, a **dagger** a
-GPU one.
+plots on logarithmic axes.
 
 ![Per-case results over the six scenes](figures/relaxed-results-grid.png)
 
 **Figure 1.** Per-case distributions over the six scenes: broad-phase time,
-narrow-phase time, false positives, and earliness against the exact root.
+narrow-phase time, and error against the exact root. `*` marks a parallel CPU
+mode, `†` a GPU one.
 
 ![Runtime split by phase](figures/relaxed-runtime-breakdown.png)
 
-**Figure 2.** Runtime split into *prep*, *broad* and *narrow*.
+**Figure 2.** Runtime split into *prep*, *broad* and *narrow*, one bar per
+configuration: `*` is a parallel CPU mode, `†` a GPU one.
 
 ![Time-of-impact error against the symbolic ground truth](figures/relaxed-toi-error.png)
 
 **Figure 3.** Error against the exact symbolic roots, log axis. One-sided by
-construction: every value is on the safe side.
+construction: every value is on the safe side. `*` marks a parallel CPU mode,
+`†` a GPU one; the device curve is dashed where the two coincide.
 
 ## 8. Provenance
 

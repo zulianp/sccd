@@ -200,8 +200,8 @@ def results_grid(case_series: dict, out_dir: Path) -> Figure:
         _stem("results-grid"), "fig:results",
         "Per-case distributions for every mode over the six scenes (columns). "
         "Rows are broad-phase time, narrow-phase time, and error against "
-        "the exact root. A star marks a "
-        "parallel CPU mode and a dagger a GPU one. Each box spans the first to "
+        "the exact root. $*$ marks a parallel CPU mode, $\\dagger$ a GPU one. "
+        "Each box spans the first to "
         "the third quartile with the median inside it, the whiskers reach the "
         "furthest case within 1.5 interquartile ranges, and cases beyond that "
         "are drawn individually. All axes are logarithmic.",
@@ -273,7 +273,7 @@ def runtime_breakdown(summaries: dict[tuple[str, str], SceneSummary],
         "Runtime split by phase for every scene and mode: \\emph{prep} builds "
         "the swept boxes and the acceleration structure, \\emph{broad} finds "
         "the candidate pairs, \\emph{narrow} turns them into a time of impact. "
-        "A star marks a parallel CPU mode and a dagger a GPU one. Bars are the "
+        "$*$ marks a parallel CPU mode, $\\dagger$ a GPU one. Bars are the "
         "median over repeats.",
         FULL_WIDTH_IN)
 
@@ -346,7 +346,9 @@ def toi_error_histogram(case_series: dict, out_dir: Path) -> Figure:
         "dataset's exact symbolic roots, on a log axis. The error is one-sided "
         "by construction -- it is how far before the true root the mode "
         "reported -- so every value shown is on the safe side, and no case falls "
-        "outside the axis on the late side because none exists.",
+        "outside the axis on the late side because none exists. $*$ marks a "
+        "parallel CPU mode, $\\dagger$ a GPU one; the device modes are dashed "
+        "where the two curves coincide.",
         FULL_WIDTH_IN)
 
 

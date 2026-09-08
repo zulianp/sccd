@@ -296,26 +296,29 @@ better (0.75 against 1.19). Traversal is what grows.
 Presentation follows the dataset paper (Belgrod et al., *TOI dataset for CCD and
 a scalable conservative algorithm*) over the same six scenes: scenes across the
 columns, one quantity per row, distributions over cases as box plots on
-logarithmic axes. A **star** marks a parallel CPU mode, a **dagger** a GPU one.
+logarithmic axes.
 
 ![Per-case results over the six scenes](figures/results-grid.png)
 
 **Figure 1.** Per-case distributions over the six scenes: broad-phase time,
-narrow-phase time, and error against the exact root. Each box spans the first to
+narrow-phase time, and error against the exact root. `*` marks a parallel CPU
+mode, `†` a GPU one. Each box spans the first to
 the third quartile with the median inside, whiskers reach the furthest case
 within 1.5 interquartile ranges, and cases beyond are drawn individually.
 
 ![Runtime split by phase](figures/runtime-breakdown.png)
 
-**Figure 2.** Runtime split into *prep*, *broad* and *narrow*. Preparation
-dominates on the host; on the GPU the narrow phase does.
+**Figure 2.** Runtime split into *prep*, *broad* and *narrow*, one bar per
+configuration: `*` is a parallel CPU mode, `†` a GPU one. Preparation dominates
+on the host; on the GPU the narrow phase does.
 
 ![Error against the symbolic ground truth](figures/toi-error.png)
 
 **Figure 3.** Error against the exact symbolic roots, log axis. One-sided by
 construction — it is how far *before* the true root the answer falls — so every
 value shown is on the safe side, and nothing falls off the axis on the late side
-because no such case exists.
+because no such case exists. `*` marks a parallel CPU mode, `†` a GPU one; the
+device curve is dashed because the two coincide.
 
 ![Cost against element count](figures/refine-scaling.png)
 
