@@ -494,11 +494,13 @@ def per_frame_table(summaries: dict[tuple[str, str], SceneSummary],
     table = Table(
         label="tab:per-frame",
         caption=("Mean time for one simulation step: the scene total, median "
-                 "over repeats, divided by the number of steps. \\emph{prep} "
+                 "over repeats, divided by the number of frames. A step runs "
+                 "both query types, so this is the cost of the vertex-face and "
+                 "edge-edge work of that frame together. \\emph{prep} "
                  "builds the swept boxes and the acceleration structure, "
                  "\\emph{broad} finds the candidate pairs, \\emph{narrow} turns "
                  "them into a time of impact."),
-        columns=[Column("scene", "l"), Column("steps"), Column("mode", "l"),
+        columns=[Column("scene", "l"), Column("frames"), Column("mode", "l"),
                  Column("prep ms"), Column("broad ms"), Column("narrow ms"),
                  Column("total ms")],
         source=source,
@@ -508,15 +510,15 @@ def per_frame_table(summaries: dict[tuple[str, str], SceneSummary],
     )
     for scene, mode in sorted(summaries):
         s = summaries[(scene, mode)]
-        if not s.cases:
+        if not s.frames:
             continue
 
         def per(col):
             stat = s.totals.get(col)
-            return (stat.median / s.cases) if stat is not None and stat.n else 0.0
+            return (stat.median / s.frames) if stat is not None and stat.n else 0.0
 
         prep, broad, narrow = per("prep_ms"), per("broad_ms"), per("narrow_ms")
-        table.add(SCENE_LABEL.get(scene, scene), f"{s.cases:,}", mode_label(mode),
+        table.add(SCENE_LABEL.get(scene, scene), f"{s.frames:,}", mode_label(mode),
                   f"{prep:.2f}", f"{broad:.2f}", f"{narrow:.2f}",
                   f"{prep + broad + narrow:.2f}")
     return table

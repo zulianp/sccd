@@ -50,7 +50,35 @@ A query carries a root exactly when the dataset marks it as colliding, and
 proportion differs by scene because it is the fraction of curated queries that
 collide, not a measure of coverage.
 
-## 2. Conservativeness
+## 2. What each phase measures
+
+A **case** is one query type on one frame: the dataset ships `100ee` and `100vf`
+separately. A simulation step runs both, so a per-frame figure is the two
+together.
+
+Each case is timed as three consecutive calls, each with its own clock. The
+first case of a scene is run once untimed to pay for allocation and first touch.
+
+**prep** — `broad_phase_prep`. Builds the swept axis-aligned boxes, one per
+vertex, face and edge, each enclosing that primitive's whole trajectory over the
+step; picks the sort axis from the spread of box centres; and builds the
+acceleration structure the traversal needs — the sorted intervals for the sweep,
+or the uniform grid for the cell list. It does not look for overlaps.
+
+**broad** — `broad_phase_fv_step` or `broad_phase_ee_step`. The overlap query
+itself, over the structure `prep` built: count the candidate pairs, prefix-sum
+the counts, then fill the output. A candidate is a pair whose swept boxes
+overlap, which is not yet a contact.
+
+**narrow** — `narrow_phase_vf` or `narrow_phase_ee` at `ToiOutput::Earliest`.
+Branch and bound over each candidate pair's `(t, u, v)` box, returning one
+earliest time of impact for the step, so every query prunes against the running
+minimum. This is where the conservativeness guarantee is produced.
+
+`total` is the three added. Nothing else is inside the timers: mesh loading, PLY
+conversion and result checking are outside them.
+
+## 3. Conservativeness
 
 The invariant: a reported time of impact must be at or before the true one, and
 a collision that exists must be reported. Checked against the exact symbolic
@@ -93,7 +121,7 @@ The mesh path agrees with the curated query geometry on every case.
 
 <!-- sccd:end mesh-check -->
 
-## 3. Against TightInclusion
+## 4. Against TightInclusion
 
 TightInclusion is the reference implementation of a certified conservative
 narrow phase. Both sides are given the same task and the same machine: SCCD at
@@ -212,7 +240,7 @@ and rod-twist the largest error approaches 1.0 for the reference too, because a
 conservative search has no tighter answer available on a grazing or
 already-touching configuration.
 
-## 4. CPU against GPU
+## 5. CPU against GPU
 
 <!-- sccd:begin processor -->
 
@@ -248,20 +276,20 @@ one comparable between a 79-step scene and a 4,571-step one:
 
 <!-- sccd:begin per-frame -->
 
-| scene             | steps | mode | prep ms | broad ms | narrow ms | total ms |
-|-------------------|------:|------|--------:|---------:|----------:|---------:|
-| armadillo-rollers |   781 | GPU  |    2.37 |     1.04 |      2.22 |     5.63 |
-| armadillo-rollers |   781 | CPU  |   10.36 |     4.27 |      1.33 |    15.95 |
-| cloth-ball        |    79 | GPU  |    6.71 |     4.67 |      5.58 |    16.97 |
-| cloth-ball        |    79 | CPU  |   15.57 |    11.97 |      2.72 |    30.25 |
-| cloth-funnel      |   577 | GPU  |    2.35 |     0.94 |      1.64 |     4.92 |
-| cloth-funnel      |   577 | CPU  |    9.81 |     3.79 |      1.14 |    14.74 |
-| n-body            |   146 | GPU  |    6.88 |     8.98 |     32.33 |    48.20 |
-| n-body            |   146 | CPU  |   17.86 |    49.48 |     11.90 |    79.24 |
-| puffer-ball       |   240 | GPU  |   70.73 |   114.67 |    161.07 |   346.48 |
-| puffer-ball       |   240 | CPU  |   78.74 |   113.90 |     25.21 |   217.84 |
-| rod-twist         | 4,571 | GPU  |    5.50 |     1.48 |      3.80 |    10.77 |
-| rod-twist         | 4,571 | CPU  |   14.61 |     6.27 |      4.04 |    24.92 |
+| scene             | frames | mode | prep ms | broad ms | narrow ms | total ms |
+|-------------------|-------:|------|--------:|---------:|----------:|---------:|
+| armadillo-rollers |    396 | GPU  |    4.67 |     2.05 |      4.38 |    11.11 |
+| armadillo-rollers |    396 | CPU  |   20.43 |     8.41 |      2.62 |    31.46 |
+| cloth-ball        |     43 | GPU  |   12.33 |     8.58 |     10.26 |    31.18 |
+| cloth-ball        |     43 | CPU  |   28.60 |    21.98 |      4.99 |    55.58 |
+| cloth-funnel      |    372 | GPU  |    3.64 |     1.45 |      2.54 |     7.63 |
+| cloth-funnel      |    372 | CPU  |   15.22 |     5.88 |      1.77 |    22.87 |
+| n-body            |     74 | GPU  |   13.58 |    17.73 |     63.79 |    95.10 |
+| n-body            |     74 | CPU  |   35.24 |    97.62 |     23.49 |   156.35 |
+| puffer-ball       |    120 | GPU  |  141.46 |   229.35 |    322.15 |   692.96 |
+| puffer-ball       |    120 | CPU  |  157.48 |   227.79 |     50.41 |   435.69 |
+| rod-twist         |  2,556 | GPU  |    9.84 |     2.64 |      6.80 |    19.27 |
+| rod-twist         |  2,556 | CPU  |   26.12 |    11.22 |      7.23 |    44.57 |
 
 A mean rather than a median over steps: the scene total is what a run costs, and the mean is the only average that divides back into it.
 
@@ -269,7 +297,7 @@ Source: `benchmark/results/sweep-gh200-bp.csv`
 
 <!-- sccd:end per-frame -->
 
-## 5. Broad phase
+## 6. Broad phase
 
 Two strategies produce the candidate pairs — a sweep over sorted intervals and a
 cell list over a uniform grid. Across 25,538 case-mode combinations they report
@@ -299,7 +327,7 @@ rod-twist by 1.03× to 1.88×; the cell list takes cloth-funnel by 1.06× and
 puffer-ball by **4.0×** — 27 s against 109 s on the largest scene. A fixed choice
 is wrong somewhere, and wrong by a factor of four at the worst point.
 
-## 6. Scaling with element count
+## 7. Scaling with element count
 
 `sccd_refine_scaling` refines one surface repeatedly, quadrupling the element
 count at each level, over two consecutive cloth-ball frames from 92,230 elements
@@ -330,7 +358,7 @@ The strategies divide their cost oppositely: the sweep builds more cheaply and
 scales better doing it (exponent 0.73 against 0.92), the cell list traverses far
 better (0.75 against 1.19). Traversal is what grows.
 
-## 7. Figures
+## 8. Figures
 
 Presentation follows the dataset paper (Belgrod et al., *TOI dataset for CCD and
 a scalable conservative algorithm*) over the same six scenes: scenes across the
@@ -363,7 +391,7 @@ two coincide.
 fitted exponent is on the broad phase; the narrow-phase series is flat and noisy
 because these two frames do not come into contact.
 
-## 8. Provenance
+## 9. Provenance
 
 <!-- sccd:begin provenance -->
 
