@@ -59,7 +59,14 @@ download_archive() {
     else
         fetch "${url}" "${archive}"
     fi
-    tar -xzf "${archive}" -C "${DATA_DIR}"
+    # The archives were packed on macOS and carry an AppleDouble sidecar for
+    # many files. macOS tar folds those back into the resource fork; GNU tar
+    # writes them out as ordinary files named `._<original>`, which land in the
+    # same directories as the data. The box converter then tries to parse
+    # `._1ee.json` and stops with "UTF8_ERROR: The input is not valid UTF-8",
+    # because the sidecar is binary. Excluding them costs nothing on either
+    # platform -- they carry no dataset content.
+    tar -xzf "${archive}" -C "${DATA_DIR}" --exclude '._*'
 }
 
 download_dataset() {

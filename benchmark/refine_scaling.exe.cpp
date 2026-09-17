@@ -219,15 +219,22 @@ int main(int argc, char** argv) {
     // say which of the two strategies produced it, and the default is not
     // self-evident: this driver builds a fresh CCD per level, so the auto tuner
     // never completes a race and every level runs its first probe.
+    // The input frames belong in the header too. Which pair of frames was
+    // refined decides the pair counts and whether the two come into contact at
+    // all, so a recorded run that omits them cannot be reproduced from the file:
+    // the same command on a different pair of the same scene produces a table
+    // that looks equally plausible and measures something else.
     printf("# mode=%s max_depth=%d tol=%g scale=%g space=%s base_topology=%s "
-           "broadphase=%s\n",
+           "broadphase=%s t0=%s t1=%s\n",
            sccd::narrow_phase_mode_name(sccd::narrow_phase_mode()),
            SCCD_MAX_DEPTH,
            (double)SCCD_TOL,
            SCCD_SCALE,
            space == smesh::EXECUTION_SPACE_DEVICE ? "device" : "host",
            smesh::type_to_string(base->block(0)->element_type()),
-           sccd::broadphase_strategy_name(sccd::broadphase_strategy_setting()));
+           sccd::broadphase_strategy_name(sccd::broadphase_strategy_setting()),
+           argc >= 3 ? argv[2] : "generated",
+           argc >= 4 ? argv[3] : "synthesized");
     printf("%5s %10s %12s %12s %9s %9s %9s %9s %10s %10s %14s\n",
            "level",
            "faces",
@@ -236,7 +243,7 @@ int main(int argc, char** argv) {
            "prep_ms",
            "bp_fv_ms",
            "bp_ee_ms",
-           "broad_ms",
+           "bp_total_ms",
            "narrow_ms",
            "ns/pair",
            "toi");
@@ -258,6 +265,10 @@ int main(int argc, char** argv) {
         auto points1 = to_2d(h1, space);
 
         auto ccd = sccd::CCD<scalar_t>::create(mesh, space);
+        // The edge graph and the working buffers belong to the mesh, not to the
+        // step, and this study builds a CCD per refinement level. Paying for
+        // them here keeps the prep column below a per-step cost at every level.
+        ccd->initialize();
 
         smesh::SharedBuffer<smesh::idx_t> v_overlap, f_overlap, e0_overlap, e1_overlap;
 
@@ -280,7 +291,7 @@ int main(int argc, char** argv) {
         // Broken out rather than timed as one call: the prep (AABBs + the sort
         // that sweep-and-prune needs) scales with elements, while the two sweeps
         // scale with how much the sorted intervals overlap. Those are different
-        // costs with different fixes, and a single broad_ms number hides which
+        // costs with different fixes, and a single total hides which
         // one is growing.
         const double t_prep0 = now_ms();
         ccd->broad_phase_prep(points0, points1);
@@ -294,7 +305,11 @@ int main(int argc, char** argv) {
         ccd->broad_phase_ee_step(e0_overlap, e1_overlap);
         const double ee_ms = now_ms() - t_ee0;
 
-        const double broad_ms = prep_ms + fv_ms + ee_ms;
+        // Preparation plus both traversals: a whole broad phase, which is what
+        // a caller pays for. Named apart from bench.exe.cpp's broad_ms on
+        // purpose -- that one is the traversal alone, with preparation reported
+        // in its own column, and the two were previously both called "broad".
+        const double bp_total_ms = prep_ms + fv_ms + ee_ms;
 
         scalar_t toi = 1;
         smesh::SharedBuffer<scalar_t> vf_tois, ee_tois;
@@ -318,7 +333,7 @@ int main(int argc, char** argv) {
                prep_ms,
                fv_ms,
                ee_ms,
-               broad_ms,
+               bp_total_ms,
                narrow_ms,
                n_pairs > 0 ? (narrow_ms * 1e6 / (double)n_pairs) : 0.0,
                (double)toi);

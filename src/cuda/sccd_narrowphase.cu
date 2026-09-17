@@ -2513,8 +2513,82 @@ namespace sccd {
             int* g_qid = gstack.qid;
             gstack_cap = gstack.cap;
 
+            // Bytes one unit of capacity costs, across all eight arrays. Each is
+            // double-buffered, so a unit buys two slots.
+            const size_t gstack_bytes_per_cap = 2 * (6 * sizeof(TC) + 2 * sizeof(int));
+
+            // Largest capacity the device can actually hold, leaving the geometry,
+            // the overlap list and the output where they are. The request the
+            // caller derives from the deficit is a count of boxes the search
+            // produced, not of boxes that must be resident at once, so on a deep
+            // tree it can ask for far more than exists -- clamp it here rather
+            // than letting the allocation fail.
+            auto gstack_cap_ceiling = [&]() -> int {
+                size_t free_bytes = 0, total_bytes = 0;
+                if (cudaMemGetInfo(&free_bytes, &total_bytes) != cudaSuccess) return INT_MAX;
+                // Spend at most three quarters of what is free, so growing the
+                // stack never starves the next allocation the pipeline makes.
+                const size_t budget = (free_bytes / 4) * 3;
+                const size_t cap = budget / gstack_bytes_per_cap;
+                return (cap > (size_t)INT_MAX) ? INT_MAX : (int)cap;
+            };
+
+            // Grow into temporaries and commit only once every allocation has
+            // succeeded. Freeing first and trusting the mallocs leaves the stack
+            // as null pointers with a capacity that says otherwise, and the only
+            // guard the device push has is that capacity -- so the next launch
+            // scatters through null, and the fault surfaces at whatever
+            // synchronisation comes next rather than where it was caused. This is
+            // the contract DeviceWorkspace::get already follows.
             auto grow_stack = [&](int new_cap) {
                 if (new_cap <= gstack_cap) return;
+                const int ceiling = gstack_cap_ceiling();
+                if (new_cap > ceiling) new_cap = ceiling;
+                if (new_cap <= gstack_cap) return;
+
+                TC* n_tlower = nullptr;
+                TC* n_tupper = nullptr;
+                TC* n_ulower = nullptr;
+                TC* n_uupper = nullptr;
+                TC* n_vlower = nullptr;
+                TC* n_vupper = nullptr;
+                int* n_level = nullptr;
+                int* n_qid = nullptr;
+
+                const size_t nreal = 2 * (size_t)new_cap * sizeof(TC);
+                const size_t nint = 2 * (size_t)new_cap * sizeof(int);
+
+                const bool ok = cudaMalloc(&n_tlower, nreal) == cudaSuccess &&
+                                cudaMalloc(&n_tupper, nreal) == cudaSuccess &&
+                                cudaMalloc(&n_ulower, nreal) == cudaSuccess &&
+                                cudaMalloc(&n_uupper, nreal) == cudaSuccess &&
+                                cudaMalloc(&n_vlower, nreal) == cudaSuccess &&
+                                cudaMalloc(&n_vupper, nreal) == cudaSuccess &&
+                                cudaMalloc(&n_level, nint) == cudaSuccess &&
+                                cudaMalloc(&n_qid, nint) == cudaSuccess;
+
+                if (!ok) {
+                    // Keep the stack that already works. The caller retries a
+                    // bounded number of rounds and then gives up, which is safe:
+                    // a dropped box can only leave the time of impact too early.
+                    cudaFree(n_tlower);
+                    cudaFree(n_tupper);
+                    cudaFree(n_ulower);
+                    cudaFree(n_uupper);
+                    cudaFree(n_vlower);
+                    cudaFree(n_vupper);
+                    cudaFree(n_level);
+                    cudaFree(n_qid);
+                    cudaGetLastError();
+                    fprintf(stderr,
+                            "sccd: narrow phase could not grow the global stack to %d "
+                            "(%.2f GiB); staying at %d.\n",
+                            new_cap,
+                            (double)new_cap * (double)gstack_bytes_per_cap / (1024.0 * 1024.0 * 1024.0),
+                            gstack_cap);
+                    return;
+                }
+
                 cudaFree(g_tlower);
                 cudaFree(g_tupper);
                 cudaFree(g_ulower);
@@ -2523,22 +2597,15 @@ namespace sccd {
                 cudaFree(g_vupper);
                 cudaFree(g_level);
                 cudaFree(g_qid);
-                g_tlower = nullptr;
-                g_tupper = nullptr;
-                g_ulower = nullptr;
-                g_uupper = nullptr;
-                g_vlower = nullptr;
-                g_vupper = nullptr;
-                g_level = nullptr;
-                g_qid = nullptr;
-                cudaMalloc(&g_tlower, 2 * (size_t)new_cap * sizeof(TC));
-                cudaMalloc(&g_tupper, 2 * (size_t)new_cap * sizeof(TC));
-                cudaMalloc(&g_ulower, 2 * (size_t)new_cap * sizeof(TC));
-                cudaMalloc(&g_uupper, 2 * (size_t)new_cap * sizeof(TC));
-                cudaMalloc(&g_vlower, 2 * (size_t)new_cap * sizeof(TC));
-                cudaMalloc(&g_vupper, 2 * (size_t)new_cap * sizeof(TC));
-                cudaMalloc(&g_level, 2 * (size_t)new_cap * sizeof(int));
-                cudaMalloc(&g_qid, 2 * (size_t)new_cap * sizeof(int));
+
+                g_tlower = n_tlower;
+                g_tupper = n_tupper;
+                g_ulower = n_ulower;
+                g_uupper = n_uupper;
+                g_vlower = n_vlower;
+                g_vupper = n_vupper;
+                g_level = n_level;
+                g_qid = n_qid;
                 gstack_cap = new_cap;
             };
 

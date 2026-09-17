@@ -160,13 +160,16 @@ namespace {
         sccd::Cell2DGrid<scalar_t> grid;
         sccd::cell2d_setup<scalar_t>(second.n, second.ptr, grid);
 
+        sccd::Cell2DPartition part;
+        sccd::cell2d_partition<scalar_t>(second.n, second.ptr, grid, part);
+
         std::vector<ptrdiff_t> cellptr(grid.ncells() + 1);
-        sccd::cell2d_count<scalar_t>(second.n, second.ptr, grid, cellptr.data());
+        sccd::cell2d_count<scalar_t>(second.n, second.ptr, grid, part, cellptr.data());
 
         std::vector<idx_t> cellidx(cellptr[grid.ncells()]);
         std::vector<ptrdiff_t> cursor(grid.ncells());
         sccd::cell2d_fill<scalar_t, idx_t>(
-            second.n, second.ptr, grid, cellptr.data(), cellidx.data(), cursor.data());
+            second.n, second.ptr, grid, part, cellptr.data(), cellidx.data(), cursor.data());
 
         std::vector<ptrdiff_t> ccdptr(first.n + 1, 0);
         const bool any = sccd::cell2d_count_overlaps<first_nxe, second_nxe, scalar_t, idx_t>(first.n,
@@ -232,11 +235,14 @@ namespace {
         sccd::Cell2DGrid<scalar_t> grid;
         sccd::cell2d_setup<scalar_t>(e.n, e.ptr, grid);
 
+        sccd::Cell2DPartition part;
+        sccd::cell2d_partition<scalar_t>(e.n, e.ptr, grid, part);
+
         std::vector<ptrdiff_t> cellptr(grid.ncells() + 1);
-        sccd::cell2d_count<scalar_t>(e.n, e.ptr, grid, cellptr.data());
+        sccd::cell2d_count<scalar_t>(e.n, e.ptr, grid, part, cellptr.data());
         std::vector<idx_t> cellidx(cellptr[grid.ncells()]);
         std::vector<ptrdiff_t> cursor(grid.ncells());
-        sccd::cell2d_fill<scalar_t, idx_t>(e.n, e.ptr, grid, cellptr.data(), cellidx.data(), cursor.data());
+        sccd::cell2d_fill<scalar_t, idx_t>(e.n, e.ptr, grid, part, cellptr.data(), cellidx.data(), cursor.data());
 
         std::vector<ptrdiff_t> ccdptr(e.n + 1, 0);
         const bool any = sccd::cell2d_count_self_overlaps<2, scalar_t, idx_t>(
@@ -296,6 +302,109 @@ namespace {
         }
         b.bind();
         return b;
+    }
+
+    /**
+     * \brief The partitioned binning must reproduce the serial binning exactly.
+     *
+     * Not "produce an equivalent cell list": the same bytes. A block owns a
+     * contiguous range of cell rows and the boxes inside a block's list stay in
+     * index order, so every cell sees its boxes in the order the serial scatter
+     * would have written them. Comparing the arrays element by element is what
+     * makes that claim testable, and it catches a partition that drops or
+     * duplicates an incidence, which a pair-set comparison could still absorb.
+     */
+    int run_binning_case(const char* name, const ptrdiff_t n, const double spread, const double size) {
+        std::mt19937 rng(20250913);
+        Boxes b = make_boxes(rng, n, 2, spread, size);
+
+        sccd::Cell2DGrid<scalar_t> grid;
+        sccd::cell2d_setup<scalar_t>(b.n, b.ptr, grid);
+
+        sccd::Cell2DPartition parallel_part;
+        sccd::cell2d_partition<scalar_t>(b.n, b.ptr, grid, parallel_part);
+        const sccd::Cell2DPartition serial_part;  // nblocks == 1: the serial path
+
+        auto bin = [&](const sccd::Cell2DPartition& part,
+                       std::vector<ptrdiff_t>& cellptr,
+                       std::vector<idx_t>& cellidx) {
+            cellptr.assign((size_t)grid.ncells() + 1, -1);
+            sccd::cell2d_count<scalar_t>(b.n, b.ptr, grid, part, cellptr.data());
+            cellidx.assign((size_t)cellptr[grid.ncells()], -1);
+            std::vector<ptrdiff_t> cursor((size_t)grid.ncells());
+            sccd::cell2d_fill<scalar_t, idx_t>(
+                b.n, b.ptr, grid, part, cellptr.data(), cellidx.data(), cursor.data());
+        };
+
+        std::vector<ptrdiff_t> sptr, pptr;
+        std::vector<idx_t> sidx, pidx;
+        bin(serial_part, sptr, sidx);
+        bin(parallel_part, pptr, pidx);
+
+        const bool ok = (sptr == pptr) && (sidx == pidx);
+        std::printf("%-24s boxes=%-7ld cells=%-8ld spans=%-9ld blocks=%-4d  %s\n",
+                    name, (long)n, (long)grid.ncells(), (long)sptr[grid.ncells()],
+                    parallel_part.nblocks, ok ? "ok" : "MISMATCH");
+        if (!ok) {
+            if (sptr != pptr) std::printf("    cell offsets differ\n");
+            if (sidx != pidx) std::printf("    cell contents differ\n");
+        }
+        // A case that never crosses into the partitioned path proves nothing
+        // about it, so say so rather than passing quietly.
+        if (parallel_part.serial() && n >= sccd::SCCD_CELL2D_MIN_PARALLEL) {
+            std::printf("    note: ran serial anyway (one worker, or a grid one row deep)\n");
+        }
+        return ok ? 0 : 1;
+    }
+
+    /**
+     * \brief sort_along_axis must produce exactly the order std::sort produces.
+     *
+     * The sweep's window walk assumes a total order on (key, index): equal keys
+     * broken by index. The radix sort supplies the tie-break through stability
+     * instead of through a comparator, so the two have to be checked against
+     * each other directly. A pair-set comparison would not do it, because a
+     * wrong order can still emit the right pairs on geometry that never puts two
+     * boxes at the same coordinate.
+     */
+    int run_sort_case(const char* name, const ptrdiff_t n, const double spread, const double size) {
+        std::mt19937 rng(31337);
+        Boxes b = make_boxes(rng, n, 2, spread, size);
+
+        struct KI { scalar_t key; idx_t idx; };
+        int bad = 0;
+        for (int axis = 0; axis < 3; ++axis) {
+            std::vector<KI> want((size_t)n);
+            for (ptrdiff_t i = 0; i < n; ++i) want[(size_t)i] = {b.data[axis][(size_t)i], (idx_t)i};
+            std::sort(want.begin(), want.end(), [](const KI& l, const KI& r) {
+                if (l.key < r.key) return true;
+                if (r.key < l.key) return false;
+                return l.idx < r.idx;
+            });
+
+            Boxes got = b;
+            got.bind();
+            std::vector<idx_t> idx((size_t)n);
+            std::vector<scalar_t> scratch((size_t)n);
+            sccd::sort_along_axis<scalar_t, idx_t>(n, axis, got.ptr, idx.data(), scratch.data());
+
+            bool perm_ok = true, sorted_ok = true, rows_ok = true;
+            for (ptrdiff_t i = 0; i < n; ++i) {
+                if (idx[(size_t)i] != want[(size_t)i].idx) perm_ok = false;
+                if (i && got.data[axis][(size_t)i] < got.data[axis][(size_t)(i - 1)]) sorted_ok = false;
+                // Every one of the six rows must carry the same permutation.
+                for (int d = 0; d < 6; ++d) {
+                    if (got.data[d][(size_t)i] != b.data[d][(size_t)idx[(size_t)i]]) rows_ok = false;
+                }
+            }
+            const bool ok = perm_ok && sorted_ok && rows_ok;
+            std::printf("%-24s axis=%d boxes=%-7ld  %s%s%s\n", name, axis, (long)n,
+                        ok ? "ok" : "MISMATCH",
+                        perm_ok ? "" : " (permutation differs from std::sort)",
+                        rows_ok ? "" : " (a row is permuted differently)");
+            bad |= ok ? 0 : 1;
+        }
+        return bad;
     }
 
     int run_flat_self_case(const char* name, const ptrdiff_t n, const int planes) {
@@ -462,6 +571,20 @@ int main() {
     bad |= run_two_element_case<3, 2>("tri vs edge", 1200, 2000);
     bad |= run_two_element_case<3, 3>("tri vs tri", 1000, 1000);
     bad |= run_two_element_case<4, 2>("quad vs edge", 900, 1500);
+
+    // sort_along_axis at sizes on both sides of the radix cutoff, so both the
+    // radix path and the comparison path are checked. "ties" puts many boxes at
+    // the same coordinate, which is where the tie-break rule shows.
+    bad |= run_sort_case("sort: random", 50000, 100.0, 1.0);
+    bad |= run_sort_case("sort: ties", 50000, 0.001, 0.0001);
+    bad |= run_sort_case("sort: below cutoff", 1000, 100.0, 1.0);
+
+    // The partitioned binning against the serial binning, at sizes that cross
+    // the per-block minimum so the partitioned path actually runs.
+    bad |= run_binning_case("binning: one cell each", 60000, 100.0, 0.5);
+    bad |= run_binning_case("binning: many cells", 60000, 100.0, 6.0);
+    bad |= run_binning_case("binning: dense", 40000, 1.0, 1.0);
+    bad |= run_binning_case("binning: degenerate", 40000, 0.0001, 0.00001);
 
     // Self-overlap: edge-edge, where each unordered pair must appear once.
     bad |= run_self_case("self: small boxes", 3000, 100.0, 1.0);

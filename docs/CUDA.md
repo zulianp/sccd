@@ -36,6 +36,52 @@ the same stages, the same exact answer of `t = 0.5`. Reading them side by side
 isolates what is actually different about CUDA. It exits 0 with a message when
 no device is present.
 
+## What an optimised build compiles
+
+A release build compiles device code at the maximum optimisation level, keeps
+IEEE arithmetic exactly as the guarantee requires, and carries no assertions
+inside kernels. The flags that matter are set for you:
+
+| flag | what it does |
+| --- | --- |
+| `-O3` | host half of each `.cu` |
+| `-Xptxas=-O3` | device back end. nvcc's own `-O` is host-only, so this is stated rather than left to a default |
+| `-Xcompiler=-march=native` | host half of each `.cu` builds for this CPU, matching the C++ units |
+| `-DNDEBUG` | assertions compiled out of kernels as well as host code |
+
+Fast math is deliberately absent. `--use_fast_math` implies `-ftz=true`,
+`-prec-div=false` and `-prec-sqrt=false`, and the narrow phase's guarantee rests
+on a certified error bound around exact IEEE arithmetic: flushing subnormals or
+approximating a division would let the search reject a box that holds a root.
+Do not add it.
+
+`SCCD_ENABLE_NATIVE_ARCH=OFF` drops `-march=native` from both languages if you
+need a portable binary.
+
+## Diagnosing a device memory fault
+
+Kernels launch asynchronously, so by default an error is reported at whichever
+call next returns a status, which is usually a stage or two after the launch that
+caused it. Two options turn that into something you can act on, and they work
+best together:
+
+```sh
+cmake -S . -B build-diag -DSCCD_ENABLE_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=90 \
+      -DSCCD_CUDA_SYNC_CHECKS=ON -DSCCD_CUDA_DEVICE_ASSERTS=ON
+```
+
+`SCCD_CUDA_SYNC_CHECKS` puts a device synchronize inside every error check, so
+the message names the launch that faulted. `SCCD_CUDA_DEVICE_ASSERTS` keeps the
+range and two-pass count checks the kernels already carry, so an invariant that
+breaks says which one it was. Between them a fault reports as *this launch broke
+this invariant*.
+
+Both stay off in a normal build, for the same reason: a synchronize per launch
+roughly doubles the narrow phase's drain loop, and an assertion inside a kernel
+holds registers live across a trap path in search kernels that are already close
+to spilling. Build a diagnostic tree beside a release one rather than instead of
+it — the optimisation level is unchanged, so the two remain comparable.
+
 ## The one rule that is easy to get wrong
 
 **A `T**` argument is a device array of device pointers.**

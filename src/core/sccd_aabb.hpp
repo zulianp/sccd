@@ -438,16 +438,18 @@ namespace sccd {
                        const geom_t* const SCCD_RESTRICT* const SCCD_RESTRICT points1,
                        aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabbs,
                        const BoxRounding rounding = BoxRounding::Exact) {
-        // One sweep per dimension, reducing over the element's vertices in
-        // registers. The previous shape ran nxe+1 separate parallel passes per
-        // dimension, each one a full read-modify-write of the min/max rows.
-        for (int d = 0; d < SCCD_DIM; d++) {
-            aabb_t *const SCCD_RESTRICT amin = aabbs[d];
-            aabb_t *const SCCD_RESTRICT amax = aabbs[SCCD_DIM + d];
-            const geom_t *const SCCD_RESTRICT p0d = points0[d];
-            const geom_t *const SCCD_RESTRICT p1d = points1[d];
-
-            sccd::parallel_for_br(0, n_elements, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+        // One parallel region for the whole box, with the dimension loop inside
+        // it: each worker takes a range of elements and writes all six rows for
+        // them, reducing over the element's vertices in registers. Splitting the
+        // dimensions across three regions instead costs three forks and three
+        // joins per call, which on a mesh of a few tens of thousands of elements
+        // is most of the time the call takes.
+        sccd::parallel_for_br(0, n_elements, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+            for (int d = 0; d < SCCD_DIM; d++) {
+                aabb_t *const SCCD_RESTRICT amin = aabbs[d];
+                aabb_t *const SCCD_RESTRICT amax = aabbs[SCCD_DIM + d];
+                const geom_t *const SCCD_RESTRICT p0d = points0[d];
+                const geom_t *const SCCD_RESTRICT p1d = points1[d];
                 for (ptrdiff_t i = rbegin; i < rend; i++) {
                     aabb_t e_min = std::numeric_limits<aabb_t>::max();
                     aabb_t e_max = std::numeric_limits<aabb_t>::lowest();
@@ -468,8 +470,8 @@ namespace sccd {
                     amin[i] = e_min;
                     amax[i] = e_max;
                 }
-            });
-        }
+            }
+        });
     }
 
     template <typename geom_t, typename aabb_t>
@@ -478,13 +480,12 @@ namespace sccd {
                        const geom_t* const SCCD_RESTRICT* const SCCD_RESTRICT points1,
                        aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabbs,
                        const BoxRounding rounding = BoxRounding::Exact) {
-        for (int d = 0; d < SCCD_DIM; d++) {
-            aabb_t *const SCCD_RESTRICT amin = aabbs[d];
-            aabb_t *const SCCD_RESTRICT amax = aabbs[SCCD_DIM + d];
-            const geom_t *const SCCD_RESTRICT p0d = points0[d];
-            const geom_t *const SCCD_RESTRICT p1d = points1[d];
-
-            sccd::parallel_for_br(0, n_nodes, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+        sccd::parallel_for_br(0, n_nodes, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+            for (int d = 0; d < SCCD_DIM; d++) {
+                aabb_t *const SCCD_RESTRICT amin = aabbs[d];
+                aabb_t *const SCCD_RESTRICT amax = aabbs[SCCD_DIM + d];
+                const geom_t *const SCCD_RESTRICT p0d = points0[d];
+                const geom_t *const SCCD_RESTRICT p1d = points1[d];
                 for (ptrdiff_t i = rbegin; i < rend; i++) {
                     aabb_t p_min = std::min(p0d[i], p1d[i]);
                     aabb_t p_max = std::max(p0d[i], p1d[i]);
@@ -495,8 +496,8 @@ namespace sccd {
                     amin[i] = p_min;
                     amax[i] = p_max;
                 }
-            });
-        }
+            }
+        });
     }
 
     template <typename idx_t, typename geom_t, typename disp_t, typename aabb_t>
@@ -509,14 +510,13 @@ namespace sccd {
                        const disp_t* const SCCD_RESTRICT* const SCCD_RESTRICT disp1,
                        aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabbs,
                        const BoxRounding rounding = BoxRounding::Exact) {
-        for (int d = 0; d < SCCD_DIM; d++) {
-            aabb_t *const SCCD_RESTRICT amin = aabbs[d];
-            aabb_t *const SCCD_RESTRICT amax = aabbs[SCCD_DIM + d];
-            const geom_t *const SCCD_RESTRICT pd = points[d];
-            const disp_t *const SCCD_RESTRICT d0 = disp0[d];
-            const disp_t *const SCCD_RESTRICT d1 = disp1[d];
-
-            sccd::parallel_for_br(0, n_elements, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+        sccd::parallel_for_br(0, n_elements, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+            for (int d = 0; d < SCCD_DIM; d++) {
+                aabb_t *const SCCD_RESTRICT amin = aabbs[d];
+                aabb_t *const SCCD_RESTRICT amax = aabbs[SCCD_DIM + d];
+                const geom_t *const SCCD_RESTRICT pd = points[d];
+                const disp_t *const SCCD_RESTRICT d0 = disp0[d];
+                const disp_t *const SCCD_RESTRICT d1 = disp1[d];
                 for (ptrdiff_t i = rbegin; i < rend; i++) {
                     aabb_t e_min = std::numeric_limits<aabb_t>::max();
                     aabb_t e_max = std::numeric_limits<aabb_t>::lowest();
@@ -538,8 +538,8 @@ namespace sccd {
                     amin[i] = e_min;
                     amax[i] = e_max;
                 }
-            });
-        }
+            }
+        });
     }
 
     template <typename geom_t, typename disp_t, typename aabb_t>
@@ -550,14 +550,13 @@ namespace sccd {
                        const disp_t* const SCCD_RESTRICT* const SCCD_RESTRICT disp1,
                        aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabbs,
                        const BoxRounding rounding = BoxRounding::Exact) {
-        for (int d = 0; d < SCCD_DIM; d++) {
-            aabb_t *const SCCD_RESTRICT amin = aabbs[d];
-            aabb_t *const SCCD_RESTRICT amax = aabbs[SCCD_DIM + d];
-            const geom_t *const SCCD_RESTRICT pd = points[d];
-            const disp_t *const SCCD_RESTRICT d0 = disp0[d];
-            const disp_t *const SCCD_RESTRICT d1 = disp1[d];
-
-            sccd::parallel_for_br(0, n_nodes, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+        sccd::parallel_for_br(0, n_nodes, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+            for (int d = 0; d < SCCD_DIM; d++) {
+                aabb_t *const SCCD_RESTRICT amin = aabbs[d];
+                aabb_t *const SCCD_RESTRICT amax = aabbs[SCCD_DIM + d];
+                const geom_t *const SCCD_RESTRICT pd = points[d];
+                const disp_t *const SCCD_RESTRICT d0 = disp0[d];
+                const disp_t *const SCCD_RESTRICT d1 = disp1[d];
                 for (ptrdiff_t i = rbegin; i < rend; i++) {
                     const geom_t p = pd[i];
                     const geom_t disp0_i = p + d0[i * stride_disp];
@@ -571,8 +570,8 @@ namespace sccd {
                     amin[i] = p_min;
                     amax[i] = p_max;
                 }
-            });
-        }
+            }
+        });
     }
 
     template <typename idx_t, typename geom_t, typename aabb_t>
@@ -582,12 +581,11 @@ namespace sccd {
                        const geom_t* const SCCD_RESTRICT* const SCCD_RESTRICT points,
                        aabb_t* const SCCD_RESTRICT* const SCCD_RESTRICT aabbs,
                        const BoxRounding rounding = BoxRounding::Exact) {
-        for (int d = 0; d < SCCD_DIM; d++) {
-            aabb_t *const SCCD_RESTRICT amin = aabbs[d];
-            aabb_t *const SCCD_RESTRICT amax = aabbs[SCCD_DIM + d];
-            const geom_t *const SCCD_RESTRICT pd = points[d];
-
-            sccd::parallel_for_br(0, n_elements, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+        sccd::parallel_for_br(0, n_elements, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+            for (int d = 0; d < SCCD_DIM; d++) {
+                aabb_t *const SCCD_RESTRICT amin = aabbs[d];
+                aabb_t *const SCCD_RESTRICT amax = aabbs[SCCD_DIM + d];
+                const geom_t *const SCCD_RESTRICT pd = points[d];
                 for (ptrdiff_t i = rbegin; i < rend; i++) {
                     aabb_t e_min = std::numeric_limits<aabb_t>::max();
                     aabb_t e_max = std::numeric_limits<aabb_t>::lowest();
@@ -607,8 +605,8 @@ namespace sccd {
                     amin[i] = e_min;
                     amax[i] = e_max;
                 }
-            });
-        }
+            }
+        });
     }
 }  // namespace sccd
 

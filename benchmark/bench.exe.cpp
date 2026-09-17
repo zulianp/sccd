@@ -716,6 +716,12 @@ namespace {
             run.points0 = smesh::to_device(run.points0);
             run.points1 = smesh::to_device(run.points1);
         }
+        // The edge graph and the working buffers are a function of the mesh, so
+        // a simulation pays for them once and every step after the first pays
+        // nothing. This driver builds a CCD per case, so without this call they
+        // would land inside the first timed prep of every case and the prep
+        // column would report a per-mesh cost as a per-step one.
+        run.ccd->initialize();
         return run;
     }
 

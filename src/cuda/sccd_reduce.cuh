@@ -30,6 +30,20 @@ namespace sccd {
             return out;
         }
 
+        /**
+         * \brief Sum `val` across the block and add the total to `result`.
+         *
+         * **Every thread of the block must reach this call.** Lane 0 of each warp
+         * writes that warp's partial sum to `block_accumulator[warp_id]`, and warp
+         * 0 then reads all `n_warps` slots; a warp that returned earlier leaves
+         * its slot holding whatever that multiprocessor's shared memory last held,
+         * and the sum silently absorbs it. A caller guarding on an element index
+         * therefore passes an identity for threads past the end rather than
+         * returning, which leaves the sum unchanged and every slot written. The
+         * __syncthreads and the full-mask shuffles need the same uniformity.
+         *
+         * `block_accumulator` is shared memory with at least one entry per warp.
+         */
         template <typename T>
         __device__ void block_reduce_to_gmem(const T val,
                                              T* const SCCD_RESTRICT block_accumulator,

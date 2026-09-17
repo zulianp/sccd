@@ -167,6 +167,38 @@ def read_rows(csv_path: Path) -> list[dict]:
         for raw in reader:
             if not raw.get("dataset"):
                 continue
+            # A competitor harness whose API answers per simulation step rather
+            # than per query kind emits an extra row summarising the step, with
+            # `type` of "step" and the step number in `case`. Its timings are the
+            # sum of the per-kind rows beside it, so reading both would count the
+            # same measurement twice. The step row exists for the earliest
+            # time-of-impact comparison, which is a separate table; everything
+            # here aggregates per case and must skip it.
+            if raw.get("type") == "step":
+                continue
+            row = dict(raw)
+            row["mode"] = normalise_mode(raw.get("mode", ""))
+            rows.append(row)
+    return rows
+
+
+def read_step_rows(csv_path: Path) -> list[dict]:
+    """The per-step rows a competitor harness emits, which read_rows skips.
+
+    These carry the earliest time of impact a library reports for a whole
+    simulation step, which is the unit some APIs answer in -- Scalable CCD's
+    `cuda::ccd` returns one scalar per step, not one per query kind. Comparing
+    `s0_toi` against `gt_earliest` on these is the like-for-like accuracy check
+    for such a library.
+    """
+    rows: list[dict] = []
+    with Path(csv_path).open(newline="") as f:
+        reader = csv.DictReader(f)
+        if reader.fieldnames is None:
+            raise ValueError(f"{csv_path}: no header")
+        for raw in reader:
+            if raw.get("type") != "step" or not raw.get("dataset"):
+                continue
             row = dict(raw)
             row["mode"] = normalise_mode(raw.get("mode", ""))
             rows.append(row)

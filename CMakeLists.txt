@@ -116,6 +116,67 @@ if(SCCD_ENABLE_CUDA)
   if(SCCD_CUDA_VERBOSE_PTXAS)
     target_compile_options(sccd PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xptxas=-v,-warn-spills>)
   endif()
+
+  # Kernels launch asynchronously, so a release build reports a memory fault at
+  # whichever API call next returns a status -- typically a stage or two after
+  # the launch that caused it. This puts a device synchronize back into every
+  # SCCD_CHECK_CUDA, which names the offending launch. It costs a full device
+  # stall per launch, which on the narrow phase's drain loop doubles the
+  # per-round cost, so it is a diagnostic switch and not a default.
+  option(SCCD_CUDA_SYNC_CHECKS "Synchronize the device inside every CUDA error check" OFF)
+  if(SCCD_CUDA_SYNC_CHECKS)
+    target_compile_definitions(sccd PUBLIC SCCD_CUDA_SYNC_CHECKS)
+    target_compile_options(sccd PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>)
+  endif()
+
+  # Device asserts are off in every configuration but Debug.
+  #
+  # An assert inside a kernel is not a cheap check. It puts a trap path and a
+  # call to __assertfail into the kernel, which holds registers live across it,
+  # and the narrow-phase search kernels above are already at the edge of
+  # spilling. NDEBUG does arrive with CMAKE_CUDA_FLAGS_<CONFIG> for the optimised
+  # configurations, but that is a default a consumer can replace wholesale and
+  # the loss would be silent, so name it here as well. Target options are
+  # appended after CMAKE_CUDA_FLAGS_<CONFIG>, and the last -D or -U on the
+  # command line is the one that counts, which also makes the switch below work.
+  option(SCCD_CUDA_DEVICE_ASSERTS "Keep assert() live inside CUDA kernels" OFF)
+  if(SCCD_CUDA_DEVICE_ASSERTS)
+    # Turns the range and two-pass count checks the kernels already carry back
+    # into runtime failures. Pair it with SCCD_CUDA_SYNC_CHECKS when chasing a
+    # device memory fault: the assert says which invariant broke and the
+    # synchronize says which launch broke it.
+    target_compile_options(sccd PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-UNDEBUG>)
+  else()
+    target_compile_options(sccd PRIVATE
+      $<$<COMPILE_LANGUAGE:CUDA>:$<$<NOT:$<CONFIG:Debug>>:-DNDEBUG>>)
+  endif()
+
+  # Device optimisation, stated rather than inherited.
+  #
+  # nvcc's own -O sets the level for the *host* half of a .cu; the device back
+  # end is ptxas, whose default happens to be -O3. Naming it keeps a toolchain
+  # whose default moves from quietly halving device performance. Measured on
+  # this build, the default and -Xptxas=-O3 produce byte-identical cubins, and
+  # -O0 produces one 2.6 times larger.
+  target_compile_options(sccd PRIVATE
+    $<$<COMPILE_LANGUAGE:CUDA>:$<$<NOT:$<CONFIG:Debug>>:-Xptxas=-O3>>)
+
+  # No fast-math, ever.
+  #
+  # --use_fast_math implies -ftz=true, -prec-div=false and -prec-sqrt=false. The
+  # narrow phase's guarantee rests on a certified error bound around exact IEEE
+  # arithmetic, so flushing subnormals or approximating a division would let the
+  # search reject a box that holds a root -- a missed collision, which is the one
+  # failure the library exists to prevent. The default the build relies on is
+  # visible in nvcc's fatbinary line: -ftz=0 -prec_div=1 -prec_sqrt=1 -fmad=1.
+
+  # The host half of a .cu compiles like any other host translation unit, and it
+  # was getting none of the architecture flags above, which are scoped to CXX and
+  # so skip CUDA entirely. nvcc rejects -march=native as its own option, so it
+  # goes through -Xcompiler.
+  if(SCCD_ENABLE_NATIVE_ARCH AND SCCD_HAS_MARCH_NATIVE)
+    target_compile_options(sccd PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-march=native>)
+  endif()
 endif()
 
 # Demoted code. Off by default, never installed, never in the correctness gate;
@@ -396,3 +457,15 @@ if(SCCD_ENABLE_TIGHT_INCLUSION)
 endif()
 
 include(SCCDTests)
+
+# Third-party CCD run over the same benchmark, for the comparison table. Off by
+# default: these pull dependencies the shipped library does not have, and
+# benchmark/competitors/README.md states the rules such a comparison follows.
+#
+# After SCCDTests, which is where enable_testing() lives: the harnesses register
+# a test that their CSV schema still matches sccd_bench's, and an add_test before
+# enable_testing is silently dropped.
+option(SCCD_ENABLE_COMPETITORS "Build the competitor benchmark harnesses" OFF)
+if(SCCD_ENABLE_COMPETITORS)
+  add_subdirectory(benchmark/competitors)
+endif()

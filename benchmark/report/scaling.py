@@ -125,13 +125,17 @@ def table(runs: list[ScalingRun], source: str):
     t = Table(
         label="tab:scaling",
         caption=("Cost against element count on a repeatedly refined surface, "
-                 "each level quadrupling the element count. $p$ is the "
-                 "least-squares exponent in $t \\sim n^{p}$ fitted over all "
-                 "levels of that series."),
+                 "each level quadrupling the element count. Every time is one "
+                 "collision step at that level, in milliseconds. \\emph{broad} "
+                 "is the whole broad phase; the \\emph{structure} and "
+                 "\\emph{traversal} columns decompose it into building the "
+                 "acceleration structure and the two overlap queries over it. "
+                 "$p$ is the least-squares exponent in $t \\sim n^{p}$ fitted "
+                 "over all levels of that series."),
         columns=[Column(_first_header, "l"), Column("level"), Column("elements"),
                  Column("candidate pairs"),
-                 Column("prep ms", tex_header="prep (ms)"),
-                 Column("step ms", tex_header="step (ms)"),
+                 Column("structure ms", tex_header="structure (ms)"),
+                 Column("traversal ms", tex_header="traversal (ms)"),
                  Column("broad ms", tex_header="broad (ms)"),
                  Column("narrow ms", tex_header="narrow (ms)"),
                  Column("p")],

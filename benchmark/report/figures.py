@@ -229,7 +229,11 @@ def runtime_breakdown(summaries: dict[tuple[str, str], SceneSummary],
         return Figure(
         _stem("runtime-breakdown"), "fig:breakdown", "no data", FULL_WIDTH_IN)
 
-    parts = [("prep_ms", "prep"), ("broad_ms", "broad"), ("narrow_ms", "narrow")]
+    # The broad phase is one bar: building the acceleration structure and
+    # traversing it. Its two halves are shaded apart so the split stays
+    # readable, and the narrow phase is the second bar.
+    parts = [("prep_ms", "structure"), ("broad_ms", "traversal"),
+             ("narrow_ms", "narrow")]
     part_ink = [SERIES[3], SERIES[0], SERIES[2]]
 
     fig, axes = plt.subplots(1, len(scenes), squeeze=False,

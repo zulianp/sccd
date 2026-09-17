@@ -109,17 +109,37 @@ namespace sccd {
         const int d0 = grid.axis0;
         const int d1 = grid.axis1;
 
-        T lo0 = aabb[d0][0], hi0 = aabb[3 + d0][0];
-        T lo1 = aabb[d1][0], hi1 = aabb[3 + d1][0];
-        T sum0 = 0, sum1 = 0;
-        for (ptrdiff_t i = 0; i < n; ++i) {
-            lo0 = sccd::min<T>(lo0, aabb[d0][i]);
-            hi0 = sccd::max<T>(hi0, aabb[3 + d0][i]);
-            lo1 = sccd::min<T>(lo1, aabb[d1][i]);
-            hi1 = sccd::max<T>(hi1, aabb[3 + d1][i]);
-            sum0 += aabb[3 + d0][i] - aabb[d0][i];
-            sum1 += aabb[3 + d1][i] - aabb[d1][i];
-        }
+        struct Extent {
+            T lo0, hi0, lo1, hi1, sum0, sum1;
+        };
+
+        const Extent ext = sccd::parallel_tiled_reduce<Extent>(
+            0,
+            n,
+            [&](const ptrdiff_t begin, const ptrdiff_t end) {
+                Extent e{aabb[d0][begin], aabb[3 + d0][begin], aabb[d1][begin], aabb[3 + d1][begin], 0, 0};
+                for (ptrdiff_t i = begin; i < end; ++i) {
+                    e.lo0 = sccd::min<T>(e.lo0, aabb[d0][i]);
+                    e.hi0 = sccd::max<T>(e.hi0, aabb[3 + d0][i]);
+                    e.lo1 = sccd::min<T>(e.lo1, aabb[d1][i]);
+                    e.hi1 = sccd::max<T>(e.hi1, aabb[3 + d1][i]);
+                    e.sum0 += aabb[3 + d0][i] - aabb[d0][i];
+                    e.sum1 += aabb[3 + d1][i] - aabb[d1][i];
+                }
+                return e;
+            },
+            [](const Extent a, const Extent b) {
+                return Extent{sccd::min<T>(a.lo0, b.lo0),
+                              sccd::max<T>(a.hi0, b.hi0),
+                              sccd::min<T>(a.lo1, b.lo1),
+                              sccd::max<T>(a.hi1, b.hi1),
+                              a.sum0 + b.sum0,
+                              a.sum1 + b.sum1};
+            });
+
+        const T lo0 = ext.lo0, hi0 = ext.hi0;
+        const T lo1 = ext.lo1, hi1 = ext.hi1;
+        const T sum0 = ext.sum0, sum1 = ext.sum1;
 
         const T span0 = sccd::max<T>(hi0 - lo0, std::numeric_limits<T>::min());
         const T span1 = sccd::max<T>(hi1 - lo1, std::numeric_limits<T>::min());
@@ -152,42 +172,220 @@ namespace sccd {
     }
 
     /**
+     * \brief Which boxes a block of cell rows has to look at.
+     *
+     * The histogram and the scatter both write one counter per (box, cell)
+     * incidence, so neither is safe to run box-parallel without either atomics
+     * or one private copy of the whole cell array per worker. Neither is
+     * affordable: the cell count is of the order of the box count, so private
+     * copies cost workers times that.
+     *
+     * Partitioning by cell row avoids both. A block owns a contiguous
+     * range of rows on the grid's second axis, and no two blocks own a cell, so
+     * each can write its own slice of the cell array with no synchronisation at
+     * all. A box that spans several row blocks appears in each of their lists,
+     * which is why the lists are built by the same count-then-fill pass as
+     * everything else here.
+     *
+     * Boxes stay in index order within a block's list, and blocks cover the rows
+     * in order, so both passes visit each cell's boxes in exactly the order the
+     * serial form does. The cell array and the index array that come out are
+     * therefore identical to the serial ones, not merely equivalent.
+     */
+    struct Cell2DPartition {
+        int nblocks = 1;
+        int rows_per_block = 1;
+        std::vector<ptrdiff_t> blockptr;  ///< nblocks + 1 offsets into blockbox
+        std::vector<int> blockbox;        ///< box indices, grouped by block
+        std::vector<ptrdiff_t> counts;    ///< per-chunk, per-block counters, reused across steps
+
+        /** \brief True when the two binning passes should just run serially. */
+        bool serial() const { return nblocks <= 1; }
+    };
+
+    /**
+     * \brief Below this many boxes the partition costs more than it saves.
+     *
+     * Measured on a draped sheet at ten workers, the partitioned binning is
+     * $0.42\times$ the speed of the serial one at $8{,}000$ boxes, level at
+     * $16{,}000$, $1.61\times$ at $32{,}000$ and $3.10\times$ at $256{,}000$. The
+     * threshold sits just past the crossover: a mesh small enough to be below it
+     * has a binning pass measured in tenths of a millisecond either way.
+     *
+     * A total, not a count per block. Deriving the block count from the boxes
+     * instead -- so that a wider machine asks for fewer, fatter blocks -- was
+     * four times slower on armadillo-rollers at seventy-two threads, because it
+     * capped the partition at a handful of blocks on exactly the mesh sizes
+     * preparation spends its time on.
+     */
+    static const ptrdiff_t SCCD_CELL2D_MIN_PARALLEL = 32768;
+
+    /**
+     * \brief Group \p n boxes by the block of cell rows they touch.
+     *
+     * Cheap relative to what it enables: one pass over the boxes reading two
+     * coordinates each to count, and a second to write. Both are box-parallel
+     * and neither touches the cell array.
+     */
+    template <typename T>
+    static void cell2d_partition(const ptrdiff_t n,
+                                 T** const SCCD_RESTRICT aabb,
+                                 const Cell2DGrid<T>& grid,
+                                 Cell2DPartition& part) {
+        part.blockptr.clear();
+        part.blockbox.clear();
+
+        const int max_workers = sccd::max_concurrency();
+        if (n < SCCD_CELL2D_MIN_PARALLEL || max_workers <= 1 || grid.n1 <= 1) {
+            part.nblocks = 1;
+            part.rows_per_block = grid.n1;
+            return;
+        }
+
+        // More blocks than workers so that a row band holding an unusually dense
+        // patch of the surface does not become the whole critical path.
+        const int want = sccd::min<int>(grid.n1, max_workers * 4);
+        part.nblocks = sccd::max<int>(1, want);
+        part.rows_per_block = (grid.n1 + part.nblocks - 1) / part.nblocks;
+        part.nblocks = (grid.n1 + part.rows_per_block - 1) / part.rows_per_block;
+
+        const int nblocks = part.nblocks;
+        const int rpb = part.rows_per_block;
+
+        const T* const SCCD_RESTRICT lo1 = aabb[grid.axis1];
+        const T* const SCCD_RESTRICT hi1 = aabb[3 + grid.axis1];
+
+        // Chunks of boxes, one private counter row each. The counters are over
+        // blocks and not over cells, so this is nchunks * nblocks entries and
+        // not nchunks * ncells.
+        const int nchunks = nblocks;
+        const ptrdiff_t chunk = (n + nchunks - 1) / nchunks;
+        std::vector<ptrdiff_t> &counts = part.counts;
+        counts.assign((size_t)nchunks * (size_t)nblocks, 0);
+
+        sccd::parallel_for_chunks(0, nchunks, [&](const ptrdiff_t c) {
+            ptrdiff_t* const row = counts.data() + c * (ptrdiff_t)nblocks;
+            const ptrdiff_t begin = c * chunk;
+            const ptrdiff_t end = sccd::min<ptrdiff_t>(begin + chunk, n);
+            for (ptrdiff_t i = begin; i < end; ++i) {
+                const int b0 = grid.clamp1(lo1[i]) / rpb;
+                const int b1 = grid.clamp1(hi1[i]) / rpb;
+                for (int b = b0; b <= b1; ++b) {
+                    row[b] += 1;
+                }
+            }
+        });
+
+        // Offsets, block-major so a block's list is contiguous, chunk-minor so
+        // the boxes inside it stay in index order.
+        part.blockptr.assign((size_t)nblocks + 1, 0);
+        ptrdiff_t running = 0;
+        for (int b = 0; b < nblocks; ++b) {
+            part.blockptr[(size_t)b] = running;
+            for (int c = 0; c < nchunks; ++c) {
+                ptrdiff_t& slot = counts[(size_t)c * (size_t)nblocks + (size_t)b];
+                const ptrdiff_t take = slot;
+                slot = running;
+                running += take;
+            }
+        }
+        part.blockptr[(size_t)nblocks] = running;
+
+        part.blockbox.resize((size_t)running);
+        sccd::parallel_for_chunks(0, nchunks, [&](const ptrdiff_t c) {
+            ptrdiff_t* const row = counts.data() + c * (ptrdiff_t)nblocks;
+            const ptrdiff_t begin = c * chunk;
+            const ptrdiff_t end = sccd::min<ptrdiff_t>(begin + chunk, n);
+            for (ptrdiff_t i = begin; i < end; ++i) {
+                const int b0 = grid.clamp1(lo1[i]) / rpb;
+                const int b1 = grid.clamp1(hi1[i]) / rpb;
+                for (int b = b0; b <= b1; ++b) {
+                    part.blockbox[(size_t)row[b]++] = (int)i;
+                }
+            }
+        });
+    }
+
+    namespace detail {
+
+        /**
+         * \brief Visit every (cell, box) incidence a block of rows owns.
+         *
+         * Shared by the counting and the scatter pass so that the two cannot
+         * disagree about which cells a box belongs to, which is the failure that
+         * would corrupt the cell array silently.
+         */
+        template <typename T, typename Visit>
+        static inline void for_each_incidence(T** const SCCD_RESTRICT aabb,
+                                              const Cell2DGrid<T>& grid,
+                                              const ptrdiff_t i,
+                                              const int row_begin,
+                                              const int row_end,
+                                              Visit&& visit) {
+            const int a = grid.clamp0(aabb[grid.axis0][i]);
+            const int b = grid.clamp0(aabb[3 + grid.axis0][i]);
+            const int c = sccd::max<int>(grid.clamp1(aabb[grid.axis1][i]), row_begin);
+            const int d = sccd::min<int>(grid.clamp1(aabb[3 + grid.axis1][i]), row_end - 1);
+            for (int j = c; j <= d; ++j) {
+                for (int k = a; k <= b; ++k) {
+                    visit(grid.cell_of(k, j));
+                }
+            }
+        }
+
+    }  // namespace detail
+
+    /**
      * \brief Bin \p n boxes into \p grid: count, prefix sum, then scatter.
      *
      * \p cellptr must hold ncells + 1 entries, \p cellidx the total span count
      * which is cellptr[ncells] after the prefix sum, so this is called in two
      * steps by the caller the same way the pair collection is.
+     *
+     * \p part comes from cell2d_partition on the same boxes and grid. It decides
+     * only how the work is divided; the result does not depend on it.
      */
     template <typename T>
     static void cell2d_count(const ptrdiff_t n,
                              T** const SCCD_RESTRICT aabb,
                              const Cell2DGrid<T>& grid,
+                             const Cell2DPartition& part,
                              ptrdiff_t* const SCCD_RESTRICT cellptr) {
         const ptrdiff_t ncells = grid.ncells();
-        std::memset(cellptr, 0, sizeof(ptrdiff_t) * (size_t)(ncells + 1));
 
-        const T* const SCCD_RESTRICT lo0 = aabb[grid.axis0];
-        const T* const SCCD_RESTRICT hi0 = aabb[3 + grid.axis0];
-        const T* const SCCD_RESTRICT lo1 = aabb[grid.axis1];
-        const T* const SCCD_RESTRICT hi1 = aabb[3 + grid.axis1];
-
-        // Serial: the scatter is a histogram, and at ~n cells the contention of a
-        // parallel version costs more than the pass itself.
-        for (ptrdiff_t i = 0; i < n; ++i) {
-            const int a = grid.clamp0(lo0[i]);
-            const int b = grid.clamp0(hi0[i]);
-            const int c = grid.clamp1(lo1[i]);
-            const int d = grid.clamp1(hi1[i]);
-            for (int j = c; j <= d; ++j) {
-                for (int k = a; k <= b; ++k) {
-                    cellptr[grid.cell_of(k, j) + 1] += 1;
-                }
+        if (part.serial()) {
+            std::memset(cellptr, 0, sizeof(ptrdiff_t) * (size_t)(ncells + 1));
+            for (ptrdiff_t i = 0; i < n; ++i) {
+                detail::for_each_incidence<T>(
+                    aabb, grid, i, 0, grid.n1, [&](const ptrdiff_t cell) { cellptr[cell + 1] += 1; });
             }
+            for (ptrdiff_t i = 0; i < ncells; ++i) {
+                cellptr[i + 1] += cellptr[i];
+            }
+            return;
         }
 
-        for (ptrdiff_t i = 0; i < ncells; ++i) {
-            cellptr[i + 1] += cellptr[i];
-        }
+        sccd::parallel_for_br(0, ncells + 1, [&](const ptrdiff_t begin, const ptrdiff_t end) {
+            std::memset(cellptr + begin, 0, sizeof(ptrdiff_t) * (size_t)(end - begin));
+        });
+
+        const int rpb = part.rows_per_block;
+        sccd::parallel_for_chunks(0, part.nblocks, [&](const ptrdiff_t b) {
+            const int row_begin = (int)b * rpb;
+            const int row_end = sccd::min<int>(row_begin + rpb, grid.n1);
+            const ptrdiff_t from = part.blockptr[(size_t)b];
+            const ptrdiff_t to = part.blockptr[(size_t)b + 1];
+            for (ptrdiff_t e = from; e < to; ++e) {
+                detail::for_each_incidence<T>(aabb,
+                                              grid,
+                                              (ptrdiff_t)part.blockbox[(size_t)e],
+                                              row_begin,
+                                              row_end,
+                                              [&](const ptrdiff_t cell) { cellptr[cell + 1] += 1; });
+            }
+        });
+
+        sccd::parallel_cum_sum_br(cellptr, cellptr + ncells + 1);
     }
 
     /** \brief Scatter box indices into the cells counted by cell2d_count. */
@@ -195,28 +393,39 @@ namespace sccd {
     static void cell2d_fill(const ptrdiff_t n,
                             T** const SCCD_RESTRICT aabb,
                             const Cell2DGrid<T>& grid,
+                            const Cell2DPartition& part,
                             const ptrdiff_t* const SCCD_RESTRICT cellptr,
                             I* const SCCD_RESTRICT cellidx,
                             ptrdiff_t* const SCCD_RESTRICT cursor) {
         const ptrdiff_t ncells = grid.ncells();
-        std::memcpy(cursor, cellptr, sizeof(ptrdiff_t) * (size_t)ncells);
 
-        const T* const SCCD_RESTRICT lo0 = aabb[grid.axis0];
-        const T* const SCCD_RESTRICT hi0 = aabb[3 + grid.axis0];
-        const T* const SCCD_RESTRICT lo1 = aabb[grid.axis1];
-        const T* const SCCD_RESTRICT hi1 = aabb[3 + grid.axis1];
-
-        for (ptrdiff_t i = 0; i < n; ++i) {
-            const int a = grid.clamp0(lo0[i]);
-            const int b = grid.clamp0(hi0[i]);
-            const int c = grid.clamp1(lo1[i]);
-            const int d = grid.clamp1(hi1[i]);
-            for (int j = c; j <= d; ++j) {
-                for (int k = a; k <= b; ++k) {
-                    cellidx[cursor[grid.cell_of(k, j)]++] = (I)i;
-                }
+        if (part.serial()) {
+            std::memcpy(cursor, cellptr, sizeof(ptrdiff_t) * (size_t)ncells);
+            for (ptrdiff_t i = 0; i < n; ++i) {
+                detail::for_each_incidence<T>(aabb, grid, i, 0, grid.n1, [&](const ptrdiff_t cell) {
+                    cellidx[cursor[cell]++] = (I)i;
+                });
             }
+            return;
         }
+
+        sccd::parallel_for_br(0, ncells, [&](const ptrdiff_t begin, const ptrdiff_t end) {
+            std::memcpy(cursor + begin, cellptr + begin, sizeof(ptrdiff_t) * (size_t)(end - begin));
+        });
+
+        const int rpb = part.rows_per_block;
+        sccd::parallel_for_chunks(0, part.nblocks, [&](const ptrdiff_t b) {
+            const int row_begin = (int)b * rpb;
+            const int row_end = sccd::min<int>(row_begin + rpb, grid.n1);
+            const ptrdiff_t from = part.blockptr[(size_t)b];
+            const ptrdiff_t to = part.blockptr[(size_t)b + 1];
+            for (ptrdiff_t e = from; e < to; ++e) {
+                const ptrdiff_t i = (ptrdiff_t)part.blockbox[(size_t)e];
+                detail::for_each_incidence<T>(aabb, grid, i, row_begin, row_end, [&](const ptrdiff_t cell) {
+                    cellidx[cursor[cell]++] = (I)i;
+                });
+            }
+        });
     }
 
     namespace detail {
