@@ -134,3 +134,35 @@ build*/
 # renders is output and stays ignored.
 !docs/assets/
 !docs/assets/*.css
+
+# The article under wip/paper/ is source, not build output: its .tex, the
+# vendored style, the figures it embeds and the generated table fragments are
+# all tracked. The blanket *.tex, *.pdf and *.png rules above would otherwise
+# win, and as with docs/figures/ the directory has to be re-included before
+# anything inside it can be -- git does not descend into an excluded directory
+# to rescue its contents.
+!wip/paper/
+!wip/paper/**/
+!wip/paper/*.tex
+!wip/paper/*.sty
+!wip/paper/sections/*.tex
+!wip/paper/tikz/*.tex
+!wip/paper/generated/tables/*.tex
+!wip/paper/figures/*.pdf
+# The compiled article is output and stays ignored; so does latexmk's state.
+wip/paper/main.pdf
+wip/paper/*.fls
+wip/paper/*.fdb_latexmk
+wip/paper/*.bbl
+wip/paper/*.blg
+wip/paper/*.out
+wip/paper/*.toc
+# Hardware-counter output behind the performance analysis. Same rule as the
+# benchmark CSVs: the numbers a document cites are only reproducible if the rows
+# behind them are in the repository.
+!benchmark/results/profile/
+!benchmark/results/profile/*.csv
+!benchmark/results/profile/*.txt
+
+# Thread-count sweep behind the strong-scaling figure.
+!benchmark/results/profile/strong-*.csv

@@ -35,6 +35,7 @@ set -euo pipefail
 #   --broadphases ".."  sweep, cell2d and/or auto (default cell2d)
 #   --modes "..."    narrow-phase modes      (default "0 2")
 #   --time HH:MM:SS  per-job limit           (default 00:29:00)
+#   --threads N      OMP threads per job     (default 72, one Grace)
 #   --partition P    Slurm partition         (default debug)
 #   --account A      Slurm account           (default c40)
 #   --no-oracle      skip the accuracy stage (timings only)
@@ -42,6 +43,13 @@ set -euo pipefail
 #   --pack N         chunks per Slurm job
 #   --jobs N         Slurm jobs in flight at once (default 1)    (default 1)
 #   --max-cases N    sweep an evenly spread subsample of N cases (default: all)
+#   --bench PATH     the benchmark binary (default <build>/sccd_bench)
+#
+# --bench drives a competitor harness from benchmark/competitors/ over the same
+# chunks. Those binaries take the same case-range variables and print the same
+# schema, but they have no narrow-phase mode and no choice of broad phase, so
+# pass `--modes 0 --broadphases sweep` with them or the same measurement is taken
+# once per combination.
 #
 # --pack matters more than it looks. The account runs one job at a time and
 # shares the queue with other work, so wall-clock time is dominated by waiting,
@@ -59,6 +67,10 @@ MODES="0 2"
 # comparable, because a raced run reports whichever won and not which ran.
 BROADPHASES="cell2d"
 TIME_LIMIT="00:29:00"
+# One Grace, not one node. A GH200 node carries four Grace-Hopper modules, so
+# `nproc` reports 288 and a job that trusts it measures four processors while
+# reporting one. Host numbers in this project are taken on a single Grace.
+THREADS=72
 PARTITION="debug"
 ACCOUNT="c40"
 UENV="prgenv-gnu/24.11:v2"
@@ -86,6 +98,7 @@ while [[ $# -gt 0 ]]; do
         --broadphases) BROADPHASES="$2"; shift 2 ;;
         --modes) MODES="$2"; shift 2 ;;
         --time) TIME_LIMIT="$2"; shift 2 ;;
+        --threads) THREADS="$2"; shift 2 ;;
         --partition) PARTITION="$2"; shift 2 ;;
         --account) ACCOUNT="$2"; shift 2 ;;
         --uenv) UENV="$2"; shift 2 ;;
@@ -97,6 +110,7 @@ while [[ $# -gt 0 ]]; do
         --jobs) JOBS="$2"; shift 2 ;;
         --oracle-chunk) ORACLE_CHUNK="$2"; shift 2 ;;
         --max-cases) MAX_CASES="$2"; shift 2 ;;
+        --bench) SCCD_BENCH="$2"; shift 2 ;;
         -h|--help) sed -n '3,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) printf 'error: unknown argument %s\n' "$1" >&2; exit 2 ;;
     esac
@@ -372,13 +386,28 @@ run_chunk_body() {
     mkdir -p "$(dirname "${out}")"
     header > "${tmp}"
     for mode in ${MODES}; do
-        SCCD_NARROWPHASE_MODE="${mode}" \
-        SCCD_BENCH_EXECUTION_SPACE="${space}" \
-        SCCD_BROADPHASE="${bp}" \
-        SCCD_BENCH_CASE_BEGIN="${begin}" \
-        SCCD_BENCH_CASE_END="${end}" \
-        SCCD_BENCH_MAX_CASES="${MAX_CASES_ENV}" \
-            "${SCCD_BENCH}" "${DATA_DIR}" "${scene}" | tail -n +2 >> "${tmp}"
+        # The exit status has to be inspected, not merely allowed to propagate.
+        # This is a pipeline, so without pipefail the status belongs to `tail`,
+        # and even with it the function carries on to the next mode and then
+        # publishes whatever accumulated. A device kernel that faults part way
+        # through a scene exits non-zero after writing real rows, so the failure
+        # mode this guards is a *partial* chunk, which the row-count check below
+        # cannot see: it is neither empty nor obviously wrong, and it merges
+        # silently into an otherwise healthy CSV, thinning one scene on one
+        # processor and biasing every median taken over it.
+        if ! ( set -o pipefail
+               SCCD_NARROWPHASE_MODE="${mode}" \
+               SCCD_BENCH_EXECUTION_SPACE="${space}" \
+               SCCD_BROADPHASE="${bp}" \
+               SCCD_BENCH_CASE_BEGIN="${begin}" \
+               SCCD_BENCH_CASE_END="${end}" \
+               SCCD_BENCH_MAX_CASES="${MAX_CASES_ENV}" \
+                   "${SCCD_BENCH}" "${DATA_DIR}" "${scene}" | tail -n +2 >> "${tmp}" ); then
+            printf 'error: %s mode %s exited non-zero; leaving the chunk unfinished\n' \
+                   "${out}" "${mode}" >&2
+            rm -f "${tmp}"
+            return 1
+        fi
     done
 
     # A chunk that produced no rows is a failure, not an empty result. The driver
@@ -454,7 +483,7 @@ flush_pack() {
                              export SCCD_BENCH='${SCCD_BENCH}' DATA_DIR='${DATA_DIR}' MODES='${MODES}'; \
                              export SCCD_DB_TO_RAW='${SCCD_DB_TO_RAW}'; \
                              export MAX_CASES_ENV='${MAX_CASES_ENV}'; \
-                             export OMP_NUM_THREADS=\"\$(nproc)\"; \
+                             export OMP_NUM_THREADS='${THREADS}'; \
                              ${body}"; then
                 printf 'ok %s\n' "${label}" > "${status_file}"
             else
@@ -477,7 +506,7 @@ flush_pack() {
                      export SCCD_BENCH='${SCCD_BENCH}' DATA_DIR='${DATA_DIR}' MODES='${MODES}'; \
                      export SCCD_DB_TO_RAW='${SCCD_DB_TO_RAW}'; \
                      export MAX_CASES_ENV='${MAX_CASES_ENV}'; \
-                     export OMP_NUM_THREADS=\"\$(nproc)\"; \
+                     export OMP_NUM_THREADS='${THREADS}'; \
                      header() { '${SCCD_BENCH}' --header; }; \
                      ${body}"; then
         printf 'FAILED %s (see %s/logs)\n' "${label}" "${OUT_DIR}" >&2
@@ -538,7 +567,7 @@ flush_oracle_pack() {
             --error="${OUT_DIR}/logs/${oracle_name}.err" \
             --wrap="$(declare -f run_oracle_body); \
                      export TI_ORACLE='${TI_ORACLE}' DATA_DIR='${DATA_DIR}'; \
-                     export OMP_NUM_THREADS=\"\$(nproc)\"; \
+                     export OMP_NUM_THREADS='${THREADS}'; \
                      ${body}"; then
         printf 'FAILED %s (see %s/logs)\n' "${label}" "${OUT_DIR}" >&2
         failures=$((failures + ${#oracle_calls[@]}))

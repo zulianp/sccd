@@ -3,6 +3,8 @@
 
 #include <algorithm>
 #include <cfloat>
+#include <memory>
+#include <cstdint>
 #include <cstring>
 #include <vector>
 
@@ -17,32 +19,74 @@ namespace sccd {
      * \param aabb SoA arrays of size 6: minx,miny,minz,maxx,maxy,maxz; each of
      * length n. \return Axis index in {0,1,2}.
      */
+    /** \brief Three per-axis sums, the accumulator of the two passes below. */
+    template <typename T>
+    struct AxisSum3 {
+        T v[3];
+    };
+
     /**
      * \brief Accumulate per-axis center means and variances in two sweeps.
      *
      * Both sweeps visit all three axes per element, so the AABB arrays are
-     * streamed twice instead of six times. The accumulation order within each
-     * axis is unchanged, so the results are bit-identical to the per-axis form.
+     * streamed twice instead of six times, and both are deterministic tiled
+     * reductions: the tiling is a function of \p n alone, so the variances --
+     * and therefore the axis chosen from them -- do not move with the worker
+     * count. They are not bit-identical to a single serial accumulation, which
+     * only matters when two axes tie to the last bit, and either is a valid
+     * choice then.
      */
     template <typename T>
     static void center_variance(const ptrdiff_t n, T **const SCCD_RESTRICT aabb, T (&var)[3]) {
-        T mean[3] = {0, 0, 0};
-        for (ptrdiff_t i = 0; i < n; i++) {
-            for (int d = 0; d < 3; d++) {
-                mean[d] += (aabb[d + 3][i] + aabb[d][i]) / 2;
-            }
-        }
-
         for (int d = 0; d < 3; d++) {
-            mean[d] /= n;
             var[d] = 0;
         }
+        if (n <= 0) {
+            return;
+        }
 
-        for (ptrdiff_t i = 0; i < n; i++) {
-            for (int d = 0; d < 3; d++) {
-                const T c = (aabb[d + 3][i] + aabb[d][i]) / 2;
-                var[d] += (c - mean[d]) * (c - mean[d]);
-            }
+        const auto join = [](const AxisSum3<T> a, const AxisSum3<T> b) {
+            AxisSum3<T> r;
+            for (int d = 0; d < 3; d++) r.v[d] = a.v[d] + b.v[d];
+            return r;
+        };
+
+        const AxisSum3<T> total = sccd::parallel_tiled_reduce<AxisSum3<T>>(
+            0,
+            n,
+            [&](const ptrdiff_t lo, const ptrdiff_t hi) {
+                AxisSum3<T> acc = {{0, 0, 0}};
+                for (ptrdiff_t i = lo; i < hi; i++) {
+                    for (int d = 0; d < 3; d++) {
+                        acc.v[d] += (aabb[d + 3][i] + aabb[d][i]) / 2;
+                    }
+                }
+                return acc;
+            },
+            join);
+
+        T mean[3];
+        for (int d = 0; d < 3; d++) {
+            mean[d] = total.v[d] / (T)n;
+        }
+
+        const AxisSum3<T> sq = sccd::parallel_tiled_reduce<AxisSum3<T>>(
+            0,
+            n,
+            [&](const ptrdiff_t lo, const ptrdiff_t hi) {
+                AxisSum3<T> acc = {{0, 0, 0}};
+                for (ptrdiff_t i = lo; i < hi; i++) {
+                    for (int d = 0; d < 3; d++) {
+                        const T c = (aabb[d + 3][i] + aabb[d][i]) / 2;
+                        acc.v[d] += (c - mean[d]) * (c - mean[d]);
+                    }
+                }
+                return acc;
+            },
+            join);
+
+        for (int d = 0; d < 3; d++) {
+            var[d] = sq.v[d];
         }
     }
 
@@ -80,6 +124,145 @@ namespace sccd {
         // printf("axes: %d, %d, %d\n", axes[0], axes[1], axes[2]);
     }
 
+    namespace detail {
+
+        /**
+         * \brief Map a float to an unsigned integer of the same width, order preserving.
+         *
+         * Sorting the images by magnitude sorts the originals by value, which is
+         * what lets a radix pass replace a comparison. For a non-negative float
+         * the IEEE bit pattern already orders correctly once the sign bit is
+         * set; for a negative one every bit is flipped, which reverses the order
+         * within the negatives and places them below the positives.
+         *
+         * A NaN key has no position in any ordering and none is defined here.
+         * Swept boxes are built from mesh coordinates by min and max, so a NaN
+         * key means a NaN coordinate reached the broad phase.
+         */
+        static inline uint32_t radix_key(const float v) {
+            uint32_t b;
+            std::memcpy(&b, &v, sizeof(b));
+            return (b & 0x80000000u) ? ~b : (b | 0x80000000u);
+        }
+
+        static inline uint64_t radix_key(const double v) {
+            uint64_t b;
+            std::memcpy(&b, &v, sizeof(b));
+            return (b & 0x8000000000000000ull) ? ~b : (b | 0x8000000000000000ull);
+        }
+
+        /**
+         * \brief Least-significant-digit radix sort of (key, index) pairs.
+         *
+         * One pass per byte of the key, each pass a privatised histogram over
+         * $256$ buckets, a serial offset pass over the histogram, and a scatter.
+         * The histogram is over buckets and not over keys, so the private copies
+         * cost workers times $256$ entries however long the input is, which is
+         * what a counting sort over the keys themselves could not afford.
+         *
+         * The sort is stable, and the offsets are laid out bucket-major and
+         * chunk-minor, so equal keys keep the order they arrived in. The pairs
+         * arrive in index order, so stability supplies the tie-break on the
+         * index that the comparison form spells out, and the result is the same
+         * total order.
+         *
+         * \param tmp Scratch of \p n pairs. The number of passes is even for
+         *        every key width used here, so the sorted result ends in \p a.
+         */
+        template <typename Pair, typename KeyOf>
+        static void radix_sort_pairs(const ptrdiff_t n,
+                                     Pair* const SCCD_RESTRICT a,
+                                     Pair* const SCCD_RESTRICT tmp,
+                                     KeyOf key_of) {
+            using U = decltype(key_of(a[0]));
+            static const int RADIX = 256;
+            static const int PASSES = (int)sizeof(U);
+
+            const int nchunks = sccd::max<int>(1, sccd::min<int>(sccd::max_concurrency() * 2, (int)(n / 4096 + 1)));
+            const ptrdiff_t chunk = (n + nchunks - 1) / nchunks;
+            std::vector<ptrdiff_t> hist((size_t)nchunks * RADIX);
+
+            Pair* src = a;
+            Pair* dst = tmp;
+
+            for (int pass = 0; pass < PASSES; ++pass) {
+                const int shift = pass * 8;
+                std::fill(hist.begin(), hist.end(), (ptrdiff_t)0);
+
+                sccd::parallel_for_chunks(0, nchunks, [&](const ptrdiff_t c) {
+                    ptrdiff_t* const row = hist.data() + c * RADIX;
+                    const ptrdiff_t begin = c * chunk;
+                    const ptrdiff_t end = sccd::min<ptrdiff_t>(begin + chunk, n);
+                    for (ptrdiff_t i = begin; i < end; ++i) {
+                        row[(key_of(src[i]) >> shift) & (RADIX - 1)] += 1;
+                    }
+                });
+
+                // Bucket-major, chunk-minor: a chunk's slot inside a bucket
+                // follows the chunks before it, which is what keeps the sort
+                // stable.
+                ptrdiff_t running = 0;
+                for (int b = 0; b < RADIX; ++b) {
+                    for (int c = 0; c < nchunks; ++c) {
+                        ptrdiff_t& slot = hist[(size_t)c * RADIX + b];
+                        const ptrdiff_t take = slot;
+                        slot = running;
+                        running += take;
+                    }
+                }
+
+                sccd::parallel_for_chunks(0, nchunks, [&](const ptrdiff_t c) {
+                    ptrdiff_t* const row = hist.data() + c * RADIX;
+                    const ptrdiff_t begin = c * chunk;
+                    const ptrdiff_t end = sccd::min<ptrdiff_t>(begin + chunk, n);
+                    for (ptrdiff_t i = begin; i < end; ++i) {
+                        dst[row[(key_of(src[i]) >> shift) & (RADIX - 1)]++] = src[i];
+                    }
+                });
+
+                Pair* const swap = src;
+                src = dst;
+                dst = swap;
+            }
+        }
+
+    }  // namespace detail
+
+    /**
+     * \brief Reusable working storage for sort_along_axis.
+     *
+     * The two arrays are sized by the list being sorted, so they depend on the
+     * mesh and not on the step. A caller that sorts the same mesh every step
+     * should hold one of these and pass it in; otherwise every step allocates
+     * and frees 2n pairs once per list, which is per-mesh work charged to a
+     * per-step measurement.
+     *
+     * Passing nothing keeps the allocating behaviour, which is what a one-shot
+     * caller wants.
+     */
+    template <typename T, typename I>
+    struct SortScratch {
+        struct KeyIndex {
+            T key;
+            I idx;
+        };
+
+        std::unique_ptr<KeyIndex[]> keys;
+        std::unique_ptr<KeyIndex[]> tmp;
+        ptrdiff_t capacity = 0;
+
+        /** \brief Grow to hold \p n pairs. Never shrinks, so a steady state is free. */
+        void reserve(const ptrdiff_t n) {
+            if (n <= capacity) return;
+            // new[] on a trivial type leaves the storage uninitialised, where a
+            // std::vector would value-initialise every entry in a serial pass
+            // and then have it overwritten.
+            keys.reset(new KeyIndex[(size_t)n]);
+            tmp.reset(new KeyIndex[(size_t)n]);
+            capacity = n;
+        }
+    };
+
     /**
      * \brief Sort AABBs along \p sort_axis and permute all six SoA arrays
      * coherently. \param n Number of AABBs. \param sort_axis Axis to sort by
@@ -95,16 +278,18 @@ namespace sccd {
                                 const int sort_axis,
                                 T **const SCCD_RESTRICT arrays,
                                 I *const SCCD_RESTRICT idx,
-                                T *const SCCD_RESTRICT scratch) {
+                                T *const SCCD_RESTRICT scratch,
+                                SortScratch<T, I> *const sort_scratch = nullptr) {
         // Sort (key, index) pairs rather than indices with an indirect
         // comparator: every comparison in the old form was a random load out of
         // arrays[sort_axis], which is the dominant cost of the sort.
-        struct KeyIndex {
-            T key;
-            I idx;
-        };
+        using Scratch = SortScratch<T, I>;
+        using KeyIndex = typename Scratch::KeyIndex;
 
-        std::vector<KeyIndex> keys(n);
+        Scratch owned;
+        Scratch &ks = sort_scratch ? *sort_scratch : owned;
+        ks.reserve(n);
+        KeyIndex *const keys = ks.keys.get();
         const T *const SCCD_RESTRICT x = arrays[sort_axis];
 
         sccd::parallel_for_br(0, n, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
@@ -114,11 +299,24 @@ namespace sccd {
             }
         });
 
-        sccd::parallel_sort(keys.data(), keys.data() + n, [](const KeyIndex &l, const KeyIndex &r) {
-            if (l.key < r.key) return true;
-            if (r.key < l.key) return false;
-            return l.idx < r.idx;
-        });
+        // A radix sort, because this is the dominant cost of the sweep's
+        // preparation and a comparison sort does not scale through it: the
+        // merge sort behind parallel_sort stops improving at about 2.4x on this
+        // input, where the passes below are linear and independent.
+        // A fixed size, not a per-worker one: this chooses between two sorting
+        // algorithms rather than deciding how wide to go, and the radix sort
+        // beats the comparison sort on a single worker too.
+        static const ptrdiff_t RADIX_CUTOFF = 4096;
+        if (n >= RADIX_CUTOFF) {
+            detail::radix_sort_pairs(
+                n, keys, ks.tmp.get(), [](const KeyIndex &k) { return detail::radix_key(k.key); });
+        } else {
+            std::sort(keys, keys + n, [](const KeyIndex &l, const KeyIndex &r) {
+                if (l.key < r.key) return true;
+                if (r.key < l.key) return false;
+                return l.idx < r.idx;
+            });
+        }
 
         sccd::parallel_for_br(0, n, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
             for (ptrdiff_t i = rbegin; i < rend; i++) {

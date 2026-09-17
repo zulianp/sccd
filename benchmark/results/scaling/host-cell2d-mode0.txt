@@ -1,7 +1,7 @@
-# mode=relaxed max_depth=69 tol=3e-08 scale=-0.5 space=host base_topology=TRI3 broadphase=cell2d
+# mode=relaxed max_depth=69 tol=3e-08 scale=-0.5 space=host base_topology=TRI3 broadphase=cell2d t0=/capstor/scratch/cscs/zulianp/sccd-assess/data/cloth-ball/frames_raw/cloth_ball0 t1=/capstor/scratch/cscs/zulianp/sccd-assess/data/cloth-ball/frames_raw/cloth_ball1
 level      faces     vf_pairs     ee_pairs   prep_ms  bp_fv_ms  bp_ee_ms  broad_ms  narrow_ms    ns/pair            toi
-    0      92230         1299        16683     18.90      3.60      5.34     27.84       3.90      216.6   1.0000000000
-    1     368920         5196        82575     52.87      4.91      9.85     67.63       3.78       43.1   1.0000000000
-    2    1475680        20784       359034    203.91      9.55     35.44    248.89       2.07        5.4   1.0000000000
-    3    5902720        83136      1490605    865.86     33.87    119.87   1019.60       5.25        3.3   1.0000000000
-    4   23610880       332800      6069281   3900.79    133.85    388.52   4423.16      18.52        2.9   1.0000000000
+    0      92230         1299        16683      0.91      0.86      2.25      4.02       0.24       13.1   1.0000000000
+    1     368920         5196        82652      5.07      3.13     11.04     19.24       0.73        8.3   1.0000000000
+    2    1475680        20784       360140     14.51     12.89     41.29     68.70       2.58        6.8   1.0000000000
+    3    5902720        83136      1498006     57.49     53.23    154.84    265.57      10.38        6.6   1.0000000000
+    4   23610880       332800      6108123    232.24    215.51    557.20   1004.94      41.66        6.5   1.0000000000

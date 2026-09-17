@@ -126,7 +126,11 @@ namespace sccd {
                                                   const int level,
                                                   const int qid) {
             const int slot = atomicAdd(out.top, 1);
-            if (slot >= out.capacity) {
+            // A dropped push still bumps the cursor, so this counts attempts, not
+            // residents, and a launch that attempts more than 2^31 pushes wraps it
+            // negative. Reject a negative slot for the same reason an oversized
+            // one is rejected: both are outside the buffer.
+            if (slot < 0 || slot >= out.capacity) {
                 atomicAdd(out.request, 1);
                 return;
             }
@@ -153,7 +157,10 @@ namespace sccd {
                                                 int& qid) {
             if (in.count <= 0) return 0;
             const int slot = atomicAdd(in.top, 1);
-            if (slot >= in.count) return 0;
+            // Claims past the end keep bumping the cursor, so it can wrap negative
+            // on a long drain round. An exhausted buffer and a wrapped one are the
+            // same answer: nothing left to take.
+            if (slot < 0 || slot >= in.count) return 0;
 
             d.tlower = in.tlower[slot];
             d.tupper = in.tupper[slot];

@@ -46,16 +46,31 @@ namespace sccd {
         __global__ void choose_axis_mean_kernel(                                                const ptrdiff_t n,
                                                 const T* const SCCD_RESTRICT* const SCCD_RESTRICT aabbs,
                                                 T* const SCCD_RESTRICT mean) {
-            ptrdiff_t i = blockIdx.x * blockDim.x + threadIdx.x;
-            if (i >= n) return;
+            const ptrdiff_t i = blockIdx.x * blockDim.x + threadIdx.x;
 
+            // Out-of-range threads stay in the block and contribute zero, rather
+            // than returning here.
+            //
+            // block_reduce_to_gmem has lane 0 of each warp write that warp's
+            // partial sum to a shared slot, then has warp 0 read every slot back.
+            // A warp lying wholly past the end that returns early never reaches
+            // the write, while warp 0 reads its slot regardless -- and __shared__
+            // is not zero-initialised, so the block's sum picks up whatever that
+            // multiprocessor's shared memory last held. The last block is partial
+            // for almost every mesh, so the axis was chosen from a contaminated
+            // variance on essentially every call; whether that changed the answer
+            // depended on the residue, which is what made it look intermittent.
+            // Keeping every thread in the block leaves the sum identical and
+            // writes every slot.
             T local_mean[3] = {0};
 
-            for (int d = 0; d < SCCD_DIM; d++) {
-                const T p0 = aabbs[d][i];
-                const T p1 = aabbs[SCCD_DIM + d][i];
-                const T p = (p0 + p1) / 2;
-                local_mean[d] += p;
+            if (i < n) {
+                for (int d = 0; d < SCCD_DIM; d++) {
+                    const T p0 = aabbs[d][i];
+                    const T p1 = aabbs[SCCD_DIM + d][i];
+                    const T p = (p0 + p1) / 2;
+                    local_mean[d] += p;
+                }
             }
 
             __shared__ T block_accumulator[SCCD_BP_N_WARPS_PER_BLOCK];
@@ -69,14 +84,18 @@ namespace sccd {
                                                const T* const SCCD_RESTRICT* const SCCD_RESTRICT aabbs,
                                                T* const SCCD_RESTRICT mean,
                                                T* const SCCD_RESTRICT var) {
-            ptrdiff_t i = blockIdx.x * blockDim.x + threadIdx.x;
-            if (i >= n) return;
+            const ptrdiff_t i = blockIdx.x * blockDim.x + threadIdx.x;
 
+            // Zero from an out-of-range thread, so that every warp writes its
+            // slot, for the reason given above.
             T local_var[3] = {0};
-            for (int d = 0; d < SCCD_DIM; d++) {
-                const T m = mean[d] / n;
-                const T p = (aabbs[d][i] + aabbs[SCCD_DIM + d][i]) / 2;
-                local_var[d] += (p - m) * (p - m);
+
+            if (i < n) {
+                for (int d = 0; d < SCCD_DIM; d++) {
+                    const T m = mean[d] / n;
+                    const T p = (aabbs[d][i] + aabbs[SCCD_DIM + d][i]) / 2;
+                    local_var[d] += (p - m) * (p - m);
+                }
             }
 
             __shared__ T block_accumulator[SCCD_BP_N_WARPS_PER_BLOCK];
@@ -100,10 +119,13 @@ namespace sccd {
             choose_axis_mean_kernel<T><<<grid, block>>>(n, aabbs, mean);
             choose_axis_var_kernel<T><<<grid, block>>>(n, aabbs, mean, var);
 
-            cudaError_t error = cudaGetLastError();
-
-            T* hvar = (T*)malloc(SCCD_DIM * sizeof(T));
-            cudaMemcpy(hvar, var, SCCD_DIM * sizeof(T), cudaMemcpyDeviceToHost);
+            // This copy is the first synchronisation of the broad phase, so it is
+            // where a fault from either kernel above -- or from the AABB pass
+            // before them -- actually surfaces. Check it: discarding the status
+            // leaves the error sticky, to be reported at whatever unrelated call
+            // comes next, and leaves hvar uninitialised on top of that.
+            T hvar[SCCD_DIM];
+            SCCD_CHECK_CUDA(cudaMemcpy(hvar, var, SCCD_DIM * sizeof(T), cudaMemcpyDeviceToHost));
 
             int fargmax = 0;
             T fmax = hvar[0];
@@ -113,13 +135,6 @@ namespace sccd {
                     fmax = hvar[d];
                     fargmax = d;
                 }
-            }
-
-            free(hvar);
-
-            if (error != cudaSuccess) {
-                fprintf(stderr, "CUDA error: %s\n", cudaGetErrorString(error));
-                exit(1);
             }
 
             return fargmax;
@@ -406,6 +421,54 @@ namespace sccd {
             SCCD_CUDA_LAST_ERROR();
         }
 
+        /**
+         * \brief Pairs a collect kernel could not write inside its own slice.
+         *
+         * Each thread owns [ccdptr[fi], ccdptr[fi+1]) and writes the pairs the
+         * counting pass said it would. If the two passes ever disagree, the
+         * thread would run past its slice and corrupt whatever follows, which
+         * surfaces as an illegal access at the next synchronisation with no
+         * indication of where it came from. The kernels below refuse the write
+         * and count it here instead, so the host can report the disagreement
+         * and name its size.
+         *
+         * The excess is never dropped quietly. A pair the broad phase fails to
+         * emit is a false negative, which Definition 2.1 forbids, so a non-zero
+         * count is an error and not a warning.
+         */
+        __device__ unsigned long long g_collect_overflow;
+
+        static void reset_collect_overflow() {
+            const unsigned long long zero = 0;
+            SCCD_CHECK_CUDA(cudaMemcpyToSymbol(g_collect_overflow, &zero, sizeof(zero)));
+        }
+
+        static unsigned long long read_collect_overflow() {
+            unsigned long long v = 0;
+            SCCD_CHECK_CUDA(cudaMemcpyFromSymbol(&v, g_collect_overflow, sizeof(v)));
+            return v;
+        }
+
+        /**
+         * \brief Turn a slice overflow into a named failure.
+         *
+         * Reading the counter synchronises, which is what makes the error
+         * attributable: the alternative is an illegal access surfacing at some
+         * later launch with nothing to say about its origin.
+         */
+        static void report_collect_overflow(const char* where, const ptrdiff_t n) {
+            const unsigned long long over = read_collect_overflow();
+            if (!over) return;
+            fprintf(stderr,
+                    "SCCD: %s over %ld elements wanted to emit %llu pair(s) beyond the "
+                    "slice the counting pass reserved. The two passes disagree, so the "
+                    "candidate set is short by that many pairs -- a false negative, which "
+                    "the conservativeness invariant forbids. Refusing to continue.\n",
+                    where, (long)n, over);
+            abort();
+        }
+
+
         template <int nxe, typename T, typename I>
         __global__ void collect_self_overlaps_kernel(const int sort_axis,
                                                      const ptrdiff_t element_count,
@@ -473,8 +536,12 @@ namespace sccd {
                     continue;
                 }
 
-                first_local_elements[count] = SCCD_MIN(idxi, jidx);
-                second_local_elements[count] = SCCD_MAX(idxi, jidx);
+                if (count < expected_count) {
+                    first_local_elements[count] = SCCD_MIN(idxi, jidx);
+                    second_local_elements[count] = SCCD_MAX(idxi, jidx);
+                } else {
+                    atomicAdd(&g_collect_overflow, 1ULL);
+                }
 
                 count++;
             }
@@ -496,8 +563,10 @@ namespace sccd {
 
             dim3 block(SCCD_BP_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
             dim3 grid((element_count + block.x - 1) / block.x);
+            reset_collect_overflow();
             collect_self_overlaps_kernel<nxe, T, I>
                 <<<grid, block>>>(sort_axis, element_count, aabbs, idx, element_stride, elements, ccdptr, first_out, second_out);
+            report_collect_overflow("collect_self_overlaps", element_count);
 
             SCCD_CUDA_LAST_ERROR();
         }
@@ -710,9 +779,11 @@ namespace sccd {
             const T* const SCCD_RESTRICT second_xmin = second_aabbs[sort_axis];
             const T* const SCCD_RESTRICT second_xmax = second_aabbs[3 + sort_axis];
 
-#ifndef NDEBUG
+            // Needed in every build, not only a debug one: it is the bound the
+            // writes below are checked against. Keeping it behind NDEBUG left
+            // the release build with no bound at all, which is the shape the
+            // illegal accesses took.
             const ptrdiff_t expected_count = ccdptr[fi + 1] - ccdptr[fi];
-#endif
 
             const T fimin = first_aabbs[sort_axis][fi];
             const T fimax = first_aabbs[3 + sort_axis][fi];
@@ -780,8 +851,12 @@ namespace sccd {
                 }
 
                 if (share) continue;
-                first_local_elements[count] = first_idxi;
-                second_local_elements[count] = jidx;
+                if (count < expected_count) {
+                    first_local_elements[count] = first_idxi;
+                    second_local_elements[count] = jidx;
+                } else {
+                    atomicAdd(&g_collect_overflow, 1ULL);
+                }
                 count += 1;
             }
 
@@ -851,6 +926,7 @@ namespace sccd {
 
             dim3 block(SCCD_BP_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
             dim3 grid((first_count + block.x - 1) / block.x);
+            reset_collect_overflow();
             collect_overlaps_kernel<first_nxe, second_nxe, T, I><<<grid, block>>>(sort_axis,
                                                                                   first_count,
                                                                                   first_aabbs,
@@ -866,6 +942,7 @@ namespace sccd {
                                                                                   second_xmax_running,
                                                                                   first_out,
                                                                                   second_out);
+            report_collect_overflow("collect_overlaps", first_count);
 
             SCCD_CUDA_LAST_ERROR();
         }

@@ -27,6 +27,23 @@ phase. `ns_per_pair` is printed so a change in total time can be attributed to
 the pair count or to the per-pair cost. `toi` is printed because it is the check
 that every level is solving the same problem -- see below.
 
+## Which frames the committed study used
+
+`benchmark/results/scaling/*.txt` is cloth-ball **frames 0 to 1**, the first step
+of the simulation, where the cloth is still falling and has not reached the ball.
+That is why every level reports `toi = 1.0` and the pair counts are small:
+`1,299` vertex-face and `16,683` edge-edge at level 0.
+
+The pair is worth stating because nothing in the output recorded it until now,
+and the choice changes what the study measures rather than merely perturbing it.
+Frames 40 to 41, the pair this document uses below, are mid-contact: the same
+command produces `12,104` and `56,881` pairs at level 0, an order of magnitude
+more, and the mesh self-collides from level 3 on. Both are valid experiments and
+they answer different questions -- the early pair isolates how the broad phase
+responds to element count with the narrow phase idle, the later pair exercises
+both. `sccd_refine_scaling` now prints `t0=` and `t1=` in its header so a
+recorded run says which it was.
+
 ## Result on real data: cloth-ball
 
 `benchmark/ply_to_smesh.py` converts the benchmark frames, which are PLY, into the

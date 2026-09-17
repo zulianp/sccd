@@ -79,18 +79,18 @@ Source: `benchmark/results/oracle-gh200-all.csv`
 
 | scene             | mode |   queries | toi compared | late | false pos. | false neg. |
 |-------------------|------|----------:|-------------:|-----:|-----------:|-----------:|
-| armadillo-rollers | GPU  |   131,261 |      130,681 |    0 |        322 |          0 |
-| armadillo-rollers | CPU  |   131,261 |      130,681 |    0 |        232 |          0 |
+| armadillo-rollers | GPU  |   131,359 |      130,777 |    0 |        322 |          0 |
+| armadillo-rollers | CPU  |   131,359 |      130,777 |    0 |        232 |          0 |
 | cloth-ball        | GPU  |   664,939 |      664,918 |    0 |          2 |          0 |
 | cloth-ball        | CPU  |   664,939 |      664,918 |    0 |          2 |          0 |
-| cloth-funnel      | GPU  |     7,544 |        6,766 |    0 |        741 |          0 |
-| cloth-funnel      | CPU  |     7,544 |        6,766 |    0 |        686 |          0 |
+| cloth-funnel      | GPU  |     7,532 |        6,753 |    0 |        742 |          0 |
+| cloth-funnel      | CPU  |     7,532 |        6,753 |    0 |        687 |          0 |
 | n-body            | GPU  | 2,921,071 |    2,920,965 |    0 |         28 |          0 |
 | n-body            | CPU  | 2,921,071 |    2,920,965 |    0 |          9 |          0 |
 | puffer-ball       | GPU  | 1,513,963 |    1,486,587 |    0 |     27,374 |          0 |
 | puffer-ball       | CPU  | 1,513,963 |    1,486,587 |    0 |     27,374 |          0 |
-| rod-twist         | GPU  |   546,081 |      283,655 |    0 |    243,717 |          0 |
-| rod-twist         | CPU  |   546,081 |      283,655 |    0 |    227,441 |          0 |
+| rod-twist         | GPU  |   548,211 |      285,240 |    0 |    244,232 |          0 |
+| rod-twist         | CPU  |   548,211 |      285,240 |    0 |    227,934 |          0 |
 
 Measured against the exact roots shipped with the dataset, not against TightInclusion: TightInclusion's own answer is itself a lower bound on the truth, so comparing against it over-reports lateness.
 
@@ -107,7 +107,7 @@ inputs:
 
 <!-- sccd:begin mesh-check -->
 
-The mesh path agrees with the curated query geometry on every case.
+**73 cases** where the mesh-path answer falls after the earliest exact root of the curated queries: the two paths are not being given the same geometry, so the exact roots are not a reference for the mesh path.
 
 <!-- sccd:end mesh-check -->
 
@@ -216,12 +216,12 @@ Source: `benchmark/results/oracle-gh200-all.csv`
 
 | scene             |  CPU ms | GPU ms | total | broad | narrow |
 |-------------------|--------:|-------:|------:|------:|-------:|
-| armadillo-rollers |  12,188 |  4,442 | 2.74x | 3.96x |  0.50x |
-| cloth-ball        |   2,531 |  1,318 | 1.92x | 2.54x |  0.91x |
-| cloth-funnel      |   8,422 |  2,718 | 3.10x | 4.03x |  0.68x |
-| n-body            |  13,164 |  7,004 | 1.88x | 5.42x |  0.74x |
-| puffer-ball       |  58,281 | 82,220 | 0.71x | 1.00x |  0.32x |
-| rod-twist         | 109,057 | 42,687 | 2.55x | 4.26x |  1.37x |
+| armadillo-rollers |   3,575 |  3,608 | 0.99x | 1.40x |  0.44x |
+| cloth-ball        |   2,804 |  1,161 | 2.41x | 2.44x |  2.36x |
+| cloth-funnel      |   2,044 |  2,191 | 0.93x | 1.32x |  0.30x |
+| n-body            |  20,030 |  7,568 | 2.65x | 4.56x |  1.72x |
+| puffer-ball       | 109,790 | 76,014 | 1.44x | 2.03x |  0.85x |
+| rod-twist         |  78,789 | 33,088 | 2.38x | 1.87x |  3.66x |
 
 A ratio is the host median over the device median, so 2.0 means the device takes half the time. Ratios below 1.0 are the cases where the host wins and are the ones worth reading.
 
@@ -238,20 +238,20 @@ runs both query types:
 
 <!-- sccd:begin per-frame -->
 
-| scene             | frames | mode | prep ms | broad ms | narrow ms | total ms |
-|-------------------|-------:|------|--------:|---------:|----------:|---------:|
-| armadillo-rollers |    396 | GPU  |    5.23 |     2.12 |      3.87 |    11.22 |
-| armadillo-rollers |    396 | CPU  |   20.47 |     8.39 |      1.92 |    30.78 |
-| cloth-ball        |     42 | GPU  |   12.50 |     8.74 |     10.13 |    31.38 |
-| cloth-ball        |     42 | CPU  |   28.87 |    22.21 |      9.18 |    60.26 |
-| cloth-funnel      |    372 | GPU  |    3.65 |     1.45 |      2.20 |     7.31 |
-| cloth-funnel      |    372 | CPU  |   15.29 |     5.86 |      1.49 |    22.64 |
-| n-body            |     74 | GPU  |   13.08 |    17.92 |     63.65 |    94.65 |
-| n-body            |     74 | CPU  |   33.55 |    97.08 |     47.27 |   177.90 |
-| puffer-ball       |    120 | GPU  |  140.45 |   227.00 |    317.73 |   685.17 |
-| puffer-ball       |    120 | CPU  |  157.74 |   227.41 |    100.53 |   485.67 |
-| rod-twist         |  2,553 | GPU  |   10.26 |     2.66 |      3.81 |    16.72 |
-| rod-twist         |  2,553 | CPU  |   26.20 |    11.31 |      5.21 |    42.72 |
+| scene             | frames | mode | broad ms | narrow ms | total ms |
+|-------------------|-------:|------|---------:|----------:|---------:|
+| armadillo-rollers |    396 | GPU  |     5.26 |      3.85 |     9.11 |
+| armadillo-rollers |    396 | CPU  |     7.34 |      1.68 |     9.03 |
+| cloth-ball        |     42 | GPU  |    17.65 |     10.00 |    27.65 |
+| cloth-ball        |     42 | CPU  |    43.14 |     23.63 |    66.77 |
+| cloth-funnel      |    372 | GPU  |     3.64 |      2.25 |     5.89 |
+| cloth-funnel      |    372 | CPU  |     4.82 |      0.67 |     5.50 |
+| n-body            |     74 | GPU  |    33.43 |     68.84 |   102.27 |
+| n-body            |     74 | CPU  |   152.41 |    118.26 |   270.67 |
+| puffer-ball       |    120 | GPU  |   319.00 |    314.44 |   633.45 |
+| puffer-ball       |    120 | CPU  |   646.39 |    268.52 |   914.91 |
+| rod-twist         |  2,554 | GPU  |     9.24 |      3.71 |    12.96 |
+| rod-twist         |  2,554 | CPU  |    17.24 |     13.61 |    30.85 |
 
 A mean rather than a median over steps: the scene total is what a run costs, and the mean is the only average that divides back into it.
 
@@ -262,20 +262,20 @@ Source: `benchmark/results/sweep-gh200-bp.csv`
 
 <!-- sccd:begin timing -->
 
-| scene             | mode | cases |         pairs | rep |           prep ms |          broad ms |       earliest ms |       per-pair ms |            total ms |
-|-------------------|------|------:|--------------:|----:|------------------:|------------------:|------------------:|------------------:|--------------------:|
-| armadillo-rollers | GPU  |   779 |    85,015,700 |   3 |   2069.6 / 2071.3 |     838.6 / 841.4 |   1533.7 / 1536.7 |   2324.8 / 2333.5 |     4393.4 / 4446.4 |
-| armadillo-rollers | CPU  |   779 |    85,015,700 |   3 |   8106.5 / 8135.7 |   3322.1 / 3354.3 |     759.8 / 771.9 |   2942.3 / 2959.0 |   12188.4 / 12262.0 |
-| cloth-ball        | GPU  |    78 |   175,057,694 |   3 |     525.1 / 526.1 |     367.1 / 369.8 |     425.6 / 428.9 |     920.2 / 935.3 |     1316.7 / 1324.8 |
-| cloth-ball        | CPU  |    78 |   175,057,694 |   3 |   1212.5 / 1218.4 |     932.9 / 937.5 |     385.5 / 387.8 |     789.9 / 802.9 |     2530.8 / 2543.6 |
-| cloth-funnel      | GPU  |   575 |    25,141,046 |   3 |   1358.4 / 1376.9 |     540.9 / 545.7 |     818.3 / 837.9 |     727.4 / 728.4 |     2694.1 / 2760.5 |
-| cloth-funnel      | CPU  |   575 |    25,141,046 |   3 |   5687.6 / 5764.2 |   2181.2 / 2191.1 |     553.7 / 568.0 |   1026.8 / 1038.2 |     8422.4 / 8523.4 |
-| n-body            | GPU  |   145 | 2,233,533,498 |   3 |     967.8 / 978.7 |   1326.4 / 1330.1 |   4709.9 / 4717.8 |   4335.3 / 4455.1 |     6983.6 / 7015.0 |
-| n-body            | CPU  |   145 | 2,233,533,498 |   3 |   2482.9 / 2492.2 |   7183.8 / 7189.1 |   3497.6 / 3554.2 | 10002.6 / 10064.4 |   13164.3 / 13228.7 |
-| puffer-ball       | GPU  |   239 | 7,298,095,145 |   3 | 16853.8 / 16990.3 | 27239.6 / 27256.6 | 38127.0 / 38131.4 | 10667.8 / 10669.8 |   81789.3 / 82356.9 |
-| puffer-ball       | CPU  |   239 | 7,298,095,145 |   3 | 18928.3 / 19590.4 | 27289.2 / 27356.9 | 12063.1 / 12188.8 | 14353.1 / 14739.7 |   58172.0 / 58854.7 |
-| rod-twist         | GPU  |  4559 | 3,861,367,133 |   3 | 26191.6 / 26628.1 |   6780.7 / 7013.1 |   9715.2 / 9723.6 | 19749.6 / 19844.2 |   42687.5 / 43286.8 |
-| rod-twist         | CPU  |  4559 | 3,861,367,133 |   3 | 66897.1 / 66993.6 | 28867.0 / 28918.5 | 13293.1 / 13373.1 | 39888.5 / 39892.8 | 109044.9 / 109285.3 |
+| scene             | mode | cases |         pairs | rep |          broad ms |       earliest ms |       per-pair ms |            total ms |
+|-------------------|------|------:|--------------:|----:|------------------:|------------------:|------------------:|--------------------:|
+| armadillo-rollers | GPU  |   779 |    85,061,295 |   3 |   2069.8 / 2099.7 |   1526.4 / 1546.0 |   2335.6 / 2336.6 |     3610.5 / 3626.2 |
+| armadillo-rollers | CPU  |   779 |    85,061,295 |   3 |   2924.5 / 2928.7 |     667.1 / 671.8 |   2176.9 / 2197.3 |     3591.9 / 3596.3 |
+| cloth-ball        | GPU  |    78 |   175,057,694 |   3 |     744.9 / 748.4 |     420.1 / 424.0 |     924.8 / 936.6 |     1165.0 / 1172.4 |
+| cloth-ball        | CPU  |    78 |   175,057,694 |   3 |   1808.2 / 1845.7 |     992.4 / 994.4 |   1797.0 / 1798.7 |     2800.7 / 2840.1 |
+| cloth-funnel      | GPU  |   575 |    25,151,368 |   3 |   1354.1 / 1384.0 |     836.8 / 844.0 |     739.6 / 742.7 |     2196.4 / 2220.8 |
+| cloth-funnel      | CPU  |   575 |    25,151,368 |   3 |   1793.6 / 1853.6 |     250.9 / 251.0 |     395.7 / 405.7 |     2044.5 / 2104.6 |
+| n-body            | GPU  |   145 | 2,233,533,498 |   3 |   2475.5 / 2505.7 |   5094.2 / 5124.8 |   4526.4 / 4639.8 |     7599.9 / 7600.3 |
+| n-body            | CPU  |   145 | 2,233,533,498 |   3 | 11276.7 / 11285.3 |   8751.2 / 8787.4 | 16143.2 / 16277.6 |   19983.7 / 20072.6 |
+| puffer-ball       | GPU  |   239 | 7,298,180,358 |   3 | 38394.5 / 38497.7 | 37733.0 / 38469.6 | 10126.2 / 10782.7 |   76230.7 / 76864.1 |
+| puffer-ball       | CPU  |   239 | 7,298,180,358 |   3 | 77625.1 / 78764.3 | 32222.6 / 32338.9 | 35035.4 / 35277.8 | 109964.0 / 110986.9 |
+| rod-twist         | GPU  |  4561 | 3,860,443,124 |   3 | 23405.6 / 23931.5 |   9484.8 / 9495.2 | 19247.1 / 19423.2 |   32890.3 / 33398.6 |
+| rod-twist         | CPU  |  4561 | 3,860,443,124 |   3 | 44032.0 / 44176.8 | 34757.4 / 34858.0 | 61721.6 / 61906.8 |   78789.4 / 78916.0 |
 
 Each cell is the median over repeats and the slowest of them. A difference smaller than the gap between the two does not separate two modes and is not reported as a ratio anywhere in this document. Which mode is faster depends on the output mode as well as the scene, so the two are given side by side rather than one standing for the other.
 
@@ -287,18 +287,18 @@ Source: `benchmark/results/sweep-gh200-bp.csv`
 
 | scene             | mode | broad Mpair/s | narrow Mpair/s |
 |-------------------|------|--------------:|---------------:|
-| armadillo-rollers | GPU  |         101.4 |           55.4 |
-| armadillo-rollers | CPU  |          25.6 |          111.9 |
-| cloth-ball        | GPU  |         476.9 |          411.3 |
-| cloth-ball        | CPU  |         187.7 |          454.1 |
-| cloth-funnel      | GPU  |          46.5 |           30.7 |
-| cloth-funnel      | CPU  |          11.5 |           45.4 |
-| n-body            | GPU  |        1683.9 |          474.2 |
-| n-body            | CPU  |         310.9 |          638.6 |
-| puffer-ball       | GPU  |         267.9 |          191.4 |
-| puffer-ball       | CPU  |         267.4 |          605.0 |
-| rod-twist         | GPU  |         569.5 |          397.5 |
-| rod-twist         | CPU  |         133.8 |          290.5 |
+| armadillo-rollers | GPU  |          41.1 |           55.7 |
+| armadillo-rollers | CPU  |          29.1 |          127.5 |
+| cloth-ball        | GPU  |         235.0 |          416.7 |
+| cloth-ball        | CPU  |          96.8 |          176.4 |
+| cloth-funnel      | GPU  |          18.6 |           30.1 |
+| cloth-funnel      | CPU  |          14.0 |          100.3 |
+| n-body            | GPU  |         902.2 |          438.5 |
+| n-body            | CPU  |         198.1 |          255.2 |
+| puffer-ball       | GPU  |         190.1 |          193.4 |
+| puffer-ball       | CPU  |          94.0 |          226.5 |
+| rod-twist         | GPU  |         164.9 |          407.0 |
+| rod-twist         | CPU  |          87.7 |          111.1 |
 
 Source: `benchmark/results/sweep-gh200-bp.csv`
 
@@ -328,7 +328,7 @@ coincide.
 
 <!-- sccd:begin provenance -->
 
-- Timings: `benchmark/results/sweep-gh200-bp.csv`, 6375 cases over 6 scenes, 3 independent repeats.
+- Timings: `benchmark/results/sweep-gh200-bp.csv`, 6377 cases over 6 scenes, 3 independent repeats.
 - Accuracy: `benchmark/results/oracle-gh200-all.csv`, every query of every scene checked against the dataset's exact roots.
 - Regenerate with `python3 -m report <bench.csv> <out> <oracle.csv> --embed=docs/BENCHMARKS.md`; add `--check` to assert the document still matches the data.
 
