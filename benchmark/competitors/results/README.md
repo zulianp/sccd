@@ -192,7 +192,10 @@ The two host narrow phases are threaded by different runtimes, SCCD's by OpenMP
 and ACCD's by oneTBB, both over 72 threads of one Grace. That is the closest
 available comparison, not an identical one.
 
-With Scalable CCD's buffer race removed in a patched copy, `47` per-query times
-of impact on armadillo were still late by up to `3.0e-3`, where SCCD and ACCD on
-the same inputs have none. That was measured under the float32 mesh and has no
-established cause; the patched copy is not what this table measures.
+The Scalable CCD result rests on a diagnosis rather than only on symptoms: a copy
+of the library whose overflow check is made race-free on the host, run over the
+same cases in double precision, finds all `54,664` curated contacts of
+armadillo's first `400` cases with nothing missed and nothing late. So the buffer
+race accounts for every miss and every late answer, and the library's search is
+otherwise conservative. That copy is diagnosis only; the table above measures the
+library as published.

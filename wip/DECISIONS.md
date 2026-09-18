@@ -293,9 +293,13 @@ The library as shipped (per-query off) is affected too: over the same cases,
 of them no contact at all, and `cuda::ccd` itself returns `0.0546875` for step
 151 against a root at `0.0140006` -- and `1` on another run.
 
-**Still open.** With the race removed, `47` per-query answers are late, the worst
-by `3.0e-3` (step `13ee`). SCCD and ACCD on the identical inputs have none, so the
-float32 mesh geometry does not explain it. No cause has been established.
+**Settled.** With the race removed the search is conservative and nothing else is
+wrong with it. A first run of the patched copy left `47` late per-query answers,
+worst `3.0e-3`, which looked like a second defect; they were the float32 mesh
+artefact of section 10. Rebuilt against the double-precision smesh, the same
+patched copy finds all `54,664` curated contacts of armadillo's first `400` cases
+with zero missed and zero late. The buffer race accounts for the whole of the
+library's observed non-conservativeness.
 
 **What the comparison does now.** Each competitor is compared on the question it
 answers, in its own table: Scalable CCD on the earliest time of impact per case,
