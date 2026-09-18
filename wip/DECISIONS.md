@@ -15,6 +15,10 @@ every one of these was believed at the time on evidence that looked sufficient.
 - Reversed: demoting `external/json` to `spikes/` — see below
 - Withdrawn: "the quad device kernel's local stack costs it 255 registers and a
   spill" — see below
+- Corrected: "Scalable CCD misses 74% of curated contacts" and its timings — see
+  section 8
+- Withdrawn: "SCCD is 6x to 24x cheaper per collision pair than Additive CCD" —
+  see section 9
 
 The full argument and the numbers behind each sit in
 [`ASSESSMENT.md`](ASSESSMENT.md).
@@ -234,6 +238,139 @@ levels on the device. Those rows predate the kernel and should be re-run.
 What survives from the whole exercise is the header extraction
 (`sccd_device_dfs_stack.cuh`), which stands on its own, and the stack now being
 sized from a depth rather than the other way round.
+
+## 8. Measuring a competitor in a configuration its authors do not ship
+
+The first GH200 comparison (`benchmark/competitors/results/compare-gh200-2026-09-17.csv`)
+reported Scalable CCD missing `15,393` of `20,668` curated queries a pass on
+armadillo-rollers and a step-level error of `+0.99`, and timed its narrow phase at
+`81.8` ns per candidate against SCCD's `21.4`. The miss count is real in the sense
+that the library produced it. What the harness said about it was not.
+
+**What the harness got wrong.**
+
+1. `SCALABLE_CCD_TOI_PER_QUERY` was forced on for every build. It is off by
+   default, and it changes the algorithm: on, each query keeps its own bound and
+   nothing prunes across queries. Every timing and every step-level answer was
+   therefore taken from a search doing strictly more work than the shipped one.
+2. The harness comments and `results/README.md` described a global prune
+   (`min_t >= *toi`) that the per-query build does not compile. The "lifted bound"
+   route built on that description changed nothing, and the explanation of why
+   the batched call "did no work" was a reading of code that was not running.
+3. The per-query accuracy numbers came from one query per kernel launch. That
+   sizes the subdivision buffer at two domains, which is the worst case for the
+   defect below, so it maximised the miss count.
+4. The step loop never flushed its last step, so each scene's final step row was
+   dropped, and the cases ran edge-edge before vertex-face, the reverse of
+   `cuda::ccd`.
+
+**What is actually wrong in the library.** `CCDBuffer::push` checks `is_full()`
+and then increments the tail as two separate operations, from hundreds of device
+threads at once. When a level of the search needs more room than the buffer has,
+two threads can both pass the check for the last slot; the tail then wraps onto
+the head, `is_full()` reads false again, no overflow is flagged, and unprocessed
+domains are overwritten. `MemoryHandler::handleNarrowPhase` sizes the buffer at
+`2 * n` domains for `n` queries, so short lists of colliding queries overflow
+constantly. Exhaustion by overwrite drops boxes, and a dropped box is a missed
+root.
+
+Established three ways, on armadillo-rollers:
+
+* **Padding the list fixes it.** The same curated queries followed by a million
+  pairs rejected on their first test (`--buffer-probe`) go from `0` of `1299`
+  edge-edge contacts at step 107 to all `1299`, none late. The padding changes
+  nothing but the buffer size.
+* **The answer changes between identical runs.** At a padding of `10,000`, step
+  100 edge-edge found `7` of `65` on one run and `65` on the next.
+* **A race-free check removes every miss.** A copy of the library that refuses,
+  on the host, to launch a level unless capacity exceeds three times the level
+  (the most a level can push) finds all `20,668` queries over cases `[0, 120)`,
+  identically on repeat. That copy is diagnosis only and is not what the
+  comparison reports.
+
+The library as shipped (per-query off) is affected too: over the same cases,
+`24` of `63` steps with a contact report a time of impact after the true one, two
+of them no contact at all, and `cuda::ccd` itself returns `0.0546875` for step
+151 against a root at `0.0140006` -- and `1` on another run.
+
+**Still open.** With the race removed, `47` per-query answers are late, the worst
+by `3.0e-3` (step `13ee`). SCCD and ACCD on the identical inputs have none, so the
+float32 mesh geometry does not explain it. No cause has been established.
+
+**What the comparison does now.** Each competitor is compared on the question it
+answers, in its own table: Scalable CCD on the earliest time of impact per case,
+both libraries running their earliest-time-of-impact path from a fresh bound over
+identical candidates; ACCD per collision pair, both narrow phases timed on SCCD's
+broad-phase candidates and scored on the curated queries at the coordinates their
+exact roots were computed for. The per-query build of Scalable CCD is no longer
+part of it.
+
+**The lesson.** A competitor's compile-time options are part of what is being
+measured. A build flag chosen for the harness's convenience silently turned the
+cost comparison into a comparison against a different algorithm, and the
+accuracy result -- although it pointed at a real defect -- was reported with a
+mechanism nobody had checked against the code that was compiled.
+
+## 9. Timing one thread against seventy-two
+
+The first per-pair comparison reported additive CCD at `332` ns per candidate
+against SCCD Tight's `33.1` on armadillo-rollers, and read that as the cost of
+conservative advancement. Both numbers were measured, and the conclusion drawn
+from them was wrong twice over.
+
+**The harness ran ACCD serially.** `ipc::AdditiveCCD::point_triangle_ccd` and
+`edge_edge_ccd` answer one pair at a time and carry no parallelism, so a plain
+loop over candidates uses one core while SCCD's narrow phase uses 72. The
+toolkit does not use them that way: `Candidates::compute_collision_free_stepsize`
+wraps the per-candidate call in a `tbb::parallel_for`, which is the loop the
+harness should have had. With it, the same chunk of armadillo gives `9.2` ns per
+candidate against SCCD Tight's `45.0` -- so per pair ACCD is about five times
+*cheaper*, and the trade against it is tightness, not speed: its median error is
+`1e-2` where SCCD Tight's is `1e-6`.
+
+**And it scored a different candidate list.** `bench.exe.cpp` computes in
+`double`; the ACCD harness had `using scalar_t = smesh::geom_t`, which is
+`float`. Both read the same float32 mesh, but the outward-ULP box rounding is
+coarser in float, so SCCD's broad phase produced `225,490` candidates for the
+ACCD rows against `225,426` for the SCCD rows of the same case -- a `0.03%`
+difference, small enough to look like nothing and large enough to make "the same
+list" false.
+
+**The lesson.** A cost comparison has to state, and equalise, the resources both
+sides get: threads first of all. A per-pair kernel is not the unit a library is
+used in, and timing it as if it were measures the harness's loop rather than the
+method. The check that would have caught it is the one that caught the second
+fault: assert that the candidate counts agree case by case, and ask what hardware
+each number was produced on.
+
+## 10. Explaining an artefact instead of removing it
+
+The competitor comparison reported SCCD Tight as late on `137` of `394`
+armadillo-rollers steps, and the write-up explained it: the mesh path reads
+float32 coordinates while the dataset's exact roots were computed for the
+rational query geometry, so the two describe different geometries and the
+comparison is not a conservativeness test. The explanation was correct, and it
+was still the wrong thing to publish. Patrick's instruction settled it in one
+line: **smesh needs to be compiled with double `geom_t` for these benchmarks.**
+
+Built that way, with the frames converted to match, the same sweep reports zero
+late steps on all three scenes in every mode, and the worst signed step error is
+negative everywhere. The number that needed a paragraph of explanation simply
+went away, and what remains is a measurement that means what it appears to mean.
+Scalable CCD's `265` late steps are unchanged by the switch, which is what makes
+that finding worth reporting.
+
+Two practical notes for rebuilding it. The float64 explicit instantiations are on
+smesh's `sideset` branch; `master` has `f32` only and leaves
+`mesh_from_folder<int, double>` undefined inside `libsmesh.a`, so nothing that
+reads a mesh links. And on GCC the build needs `SMESH_ENABLE_DEV_MODE=OFF`, plus
+`#include <cstddef>` in `src/mesh/geometry/smesh_fff.hpp`, which clang supplies
+transitively and GCC does not.
+
+**The lesson.** An artefact that is understood is still an artefact. When the
+cheaper move is to remove its cause rather than to document it, document nothing
+and remove the cause -- a reader should not have to hold a caveat in mind to read
+a table correctly.
 
 ## A note on the C ABI
 
