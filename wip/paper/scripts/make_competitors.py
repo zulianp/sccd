@@ -11,6 +11,10 @@ than a shared one:
   broad-phase candidates and scored on the curated queries at the coordinates
   their exact roots were computed for.
 
+Both tables report earliness, the exact root minus the time of impact reported
+for it, so a positive value is conservative and a negative one is an answer
+after the root.
+
 Usage: make_competitors.py [--check]
 """
 import csv
@@ -66,6 +70,18 @@ def passes(rs):
     return max(1, len(rs) // max(1, len({r["case"] for r in rs})))
 
 
+def whole_scene(rs, cols):
+    """Whole-scene total in ms: per case the median over repeats, summed.
+
+    A median over repeats first keeps one slow case on one pass from moving the
+    scene's total, which is the convention the paper's other timing tables use.
+    """
+    per_case = defaultdict(list)
+    for r in rs:
+        per_case[r["case"]].append(sum(num(r[c]) or 0.0 for c in cols))
+    return sum(st.median(v) for v in per_case.values()), len(per_case)
+
+
 def fmt(v, digits=3):
     if v is None:
         return "--"
@@ -74,9 +90,14 @@ def fmt(v, digits=3):
     return f"{v:.{digits}g}"
 
 
+def ms(v):
+    """A millisecond total, grouped in thousands."""
+    return f"{v:,.0f}" if v >= 1000 else f"{v:.1f}"
+
+
 def earliest_table(data):
     """Per step: the earliest time of impact each library reports."""
-    lines = []
+    lines, touching = [], []
     for scene in SCENES:
         mine = [r for r in data if r["dataset"] == scene]
         # The earliest exact root of each step, and each library's answer for it,
@@ -101,23 +122,30 @@ def earliest_table(data):
             prev = got[r["mode"]].get((s, rep))
             got[r["mode"]][(s, rep)] = t if prev is None else min(prev, t)
 
+        # A step whose earliest exact root is 0 begins with its primitives
+        # already touching, so every correct answer for it is 0 and it carries
+        # no information about tightness. Say how many of each scene's steps
+        # those are, so the column is read for what it measures.
+        zero = sum(1 for v in ref.values() if v == 0.0)
+        if zero:
+            touching.append(f"{PRETTY[scene]} {zero} of {len(ref)}")
+
         for label, mode in (("SCCD (CPU)", "tight"), ("SCCD (GPU)", "device-tight"),
                             ("Scalable CCD (GPU)", "scalable-ccd-device")):
             mr = [r for r in mine if r["mode"] == mode]
             if not mr:
                 continue
-            broad = st.median([(num(r["prep_ms"]) or 0) + (num(r["broad_ms"]) or 0) for r in mr])
-            narrow = st.median([num(r["narrow_ms"]) or 0 for r in mr])
-            cand = sum(num(r["queries"]) or 0 for r in mr)
-            nsq = sum(num(r["narrow_ms"]) or 0 for r in mr) / cand * 1e6 if cand else None
-            errs = [t - ref[s] for (s, _), t in got[mode].items() if s in ref]
-            late = sum(1 for e in errs if e > 0)
+            total, ncases = whole_scene(mr, ("prep_ms", "broad_ms", "narrow_ms"))
+            # Earliness: the exact root minus the answer, so positive is
+            # conservative and a negative value is an answer after the root.
+            early = [ref[s] - t for (s, _), t in got[mode].items() if s in ref]
+            late = sum(1 for e in early if e < 0)
             reps = max(1, len({rep for (_, rep) in got[mode]}))
             lines.append(
                 f"    {PRETTY[scene] if label.startswith('SCCD (CPU)') else ''} & {label} & "
-                f"{broad:.1f} & {narrow:.1f} & {broad + narrow:.1f} & {fmt(nsq, 3)} & "
-                f"{fmt(st.median(errs) if errs else None, 3)} & {fmt(max(errs) if errs else None, 3)} & "
-                f"{round(late / reps)} \\\\")
+                f"{fmt(st.median(early) if early else None, 3)} & "
+                f"{fmt(max(early) if early else None, 3)} & {round(late / reps)} & "
+                f"{ms(total)} & {total / ncases:.2f} \\\\")
         lines.append("    \\midrule")
     if lines and lines[-1].strip() == "\\midrule":
         lines.pop()
@@ -128,23 +156,28 @@ def earliest_table(data):
     CCD~\\citep{{belgrod2025toi}}. Both libraries run their
     earliest-time-of-impact path once per case from a bound of $1$, over
     identical broad-phase candidates, and a step's answer is the minimum over
-    its cases. \\emph{{broad}} is the acceleration structure and the traversal
-    together and \\emph{{narrow}} the root finding, both medians per case in
-    milliseconds; \\emph{{ns/cand.}} is narrow-phase time over the candidates it
-    was handed. The error is signed, reported minus exact root, so negative is
-    conservative; \\emph{{late}} counts steps where it is positive, per pass over
-    the case list.}}
+    its cases. \\emph{{earliness}} is the step's earliest exact root minus the
+    answer reported for it, so a positive value is conservative and a negative
+    one is an answer after the root; \\emph{{late}} counts the steps where it is
+    negative, per pass over the case list. \\emph{{total}} is the whole scene,
+    prep and broad phase and narrow phase together, summed over every case with
+    the median over repeats taken first; \\emph{{avg}} divides it by the cases of
+    the scene.}}
   \\label{{tab:competitor-earliest}}
   \\fittable{{%
-\\begin{{tabular}}{{llrrrrrrr}}
+\\begin{{tabular}}{{llrrrrr}}
     \\toprule
-    scene & library & broad (ms) & narrow (ms) & total (ms) & ns/cand. & err.\\ med. & err.\\ worst & late \\\\
+    scene & library & earl.\\ med. & earl.\\ max & late & total (ms) & avg (ms) \\\\
     \\midrule
 {chr(10).join(lines)}
     \\bottomrule
   \\end{{tabular}}}}
   \\par\\smallskip\\footnotesize Scalable CCD's narrow phase is CUDA only, so it has
   no CPU row; its host broad phase is discussed in the text.
+  \\par\\smallskip\\footnotesize Some steps begin with their primitives already
+  touching, so their earliest exact root is $0$ and every correct answer for them
+  is $0$: {', '.join(touching)}. Those steps hold the earliness columns at $0$
+  without saying anything about tightness.
   \\par\\smallskip\\footnotesize Source: \\texttt{{benchmark/competitors/results/}}
 \\end{{table}}
 """
@@ -152,7 +185,7 @@ def earliest_table(data):
 
 def pair_table(data):
     """Per curated query: what each library reports for the same pair."""
-    lines = []
+    lines, late_total = [], 0
     for scene in SCENES:
         mine = [r for r in data if r["dataset"] == scene]
         for label, mode, col in (("SCCD (CPU)", "tight", "narrow_ms_s1"),
@@ -162,23 +195,26 @@ def pair_table(data):
             if not mr:
                 continue
             p = passes(mr)
-            narrow = st.median([num(r[col]) or 0 for r in mr])
-            cand = sum(num(r["queries"]) or 0 for r in mr)
-            nsq = sum(num(r[col]) or 0 for r in mr) / cand * 1e6 if cand else None
+            total, _ = whole_scene(mr, (col,))
+            cand = sum(num(r["queries"]) or 0 for r in mr) / p
+            nsq = total / cand * 1e6 if cand else None
             fp = sum(num(r["fp"]) or 0 for r in mr) / p
             fn = sum(num(r["fn"]) or 0 for r in mr) / p
-            late = sum(num(r["toi_late"]) or 0 for r in mr) / p
+            late_total += sum(num(r["toi_late"]) or 0 for r in mr) / p
             scored = [r for r in mr if num(r["toi_n"])]
-            med = -st.median([num(r["toi_med_early"]) for r in scored]) if scored else None
-            worst = -max([num(r["toi_max_early"]) for r in scored], default=0.0) if scored else None
+            med = st.median([num(r["toi_med_early"]) for r in scored]) if scored else None
+            worst = max([num(r["toi_max_early"]) for r in scored], default=None) if scored else None
             lines.append(
                 f"    {PRETTY[scene] if label.startswith('SCCD (CPU)') else ''} & {label} & "
-                f"{narrow:.2f} & {fmt(nsq, 3)} & {round(fp)} & {round(fn)} & {round(late)} & "
-                f"{fmt(med, 3)} & {fmt(worst, 3)} \\\\")
+                f"{round(fp)} & {round(fn)} & {fmt(med, 3)} & {fmt(worst, 3)} & "
+                f"{ms(total)} & {fmt(nsq, 3)} \\\\")
         lines.append("    \\midrule")
     if lines and lines[-1].strip() == "\\midrule":
         lines.pop()
 
+    late_note = ("no query of either library is answered after its root."
+                 if late_total == 0 else
+                 f"{round(late_total)} queries are answered after their root.")
     return f"""\\begin{{table}}[htbp]
   \\centering
   \\caption{{Per collision pair, against additive CCD~\\citep{{li2021codim}} as the
@@ -187,13 +223,17 @@ def pair_table(data):
     no parallelism of its own, so it is driven by the parallel loop the toolkit's
     own stepsize query uses, on the same $72$ threads -- and both are scored on
     every curated query at the coordinates its exact root was computed for.
-    \\emph{{f.p.}}, \\emph{{missed}} and \\emph{{late}} are counts per pass over the
-    case list. The error is signed, so negative is conservative.}}
+    \\emph{{f.p.}} and \\emph{{missed}} are counts per pass over the case list.
+    \\emph{{earliness}} is the query's exact root minus the time of impact
+    reported for it, so a positive value is conservative, and {late_note}
+    \\emph{{total}} is the narrow phase over the whole scene, summed over every case with the median
+    over repeats taken first, and \\emph{{avg}} divides it by the candidates it
+    was handed.}}
   \\label{{tab:competitor-pair}}
   \\fittable{{%
-\\begin{{tabular}}{{llrrrrrrr}}
+\\begin{{tabular}}{{llrrrrrr}}
     \\toprule
-    scene & library & narrow (ms) & ns/pair & f.p. & missed & late & err.\\ med. & err.\\ worst \\\\
+    scene & library & f.p. & missed & earl.\\ med. & earl.\\ max & total (ms) & avg (ns/pair) \\\\
     \\midrule
 {chr(10).join(lines)}
     \\bottomrule

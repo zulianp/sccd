@@ -287,21 +287,26 @@ scores the step's answer against the step's earliest exact root.
 
 \input{generated/tables/tab-competitor-earliest}
 
-End to end SCCD is ahead on every scene, by $3.1\times$ on rod-twist,
-$3.4\times$ on armadillo-rollers, $3.7\times$ on cloth-ball and $4.1\times$ to
-$4.4\times$ on the other three. On the host, where Scalable CCD implements only a
-broad phase, its sweep costs $5.9$, $22.9$, $4.7$, $55.2$, $4644.6$ and
-$15.2\,\mathrm{ms}$ against the cell list's $5.3$, $21.4$, $4.1$, $82.0$,
-$1508.6$ and $9.9$: the cell list leads on four scenes and the sweep on n-body
-and puffer-ball, which is the same split \cref{tab:broadphase} reports between
-our own two strategies.
+End to end SCCD on the device is ahead on every scene, from $3.2\times$ on
+rod-twist to $4.5\times$ on cloth-ball, and the whole-scene totals put the cost
+in the terms a simulation pays: $44.5$ against $143.1\,\mathrm{s}$ over
+rod-twist's $4{,}571$ cases, $75.3$ against $278.6\,\mathrm{s}$ over
+puffer-ball's $240$. Puffer-ball is also where our host path loses outright, at
+$462.9\,\mathrm{s}$, because its broad phase carries the scene on its own. On the
+host, where Scalable CCD implements only a broad phase, its sweep costs $4.7$,
+$1.8$, $2.7$, $8.1$, $1212.2$ and $69.6\,\mathrm{s}$ against the cell list's
+$4.3$, $1.8$, $2.6$, $12.5$, $441.1$ and $45.4$: the cell list leads on four
+scenes, the two are level on cloth-ball, and the sweep leads on n-body, which is
+the same split \cref{tab:broadphase} reports between our own two strategies.
 
-The accuracy column is the one to read carefully, because it reports a defect
-rather than a difference in tightness. On armadillo-rollers Scalable CCD's
-answer lands after the true root on $265$ of the $394$ steps that carry a
-contact, by as much as $0.999$: for those steps it reports no contact at all
-where one exists early. It does so on $33$ of rod-twist's $2{,}481$ steps and $8$
-of cloth-funnel's $363$, and not at all on cloth-ball, n-body or puffer-ball.
+The earliness columns are the ones to read carefully, because on three scenes
+they report a defect rather than a difference in tightness. On armadillo-rollers
+Scalable CCD's answer lands after the true root on $265$ of the $394$ steps that
+carry a contact -- its median earliness is $-8.9\times10^{-3}$, so the median
+step is late -- and its worst answer misses by $0.999$, reporting no contact at
+all where one exists early. It is late on $33$ of rod-twist's $2{,}481$ steps and
+$8$ of cloth-funnel's $363$, and on none of cloth-ball's, n-body's or
+puffer-ball's.
 The cause is a race in its subdivision buffer, whose overflow check tests that
 the buffer is full and then advances the tail as two separate operations, so
 that concurrent pushes can wrap the tail onto domains that have not been
@@ -328,19 +333,23 @@ candidates and the same curated queries.
 \input{generated/tables/tab-competitor-pair}
 
 It is the cheaper narrow phase on every scene, by $2.0\times$ per candidate on
-cloth-funnel, around $5\times$ to $6\times$ on armadillo-rollers, cloth-ball,
-n-body and puffer-ball, and $11.6\times$ on rod-twist, against \textsc{Tight} on
-the host. What it gives up is the answer. Its median error runs from
-$-8.6\times10^{-3}$ to $-1.1\times10^{-1}$ where \textsc{Tight}'s runs from
-$-3.0\times10^{-8}$ to $-2.8\times10^{-4}$, two orders of magnitude further from
-the root on rod-twist and six on n-body, and it reports $27{,}374$ contacts that do not exist on
-puffer-ball against $536$. That last figure is worth putting beside
-\cref{sec:results:relaxed}: on the same scene our own \textsc{Relaxed} reports
-$27{,}380$, so additive CCD at its shipped $0.9$ rescaling sits about where the
-looser of our two acceptance tests does. Both are conservative throughout:
-neither misses a contact and neither reports a time of impact after the true one,
-which is what \cref{thm:conservative} and the method's own construction each
-guarantee. A solver pays for the gap with a shortened step.
+cloth-funnel, $4.7\times$ to $6.7\times$ on armadillo-rollers, cloth-ball, n-body
+and puffer-ball, and $12.0\times$ on rod-twist, against \textsc{Tight} on the
+host: $6.9$ against $82.4\,\mathrm{s}$ over the whole of rod-twist.
+
+What it buys with that is the answer. Its median earliness runs from
+$8.6\times10^{-3}$ to $1.1\times10^{-1}$ where \textsc{Tight}'s runs from
+$3.0\times10^{-8}$ to $2.8\times10^{-4}$: two orders of magnitude further from
+the root on rod-twist, six on n-body. Its worst case gives up almost the entire
+step on every scene, between $0.897$ and $0.996$. The same gap shows in the false
+positives, $444$ against $24$ on armadillo-rollers and $27{,}374$ against $536$ on
+puffer-ball. That last figure is worth putting beside \cref{sec:results:relaxed}:
+on the same scene our own \textsc{Relaxed} reports $27{,}380$, so additive CCD at
+its shipped $0.9$ rescaling sits about where the looser of our two acceptance
+tests does. Neither library misses a contact anywhere, and every earliness in
+\cref{tab:competitor-pair} is positive, so neither answers after a root -- which
+is what \cref{thm:conservative} and the method's own construction each guarantee.
+A solver pays for the gap with a shortened step.
 
 \subsection{Scaling with element count}
 \label{sec:results:scaling}

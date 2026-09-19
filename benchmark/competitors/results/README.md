@@ -230,7 +230,11 @@ answers correctly are those with millions. Its answers vary between runs. Double
 precision does not change this: the same run under a float32 mesh gave `271` on
 armadillo.
 
-**Against Scalable CCD, on cost.** At the median, end to end, SCCD on the device
+**Against Scalable CCD, on cost.** The figures below are per-case medians. The
+paper's tables sum whole scenes instead, which weights the heavy cases and puts
+the same comparison at `3.2x` to `4.5x`.
+
+At the median, end to end, SCCD on the device
 is `3.4x` faster on armadillo (`5.50` against `18.56` ms per case), `3.7x` on
 cloth-ball (`13.47` against `50.11`), `4.3x` on cloth-funnel (`4.04` against
 `17.49`), `4.1x` on n-body (`63.53` against `260.50`), `4.1x` on puffer-ball
