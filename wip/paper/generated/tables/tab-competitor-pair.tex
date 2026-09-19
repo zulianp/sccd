@@ -11,36 +11,39 @@
     reported for it, so a positive value is conservative, and no query of either library is answered after its root.
     \emph{total} is the narrow phase over the whole scene, summed over every case with the median
     over repeats taken first, and \emph{avg} divides it by the candidates it
-    was handed.}
+    was handed. \emph{slowdown} is our total over additive CCD's, so above one
+    is what the tighter answer costs, and \emph{tighter} is its median
+    earliness over ours, so above one is how many times further from the root its
+    median answer sits.}
   \label{tab:competitor-pair}
   \fittable{%
-\begin{tabular}{llrrrrrr}
+\begin{tabular}{llrrrrrrrr}
     \toprule
-    scene & library & f.p. & missed & earl.\ med. & earl.\ max & total (ms) & avg (ns/pair) \\
+    scene & library & f.p. & missed & earl.\ med. & earl.\ max & total (ms) & avg (ns/pair) & slowdown & tighter \\
     \midrule
-    armadillo-rollers & SCCD (CPU) & 24 & 0 & 3.39e-06 & 0.016 & 2,773 & 32.5 \\
-     & SCCD (GPU) & 24 & 0 & 3.41e-06 & 0.016 & 2,669 & 31.3 \\
-     & Additive CCD (CPU) & 444 & 0 & 0.0286 & 0.996 & 559.9 & 6.56 \\
+    armadillo-rollers & SCCD (CPU) & 24 & 0 & 3.39e-06 & 0.016 & 2,773 & 32.5 & 4.95$\times$ & 8,436$\times$ \\
+     & SCCD (GPU) & 24 & 0 & 3.41e-06 & 0.016 & 2,669 & 31.3 & 4.77$\times$ & 8,397$\times$ \\
+     & Additive CCD (CPU) & 444 & 0 & 0.0286 & 0.996 & 559.9 & 6.56 & 1.0$\times$ (ref) & 1.0$\times$ (ref) \\
     \midrule
-    cloth-ball & SCCD (CPU) & 1 & 0 & 2.72e-07 & 0.000193 & 1,616 & 9.23 \\
-     & SCCD (GPU) & 1 & 0 & 2.7e-07 & 0.000193 & 856.9 & 4.89 \\
-     & Additive CCD (CPU) & 21 & 0 & 0.0656 & 0.94 & 241.8 & 1.38 \\
+    cloth-ball & SCCD (CPU) & 1 & 0 & 2.72e-07 & 0.000193 & 1,616 & 9.23 & 6.68$\times$ & 241,276$\times$ \\
+     & SCCD (GPU) & 1 & 0 & 2.7e-07 & 0.000193 & 856.9 & 4.89 & 3.54$\times$ & 242,827$\times$ \\
+     & Additive CCD (CPU) & 21 & 0 & 0.0656 & 0.94 & 241.8 & 1.38 & 1.0$\times$ (ref) & 1.0$\times$ (ref) \\
     \midrule
-    cloth-funnel & SCCD (CPU) & 15 & 0 & 6.87e-06 & 1 & 725.8 & 28.8 \\
-     & SCCD (GPU) & 15 & 0 & 6.83e-06 & 1 & 1,055 & 41.9 \\
-     & Additive CCD (CPU) & 422 & 0 & 0.00857 & 0.956 & 358.8 & 14.2 \\
+    cloth-funnel & SCCD (CPU) & 15 & 0 & 6.87e-06 & 1 & 725.8 & 28.8 & 2.02$\times$ & 1,248$\times$ \\
+     & SCCD (GPU) & 15 & 0 & 6.83e-06 & 1 & 1,055 & 41.9 & 2.94$\times$ & 1,256$\times$ \\
+     & Additive CCD (CPU) & 422 & 0 & 0.00857 & 0.956 & 358.8 & 14.2 & 1.0$\times$ (ref) & 1.0$\times$ (ref) \\
     \midrule
-    n-body & SCCD (CPU) & 11 & 0 & 3.02e-08 & 0.00024 & 20,459 & 9.08 \\
-     & SCCD (GPU) & 12 & 0 & 3.02e-08 & 0.00024 & 4,351 & 1.93 \\
-     & Additive CCD (CPU) & 107 & 0 & 0.0643 & 0.897 & 3,257 & 1.45 \\
+    n-body & SCCD (CPU) & 11 & 0 & 3.02e-08 & 0.00024 & 20,459 & 9.08 & 6.28$\times$ & 2,128,613$\times$ \\
+     & SCCD (GPU) & 12 & 0 & 3.02e-08 & 0.00024 & 4,351 & 1.93 & 1.34$\times$ & 2,132,148$\times$ \\
+     & Additive CCD (CPU) & 107 & 0 & 0.0643 & 0.897 & 3,257 & 1.45 & 1.0$\times$ (ref) & 1.0$\times$ (ref) \\
     \midrule
-    puffer-ball & SCCD (CPU) & 536 & 0 & 4e-05 & 0.261 & 41,620 & 5.68 \\
-     & SCCD (GPU) & 558 & 0 & 4.03e-05 & 0.261 & 10,979 & 1.5 \\
-     & Additive CCD (CPU) & 27374 & 0 & 0.105 & 0.976 & 8,943 & 1.22 \\
+    puffer-ball & SCCD (CPU) & 536 & 0 & 4e-05 & 0.261 & 41,620 & 5.68 & 4.65$\times$ & 2,624$\times$ \\
+     & SCCD (GPU) & 558 & 0 & 4.03e-05 & 0.261 & 10,979 & 1.5 & 1.23$\times$ & 2,608$\times$ \\
+     & Additive CCD (CPU) & 27374 & 0 & 0.105 & 0.976 & 8,943 & 1.22 & 1.0$\times$ (ref) & 1.0$\times$ (ref) \\
     \midrule
-    rod-twist & SCCD (CPU) & 1243 & 0 & 0.000275 & 0.993 & 82,393 & 21.3 \\
-     & SCCD (GPU) & 1245 & 0 & 0.000275 & 0.993 & 27,388 & 7.07 \\
-     & Additive CCD (CPU) & 16708 & 0 & 0.0232 & 0.994 & 6,891 & 1.78 \\
+    rod-twist & SCCD (CPU) & 1243 & 0 & 0.000275 & 0.993 & 82,393 & 21.3 & 11.96$\times$ & 84.6$\times$ \\
+     & SCCD (GPU) & 1245 & 0 & 0.000275 & 0.993 & 27,388 & 7.07 & 3.97$\times$ & 84.5$\times$ \\
+     & Additive CCD (CPU) & 16708 & 0 & 0.0232 & 0.994 & 6,891 & 1.78 & 1.0$\times$ (ref) & 1.0$\times$ (ref) \\
     \bottomrule
   \end{tabular}}
   \par\smallskip\footnotesize Source: \texttt{benchmark/competitors/results/}

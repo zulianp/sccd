@@ -95,6 +95,24 @@ def ms(v):
     return f"{v:,.0f}" if v >= 1000 else f"{v:.1f}"
 
 
+def ratio(ours, theirs):
+    """How many times one number is the other, or why it cannot be said.
+
+    A ratio against a competitor that answers after the root is not a tightness
+    ratio at all, so it is named rather than computed; and where both sides are
+    exactly $0$ -- every step of a scene that begins in contact -- there is
+    nothing to compare.
+    """
+    if ours is None or theirs is None:
+        return "--"
+    if theirs < 0:
+        return "late"
+    if ours == 0 or theirs == 0:
+        return "--"
+    v = theirs / ours
+    return f"{v:,.0f}$\\times$" if v >= 100 else f"{v:.1f}$\\times$"
+
+
 def earliest_table(data):
     """Per step: the earliest time of impact each library reports."""
     lines, touching = [], []
@@ -130,8 +148,10 @@ def earliest_table(data):
         if zero:
             touching.append(f"{PRETTY[scene]} {zero} of {len(ref)}")
 
-        for label, mode in (("SCCD (CPU)", "tight"), ("SCCD (GPU)", "device-tight"),
-                            ("Scalable CCD (GPU)", "scalable-ccd-device")):
+        ROWS = (("SCCD (CPU)", "tight"), ("SCCD (GPU)", "device-tight"),
+                ("Scalable CCD (GPU)", "scalable-ccd-device"))
+        stat = {}
+        for _, mode in ROWS:
             mr = [r for r in mine if r["mode"] == mode]
             if not mr:
                 continue
@@ -139,13 +159,28 @@ def earliest_table(data):
             # Earliness: the exact root minus the answer, so positive is
             # conservative and a negative value is an answer after the root.
             early = [ref[s] - t for (s, _), t in got[mode].items() if s in ref]
-            late = sum(1 for e in early if e < 0)
             reps = max(1, len({rep for (_, rep) in got[mode]}))
+            stat[mode] = {
+                "total": total, "avg": total / ncases,
+                "med": st.median(early) if early else None,
+                "max": max(early) if early else None,
+                "late": round(sum(1 for e in early if e < 0) / reps),
+            }
+
+        them = stat.get("scalable-ccd-device")
+        for label, mode in ROWS:
+            s = stat.get(mode)
+            if s is None:
+                continue
+            if them is None or mode == "scalable-ccd-device":
+                speedup, tighter = "1.0$\\times$ (ref)", "1.0$\\times$ (ref)"
+            else:
+                speedup = f"{them['total'] / s['total']:.2f}$\\times$"
+                tighter = ratio(s["med"], them["med"])
             lines.append(
                 f"    {PRETTY[scene] if label.startswith('SCCD (CPU)') else ''} & {label} & "
-                f"{fmt(st.median(early) if early else None, 3)} & "
-                f"{fmt(max(early) if early else None, 3)} & {round(late / reps)} & "
-                f"{ms(total)} & {total / ncases:.2f} \\\\")
+                f"{fmt(s['med'], 3)} & {fmt(s['max'], 3)} & {s['late']} & "
+                f"{ms(s['total'])} & {s['avg']:.2f} & {speedup} & {tighter} \\\\")
         lines.append("    \\midrule")
     if lines and lines[-1].strip() == "\\midrule":
         lines.pop()
@@ -162,12 +197,16 @@ def earliest_table(data):
     negative, per pass over the case list. \\emph{{total}} is the whole scene,
     prep and broad phase and narrow phase together, summed over every case with
     the median over repeats taken first; \\emph{{avg}} divides it by the cases of
-    the scene.}}
+    the scene. \\emph{{speedup}} is Scalable CCD's total over ours, so above one
+    is our lead, and \\emph{{tighter}} is its median earliness over ours, so
+    above one is how many times further from the root its median answer sits;
+    \\emph{{late}} where its median answer falls after the root, which is not a
+    tightness ratio, and \\emph{{--}} where both medians are $0$.}}
   \\label{{tab:competitor-earliest}}
   \\fittable{{%
-\\begin{{tabular}}{{llrrrrr}}
+\\begin{{tabular}}{{llrrrrrrr}}
     \\toprule
-    scene & library & earl.\\ med. & earl.\\ max & late & total (ms) & avg (ms) \\\\
+    scene & library & earl.\\ med. & earl.\\ max & late & total (ms) & avg (ms) & speedup & tighter \\\\
     \\midrule
 {chr(10).join(lines)}
     \\bottomrule
@@ -188,26 +227,42 @@ def pair_table(data):
     lines, late_total = [], 0
     for scene in SCENES:
         mine = [r for r in data if r["dataset"] == scene]
-        for label, mode, col in (("SCCD (CPU)", "tight", "narrow_ms_s1"),
-                                 ("SCCD (GPU)", "device-tight", "narrow_ms_s1"),
-                                 ("Additive CCD (CPU)", "accd", "narrow_ms")):
+        ROWS = (("SCCD (CPU)", "tight", "narrow_ms_s1"),
+                ("SCCD (GPU)", "device-tight", "narrow_ms_s1"),
+                ("Additive CCD (CPU)", "accd", "narrow_ms"))
+        stat = {}
+        for _, mode, col in ROWS:
             mr = [r for r in mine if r["mode"] == mode]
             if not mr:
                 continue
             p = passes(mr)
             total, _ = whole_scene(mr, (col,))
             cand = sum(num(r["queries"]) or 0 for r in mr) / p
-            nsq = total / cand * 1e6 if cand else None
-            fp = sum(num(r["fp"]) or 0 for r in mr) / p
-            fn = sum(num(r["fn"]) or 0 for r in mr) / p
             late_total += sum(num(r["toi_late"]) or 0 for r in mr) / p
             scored = [r for r in mr if num(r["toi_n"])]
-            med = st.median([num(r["toi_med_early"]) for r in scored]) if scored else None
-            worst = max([num(r["toi_max_early"]) for r in scored], default=None) if scored else None
+            stat[mode] = {
+                "total": total,
+                "nsq": total / cand * 1e6 if cand else None,
+                "fp": round(sum(num(r["fp"]) or 0 for r in mr) / p),
+                "fn": round(sum(num(r["fn"]) or 0 for r in mr) / p),
+                "med": st.median([num(r["toi_med_early"]) for r in scored]) if scored else None,
+                "max": max([num(r["toi_max_early"]) for r in scored], default=None) if scored else None,
+            }
+
+        them = stat.get("accd")
+        for label, mode, _ in ROWS:
+            s = stat.get(mode)
+            if s is None:
+                continue
+            if them is None or mode == "accd":
+                slowdown, tighter = "1.0$\\times$ (ref)", "1.0$\\times$ (ref)"
+            else:
+                slowdown = f"{s['total'] / them['total']:.2f}$\\times$"
+                tighter = ratio(s["med"], them["med"])
             lines.append(
                 f"    {PRETTY[scene] if label.startswith('SCCD (CPU)') else ''} & {label} & "
-                f"{round(fp)} & {round(fn)} & {fmt(med, 3)} & {fmt(worst, 3)} & "
-                f"{ms(total)} & {fmt(nsq, 3)} \\\\")
+                f"{s['fp']} & {s['fn']} & {fmt(s['med'], 3)} & {fmt(s['max'], 3)} & "
+                f"{ms(s['total'])} & {fmt(s['nsq'], 3)} & {slowdown} & {tighter} \\\\")
         lines.append("    \\midrule")
     if lines and lines[-1].strip() == "\\midrule":
         lines.pop()
@@ -228,12 +283,15 @@ def pair_table(data):
     reported for it, so a positive value is conservative, and {late_note}
     \\emph{{total}} is the narrow phase over the whole scene, summed over every case with the median
     over repeats taken first, and \\emph{{avg}} divides it by the candidates it
-    was handed.}}
+    was handed. \\emph{{slowdown}} is our total over additive CCD's, so above one
+    is what the tighter answer costs, and \\emph{{tighter}} is its median
+    earliness over ours, so above one is how many times further from the root its
+    median answer sits.}}
   \\label{{tab:competitor-pair}}
   \\fittable{{%
-\\begin{{tabular}}{{llrrrrrr}}
+\\begin{{tabular}}{{llrrrrrrrr}}
     \\toprule
-    scene & library & f.p. & missed & earl.\\ med. & earl.\\ max & total (ms) & avg (ns/pair) \\\\
+    scene & library & f.p. & missed & earl.\\ med. & earl.\\ max & total (ms) & avg (ns/pair) & slowdown & tighter \\\\
     \\midrule
 {chr(10).join(lines)}
     \\bottomrule

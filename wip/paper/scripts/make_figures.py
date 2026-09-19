@@ -10,6 +10,8 @@ answers for their pipeline and ours did not answer for this one:
   strong-scaling   speedup of each host phase against thread count, with the
                    perfect line, from benchmark/results/profile/strong-*.csv
   per-frame        cost through a simulation rather than aggregated over it
+  broad-per-frame  the same for the broad phase alone, with both host
+                   strategies against the device
 
 Written into figures/ as PDF. They are committed, so building the article needs
 no Python; this is only for regenerating them after new data.
@@ -19,6 +21,7 @@ from __future__ import annotations
 
 import collections
 import csv
+import statistics as st
 import re
 import sys
 from pathlib import Path
@@ -52,6 +55,38 @@ def sweep_rows():
 def frame_of(case: str):
     m = re.match(r"(\d+)", case or "")
     return int(m.group(1)) if m else None
+
+
+def log_y(ax):
+    """A log y axis a reader can read on a panel spanning under a decade.
+
+    A decade-only locator leaves such a panel with one tick or none, which
+    happened to four of these six. Put majors at 1, 2 and 5 times each power of
+    ten and label them as plain numbers.
+    """
+    ax.set_yscale("log")
+    ax.yaxis.set_major_locator(matplotlib.ticker.LogLocator(
+        base=10.0, subs=(1.0, 2.0, 5.0), numticks=12))
+    ax.yaxis.set_major_formatter(
+        matplotlib.ticker.FuncFormatter(lambda v, _: f"{v:g}"))
+    ax.yaxis.set_minor_locator(matplotlib.ticker.NullLocator())
+
+
+def check_ticks(fig, axes, scenes, name):
+    """Fail rather than publish an axis with no labelled tick.
+
+    A log panel spanning less than a decade can end up with no labelled tick at
+    all, which is how the per-frame figure first shipped.
+    """
+    fig.canvas.draw()
+    for ax, scene in zip(axes, scenes):
+        labelled = [t for t in ax.get_yticklabels()
+                    if t.get_text() and ax.get_ylim()[0] <= t.get_position()[1]
+                    <= ax.get_ylim()[1]]
+        if len(labelled) < 2:
+            raise SystemExit(
+                f"{name}: {scene} has {len(labelled)} y tick labels; "
+                "the locator is not covering its range")
 
 
 # ---------------------------------------------------------------- scaling ---
@@ -144,15 +179,7 @@ def per_frame():
             xs = sorted(d)
             ax.plot(xs, [d[x] for x in xs], lw=0.7,
                     color=style.MODE_COLOR[mode], label=lab)
-        ax.set_yscale("log")
-        # A decade-only locator leaves a panel spanning less than a decade with
-        # one tick or none, which happened to four of these six. Put majors at
-        # 1, 2 and 5 times each power of ten and label them as plain numbers.
-        ax.yaxis.set_major_locator(matplotlib.ticker.LogLocator(
-            base=10.0, subs=(1.0, 2.0, 5.0), numticks=12))
-        ax.yaxis.set_major_formatter(
-            matplotlib.ticker.FuncFormatter(lambda v, _: f"{v:g}"))
-        ax.yaxis.set_minor_locator(matplotlib.ticker.NullLocator())
+        log_y(ax)
         ax.set_title(LABEL.get(scene, scene), fontsize=7)
         ax.set_xlabel("frame", fontsize=7)
         ax.tick_params(labelsize=6)
@@ -160,18 +187,7 @@ def per_frame():
         ax.set_axisbelow(True)
     axes[0].set_ylabel("ms per step", fontsize=7)
 
-    # A log panel spanning less than a decade can end up with no labelled tick
-    # at all, which is how this figure first shipped. Fail rather than publish
-    # an axis a reader cannot read.
-    fig.canvas.draw()
-    for ax, scene in zip(axes, SCENES):
-        labelled = [t for t in ax.get_yticklabels()
-                    if t.get_text() and ax.get_ylim()[0] <= t.get_position()[1]
-                    <= ax.get_ylim()[1]]
-        if len(labelled) < 2:
-            raise SystemExit(
-                f"per-frame: {scene} has {len(labelled)} y tick labels; "
-                "the locator is not covering its range")
+    check_ticks(fig, axes, SCENES, "per-frame")
 
     h, l = axes[0].get_legend_handles_labels()
     fig.legend(h, l, frameon=False, fontsize=7, ncol=2,
@@ -182,10 +198,82 @@ def per_frame():
     return p
 
 
+# -------------------------------------------------- broad phase per frame ---
+# The three series: colour carries the processor, dash carries the strategy.
+# The device broad phase does not implement the choice -- it always sorts, and
+# `sccd::device::cell2d_*` has no caller outside its own unit test -- so its two
+# settings are one code path measured twice and are pooled as repeats rather
+# than drawn as a comparison that does not exist.
+SERIES_BP = (("cell list, CPU", HOST, ("cell2d",), "-"),
+             ("sweep, CPU", HOST, ("sweep",), "--"),
+             ("GPU", DEV, ("cell2d", "sweep"), "-"))
+
+
+def broad_per_frame():
+    """Broad-phase cost through a simulation, both strategies against the device.
+
+    The broad phase here is the whole of it, the acceleration structure and the
+    traversal over it, summed over the vertex-face and edge-edge case of the
+    frame: what one step of a simulation pays before any root finding.
+    """
+    # scene -> (mode, strategy) -> frame -> summed ms over the vf and ee case
+    acc = collections.defaultdict(lambda: collections.defaultdict(
+        lambda: collections.defaultdict(float)))
+    for r in sweep_rows():
+        if r["mode"] not in (HOST, DEV):
+            continue
+        fr = frame_of(r["case"])
+        if fr is None:
+            continue
+        try:
+            acc[r["dataset"]][(r["mode"], r.get("broadphase") or "cell2d")][fr] += (
+                float(r["prep_ms"]) + float(r["broad_ms"]))
+        except ValueError:
+            continue
+
+    fig, axes = plt.subplots(1, len(SCENES), figsize=style.figsize(
+        style.FULL_WIDTH_IN, 0.30))
+    for ax, scene in zip(axes, SCENES):
+        for lab, mode, strategies, dash in SERIES_BP:
+            got = [acc[scene][(mode, s)] for s in strategies
+                   if acc[scene][(mode, s)]]
+            if not got:
+                continue
+            frames = sorted(set().union(*(set(d) for d in got)))
+            ys = [st.median([d[f] for d in got if f in d]) for f in frames]
+            ax.plot(frames, ys, lw=0.7, ls=dash,
+                    color=style.MODE_COLOR[mode], label=lab)
+        log_y(ax)
+        ax.set_title(LABEL.get(scene, scene), fontsize=7)
+        ax.set_xlabel("frame", fontsize=7)
+        ax.tick_params(labelsize=6)
+        ax.grid(True, which="major", lw=0.4, color=style.GRID_INK)
+        ax.set_axisbelow(True)
+    axes[0].set_ylabel("broad phase, ms per step", fontsize=7)
+
+    check_ticks(fig, axes, SCENES, "broad-per-frame")
+
+    # Every panel must carry all three series, or the figure claims a
+    # comparison it does not draw.
+    for ax, scene in zip(axes, SCENES):
+        drawn = len(ax.get_legend_handles_labels()[0])
+        if drawn != len(SERIES_BP):
+            raise SystemExit(
+                f"broad-per-frame: {scene} draws {drawn} of {len(SERIES_BP)} series")
+
+    h, l = axes[0].get_legend_handles_labels()
+    fig.legend(h, l, frameon=False, fontsize=7, ncol=3,
+               loc="lower center", bbox_to_anchor=(0.5, -0.06))
+    fig.tight_layout()
+    p = OUT / "broad-per-frame.pdf"
+    fig.savefig(p, bbox_inches="tight"); plt.close(fig)
+    return p
+
+
 def main() -> int:
     style.apply_rcparams()
     OUT.mkdir(parents=True, exist_ok=True)
-    for fn in (strong_scaling, per_frame):
+    for fn in (strong_scaling, per_frame, broad_per_frame):
         p = fn()
         if p:
             print(f"wrote {p.relative_to(PAPER)}")

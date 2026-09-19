@@ -252,6 +252,25 @@ sitting inside the repeat spread of \cref{sec:results:setup}. The largest margin
 is the largest scene: $78.0\,\mathrm{s}$ against $448.8\,\mathrm{s}$ over
 puffer-ball's $240$ cases.
 
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{figures/broad-per-frame.pdf}
+  \caption{Broad-phase cost through each simulation: the acceleration structure
+    and the traversal over it added, in milliseconds for one step, both query
+    types together, against frame index. The two host strategies are drawn
+    separately; the device broad phase does not implement the choice, so it is
+    one curve.}
+  \label{fig:bpframe}
+\end{figure}
+
+\Cref{fig:bpframe} draws the same comparison step by step, and it shows the
+margin to be a property of the scene rather than of a few frames. On puffer-ball
+the sweep is the slower strategy on all $120$ of them. The two ties are ties for
+different reasons: on cloth-ball the strategies trade frames, the sweep leading
+on $24$ of $43$ and leading on the expensive ones, so the totals come out level;
+on rod-twist the cell list leads on $1{,}821$ of $2{,}556$ frames and still ends
+only $8\%$ ahead, because the frames it loses cost more than the frames it wins.
+
 The structure columns say where the difference comes from, and it is not where
 the traversal alone would suggest. The sweep builds its sorted intervals at two to four times the cost of the grid,
 $29.1\,\mathrm{s}$ against $12.1$ on rod-twist and $10.1$ against $2.9$ on
@@ -303,10 +322,13 @@ The earliness columns are the ones to read carefully, because on three scenes
 they report a defect rather than a difference in tightness. On armadillo-rollers
 Scalable CCD's answer lands after the true root on $265$ of the $394$ steps that
 carry a contact -- its median earliness is $-8.9\times10^{-3}$, so the median
-step is late -- and its worst answer misses by $0.999$, reporting no contact at
-all where one exists early. It is late on $33$ of rod-twist's $2{,}481$ steps and
-$8$ of cloth-funnel's $363$, and on none of cloth-ball's, n-body's or
-puffer-ball's.
+step is late, and the \emph{tighter} column reads \emph{late} because a ratio
+against it would not be a measure of tightness -- and its worst answer misses by
+$0.999$, reporting no contact at all where one exists early. It is late on $33$
+of rod-twist's $2{,}481$ steps and $8$ of cloth-funnel's $363$, and on none of
+cloth-ball's, n-body's or puffer-ball's. Where it does stay conservative it is
+still the looser answer, by $60\times$ on cloth-ball, $277\times$ on rod-twist
+and $3{,}320\times$ on puffer-ball.
 The cause is a race in its subdivision buffer, whose overflow check tests that
 the buffer is full and then advances the tail as two separate operations, so
 that concurrent pushes can wrap the tail onto domains that have not been
@@ -339,8 +361,9 @@ host: $6.9$ against $82.4\,\mathrm{s}$ over the whole of rod-twist.
 
 What it buys with that is the answer. Its median earliness runs from
 $8.6\times10^{-3}$ to $1.1\times10^{-1}$ where \textsc{Tight}'s runs from
-$3.0\times10^{-8}$ to $2.8\times10^{-4}$: two orders of magnitude further from
-the root on rod-twist, six on n-body. Its worst case gives up almost the entire
+$3.0\times10^{-8}$ to $2.8\times10^{-4}$, which the \emph{tighter} column puts at
+$85\times$ further from the root on rod-twist, $2{,}600\times$ on puffer-ball and
+$2.1$ million$\times$ on n-body. Its worst case gives up almost the entire
 step on every scene, between $0.897$ and $0.996$. The same gap shows in the false
 positives, $444$ against $24$ on armadillo-rollers and $27{,}374$ against $536$ on
 puffer-ball. That last figure is worth putting beside \cref{sec:results:relaxed}:
