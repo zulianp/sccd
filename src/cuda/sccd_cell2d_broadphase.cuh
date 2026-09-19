@@ -45,6 +45,17 @@ namespace sccd {
         };
 
         /**
+         * \brief Write `idx[i] = i` over \p n entries.
+         *
+         * The cell list does not sort, so it needs the identity permutation
+         * where the sweep leaves the order its sort produced. A step that
+         * switched strategies would otherwise inherit the other one's
+         * permutation, so this is written every step rather than once.
+         */
+        template <typename I>
+        void fill_identity(const ptrdiff_t n, I* const SCCD_RESTRICT idx);
+
+        /**
          * \brief Size the grid and bin \p n boxes into it.
          *
          * \p cellptr must have ncells + 1 entries and \p cellidx must have room

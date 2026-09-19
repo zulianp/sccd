@@ -157,6 +157,12 @@ namespace sccd {
                 }
             }
 
+            template <typename I>
+            __global__ void fill_identity_kernel(const ptrdiff_t n, I* const SCCD_RESTRICT idx) {
+                const ptrdiff_t i = (ptrdiff_t)blockIdx.x * blockDim.x + threadIdx.x;
+                if (i < n) idx[i] = (I)i;
+            }
+
             template <typename T, typename I>
             __global__ void bin_fill_kernel(const ptrdiff_t n,
                                             const T* const SCCD_RESTRICT lo0,
@@ -522,6 +528,15 @@ namespace sccd {
             SCCD_CHECK_CUDA(cudaMemcpy(span_count, cellptr + ncells, sizeof(ptrdiff_t), cudaMemcpyDeviceToHost));
         }
 
+        template <typename I>
+        void fill_identity(const ptrdiff_t n, I* const SCCD_RESTRICT idx) {
+            if (n <= 0) return;
+            dim3 block(SCCD_C2D_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
+            dim3 gridsz((n + block.x - 1) / block.x);
+            detail::fill_identity_kernel<I><<<gridsz, block>>>(n, idx);
+            SCCD_CUDA_LAST_ERROR();
+        }
+
         template <typename T, typename I>
         void cell2d_fill(const ptrdiff_t n,
                          T** const SCCD_RESTRICT aabbs,
@@ -705,6 +720,13 @@ namespace sccd {
         I*,                                                                                    \
         I*);
 
+// Indexed by the index type alone, so it is instantiated once rather than once
+// per scalar type like everything below it.
+#define SCCD_C2D_INSTANTIATE_IDX(I) \
+    template void sccd::device::fill_identity<I>(const ptrdiff_t, I*);
+
+SCCD_C2D_INSTANTIATE_IDX(int32_t)
+
 #define SCCD_C2D_INSTANTIATE(T, I)                                                             \
     template void sccd::device::cell2d_setup_and_count<T, I>(                                  \
         const ptrdiff_t, T**, sccd::device::Cell2DGridD<T>&, ptrdiff_t*, ptrdiff_t*);          \
@@ -744,3 +766,4 @@ SCCD_C2D_INSTANTIATE(double, int32_t)
 
 #undef SCCD_C2D_INSTANTIATE
 #undef SCCD_C2D_INSTANTIATE_FV
+#undef SCCD_C2D_INSTANTIATE_IDX
