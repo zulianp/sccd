@@ -102,6 +102,27 @@ namespace sccd {
      * every box touch a large block of cells and give the counting pass more work
      * than the query saves.
      */
+    /**
+     * \brief Shrink a grid until it holds at most `4 * n` cells.
+     *
+     * The caller sizes its cell array from this bound, so it has to hold
+     * exactly, not approximately. Both sides come in at least one, and the
+     * larger is reduced to whatever the smaller leaves room for.
+     */
+    inline void cap_cells(const ptrdiff_t n, int& n0, int& n1) {
+        const ptrdiff_t cap = sccd::max<ptrdiff_t>(4 * n, 1);
+        if (n0 < 1) n0 = 1;
+        if (n1 < 1) n1 = 1;
+        if ((ptrdiff_t)n0 > cap) n0 = (int)cap;
+        if ((ptrdiff_t)n1 > cap) n1 = (int)cap;
+        if ((ptrdiff_t)n0 * (ptrdiff_t)n1 <= cap) return;
+        if (n0 >= n1) {
+            n0 = (int)sccd::max<ptrdiff_t>(cap / (ptrdiff_t)n1, 1);
+        } else {
+            n1 = (int)sccd::max<ptrdiff_t>(cap / (ptrdiff_t)n0, 1);
+        }
+    }
+
     template <typename T>
     static void cell2d_setup(const ptrdiff_t n, T** const SCCD_RESTRICT aabb, Cell2DGrid<T>& grid) {
         detail::choose_two_axes<T>(n, aabb, grid.axis0, grid.axis1);
@@ -164,6 +185,12 @@ namespace sccd {
 
         grid.n0 = (int)sccd::max<double>(1.0, std::floor(want0));
         grid.n1 = (int)sccd::max<double>(1.0, std::floor(want1));
+        // Scaling both sides by the same factor does not enforce the cap on a
+        // scene whose two axes differ wildly: a side scaled below one is raised
+        // back to one, and the product grows past the cap again by exactly that
+        // much. The bound is what the caller sizes its cell array from, so it is
+        // enforced here on the integers that array is sized by.
+        cap_cells(sccd::max<ptrdiff_t>(n, 1), grid.n0, grid.n1);
         grid.min0 = lo0;
         grid.min1 = lo1;
         // Nudge the span so the largest coordinate lands inside the last cell.
