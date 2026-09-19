@@ -96,18 +96,18 @@ def ms(v):
 
 
 def ratio(ours, theirs):
-    """How many times one number is the other, or why it cannot be said.
+    """How many times further from the root the competitor's median sits.
 
-    A ratio against a competitor that answers after the root is not a tightness
-    ratio at all, so it is named rather than computed; and where both sides are
-    exactly $0$ -- every step of a scene that begins in contact -- there is
-    nothing to compare.
+    Left blank where there is no such number: where the competitor answers after
+    the root, which is a failure rather than a looser answer, and where both
+    sides are exactly $0$ because every step of the scene begins in contact.
+
+    Nothing but a number or a blank may be returned. A word here would be read
+    as a property of the row it is printed on, which is ours, and the one word
+    worth saying about a competitor -- that it is late -- would then libel the
+    library that never is. It is said on the competitor's own row instead.
     """
-    if ours is None or theirs is None:
-        return "--"
-    if theirs < 0:
-        return "late"
-    if ours == 0 or theirs == 0:
+    if ours is None or theirs is None or theirs < 0 or ours == 0 or theirs == 0:
         return "--"
     v = theirs / ours
     return f"{v:,.0f}$\\times$" if v >= 100 else f"{v:.1f}$\\times$"
@@ -173,7 +173,11 @@ def earliest_table(data):
             if s is None:
                 continue
             if them is None or mode == "scalable-ccd-device":
-                speedup, tighter = "1.0$\\times$ (ref)", "1.0$\\times$ (ref)"
+                # "late" belongs here, on the row of the library it describes,
+                # and nowhere else.
+                speedup = "1.0$\\times$ (ref)"
+                tighter = ("late" if s["med"] is not None and s["med"] < 0
+                           else "1.0$\\times$ (ref)")
             else:
                 speedup = f"{them['total'] / s['total']:.2f}$\\times$"
                 tighter = ratio(s["med"], them["med"])
@@ -199,9 +203,12 @@ def earliest_table(data):
     the median over repeats taken first; \\emph{{avg}} divides it by the cases of
     the scene. \\emph{{speedup}} is Scalable CCD's total over ours, so above one
     is our lead, and \\emph{{tighter}} is its median earliness over ours, so
-    above one is how many times further from the root its median answer sits;
-    \\emph{{late}} where its median answer falls after the root, which is not a
-    tightness ratio, and \\emph{{--}} where both medians are $0$.}}
+    above one is how many times further from the root its median answer sits.
+    Both are quoted on our rows against the reference row, which reads
+    \\emph{{late}} on the scene where Scalable CCD's own median answer falls
+    after the root; \\emph{{--}} marks a tightness ratio there is no number for.
+    Our rows never read \\emph{{late}}: no SCCD answer in this table or the next
+    falls after a root.}}
   \\label{{tab:competitor-earliest}}
   \\fittable{{%
 \\begin{{tabular}}{{llrrrrrrr}}
@@ -255,7 +262,9 @@ def pair_table(data):
             if s is None:
                 continue
             if them is None or mode == "accd":
-                slowdown, tighter = "1.0$\\times$ (ref)", "1.0$\\times$ (ref)"
+                slowdown = "1.0$\\times$ (ref)"
+                tighter = ("late" if s["med"] is not None and s["med"] < 0
+                           else "1.0$\\times$ (ref)")
             else:
                 slowdown = f"{s['total'] / them['total']:.2f}$\\times$"
                 tighter = ratio(s["med"], them["med"])
