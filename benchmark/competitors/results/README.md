@@ -1,10 +1,11 @@
 # Comparison: SCCD, Scalable CCD and Additive CCD
 
-`compare-gh200-full-2026-09-18.csv.gz`, produced by `../sweep_comparison.sh` and
-tabulated by `../compare_table.py` (`gunzip -k` it first; the raw CSV is 4.4 MB).
+`compare-gh200-full-2026-09-19.csv.gz`, produced by `../sweep_comparison.sh` and
+tabulated by `../compare_table.py` (`gunzip -k` it first; the raw CSV is 20 MB).
 One GH200 module per job -- one Hopper, and one Grace bound to 72 CPUs -- over
-whole scenes: every prepared case of armadillo-rollers (781), cloth-ball (79)
-and cloth-funnel (577), three repeats each, as 15 resumable Slurm chunks.
+whole scenes: every prepared case of armadillo-rollers (781), cloth-ball (79),
+cloth-funnel (577), n-body-simulation (146), puffer-ball (240) and rod-twist
+(4,571), `6,394` in all, three repeats each, as 66 resumable Slurm chunks.
 
 **Double precision throughout.** smesh is built with `SMESH_GEOM_TYPE=float64`
 and the frames are converted to match, so the mesh path and the dataset's exact
@@ -49,6 +50,7 @@ Timings are per case in milliseconds, median / maximum. `ns/q` is narrow-phase
 time over the candidates handed to it.
 
 ```
+
 ### armadillo-rollers -- earliest time of impact
 
 | library               |  prep ms |         broad ms |        narrow ms |    total |     ns/q |     err med |     err worst | late |
@@ -124,6 +126,81 @@ time over the candidates handed to it.
 
   curated queries with a contact per pass: 6773
 
+### n-body-simulation -- earliest time of impact
+
+| library               |  prep ms |         broad ms |        narrow ms |    total |     ns/q |     err med |     err worst | late |
+|-----------------------|----------|------------------|------------------|----------|----------|-------------|---------------|------|
+| SCCD host Relaxed     |   10.021 |  71.595 /  160.36 |  56.538 /   99.30 |  135.141 |    2.798 |           0 |             0 |    0 |
+| SCCD host Tight       |   10.582 |  71.449 /  170.30 |  44.001 /   80.43 |  121.829 |    2.266 |           0 |             0 |    0 |
+| SCCD device Relaxed   |    6.942 |  52.256 /  104.34 |   2.919 /    5.29 |   62.476 |   0.1864 |           0 |             0 |    0 |
+| SCCD device Tight     |    6.874 |  53.527 /  104.63 |   2.913 /    4.42 |   63.528 |   0.1854 |           0 |             0 |    0 |
+| Scalable CCD device   |    3.007 |  39.981 /   54.35 | 222.156 /  470.49 |  260.500 |     10.7 |           0 |             0 |    0 |
+| Scalable CCD host     |    1.916 |  53.291 /   89.36 |   0.000 /    0.00 |   55.181 |        - |           - |             - |    - |
+
+  steps with a known contact: 74
+
+### n-body-simulation -- per collision pair
+
+| library               |  prep ms |         broad ms |        narrow ms |    total |     ns/q |    fp |    fn | late |    err med | worst late | worst early |
+|-----------------------|----------|------------------|------------------|----------|----------|-------|-------|------|------------|------------|-------------|
+| SCCD host Relaxed     |   10.021 |  71.595 /  160.36 | 150.401 /  306.75 |  230.759 |    6.993 |     9 |     0 |    0 |  -1.82e-08 |          0 |    -0.00127 |
+| SCCD host Tight       |   10.582 |  71.449 /  170.30 | 140.621 /  320.61 |  241.023 |    9.076 |    11 |     0 |    0 |  -3.02e-08 |          0 |    -0.00024 |
+| SCCD device Relaxed   |    6.942 |  52.256 /  104.34 |  36.667 /  130.37 |   96.829 |    2.068 |    28 |     0 |    0 |  -1.04e-07 |          0 |    -0.00263 |
+| SCCD device Tight     |    6.874 |  53.527 /  104.63 |  34.395 /   87.75 |   95.467 |    1.936 |    12 |     0 |    0 |  -3.02e-08 |          0 |    -0.00024 |
+| ACCD host             |   10.303 |  71.557 /  151.35 |  20.933 /   44.78 |  105.386 |    1.468 |   107 |     0 |    0 |    -0.0643 |          0 |      -0.897 |
+
+  curated queries with a contact per pass: 2947611
+
+### puffer-ball -- earliest time of impact
+
+| library               |  prep ms |         broad ms |        narrow ms |    total |     ns/q |     err med |     err worst | late |
+|-----------------------|----------|------------------|------------------|----------|----------|-------------|---------------|------|
+| SCCD host Relaxed     |   34.696 | 1448.995 / 4348.33 | 111.825 / 3734.16 | 1593.714 |    5.399 |     -0.0325 |       -0.0005 |    0 |
+| SCCD host Tight       |   35.607 | 1472.220 / 4411.97 |  69.182 /  645.97 | 1581.523 |    2.993 |   -1.76e-05 |     -1.37e-06 |    0 |
+| SCCD device Relaxed   |   49.488 | 191.803 /  938.98 |   2.900 /  188.09 |  243.261 |   0.1204 |     -0.0584 |      -0.00251 |    0 |
+| SCCD device Tight     |   49.706 | 193.499 /  951.18 |   5.100 /   38.37 |  246.353 |   0.1995 |   -1.85e-05 |      -7.6e-07 |    0 |
+| Scalable CCD device   |   10.764 | 856.337 / 2090.40 | 157.686 / 1561.35 | 1014.892 |    6.986 |     -0.0584 |      -0.00251 |    0 |
+| Scalable CCD host     |   11.091 | 4632.390 /14896.80 |   0.000 /    0.00 | 4644.581 |        - |           - |             - |    - |
+
+  steps with a known contact: 120
+
+### puffer-ball -- per collision pair
+
+| library               |  prep ms |         broad ms |        narrow ms |    total |     ns/q |    fp |    fn | late |    err med | worst late | worst early |
+|-----------------------|----------|------------------|------------------|----------|----------|-------|-------|------|------------|------------|-------------|
+| SCCD host Relaxed     |   34.696 | 1448.995 / 4348.33 | 115.887 / 3336.12 | 1601.138 |    5.612 | 27380 |     0 |    0 |    -0.0398 |          0 |      -0.975 |
+| SCCD host Tight       |   35.607 | 1472.220 / 4411.97 | 131.416 / 2021.25 | 1765.613 |    6.072 |   536 |     0 |    0 |     -4e-05 |          0 |      -0.261 |
+| SCCD device Relaxed   |   49.488 | 191.803 /  938.98 |  33.160 /  475.57 |  271.319 |    1.447 | 27380 |     0 |    0 |     -0.042 |          0 |      -0.975 |
+| SCCD device Tight     |   49.706 | 193.499 /  951.18 |  32.599 /  656.20 |  273.630 |    1.521 |   558 |     0 |    0 |  -4.03e-05 |          0 |      -0.261 |
+| ACCD host             |   33.612 | 1481.095 / 4732.60 |  27.346 /  228.13 | 1567.887 |    1.219 | 27374 |     0 |    0 |     -0.105 |          0 |      -0.976 |
+
+  curated queries with a contact per pass: 1486790
+
+### rod-twist -- earliest time of impact
+
+| library               |  prep ms |         broad ms |        narrow ms |    total |     ns/q |     err med |     err worst | late |
+|-----------------------|----------|------------------|------------------|----------|----------|-------------|---------------|------|
+| SCCD host Relaxed     |    6.244 |   3.133 /   12.46 |   5.469 /   28.62 |   15.587 |    9.427 |      -0.012 |     -5.11e-06 |    0 |
+| SCCD host Tight       |    6.482 |   3.079 /   10.22 |   5.204 /  126.97 |   14.724 |    8.425 |   -7.32e-05 |      -3.3e-07 |    0 |
+| SCCD device Relaxed   |    4.009 |   1.783 /    9.97 |   1.845 /   58.52 |    7.392 |    2.316 |     -0.0146 |     -9.92e-06 |    0 |
+| SCCD device Tight     |    4.020 |   1.851 /   24.82 |   2.938 /  142.51 |    8.588 |    4.373 |   -7.23e-05 |     -2.15e-07 |    0 |
+| Scalable CCD device   |    1.691 |  10.438 /   30.86 |  13.858 /  137.57 |   26.363 |    22.07 |     -0.0203 |         0.969 |   33 |
+| Scalable CCD host     |    1.166 |  14.001 /   30.37 |   0.000 /    0.00 |   15.198 |        - |           - |             - |    - |
+
+  steps with a known contact: 2481
+
+### rod-twist -- per collision pair
+
+| library               |  prep ms |         broad ms |        narrow ms |    total |     ns/q |    fp |    fn | late |    err med | worst late | worst early |
+|-----------------------|----------|------------------|------------------|----------|----------|-------|-------|------|------------|------------|-------------|
+| SCCD host Relaxed     |    6.244 |   3.133 /   12.46 |   8.061 /  492.85 |   18.624 |    16.93 | 228608 |     0 |    0 |    -0.0268 |          0 |      -0.996 |
+| SCCD host Tight       |    6.482 |   3.079 /   10.22 |   7.733 / 1978.78 |   18.372 |    21.29 |  1243 |     0 |    0 |  -0.000275 |          0 |      -0.993 |
+| SCCD device Relaxed   |    4.009 |   1.783 /    9.97 |   3.153 /   34.72 |    8.758 |    5.055 | 244973 |     0 |    0 |    -0.0294 |          0 |      -0.996 |
+| SCCD device Tight     |    4.020 |   1.851 /   24.82 |   4.142 /   80.14 |    9.713 |    7.083 |  1245 |     0 |    0 |  -0.000275 |          0 |      -0.993 |
+| ACCD host             |    7.183 |   3.038 /   10.06 |   1.304 /   26.72 |   11.429 |    1.841 | 16708 |     0 |    0 |    -0.0232 |          0 |      -0.994 |
+
+  curated queries with a contact per pass: 285431
+
   Time-of-impact error is signed: reported minus exact root, so negative is
   conservative and a positive value is a contact reported after the true one.
   Counts are per pass over the case list. The mesh path and the exact roots
@@ -135,58 +212,71 @@ time over the candidates handed to it.
 ## What the numbers say
 
 **Conservativeness.** SCCD reports no missed contact and no time of impact after
-the true root anywhere: zero late steps on all three scenes in every mode, and
-zero late answers over `130,859`, `664,919` and `6,773` curated contacts per
-pass. Its worst signed step error is negative on every scene. ACCD is likewise
-never late and never misses.
+the true root anywhere: zero late steps on all six scenes in every mode, and zero
+late answers over the `5,522,383` curated contacts scored per pass. Its worst
+signed step error is negative on every scene. ACCD is likewise never late and
+never misses.
 
 Scalable CCD's earliest time of impact lands after the true one on `265` of `394`
 armadillo steps per pass, by up to `0.999` -- reporting no contact at all for
-steps that have one -- and on `8` of `363` cloth-funnel steps. On cloth-ball it is
+steps that have one -- on `33` of rod-twist's `2,481` and on `8` of
+cloth-funnel's `363`. On cloth-ball, n-body-simulation and puffer-ball it is
 conservative throughout. The cause is a race in its subdivision buffer's overflow
-check, described in `../README.md` and diagnosed in `wip/DECISIONS.md` section 8;
-it bites when a candidate list is short relative to the search it starts, which is
-armadillo's situation and not cloth-ball's, and its answers vary between runs.
-Double precision does not change this: the same run under a float32 mesh gave
-`271`.
+check, described in `../README.md` and diagnosed in `wip/DECISIONS.md` section 8.
+The buffer is sized from the number of queries it is handed, so it bites when a
+candidate list is short relative to the search it starts: the three scenes it
+fails are the three with the fewest candidate pairs per step, and the three it
+answers correctly are those with millions. Its answers vary between runs. Double
+precision does not change this: the same run under a float32 mesh gave `271` on
+armadillo.
 
 **Against Scalable CCD, on cost.** At the median, end to end, SCCD on the device
 is `3.4x` faster on armadillo (`5.50` against `18.56` ms per case), `3.7x` on
-cloth-ball (`13.47` against `50.11`) and `4.3x` on cloth-funnel (`4.04` against
-`17.49`). Per candidate its narrow phase costs `18.5` against `57.3` ns on
-armadillo, `1.04` against `21.8` on cloth-ball and `33.0` against `56.3` on
-cloth-funnel. On the host, where Scalable CCD has only a broad phase, SCCD's prep
-plus query is `5.22` against `5.94` ms on armadillo, `21.0` against `22.9` on
-cloth-ball and `4.02` against `4.70` on cloth-funnel.
+cloth-ball (`13.47` against `50.11`), `4.3x` on cloth-funnel (`4.04` against
+`17.49`), `4.1x` on n-body (`63.53` against `260.50`), `4.1x` on puffer-ball
+(`246.35` against `1014.89`) and `3.1x` on rod-twist (`8.59` against `26.36`).
+Per candidate its narrow phase costs `18.5` against `57.3` ns on armadillo, `1.04`
+against `21.8` on cloth-ball, `33.0` against `56.3` on cloth-funnel, `0.19`
+against `10.7` on n-body, `0.20` against `6.99` on puffer-ball and `4.37` against
+`22.1` on rod-twist. On the host, where Scalable CCD has only a broad phase,
+SCCD's prep plus query is `5.22` against `5.94` ms on armadillo, `21.0` against
+`22.9` on cloth-ball, `4.02` against `4.71` on cloth-funnel and `9.56` against
+`15.20` on rod-twist; the sweep leads on the other two, `55.2` against `82.0` on
+n-body and `4644.6` against `1507.8` on puffer-ball, which is the same split the
+broad-phase study reports between our own two strategies.
 
 **Against ACCD, per collision pair, the cost goes the other way.** Over the same
-candidates on the same 72 threads, ACCD is the cheaper narrow phase: `6.6`
-against SCCD Tight's `32.6` ns per candidate on armadillo, `1.44` against `9.17`
-on cloth-ball, `14.4` against `28.9` on cloth-funnel -- two to six times.
-Conservative advancement is cheap per pair precisely because it stops at a bound
-instead of isolating a root.
+candidates on the same 72 threads, ACCD is the cheaper narrow phase on every
+scene: `6.6` against SCCD Tight's `32.6` ns per candidate on armadillo, `1.44`
+against `9.17` on cloth-ball, `14.4` against `28.9` on cloth-funnel, `1.47`
+against `9.08` on n-body, `1.22` against `6.07` on puffer-ball and `1.84` against
+`21.3` on rod-twist -- two to twelve times. Conservative advancement is cheap per
+pair precisely because it stops at a bound instead of isolating a root.
 
-**Tightness separates them by three to four orders of magnitude.** Per pair, SCCD
-Tight's median error is `-3.4e-6` on armadillo, `-2.7e-7` on cloth-ball and
-`-6.9e-6` on cloth-funnel; ACCD's is `-2.9e-2`, `-6.6e-2` and `-8.6e-3`. That is
-`conservative_rescaling = 0.9` doing what it is for, and it shows in the
-false-positive counts too: `444` against `24` on armadillo. Within SCCD, Relaxed
-trades the same way against Tight -- `232` false positives against `24` on
-armadillo, `687` against `15` on cloth-funnel.
+**Tightness separates them by two to six orders of magnitude.** Per pair, SCCD
+Tight's median error is `-3.4e-6` on armadillo, `-2.7e-7` on cloth-ball, `-6.9e-6`
+on cloth-funnel, `-3.0e-8` on n-body, `-4.0e-5` on puffer-ball and `-2.8e-4` on
+rod-twist; ACCD's is `-2.9e-2`, `-6.6e-2`, `-8.6e-3`, `-6.4e-2`, `-1.1e-1` and
+`-2.3e-2`. That is `conservative_rescaling = 0.9` doing what it is for, and it
+shows in the false-positive counts too: `444` against `24` on armadillo and
+`27,374` against `536` on puffer-ball. Within SCCD, Relaxed trades the same way
+against Tight -- `232` false positives against `24` on armadillo, `687` against
+`15` on cloth-funnel, `228,608` against `1,243` on rod-twist, and on puffer-ball
+`27,380`, which puts ACCD at its shipped rescaling about where our looser
+acceptance test sits.
 
 **cloth-funnel starts in contact.** `3,570` of the scene's `7,552` curated
 queries have an exact root of `0`: the primitives already touch when the step
 begins. ACCD reports `0` for them and says so ("Initial distance 0 ≤ d_min=0"),
 which is conservative. Counting its broad-phase candidates too, that warning
-fires about `7,000` times per pass and fills the scene's `.accd.err` files; the
-other two scenes produce none. It is also why `worst early` reaches `-1` there:
-a query whose root is late in the step but whose primitives touch at the start.
+fires about `7,000` times per pass and fills the scene's `.accd.err` files. It is
+also why `worst early` reaches `-1` there: a query whose root is late in the step
+but whose primitives touch at the start.
 
 ## What this run does not establish
 
-Three scenes -- the ones with verified ground truth -- on one machine, three
-repeats. n-body-simulation, rod-twist and puffer-ball are not prepared here;
-puffer-ball has no runnable case until its frames are extracted.
+One machine, three repeats. Every scene of the benchmark is covered, at every
+prepared case, so the gaps left are in hardware and in repetition.
 
 The two host narrow phases are threaded by different runtimes, SCCD's by OpenMP
 and ACCD's by oneTBB, both over 72 threads of one Grace. That is the closest
@@ -197,5 +287,5 @@ of the library whose overflow check is made race-free on the host, run over the
 same cases in double precision, finds all `54,664` curated contacts of
 armadillo's first `400` cases with nothing missed and nothing late. So the buffer
 race accounts for every miss and every late answer, and the library's search is
-otherwise conservative. That copy is diagnosis only; the table above measures the
+otherwise conservative. That copy is diagnosis only; the tables above measure the
 library as published.
