@@ -139,7 +139,8 @@ namespace sccd {
                                              const T* const SCCD_RESTRICT lo1,
                                              const T* const SCCD_RESTRICT hi1,
                                              const Cell2DGridD<T> grid,
-                                             ptrdiff_t* const SCCD_RESTRICT cellptr) {
+                                             ptrdiff_t* const SCCD_RESTRICT cellptr,
+                                             int* const SCCD_RESTRICT ranges) {
                 const ptrdiff_t i = (ptrdiff_t)blockIdx.x * blockDim.x + threadIdx.x;
                 if (i >= n) return;
 
@@ -147,6 +148,14 @@ namespace sccd {
                 const int b = cell0<T>(grid, hi0[i]);
                 const int c = cell1<T>(grid, lo1[i]);
                 const int d = cell1<T>(grid, hi1[i]);
+
+                // The scatter pass reads these back rather than recomputing
+                // them, so the two passes cannot disagree about which cells a
+                // box covers however the arithmetic is scheduled.
+                ranges[4 * i + 0] = a;
+                ranges[4 * i + 1] = b;
+                ranges[4 * i + 2] = c;
+                ranges[4 * i + 3] = d;
 
                 for (int j = c; j <= d; ++j) {
                     for (int k = a; k <= b; ++k) {
@@ -165,10 +174,7 @@ namespace sccd {
 
             template <typename T, typename I>
             __global__ void bin_fill_kernel(const ptrdiff_t n,
-                                            const T* const SCCD_RESTRICT lo0,
-                                            const T* const SCCD_RESTRICT hi0,
-                                            const T* const SCCD_RESTRICT lo1,
-                                            const T* const SCCD_RESTRICT hi1,
+                                            const int* const SCCD_RESTRICT ranges,
                                             const Cell2DGridD<T> grid,
                                             const ptrdiff_t* const SCCD_RESTRICT cellptr,
                                             I* const SCCD_RESTRICT cellidx,
@@ -177,16 +183,15 @@ namespace sccd {
                 const ptrdiff_t i = (ptrdiff_t)blockIdx.x * blockDim.x + threadIdx.x;
                 if (i >= n) return;
 
-                const int a = cell0<T>(grid, lo0[i]);
-                const int b = cell0<T>(grid, hi0[i]);
-                const int c = cell1<T>(grid, lo1[i]);
-                const int d = cell1<T>(grid, hi1[i]);
+                const int a = ranges[4 * i + 0];
+                const int b = ranges[4 * i + 1];
+                const int c = ranges[4 * i + 2];
+                const int d = ranges[4 * i + 3];
                 const ptrdiff_t ncells = grid.ncells();
 
                 for (int j = c; j <= d; ++j) {
                     for (int k = a; k <= b; ++k) {
                         const ptrdiff_t cell = cell_of<T>(grid, k, j);
-                        atomicAdd((unsigned long long*)&cursor[ncells + 1], 1ull);
                         // A write outside the array is counted rather than made.
                         // The counting pass reserved exactly one slot per span,
                         // so a bad index here means the two passes disagreed,
@@ -568,13 +573,15 @@ namespace sccd {
 
             dim3 block(SCCD_C2D_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
             dim3 gridsz((n + block.x - 1) / block.x);
+            int* const ranges = workspace(WorkspaceSlot::CellRange).get_as<int>(4 * (size_t)n);
             detail::bin_count_kernel<T><<<gridsz, block>>>(n,
                                                         soa_device_row<T>(aabbs, grid.axis0),
                                                         soa_device_row<T>(aabbs, SCCD_DIM + grid.axis0),
                                                         soa_device_row<T>(aabbs, grid.axis1),
                                                         soa_device_row<T>(aabbs, SCCD_DIM + grid.axis1),
                                                         grid,
-                                                        cellptr);
+                                                        cellptr,
+                                                        ranges);
             SCCD_CUDA_LAST_ERROR();
 
             detail::inclusive_sum<T>(cellptr, ncells + 1);
@@ -604,15 +611,13 @@ namespace sccd {
                 return;
             }
             // One past the cells: the slot the kernel counts rejected writes in.
-            SCCD_CHECK_CUDA(cudaMemset(cursor, 0, sizeof(ptrdiff_t) * (size_t)(grid.ncells() + 2)));
+            SCCD_CHECK_CUDA(cudaMemset(cursor, 0, sizeof(ptrdiff_t) * (size_t)(grid.ncells() + 1)));
 
             dim3 block(SCCD_C2D_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
             dim3 gridsz((n + block.x - 1) / block.x);
+            const int* const ranges = workspace(WorkspaceSlot::CellRange).get_as<int>(4 * (size_t)n);
             detail::bin_fill_kernel<T, I><<<gridsz, block>>>(n,
-                                                          soa_device_row<T>(aabbs, grid.axis0),
-                                                          soa_device_row<T>(aabbs, SCCD_DIM + grid.axis0),
-                                                          soa_device_row<T>(aabbs, grid.axis1),
-                                                          soa_device_row<T>(aabbs, SCCD_DIM + grid.axis1),
+                                                          ranges,
                                                           grid,
                                                           cellptr,
                                                           cellidx,
@@ -620,11 +625,8 @@ namespace sccd {
                                                           cursor);
             SCCD_CUDA_LAST_ERROR();
             if (out_rejected) {
-                ptrdiff_t both[2] = {0, 0};
-                SCCD_CHECK_CUDA(cudaMemcpy(both, cursor + grid.ncells(),
-                                           sizeof(ptrdiff_t) * 2, cudaMemcpyDeviceToHost));
-                out_rejected[0] = both[0];
-                out_rejected[1] = both[1];
+                SCCD_CHECK_CUDA(cudaMemcpy(out_rejected, cursor + grid.ncells(),
+                                           sizeof(ptrdiff_t), cudaMemcpyDeviceToHost));
             }
         }
 
