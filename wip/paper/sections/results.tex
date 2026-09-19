@@ -257,9 +257,10 @@ puffer-ball's $240$ cases.
   \includegraphics[width=\linewidth]{figures/broad-per-frame.pdf}
   \caption{Broad-phase cost through each simulation: the acceleration structure
     and the traversal over it added, in milliseconds for one step, both query
-    types together, against frame index. The two host strategies are drawn
-    separately; the device broad phase does not implement the choice, so it is
-    one curve.}
+    types together, against frame index. Colour carries the processor and
+    intensity the strategy, the cell list at full strength and the sweep
+    lightened. The device curve is the sweep: the device CCD path dispatches
+    only to it, so there is no device cell list to draw.}
   \label{fig:bpframe}
 \end{figure}
 

@@ -57,6 +57,17 @@ def frame_of(case: str):
     return int(m.group(1)) if m else None
 
 
+def lighten(hex_color, amount):
+    """The same hue at a lower intensity, blended that far towards white.
+
+    Intensity carries the broad-phase strategy where a dash pattern would break
+    up curves that already change direction every frame.
+    """
+    h = hex_color.lstrip("#")
+    rgb = [int(h[i:i + 2], 16) for i in (0, 2, 4)]
+    return "#" + "".join(f"{round(c + (255 - c) * amount):02x}" for c in rgb)
+
+
 def log_y(ax):
     """A log y axis a reader can read on a panel spanning under a decade.
 
@@ -204,9 +215,14 @@ def per_frame():
 # `sccd::device::cell2d_*` has no caller outside its own unit test -- so its two
 # settings are one code path measured twice and are pooled as repeats rather
 # than drawn as a comparison that does not exist.
-SERIES_BP = (("cell list, CPU", HOST, ("cell2d",), "-"),
-             ("sweep, CPU", HOST, ("sweep",), "--"),
-             ("GPU", DEV, ("cell2d", "sweep"), "-"))
+# Colour carries the processor and intensity the strategy: the cell list at full
+# strength, the sweep at the same hue lightened. The device curve is the sweep,
+# so it takes the sweep's intensity, and the absence of a full-strength device
+# curve is the point -- there is no device cell list in the CCD path to draw.
+SWEEP_TINT = 0.45
+SERIES_BP = (("cell list, CPU", HOST, ("cell2d",), 0.0),
+             ("sweep, CPU", HOST, ("sweep",), SWEEP_TINT),
+             ("sweep, GPU", DEV, ("cell2d", "sweep"), SWEEP_TINT))
 
 
 def broad_per_frame():
@@ -234,15 +250,15 @@ def broad_per_frame():
     fig, axes = plt.subplots(1, len(SCENES), figsize=style.figsize(
         style.FULL_WIDTH_IN, 0.30))
     for ax, scene in zip(axes, SCENES):
-        for lab, mode, strategies, dash in SERIES_BP:
+        for lab, mode, strategies, tint in SERIES_BP:
             got = [acc[scene][(mode, s)] for s in strategies
                    if acc[scene][(mode, s)]]
             if not got:
                 continue
             frames = sorted(set().union(*(set(d) for d in got)))
             ys = [st.median([d[f] for d in got if f in d]) for f in frames]
-            ax.plot(frames, ys, lw=0.7, ls=dash,
-                    color=style.MODE_COLOR[mode], label=lab)
+            ax.plot(frames, ys, lw=0.7,
+                    color=lighten(style.MODE_COLOR[mode], tint), label=lab)
         log_y(ax)
         ax.set_title(LABEL.get(scene, scene), fontsize=7)
         ax.set_xlabel("frame", fontsize=7)
