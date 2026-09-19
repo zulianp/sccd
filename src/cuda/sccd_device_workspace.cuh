@@ -82,7 +82,7 @@ namespace sccd {
          * Separate slots so that two buffers needed at the same time (for
          * example CUB temp storage and the sort's index array) never alias.
          */
-        enum class WorkspaceSlot { TempStorage = 0, SortIndex, Scratch, Count };
+        enum class WorkspaceSlot { TempStorage = 0, SortIndex, Scratch, CellRange, Count };
 
         inline DeviceWorkspace& workspace(const WorkspaceSlot slot) {
             static DeviceWorkspace slots[static_cast<int>(WorkspaceSlot::Count)];

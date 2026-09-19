@@ -422,23 +422,21 @@ namespace sccd {
 
             const ptrdiff_t want = spans > 0 ? spans : 1;
             if (!cellidx || cellidx->size() < want) {
-                cellidx = smesh::create_buffer<smesh::idx_t>(want, execution_space_);
+                cellidx = smesh::create_device_buffer<smesh::idx_t>(want);
             }
 
-            ptrdiff_t rejected[2] = {0, 0};
+            ptrdiff_t rejected = 0;
             sccd::device::cell2d_fill<scalar_t, smesh::idx_t>(
                 n, aabb, grid, cellptr->data(), cellidx->data(), cellidx->size(),
-                cursor->data(), rejected);
-            if (rejected[0]) {
-                fprintf(stderr, "sccd: fill attempted %ld writes, count reserved %ld\n",
-                        (long)rejected[1], (long)spans);
+                cursor->data(), &rejected);
+            if (rejected) {
                 // The counting pass reserves one slot per span, so this cannot
                 // happen while the two passes agree. Saying so is better than
                 // running the query over a cell list that is quietly missing
                 // entries, which would drop candidate pairs.
                 SMESH_ERROR("sccd: device cell list rejected %ld of %ld spans over %ld boxes "
                             "(grid %dx%d)\n",
-                            (long)rejected[0], (long)spans, (long)n, grid.n0, grid.n1);
+                            (long)rejected, (long)spans, (long)n, grid.n0, grid.n1);
             }
         }
 #endif
@@ -1453,10 +1451,16 @@ namespace sccd {
                 // cap the grid setup enforces so that no step reallocates them.
                 // One-time per mesh, like everything else here, and so outside
                 // what a step is timed for.
-                v_cellptr_d_ = smesh::create_buffer<ptrdiff_t>(4 * n_nodes + 2, execution_space_);
-                v_cursor_d_ = smesh::create_buffer<ptrdiff_t>(4 * n_nodes + 2, execution_space_);
-                e_cellptr_d_ = smesh::create_buffer<ptrdiff_t>(4 * n_edges + 2, execution_space_);
-                e_cursor_d_ = smesh::create_buffer<ptrdiff_t>(4 * n_edges + 2, execution_space_);
+                // create_device_buffer, not create_buffer: the fill pass takes a
+                // device atomic on the cursor, and a buffer the allocator places
+                // in system memory is reachable from the device through address
+                // translation but does not carry those atomics reliably. The
+                // counts then come out wrong, intermittently and only for the
+                // list that landed there.
+                v_cellptr_d_ = smesh::create_device_buffer<ptrdiff_t>(4 * n_nodes + 2);
+                v_cursor_d_ = smesh::create_device_buffer<ptrdiff_t>(4 * n_nodes + 2);
+                e_cellptr_d_ = smesh::create_device_buffer<ptrdiff_t>(4 * n_edges + 2);
+                e_cursor_d_ = smesh::create_device_buffer<ptrdiff_t>(4 * n_edges + 2);
             }
 #endif
         }
