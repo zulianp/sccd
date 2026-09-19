@@ -173,6 +173,117 @@ namespace {
         return st;
     }
 
+
+    // ---------------------------------------------------------------- isolate ---
+    /**
+     * \brief Drive the binning passes alone, over boxes dumped from a real run.
+     *
+     * The pipeline offers no way to see which of the two passes is wrong, so
+     * this recomputes the per-cell counts on the host from the same boxes and
+     * the same grid, and compares them with the row pointer the device scan
+     * produced. Whatever disagrees is named.
+     */
+    int cell0_host(const sccd::device::Cell2DGridD<scalar_t>& g, const scalar_t v) {
+        const scalar_t f = (v - g.min0) * g.inv0;
+        if (!(f > scalar_t(0))) return 0;
+        const int c = (int)f;
+        return c >= g.n0 ? g.n0 - 1 : c;
+    }
+    int cell1_host(const sccd::device::Cell2DGridD<scalar_t>& g, const scalar_t v) {
+        const scalar_t f = (v - g.min1) * g.inv1;
+        if (!(f > scalar_t(0))) return 0;
+        const int c = (int)f;
+        return c >= g.n1 ? g.n1 - 1 : c;
+    }
+
+    int run_from_dump(const char* path, const int repeats) {
+        std::FILE* f = std::fopen(path, "rb");
+        if (!f) {
+            std::fprintf(stderr, "cannot open %s\n", path);
+            return 2;
+        }
+        long n = 0;
+        if (std::fread(&n, sizeof(n), 1, f) != 1 || n <= 0) {
+            std::fprintf(stderr, "bad dump %s\n", path);
+            return 2;
+        }
+        DeviceBoxes b;
+        b.n = n;
+        b.nxe = 2;
+        for (int d = 0; d < 6; ++d) {
+            b.h[d].resize((size_t)n);
+            if (std::fread(b.h[d].data(), sizeof(scalar_t), (size_t)n, f) != (size_t)n) {
+                std::fprintf(stderr, "short dump %s\n", path);
+                return 2;
+            }
+        }
+        std::fclose(f);
+        for (int v = 0; v < b.nxe; ++v) b.h_elem[v].assign((size_t)n, 0);
+        b.upload();
+        std::printf("loaded %ld boxes from %s\n", n, path);
+
+        int failures = 0;
+        for (int rep = 0; rep < repeats; ++rep) {
+            sccd::device::Cell2DGridD<scalar_t> grid;
+            ptrdiff_t spans = 0;
+            ptrdiff_t* cellptr = nullptr;
+            SCCD_CUDA_CHECK(cudaMalloc(&cellptr, sizeof(ptrdiff_t) * (size_t)(4 * n + 2)));
+            int* ranges = nullptr;
+            SCCD_CUDA_CHECK(cudaMalloc(&ranges, sizeof(int) * (size_t)(4 * n + 4)));
+            sccd::device::cell2d_setup_and_count<scalar_t, idx_t>(n, b.aabbs, grid, cellptr, ranges, &spans);
+
+            const ptrdiff_t ncells = grid.ncells();
+
+            // What the boxes imply, computed here.
+            std::vector<ptrdiff_t> want((size_t)ncells + 1, 0);
+            for (long i = 0; i < n; ++i) {
+                const int a = cell0_host(grid, b.h[grid.axis0][(size_t)i]);
+                const int bb = cell0_host(grid, b.h[3 + grid.axis0][(size_t)i]);
+                const int c = cell1_host(grid, b.h[grid.axis1][(size_t)i]);
+                const int d = cell1_host(grid, b.h[3 + grid.axis1][(size_t)i]);
+                for (int j = c; j <= d; ++j) {
+                    for (int k = a; k <= bb; ++k) want[(size_t)((ptrdiff_t)j * grid.n0 + k) + 1]++;
+                }
+            }
+            for (ptrdiff_t c = 0; c < ncells; ++c) want[(size_t)c + 1] += want[(size_t)c];
+
+            std::vector<ptrdiff_t> got((size_t)ncells + 1, -1);
+            SCCD_CUDA_CHECK(cudaMemcpy(got.data(), cellptr,
+                                       sizeof(ptrdiff_t) * (size_t)(ncells + 1), cudaMemcpyDeviceToHost));
+            ptrdiff_t off = 0, first = -1;
+            for (ptrdiff_t c = 0; c <= ncells; ++c) {
+                if (got[(size_t)c] != want[(size_t)c]) {
+                    if (first < 0) first = c;
+                    ++off;
+                }
+            }
+
+            idx_t* cellidx = nullptr;
+            ptrdiff_t* cursor = nullptr;
+            SCCD_CUDA_CHECK(cudaMalloc(&cellidx, sizeof(idx_t) * (size_t)(spans > 0 ? spans : 1)));
+            SCCD_CUDA_CHECK(cudaMalloc(&cursor, sizeof(ptrdiff_t) * (size_t)(ncells + 1)));
+            ptrdiff_t rejected = 0;
+            sccd::device::cell2d_fill<scalar_t, idx_t>(
+                n, b.aabbs, grid, cellptr, ranges, cellidx, spans > 0 ? spans : 1, cursor, &rejected);
+            SCCD_CUDA_CHECK(cudaDeviceSynchronize());
+
+            std::printf("rep %d: grid %dx%d axes %d,%d spans=%ld host_total=%ld "
+                        "cellptr_wrong=%ld (first cell %ld) rejected=%ld\n",
+                        rep, grid.n0, grid.n1, grid.axis0, grid.axis1, (long)spans,
+                        (long)want[(size_t)ncells], (long)off, (long)first, (long)rejected);
+            if (off || rejected) ++failures;
+
+            cudaFree(cellptr);
+            cudaFree(cellidx);
+            cudaFree(cursor);
+            cudaFree(ranges);
+        }
+        b.free_all();
+        std::printf(failures ? "FAIL: %d of %d reps disagreed\n" : "OK: %d of %d reps disagreed\n",
+                    failures, repeats);
+        return failures ? 1 : 0;
+    }
+
     using PairSet = std::set<std::pair<idx_t, idx_t>>;
 
     PairSet download(idx_t* a, idx_t* b, const ptrdiff_t n) {
@@ -193,7 +304,9 @@ namespace {
         // ncells is not known until setup picks the axes, so size generously and
         // let setup memset what it needs; 4n is the cap setup itself enforces.
         SCCD_CUDA_CHECK(cudaMalloc(&cellptr, sizeof(ptrdiff_t) * (size_t)(4 * e.n + 2)));
-        sccd::device::cell2d_setup_and_count<scalar_t, idx_t>(e.n, e.aabbs, grid, cellptr, &spans);
+        int* ranges = nullptr;
+        SCCD_CUDA_CHECK(cudaMalloc(&ranges, sizeof(int) * (size_t)(4 * e.n + 4)));
+        sccd::device::cell2d_setup_and_count<scalar_t, idx_t>(e.n, e.aabbs, grid, cellptr, ranges, &spans);
 
         idx_t* cellidx = nullptr;
         ptrdiff_t* cursor = nullptr;
@@ -201,7 +314,7 @@ namespace {
         SCCD_CUDA_CHECK(cudaMalloc(&cursor, sizeof(ptrdiff_t) * (size_t)(grid.ncells() + 1)));
         ptrdiff_t rejected = 0;
         sccd::device::cell2d_fill<scalar_t, idx_t>(
-            e.n, e.aabbs, grid, cellptr, cellidx, spans > 0 ? spans : 1, cursor, &rejected);
+            e.n, e.aabbs, grid, cellptr, ranges, cellidx, spans > 0 ? spans : 1, cursor, &rejected);
         if (rejected) {
             fprintf(stderr, "cell2d_fill rejected %ld of %ld spans\n", (long)rejected, (long)spans);
             std::exit(1);
@@ -226,6 +339,7 @@ namespace {
         cudaFree(cellptr);
         cudaFree(cellidx);
         cudaFree(cursor);
+        cudaFree(ranges);
         cudaFree(ccdptr);
         cudaFree(o0);
         cudaFree(o1);
@@ -317,6 +431,11 @@ namespace {
 }  // namespace
 
 int main(int argc, char** argv) {
+    if (const char* dump = std::getenv("SCCD_CELL2D_BOXES")) {
+        const char* reps = std::getenv("SCCD_CELL2D_REPS");
+        return run_from_dump(dump, reps ? std::atoi(reps) : 5);
+    }
+
     int device_count = 0;
     if (cudaGetDeviceCount(&device_count) != cudaSuccess || device_count == 0) {
         std::printf("no CUDA device available, skipping\n");
