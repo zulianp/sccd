@@ -1,0 +1,19 @@
+\begin{table}[htbp]
+  \centering
+  \caption{The benchmark problems. \emph{cases} is simulation steps with a runnable query set, \emph{candidate pairs} the mean number the broad phase produces per step, and \emph{queries} the curated per-step query sets that carry exact symbolic roots.}
+  \label{tab:dataset-relaxed}
+  \fittable{%
+\begin{tabular}{lrrrr}
+    \toprule
+    scene & cases & pairs/step & queries & w/ root \\
+    \midrule
+    armadillo-rollers & 781 & 109,214 & 131,441 & 130,859 \\
+    cloth-ball & 79 & 2,217,099 & 664,940 & 664,919 \\
+    cloth-funnel & 577 & 43,661 & 7,552 & 6,773 \\
+    n-body & 146 & 15,436,757 & 2,947,719 & 2,947,611 \\
+    puffer-ball & 240 & 30,529,227 & 1,514,172 & 1,486,790 \\
+    rod-twist & 4,571 & 847,250 & 549,208 & 285,431 \\
+    \bottomrule
+  \end{tabular}}
+  \par\smallskip\footnotesize Source: \texttt{benchmark/results/sweep-gh200-bp.csv}
+\end{table}

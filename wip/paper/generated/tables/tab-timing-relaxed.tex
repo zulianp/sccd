@@ -1,0 +1,26 @@
+\begin{table}[htbp]
+  \centering
+  \caption{Wall-clock time per scene and narrow-phase mode, as a whole-scene total in milliseconds summed over every case in the scene, given as median / slowest over independent repeats. \emph{broad} is the whole broad phase, the acceleration structure and the traversal over it together. The two narrow-phase columns are the two output modes: \emph{earliest} returns one time of impact for the step, so every query prunes against the running minimum, while \emph{per-pair} returns one per candidate with no shared bound. \emph{total} is broad + earliest.}
+  \label{tab:timing-relaxed}
+  \fittable{%
+\begin{tabular}{llrrrrrrr}
+    \toprule
+    scene & mode & cases & pairs & rep & broad (ms) & earliest (ms) & per-pair (ms) & total (ms) \\
+    \midrule
+    armadillo-rollers & GPU & 781 & 85,296,282 & 3 & 2868.1 / 2910.5 & 1384.0 / 1418.0 & 2370.0 / 2385.8 & 4286.1 / 4294.5 \\
+    armadillo-rollers & CPU & 781 & 85,296,282 & 3 & 2653.9 / 2830.6 & 661.3 / 675.7 & 2125.2 / 2182.5 & 3315.2 / 3506.3 \\
+    cloth-ball & GPU & 79 & 175,150,856 & 3 & 1069.0 / 1076.7 & 175.9 / 177.9 & 926.4 / 933.7 & 1244.9 / 1254.6 \\
+    cloth-ball & CPU & 79 & 175,150,856 & 3 & 1736.5 / 1738.1 & 981.9 / 984.6 & 1766.7 / 1770.2 & 2716.9 / 2720.0 \\
+    cloth-funnel & GPU & 577 & 25,192,698 & 3 & 1858.9 / 1874.3 & 692.7 / 696.3 & 734.3 / 749.4 & 2531.5 / 2570.6 \\
+    cloth-funnel & CPU & 577 & 25,192,698 & 3 & 1740.1 / 1776.3 & 221.4 / 233.2 & 357.0 / 374.9 & 1954.2 / 2009.5 \\
+    n-body & GPU & 146 & 2,253,766,609 & 3 & 7420.8 / 7439.8 & 416.0 / 416.4 & 4500.9 / 4537.3 & 7836.8 / 7850.8 \\
+    n-body & CPU & 146 & 2,253,766,609 & 3 & 11612.0 / 11616.5 & 8871.6 / 8889.1 & 16546.3 / 16562.8 & 20478.5 / 20483.6 \\
+    puffer-ball & GPU & 240 & 7,327,014,600 & 3 & 75325.5 / 75381.8 & 867.7 / 897.7 & 10762.8 / 11312.7 & 76223.2 / 76249.5 \\
+    puffer-ball & CPU & 240 & 7,327,014,600 & 3 & 78662.7 / 78979.6 & 32116.3 / 32125.6 & 34884.3 / 35236.7 & 110788.3 / 110910.7 \\
+    rod-twist & GPU & 4571 & 3,872,779,843 & 3 & 27376.2 / 28768.3 & 8974.2 / 9073.6 & 19787.8 / 19928.4 & 36449.8 / 37742.5 \\
+    rod-twist & CPU & 4571 & 3,872,779,843 & 3 & 43159.9 / 43660.7 & 34994.6 / 35202.6 & 62239.9 / 62497.5 & 78362.6 / 78655.2 \\
+    \bottomrule
+  \end{tabular}}
+  \par\smallskip\footnotesize Each cell is the median over repeats and the slowest of them. A difference smaller than the gap between the two does not separate two modes and is not reported as a ratio anywhere in this document. Which mode is faster depends on the output mode as well as the scene, so the two are given side by side rather than one standing for the other.
+  \par\smallskip\footnotesize Source: \texttt{benchmark/results/sweep-gh200-bp.csv}
+\end{table}

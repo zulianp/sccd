@@ -1,0 +1,137 @@
+\documentclass[11pt]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+
+\usepackage{arxiv}
+
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsthm}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{algorithm}
+% `noend`: one-line bodies dominate here, and an explicit terminator after each
+% of them costs more clarity than it buys. Indentation carries the structure.
+\usepackage[noend]{algpseudocode}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning, fit, backgrounds, calc, patterns}
+\usepackage{xcolor}
+\usepackage[numbers,sort&compress]{natbib}
+% Bibliography URLs are long enough to leave an underfull line if they can only
+% break at punctuation; xurl lets them break anywhere.
+\usepackage[hidelinks]{hyperref}
+\usepackage{xurl}
+\usepackage[capitalise,noabbrev]{cleveref}
+
+% Each environment gets its own counter. Sharing one makes cleveref name every
+% reference after the counter, so \cref of a definition comes out as "Theorem".
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}
+\newtheorem{proposition}{Proposition}
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}
+\theoremstyle{remark}
+\newtheorem{remark}{Remark}
+
+% The palette the figures were drawn with, so a TikZ schematic sitting beside
+% one of them does not look like it came from a different document.
+\definecolor{sccdTeal}{HTML}{0E8AA0}
+\definecolor{sccdAmber}{HTML}{C07C10}
+\definecolor{sccdPlum}{HTML}{8A3C74}
+\definecolor{sccdMoss}{HTML}{3E6E4B}
+\definecolor{sccdInk}{HTML}{333A41}
+\definecolor{sccdGrid}{HTML}{D6DBE0}
+
+% Notation used throughout, defined once.
+\newcommand{\Fdiff}{\mathbf{F}}          % the difference function
+\newcommand{\Rthree}{\mathbb{R}^{3}}
+\newcommand{\toi}{t^{\star}}             % the reported time of impact
+\newcommand{\toitrue}{\bar{t}}           % the true earliest root
+\newcommand{\mach}{\varepsilon}          % machine epsilon
+\newcommand{\dom}{\mathcal{B}}           % a box in (t, u, v)
+\newcommand{\Cand}{\mathcal{C}}          % the candidate set
+\newcommand{\Boxes}{\mathcal{B}}
+\DeclareMathOperator{\hull}{hull}
+% Small caps for the algorithm's named steps. Wrapped in \textnormal so it
+% survives the italic body of a theorem, where lmodern has no italic small caps.
+% The two primitives of a query, coloured as they are in the schematics: the
+% teal and plum boxes of Figure 8 are the same two primitives whose difference
+% function these equations root, so a reader can carry one picture into the
+% other. Named by role rather than by colour, so the palette can change in one
+% place.
+\newcommand{\primA}[1]{\textcolor{sccdTeal}{#1}}
+\newcommand{\primB}[1]{\textcolor{sccdPlum}{#1}}
+% The quantity under test -- amber in both schematics, where it marks the query
+% box, the overlap it forms, and the query that overruns a block.
+\newcommand{\tested}[1]{\textcolor{sccdAmber}{#1}}
+
+\newcommand{\op}[1]{\textnormal{\textsc{#1}}}
+
+% Generated tables are as wide as their data. This shrinks one only when it
+% would otherwise run into the margin, and leaves every table that already fits
+% at its natural size -- so the common case keeps the body font exactly.
+\newcommand{\fittable}[1]{%
+  \resizebox{\ifdim\width>\linewidth \linewidth\else \width\fi}{!}{#1}}
+
+\headertitle{Conservative continuous collision detection on CPU and GPU}
+\preprintmark{\textsc{Preprint}}
+
+\title{A Conservative Continuous Collision Detection Pipeline\\
+       for Triangle and Quad Meshes on CPU and GPU}
+
+% Affiliation marks run in order of first appearance, so Victoria is 3 rather
+% than 7: it is Patrick's third and Teseo's only one, and the two share the entry.
+\author{%
+  Patrick Zulian\affilmark{1,2,3}\thanks{Corresponding author:
+  \texttt{patrick.zulian@usi.ch}, ORCID 0000-0002-5822-3288.}
+  \and David Belgrod\affilmark{4}
+  \and Bolun Wang\affilmark{5}
+  \and Zachary Ferguson\affilmark{6}
+  \and Xin Zhao\affilmark{4}
+  \and Marco Attene\affilmark{7}
+  \and Daniele Panozzo\affilmark{4}
+  \and Teseo Schneider\affilmark{3}%
+}
+
+\affiliations{%
+  \affiltext{1}{Euler Institute, Universit\`a della Svizzera italiana,
+    Via Buffi 13, 6900 Lugano, Ticino, Switzerland}
+  \affiltext{2}{UniDistance Suisse, Schinerstrasse 18, 3900 Brig, Valais,
+    Switzerland}
+  \affiltext{3}{University of Victoria, Victoria, BC, Canada}
+  \affiltext{4}{New York University, New York, NY, USA}
+  \affiltext{5}{King Abdullah University of Science and Technology, Thuwal,
+    Saudi Arabia}
+  \affiltext{6}{Massachusetts Institute of Technology, Cambridge, MA, USA}
+  \affiltext{7}{IMATI -- CNR, Genoa, Italy}%
+}
+
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\input{sections/abstract}
+
+\keywords{continuous collision detection \and conservative algorithms \and
+  interval methods \and GPU computing \and SIMD \and contact simulation}
+
+\input{sections/intro}
+\input{sections/related}
+\input{sections/prelim}
+\input{sections/broadphase}
+\input{sections/narrowphase}
+\input{sections/parallel}
+\input{sections/guarantee}
+\input{sections/results}
+\input{sections/limitations}
+\input{sections/availability}
+\input{sections/conclusion}
+
+\bibliographystyle{plainnat}
+\bibliography{refs}
+
+\end{document}

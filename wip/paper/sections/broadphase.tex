@@ -1,0 +1,277 @@
+\section{Broad phase}
+\label{sec:bp}
+
+Of the two phases the broad one asks the cheaper question. It never evaluates
+$\Fdiff$ and never sees a tolerance. It turns a mesh into a set of candidate
+pairs, meaning pairs of primitives whose swept bounding boxes overlap and which
+might therefore touch, and hands them to \cref{sec:np}. It must be
+conservative, because a pair it discards is never examined again. On the scenes
+in our benchmark it is also the larger share of the host runtime, so it must be
+fast.
+
+Two algorithms serve it here, and they are not alternatives in the usual sense.
+They emit the same pairs, so nothing about the answer depends on which one runs.
+The interesting question is therefore purely economic, and its answer turns out
+not to be a property of the geometry at all.
+
+\subsection{Swept boxes, and the shape of the output}
+\label{sec:bp:common}
+
+Because vertices move affinely, the axis-aligned box enclosing a primitive's
+entire trajectory is the componentwise hull of its vertex positions at $t=0$ and
+$t=1$. That hull is exact and needs no sampling. One box is built per vertex,
+per edge and per face. Where the box is stored in a narrower type than the
+geometry, each bound is moved outward by one unit in the last place, so a
+rounded box can never exclude a candidate the exact box would have kept.
+
+Two conventions shape everything downstream. The first concerns the overlap
+test, which rejects only on a \emph{strict} separation, $a_{\min} > b_{\max}$ on
+some axis. Boxes that merely touch are therefore reported as overlapping. This
+inclusivity is deliberate, and \cref{sec:bp:sweep} records what it cost to
+violate it.
+
+The second is that all storage is structure-of-arrays and every output is built
+\emph{count-then-fill}. A first pass counts the pairs each primitive will
+contribute, a prefix sum turns those counts into offsets, and a second pass
+re-runs the identical traversal, writing into its own slice. Nothing grows a
+shared buffer, the allocation is exact, and the output is bit-for-bit
+reproducible. The same code shape then works on a GPU, where a growable
+per-thread container is not available.
+
+The host tests one box against $32$ consecutive boxes at a time, and an AVX-512,
+AVX2 or NEON kernel returns a $32$-bit mask of the survivors. Counting is then a
+population count, and enumeration is a bit scan. A rejected candidate therefore
+never issues the indirect load of its element indices, which is the expensive
+part of a test that usually fails.
+
+\subsection{Sweep and prune}
+\label{sec:bp:sweep}
+
+\Cref{alg:sweep} is the classical algorithm with the parallel details that
+matter. The sort axis is the one on which box centres have the largest variance,
+computed in two streaming passes that visit all three axes per element instead
+of three passes per axis. The sort is over $(\text{key},\text{index})$ pairs and
+not over indices with an indirect comparator, because in the latter every
+comparison is a random load from the key array, and those loads dominate. Ties
+break on the index, which makes the order total, so a non-stable parallel sort
+still gives a deterministic result.
+
+\begin{algorithm}[htbp]
+\caption{Sweep and prune, one pass (count or fill)}
+\label{alg:sweep}
+\begin{algorithmic}[1]
+\Function{Sweep}{$A$: boxes of list 1, $B$: boxes of list 2}
+  \State $a \gets \arg\max_{d} \operatorname{Var}\bigl(\text{centres of } A \cup B\bigr)_{d}$
+  \State sort $A$ and $B$ by their minimum coordinate on axis $a$
+  \State $\mu_{j} \gets \max_{k \le j} B_{k}.\max_{a}$
+    \Comment{running maximum; monotone, so binary-searchable}
+  \ForAll{blocks of consecutive $i$ \textbf{in parallel}}
+    \State $j \gets$ \Call{LowerBound}{$\mu$, $A_{i}.\min_{a}$}
+      \Comment{window start for the first $i$ of this block}
+    \For{$i$ in the block}
+      \While{$A_{i}.\min_{a} > B_{j}.\max_{a}$} $j \gets j+1$ \EndWhile
+        \Comment{$j$ is monotone in $i$}
+      \State $e \gets \min\{k \ge j : B_{k}.\min_{a} > A_{i}.\max_{a}\}$
+      \For{chunks of $32$ boxes in $[j,e)$}
+        \State $m \gets$ \Call{OverlapMask}{$A_{i}$, chunk}
+          \Comment{one SIMD test, $32$ results}
+        \State $m \gets m \wedge \neg\,$\Call{SharesVertex}{$A_{i}$, chunk}
+        \State count \Call{Popcount}{$m$}, or emit the pairs $m$ selects
+      \EndFor
+    \EndFor
+  \EndFor
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+The window cursor $j$ is monotone in $i$ within a parallel block, so the total
+advance is linear in the block and not quadratic. The running maximum $\mu$
+lets a block start in the middle of the list without walking to it. Since $\mu$
+is monotone by construction, a binary search on it gives a valid window start
+directly. Self-overlap of a single list, which edge-edge needs, comes out of the
+same code by starting the window at $i+1$ in sorted order, and that yields each
+unordered pair exactly once for free. The whole costs $O(n\log n)$ for the sort
+plus $O\bigl(\sum_{i}|W_{i}|\bigr)$ for the window walk, where $|W_{i}|$ is the
+number of boxes overlapping box $i$ on the sort axis. That expectation is the
+$\lambda$ of \cref{sec:bp:choose}. The worst case is quadratic, and it occurs
+when every box overlaps on the chosen axis.
+
+One comparison in \cref{alg:sweep} deserves singling out, because getting it
+wrong is the one way this algorithm can violate \cref{def:conservative}. The
+comparison on line 8 must agree with the overlap predicate of
+\cref{sec:bp:common}, which rejects only on strict separation. Written the other
+way, so that the window advances while the two intervals are not \emph{strictly}
+overlapping, it steps past any pair of boxes that are degenerate on the sort
+axis and coincide there. Such a pair is never tested, which is a false negative,
+and \cref{def:conservative} forbids it.
+
+The two conventions are set in different places, and a benchmark will not reveal
+that they disagree. On all six scenes the two variants produce identical
+candidate counts, because a swept box degenerate on the axis of largest centre
+variance does not arise from a moving surface. On $2{,}000$ coincident flat
+boxes they differ completely: the cell list finds $64{,}922$ pairs and the
+strict variant finds none. A conservative filter agrees with an exact one on
+almost every realistic input, and the configurations that separate them are not
+the ones a benchmark supplies.
+
+\subsection{A two-dimensional cell list}
+\label{sec:bp:cell}
+
+Sorting on one axis prunes on one axis, and a draped surface is not separated
+by any single direction. Measured on a refined cloth frame, the sweep walks
+about $2{,}100$ candidates for every pair it finds, and the axis choice does
+not rescue it. The two good axes give $2{,}882$ and $2{,}838$ candidates per
+pair, and the bad one $126{,}063$. \Cref{alg:cell} bins instead, and two of its
+choices are deliberate enough to state before the algorithm itself.
+
+The grid is over \emph{two} axes, not three. For a surface of $N$ elements of
+size $h$ inside a region of side $L$ we have $N \sim (L/h)^{2}$, because a
+surface does not fill a volume. A two-dimensional grid at element resolution
+therefore has $O(N)$ cells, and it is mostly occupied. A three-dimensional one
+has $(L/h)^{3} = N^{3/2}$ cells. At $N = 1.5\times10^{6}$ that is
+$1.8\times10^{9}$ cells at $0.08\%$ occupancy, which buys memory and empty-cell
+iteration in exchange for pruning along a direction the surface barely occupies.
+The third axis is not abandoned. The ordinary three-dimensional box test inside
+the cell culls it, where it costs nothing extra.
+
+The cell size is derived, not chosen. The grid spacing on each of the two axes
+is the \emph{mean extent of the swept boxes} on that axis. Sizing on the element
+size instead would be wrong here. A swept box is much larger than the element it
+came from, so every box would span a block of cells, and the binning pass would
+cost more than the query saves. The resulting cell counts are then scaled
+isotropically so that their product does not exceed $4N$. Past that point more
+resolution does not pay, and a degenerate extent could otherwise allocate
+without bound. No voxel size is left for a caller to supply, and none to get
+wrong.
+
+\begin{algorithm}[htbp]
+\caption{Cell-list broad phase, one pass (count or fill)}
+\label{alg:cell}
+\begin{algorithmic}[1]
+\Function{CellList}{$A$, $B$}
+  \State $(a_{0},a_{1}) \gets$ the two axes of largest centre variance
+  \State $h_{k} \gets$ mean extent of the boxes on axis $a_{k}$;\quad
+         $n_{k} \gets \lfloor \operatorname{span}_{k}/h_{k} \rfloor$,
+         scaled so $n_{0}n_{1} \le 4N$
+  \State bin every box of $B$ into each cell its $(a_{0},a_{1})$ footprint
+         touches, by counting sort
+  \ForAll{$i$ \textbf{in parallel}}
+    \ForAll{cells $c$ touched by $A_{i}$, and $j$ listed in $c$}
+      \If{$A_{i}$ and $B_{j}$ are disjoint in 3D} \textbf{continue} \EndIf
+      \State $o_{k} \gets \max(A_{i}.\min_{a_{k}},\, B_{j}.\min_{a_{k}})$
+        \Comment{corner of the overlap}
+      \If{$c \ne \operatorname{cell}(o_{0},o_{1})$} \textbf{continue}
+        \Comment{another cell owns this pair}
+      \EndIf
+      \If{$A_{i}$ and $B_{j}$ share a vertex} \textbf{continue} \EndIf
+      \State count, or emit the pair
+    \EndFor
+  \EndFor
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+Duplicates are then settled without per-pair state. A box spans several cells,
+so a pair can be discovered in several of them. The usual remedies, a hash set
+of emitted pairs or a mark array, cost memory proportional to the number of
+pairs and are awkward on a GPU. Instead the pair is \emph{attributed} to the
+cell containing the minimum corner of the two boxes' overlap, on line 8 of
+\cref{alg:cell}. That corner lies inside both boxes, so both are binned in that
+cell, and the cell is unique. The rule costs two clamps per surviving pair and
+no state at all, which is why the same code runs unchanged on the device.
+
+Nothing on this path is sorted and nothing assumes an order. The query tests
+every entry of a touched cell and never breaks on a first miss, so the sort is
+removed and not merely moved. Binning costs
+$O\bigl(\sum_{i}\text{cells}(i)\bigr)$, with $\text{cells}(i) = O(1)$ by
+construction of the cell size, and the query
+$O\bigl(\sum_{i}\sum_{c \ni i} \text{occupancy}(c)\bigr)$. There is no
+logarithmic factor. \Cref{sec:results:scaling} measures the exponents both
+achieve in practice.
+
+\subsection{Which one to run}
+\label{sec:bp:choose}
+
+The choice between the two is not a question of accuracy. That much we can state
+exactly, with no measurement.
+
+\begin{proposition}[Agreement]
+\label{prop:agree}
+On the same box set, \cref{alg:sweep} and \cref{alg:cell} emit the same set of
+candidate pairs.
+\end{proposition}
+
+\begin{proof}
+A pair qualifies, in either algorithm, exactly when it passes the same two
+filters: the three-dimensional overlap predicate, which only compares stored
+floating-point bounds and is therefore exact and identical in both, and the
+shared-vertex test, which compares indices. So the two agree on which pairs
+qualify, and it remains to check that each is emitted once.
+
+In \cref{alg:sweep} the boxes carry a total order and the window for $i$ is
+scanned from $i+1$, so a qualifying pair $\{i,j\}$ is considered only at
+$\min(i,j)$. It is considered there: the window ends at the first $k$ with
+$B_{k}.\min_{a} > A_{i}.\max_{a}$, and a qualifying pair overlaps on every
+axis, so $B_{j}.\min_{a} \le A_{i}.\max_{a}$ and $j$ falls inside the window.
+
+In \cref{alg:cell} let $o$ be the componentwise minimum corner of the two
+boxes' overlap on the two grid axes. Since $o$ lies in both boxes, both are
+binned into $\operatorname{cell}(o)$, so the pair is examined there; and line 9
+emits it only from $\operatorname{cell}(o)$, which is one cell. So it is
+emitted exactly once, from a cell that does examine it. \end{proof}
+
+\Cref{prop:agree} makes the two interchangeable. We also check it empirically,
+the two reporting identical candidate counts over $25{,}538$ case-and-mode
+combinations, because a proof about an algorithm is only as good as its
+correspondence to the code, and \cref{sec:bp:sweep} gives one occasion where
+that correspondence failed.
+
+What is left is cost, and the cost difference is large in both directions
+(\cref{sec:results:bp}). That invites a rule fixed in advance. We tried four
+predictors and one constant, and we report all five because each looked
+convincing before it was measured.
+
+\emph{Distribution anisotropy}, a measure of how far the boxes are from filling
+a volume, separated two synthetic families cleanly: it reads $1.00$ where the
+sweep won and $3.3$ where the cell list did. A sweep in which anisotropy is
+$1.00$ on every row and the winner flips anyway refutes it. It also
+misclassifies a real cloth frame, which measures $1.96$ and would be called
+``sweep'' by any fitted threshold, although the cell list is $4.2\times$ faster
+on it. \emph{The expected sweep window}, $\lambda = \sum_{i}\text{extent}_{i} /
+\text{span}$, does not separate the two either, reading $1198$ with the sweep
+winning and $940$ with it losing by $3.3\times$. The sweep walks its window over
+sorted contiguous memory behind a $32$-wide mask, so it absorbs a long window
+far better than a candidate count suggests.
+
+\emph{Estimated pair density}, derived from the same statistics, predicts
+$270$, $16{,}940$ and $1.158\times10^{6}$ against measured $264$, $16{,}992$ and
+$1.217\times10^{6}$ on uniform inputs. It then underestimates a real cloth by
+four orders of magnitude, since uniformity is the assumption a surface violates.
+\emph{Element count} is refuted in the wrong direction: across three real scenes
+the cell list wins the smallest and loses the two largest.
+
+\emph{A fixed choice} is the alternative to predicting at all, and it is
+defensible on synthetic box lists, where the cell list wins by
+$4$--$7\times$ and the worst case for choosing it is $1.8\,\mathrm{ms}$ against
+$1.3$. It is harder to defend on real scenes, where the evidence is not even
+self-consistent. The sweep of \cref{sec:results:bp}, at $288$ threads over every
+case, has the cell list winning the whole broad phase on five scenes of six. A
+separate run of the same code on the same machine, at $72$ threads over a
+sampled subset, puts the sweep ahead on two of three. A choice cannot be fixed
+from evidence that changes with the thread count.
+
+\Cref{prop:agree} removes the need for a heuristic at all. Since the two
+produce identical output, they can be \emph{raced}. One runs on a step, the other on the next, and the faster is
+kept until the next probe. Three details make the race fair and cheap. Each
+strategy runs once unmeasured first, because a strategy's first execution pays
+for allocating its own scratch. Measured cold, one step costs $1.195\,\mathrm{ms}$ against $0.152\,\mathrm{ms}$
+warm, an eightfold difference that is entirely allocation and would decide any
+close race. The cell list is probed first,
+because a caller that runs a single broad phase never completes the race and
+only ever sees the first probe, and the cell list's worst case is the smaller
+one. And the race is re-run every $64$ steps, because a cloth that starts flat
+and ends crumpled is not one workload and a verdict from frame one should not
+bind frame ten thousand.
+
+Racing costs two probe steps out of a simulation of thousands, and it answers
+from the geometry in front of it, so it holds on a scene nobody tested.

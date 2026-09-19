@@ -1,0 +1,31 @@
+\begin{table}[!tb]
+  \centering
+  \caption{Nsight Compute counters for the device narrow-phase kernel, \op{Tight}
+    mode, at the shipped parameters. \emph{DRAM} is read and write together for
+    one launch and the share of sustained peak bandwidth it represents;
+    \emph{lanes} is how many of a warp's $32$ are doing useful work when an
+    instruction issues; \emph{issue} is instructions per scheduler cycle out of a
+    possible one; \emph{waves} is how many times the grid covers the device. The
+    last three columns are warps stalled per issue-active cycle, by reason. A
+    profiler serialises launches, so the ratios here are comparable with
+    \cref{sec:results} and the absolute times are not.}
+  \label{tab:counters}
+  \fittable{%
+\begin{tabular}{lrrrrrrrrr}
+    \toprule
+    & \multicolumn{2}{c}{DRAM} & \multicolumn{4}{c}{utilisation}
+      & \multicolumn{3}{c}{warps stalled on} \\
+    \cmidrule(lr){2-3}\cmidrule(lr){4-7}\cmidrule(lr){8-10}
+    scene & MB & \% peak & occ.\ \% & lanes & issue & waves
+          & depend. & barrier & memory \\
+    \midrule
+    armadillo-rollers & 2.28 & 0.085 & 9.0 & 10.2 & 0.20 & 2.24 & 1.55 & 1.54 & 0.46 \\
+    cloth-ball & 3.28 & 0.360 & 14.0 & 10.9 & 0.28 & 1.38 & 1.62 & 1.56 & 1.40 \\
+    cloth-funnel & 0.84 & 0.082 & 8.4 & 13.8 & 0.20 & 0.41 & 1.60 & 0.99 & 0.80 \\
+    n-body & 139.61 & 1.215 & 16.0 & 24.4 & 0.34 & 332.64 & 1.52 & 1.45 & 0.79 \\
+    puffer-ball & 219.68 & 1.102 & 16.3 & 18.3 & 0.30 & 475.46 & 1.54 & 2.98 & 0.73 \\
+    rod-twist & 5.34 & 0.180 & 14.0 & 8.0 & 0.35 & 4.44 & 1.65 & 1.37 & 0.17 \\
+    \bottomrule
+  \end{tabular}}
+  \par\smallskip\footnotesize Source: \texttt{benchmark/results/profile/}
+\end{table}

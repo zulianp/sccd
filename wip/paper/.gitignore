@@ -1,0 +1,12 @@
+# latexmk's working files. The repository's top-level .gitignore already
+# excludes wip/paper/*.bbl, so latexmk regenerates the bibliography with BibTeX
+# rather than building from a committed .bbl.
+main.aux
+main.blg
+main.fdb_latexmk
+main.fls
+main.log
+main.out
+main.pdf
+main.synctex.gz
+*.toc

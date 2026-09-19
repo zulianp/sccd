@@ -1,0 +1,24 @@
+\begin{table}[!tb]
+  \centering
+  \caption{\texttt{perf stat} counters on Grace. \emph{pipeline} is the whole
+    host pipeline from a build with the device path compiled out, so it is host
+    work throughout; \emph{narrow phase} is the accuracy oracle, which runs the
+    narrow phase over the curated query sets and no broad phase at all. Both are
+    whole-process counters.}
+  \label{tab:counters-host}
+  \begin{tabular}{lrrrr}
+    \toprule
+    & \multicolumn{2}{c}{pipeline} & \multicolumn{2}{c}{narrow phase} \\
+    \cmidrule(lr){2-3}\cmidrule(lr){4-5}
+    scene & inst/cycle & L1 miss \% & inst/cycle & L1 miss \% \\
+    \midrule
+    armadillo-rollers & 3.29 & 0.73 & 0.80 & 0.35 \\
+    cloth-ball & 2.78 & 1.38 & 0.49 & 0.46 \\
+    cloth-funnel & 3.35 & 1.31 & 0.84 & 0.55 \\
+    n-body & 2.86 & 0.76 & 2.87 & 0.01 \\
+    puffer-ball & 3.77 & 2.11 & 1.13 & 0.31 \\
+    rod-twist & 3.13 & 0.23 & 0.87 & 0.65 \\
+    \bottomrule
+  \end{tabular}
+  \par\smallskip\footnotesize Source: \texttt{benchmark/results/profile/}
+\end{table}

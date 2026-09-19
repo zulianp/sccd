@@ -1,0 +1,72 @@
+% The device narrow phase's work flow: a small per-block shared stack that spills
+% early into a double-buffered global queue, which the next launch redistributes.
+%
+% Every node carries an explicit inner sep so its text keeps a margin from its
+% frame, group labels are placed outside the group they name, and arrows are
+% shortened at both ends so no head or tail lands on a border.
+\begin{tikzpicture}[
+  font=\footnotesize,
+  >={Stealth[length=2mm]},
+  every edge/.append style={shorten >=1.5pt, shorten <=1.5pt},
+  blk/.style={draw=sccdInk, rounded corners=1pt, minimum width=19mm,
+              minimum height=7mm, align=center, fill=white,
+              inner xsep=6pt, inner ysep=4pt},
+  stk/.style={draw=sccdTeal, fill=sccdTeal!8, rounded corners=1pt,
+              minimum width=19mm, minimum height=8mm, align=center,
+              inner xsep=6pt, inner ysep=4pt},
+  buf/.style={draw=sccdPlum, fill=sccdPlum!8, rounded corners=1pt,
+              minimum width=32mm, minimum height=9mm, align=center,
+              inner xsep=7pt, inner ysep=5pt},
+  lbl/.style={font=\scriptsize\itshape, text=sccdInk, align=left, inner sep=1pt},
+  grp/.style={draw=sccdGrid, rounded corners=2pt, inner sep=4.5mm},
+  flow/.style={->, shorten >=1.5pt, shorten <=1.5pt},
+]
+
+% ======================= launch k =======================================
+\foreach \i/\x in {0/0, 1/2.4, 2/4.8} {
+  \node[blk] (b\i) at (\x,1.9) {block \i};
+  \node[stk] (s\i) at (\x,0.85) {shared stack\\[1pt]\scriptsize 64 entries};
+  \draw[flow, draw=sccdInk] (b\i) -- (s\i);
+}
+\node[grp, fit=(b0)(s2)] (g1) {};
+\node[lbl, anchor=south west] at ([yshift=1.2mm]g1.north west) {launch $k$};
+
+% The pathological query arrives from outside the group.
+\node[lbl, text=sccdAmber, align=center, anchor=south]
+  (heavy) at ([yshift=1.2mm]g1.north) {a query needing $>10^{6}$ boxes};
+\draw[flow, draw=sccdAmber, thick] (heavy.south) -- (b1.north);
+
+% ======================= spill ==========================================
+\node[buf] (wbuf) at (2.4,-0.75)
+  {global queue, buffer $A$\\[1pt]\scriptsize launch $k$ \emph{writes} it};
+\foreach \i in {0,1,2} {
+  \draw[flow, draw=sccdPlum, dashed] (s\i) -- (wbuf);
+}
+\node[lbl, text=sccdPlum, anchor=west] at ([xshift=5mm]wbuf.east)
+  {spill when full;\\overflow is counted,\\not written};
+
+% ======================= swap ===========================================
+\node[buf, draw=sccdMoss, fill=sccdMoss!8] (rbuf) at (2.4,-2.45)
+  {the same buffer $A$\\[1pt]\scriptsize launch $k{+}1$ \emph{reads} it};
+\draw[flow, draw=sccdInk, thick] (wbuf) -- (rbuf);
+\node[lbl, anchor=west] at ([xshift=2mm]$(wbuf.south)!0.5!(rbuf.north)$)
+  {launch $k$ ends; the buffers swap roles};
+
+% ======================= launch k+1 =====================================
+\foreach \i/\x in {0/0, 1/2.4, 2/4.8} {
+  \node[blk] (c\i) at (\x,-4.3) {block \i};
+  \draw[flow, draw=sccdMoss] (rbuf) -- (c\i);
+}
+\node[grp, fit=(c0)(c2)] (g2) {};
+\node[lbl, anchor=north west] at ([yshift=-1.2mm]g2.south west)
+  {launch $k{+}1$};
+\node[lbl, text=sccdMoss, anchor=west] at ([xshift=5mm]g2.east)
+  {the heavy query's subtree\\is now spread over\\every block};
+\node[lbl, anchor=west] at ([xshift=5mm]rbuf.east)
+  {and writes buffer $B$,\\which launch $k{+}2$ reads:\\the two never meet};
+
+\begin{scope}[on background layer]
+  \node[grp, fit=(b0)(s2)] {};
+  \node[grp, fit=(c0)(c2)] {};
+\end{scope}
+\end{tikzpicture}

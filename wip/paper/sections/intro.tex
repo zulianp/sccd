@@ -1,0 +1,95 @@
+\section{Introduction}
+\label{sec:intro}
+
+Continuous collision detection (CCD) asks a question that sounds simple and is
+not. Take two configurations of a mesh, one at the start of a time step and one
+at the end, with every vertex moving along a straight line in between. Does any
+pair of primitives touch during the step, and if so, when? The answer gates the
+step size in cloth, deformable and rigid-body simulation. The two ways of
+getting it wrong are not symmetric.
+
+If a method reports a collision that does not happen, the solver takes a shorter
+step than it needed to. Work is wasted and nothing is broken. If a method misses
+a collision, or reports a time of impact \emph{after} the true one, the solver
+steps straight through the contact, and the configuration it lands in contains
+an interpenetration. One family of solvers is built on a barrier
+potential~\citep{li2020ipc,li2021codim,ferguson2021rigid}, and its whole
+argument depends on the state remaining intersection-free. For those solvers the
+result is worse than degraded: the barrier is infinite on the wrong side, and
+the optimisation has nowhere to go.
+
+\begin{definition}[Conservative]
+\label{def:conservative}
+A CCD implementation is \emph{conservative} if it reports a collision whenever
+the geometries intersect during the step, and the time of impact it reports is
+at or before the true earliest one.
+\end{definition}
+
+\Cref{def:conservative} is the specification this work implements, and it is
+deliberately stronger than the usual one. Reporting the Boolean correctly is not
+enough. A query can agree with an exact reference on whether a contact happens
+and still return a time after it, which costs the solver as much as a missed
+collision does. Every accuracy measurement in this paper is therefore
+\emph{signed}, and a time of impact later than the exact root counts as a
+failure of the same severity as a miss.
+
+The difficulty is that conservativeness is a statement about real arithmetic,
+while implementations run in floating point. \citet{wang2021tight} showed that
+most published CCD implementations are not conservative once the rounding is
+accounted for, and they gave the first one that provably is. That
+implementation, TightInclusion, replaces interval arithmetic with a custom
+inclusion function and a certified error bound. It is the reference we measure
+against throughout, used exactly as released.
+
+\paragraph{This work.} We present SCCD, a two-phase CCD pipeline for triangle
+\emph{and} quad meshes, with host and device implementations of both phases. Its
+conservativeness is structural and not empirical (\cref{sec:guarantee}), and we
+assess it against TightInclusion on a dataset whose roots are known exactly. The
+contribution is the parallel design, its measured performance and the accuracy
+assessment, and not an implementation of a known algorithm on new hardware.
+
+The first contribution is a broad phase with no tuning parameter, chosen by
+measurement. Two algorithms are given: sweep-and-prune over an axis chosen by
+centre variance, and a two-dimensional uniform cell list that removes the sort
+entirely and derives its cell size from the data itself. We prove that the two emit \emph{identical} candidate sets
+(\cref{prop:agree}). The only remaining question is therefore which of them is
+cheaper on the geometry at hand. We tried four cheap predictors of that
+answer, namely distribution anisotropy, the expected sweep window, estimated
+pair density and element count, and we also tried fixing the choice outright.
+All five are refuted by measurement (\cref{sec:bp:choose}). The shipped default
+races the two algorithms on consecutive steps and keeps the winner, which costs
+two probe steps out of a simulation and cannot be wrong about a scene nobody
+tested.
+
+The second is a host narrow phase that packs single-instruction,
+multiple-data (SIMD) lanes across queries. TightInclusion's search is a
+priority queue ordered by the time lower bound, and its answer is the first box
+it accepts. We show in \cref{sec:np:order} that keeping the minimum over
+\emph{all} accepted boxes and pruning against it gives the same answer under
+\emph{any} traversal order. That licenses a lane to hold boxes from different
+queries (\cref{alg:host}), which turns a search with per-query divergence into
+a vector kernel. Sibling boxes then inherit four of their eight corner values
+from their parent, halving the dominant cost.
+
+The third is a device narrow phase built around redistribution. The difficulty of a CCD query is heavy-tailed: on one scene most
+queries need a single box, while $208$ of them need more than a million
+(\cref{tab:difficulty}). A large per-block work stack keeps such a query inside
+the block that seeded it while its neighbours idle. We use a deliberately
+\emph{small} shared stack that spills early into a double-buffered global
+queue, which the next launch redistributes across every block
+(\cref{alg:device}). On the worst scene this is worth two orders of magnitude
+(\cref{tab:stackcap}).
+
+The fourth is a signed accuracy assessment against a certified reference. It
+covers $11{,}630{,}064$ query-mode checks against exact symbolic roots, on both
+processors and all six scenes, of which $11{,}044{,}766$ place a reported time
+of impact beside an exact root. SCCD reports no missed collision and no late
+time of impact, and reproduces TightInclusion's median and worst-case error to
+every printed digit while running faster (\cref{sec:results:ref}).
+
+We are equally explicit about where the pipeline does not win, and why. The device narrow phase is slower than the host on four of six scenes, for a
+structural reason we can name, and that is enough to put the whole pipeline
+behind on one of them. The host cell list beats the device broad phase at every
+mesh size we measured, and by more as the mesh grows. The mode that trades accuracy for speed is \emph{slower} on
+half the host scenes. \Cref{sec:limitations} collects those results, together
+with the threats to validity that bound what the measurements can support.

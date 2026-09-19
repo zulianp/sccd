@@ -1,0 +1,31 @@
+\begin{table}[htbp]
+  \centering
+  \caption{Per collision pair, against additive CCD~\citep{li2021codim} as the
+    IPC toolkit implements it. Both narrow phases are timed over the same
+    broad-phase candidates -- additive CCD answers one pair at a time and carries
+    no parallelism of its own, so it is driven by the parallel loop the toolkit's
+    own stepsize query uses, on the same $72$ threads -- and both are scored on
+    every curated query at the coordinates its exact root was computed for.
+    \emph{f.p.}, \emph{missed} and \emph{late} are counts per pass over the
+    case list. The error is signed, so negative is conservative.}
+  \label{tab:competitor-pair}
+  \fittable{%
+\begin{tabular}{llrrrrrrr}
+    \toprule
+    scene & library & narrow (ms) & ns/pair & f.p. & missed & late & err.\ med. & err.\ worst \\
+    \midrule
+    armadillo-rollers & SCCD (CPU) & 2.08 & 32.6 & 24 & 0 & 0 & -3.39e-06 & -0.016 \\
+     & SCCD (GPU) & 2.98 & 31.4 & 24 & 0 & 0 & -3.41e-06 & -0.016 \\
+     & Additive CCD (CPU) & 0.60 & 6.61 & 444 & 0 & 0 & -0.0286 & -0.996 \\
+    \midrule
+    cloth-ball & SCCD (CPU) & 17.90 & 9.17 & 1 & 0 & 0 & -2.72e-07 & -0.000193 \\
+     & SCCD (GPU) & 8.83 & 4.91 & 1 & 0 & 0 & -2.7e-07 & -0.000193 \\
+     & Additive CCD (CPU) & 3.00 & 1.44 & 21 & 0 & 0 & -0.0656 & -0.94 \\
+    \midrule
+    cloth-funnel & SCCD (CPU) & 0.58 & 28.9 & 15 & 0 & 0 & -6.87e-06 & -1 \\
+     & SCCD (GPU) & 1.95 & 42.2 & 15 & 0 & 0 & -6.83e-06 & -1 \\
+     & Additive CCD (CPU) & 0.37 & 14.4 & 422 & 0 & 0 & -0.00857 & -0.956 \\
+    \bottomrule
+  \end{tabular}}
+  \par\smallskip\footnotesize Source: \texttt{benchmark/competitors/results/}
+\end{table}

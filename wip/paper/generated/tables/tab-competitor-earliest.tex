@@ -1,0 +1,35 @@
+\begin{table}[htbp]
+  \centering
+  \caption{Earliest time of impact per simulation step, against Scalable
+    CCD~\citep{belgrod2025toi}. Both libraries run their
+    earliest-time-of-impact path once per case from a bound of $1$, over
+    identical broad-phase candidates, and a step's answer is the minimum over
+    its cases. \emph{broad} is the acceleration structure and the traversal
+    together and \emph{narrow} the root finding, both medians per case in
+    milliseconds; \emph{ns/cand.} is narrow-phase time over the candidates it
+    was handed. The error is signed, reported minus exact root, so negative is
+    conservative; \emph{late} counts steps where it is positive, per pass over
+    the case list.}
+  \label{tab:competitor-earliest}
+  \fittable{%
+\begin{tabular}{llrrrrrrr}
+    \toprule
+    scene & library & broad (ms) & narrow (ms) & total (ms) & ns/cand. & err.\ med. & err.\ worst & late \\
+    \midrule
+    armadillo-rollers & SCCD (CPU) & 5.3 & 0.7 & 6.0 & 8.37 & -1.24e-06 & -2e-08 & 0 \\
+     & SCCD (GPU) & 3.4 & 2.0 & 5.4 & 18.5 & -1.32e-06 & -1.92e-08 & 0 \\
+     & Scalable CCD (GPU) & 13.9 & 4.2 & 18.1 & 57.3 & 0.00892 & 0.999 & 265 \\
+    \midrule
+    cloth-ball & SCCD (CPU) & 21.4 & 5.5 & 26.9 & 3.66 & -1.66e-07 & 0 & 0 \\
+     & SCCD (GPU) & 11.1 & 2.3 & 13.4 & 1.04 & -1.69e-07 & 0 & 0 \\
+     & Scalable CCD (GPU) & 21.4 & 28.0 & 49.4 & 21.8 & -9.97e-06 & -1.66e-07 & 0 \\
+    \midrule
+    cloth-funnel & SCCD (CPU) & 4.1 & 0.3 & 4.4 & 13.1 & 0 & 0 & 0 \\
+     & SCCD (GPU) & 2.6 & 1.4 & 3.9 & 33 & 0 & 0 & 0 \\
+     & Scalable CCD (GPU) & 15.1 & 2.2 & 17.3 & 56.3 & 0 & 1 & 8 \\
+    \bottomrule
+  \end{tabular}}
+  \par\smallskip\footnotesize Scalable CCD's narrow phase is CUDA only, so it has
+  no CPU row; its host broad phase is discussed in the text.
+  \par\smallskip\footnotesize Source: \texttt{benchmark/competitors/results/}
+\end{table}

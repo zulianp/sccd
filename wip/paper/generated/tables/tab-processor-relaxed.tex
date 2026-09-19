@@ -1,0 +1,20 @@
+\begin{table}[htbp]
+  \centering
+  \caption{Host against device for the same mode and the same cases. Every time is a whole-scene total in milliseconds, summed over every case of the scene. \emph{broad} is the whole broad phase, the acceleration structure and the traversal over it together; \emph{total} adds the narrow phase to it, median over repeats. A ratio above one means the GPU is faster.}
+  \label{tab:processor-relaxed}
+  \fittable{%
+\begin{tabular}{lrrrrr}
+    \toprule
+    scene & CPU ms & GPU ms & total$\times$ & broad$\times$ & narrow$\times$ \\
+    \midrule
+    armadillo-rollers & 3,315 & 4,252 & 0.78x & 0.93x & 0.48x \\
+    cloth-ball & 2,715 & 1,245 & 2.18x & 1.62x & 5.58x \\
+    cloth-funnel & 1,957 & 2,552 & 0.77x & 0.93x & 0.32x \\
+    n-body & 20,484 & 7,844 & 2.61x & 1.56x & 21.33x \\
+    puffer-ball & 110,719 & 76,153 & 1.45x & 1.04x & 37.01x \\
+    rod-twist & 78,021 & 36,350 & 2.15x & 1.57x & 3.90x \\
+    \bottomrule
+  \end{tabular}}
+  \par\smallskip\footnotesize A ratio is the host median over the device median, so 2.0 means the device takes half the time. Ratios below 1.0 are the cases where the host wins and are the ones worth reading.
+  \par\smallskip\footnotesize Source: \texttt{benchmark/results/sweep-gh200-bp.csv}
+\end{table}

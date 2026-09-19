@@ -1,0 +1,27 @@
+\begin{abstract}
+Continuous collision detection (CCD) decides whether two meshes moving along
+linear trajectories touch during a time step, and when. A simulator that
+guarantees an intersection-free state can tolerate neither a missed collision
+nor a late time of impact: either lets the solver step through the contact. We
+present SCCD, a CCD pipeline for triangle and quad meshes, conservative by
+construction on both CPU and GPU, assessed against the certified reference
+implementation TightInclusion over $11{,}630{,}064$ checks against exactly
+known roots.
+
+The broad phase ships two interchangeable algorithms: sweep-and-prune, and a
+two-dimensional cell list with no sort and no user-chosen cell size. We prove
+that the two emit \emph{identical} candidate sets, so the choice is one of cost
+alone. Five cheap rules for making it are refuted by measurement, so the
+default races the two on consecutive steps and keeps the winner. The host
+narrow phase packs SIMD lanes with boxes from \emph{different} queries, which
+an order-independence argument shows is legal. The device narrow phase pairs a
+small per-block stack with a double-buffered global queue, so a query needing
+millions of boxes spreads across the machine.
+
+Over six scenes and $6{,}394$ cases on one \textsc{GH200} node, SCCD reports no
+missed collision and no late time of impact. On the host, median and
+worst-case error match TightInclusion's on all twelve scene-phases to every
+printed digit, at $1.7\times$ to $4.9\times$ its speed. The device is
+$2.5\times$ to $26.6\times$ faster and agrees to within $3\%$ and $4.5\%$. Its narrow phase nevertheless runs at $0.37\times$ host speed on the smallest
+scene, which is enough to put the whole pipeline behind the host there.
+\end{abstract}

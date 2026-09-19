@@ -1,0 +1,98 @@
+% Why the two broad phases differ. Left: sorting on one axis prunes on one axis,
+% which a draped surface defeats. Right: the cell list bins instead, and settles
+% the duplicates that binning creates with a rule that carries no per-pair state.
+%
+% Labels are placed beside the marks they name rather than above or below them,
+% so nothing crosses a rule or a box edge, and the legend keeps the three marks
+% of the right-hand panel off the drawing.
+\begin{tikzpicture}[
+  font=\footnotesize,
+  >={Stealth[length=2mm]},
+  bar/.style={draw=sccdInk, fill=sccdInk!7, line width=0.35pt},
+  tested/.style={draw=sccdInk, fill=sccdAmber!18, line width=0.35pt},
+  hd/.style={font=\footnotesize\itshape, text=sccdInk, inner sep=2pt},
+  tag/.style={font=\scriptsize\itshape, inner sep=2pt},
+  note/.style={font=\scriptsize, text=sccdInk, align=left, text width=63mm,
+               anchor=north west, inner sep=0pt},
+]
+
+% ======================= left: sweep and prune ==========================
+\begin{scope}
+  \node[hd, anchor=south west] at (0,4.32) {sweep and prune along axis $a$};
+
+  % Boxes sorted by their minimum on a, one per row. Many intervals overlap the
+  % query's, which is what a draped surface does to any single axis.
+  \foreach \i/\s/\w/\st in {
+      0/0.00/1.7/bar, 1/0.35/1.9/tested, 2/0.55/2.1/tested,
+      3/0.80/1.6/tested, 4/1.05/2.3/tested, 5/1.30/1.8/tested,
+      6/2.95/1.7/bar,  7/3.30/1.5/bar} {
+    \pgfmathsetmacro{\y}{3.70 - 0.30*\i}
+    \draw[\st] (\s,\y) rectangle ++(\w,0.20);
+  }
+
+  % The query box, well clear of the lowest bar above it.
+  \draw[draw=sccdAmber, fill=sccdAmber!45, line width=0.8pt]
+    (0.60,1.08) rectangle ++(2.00,0.22);
+  \node[tag, text=sccdAmber, anchor=west] at (2.78,1.19) {query box};
+
+  % Its extent on a, and the window that extent opens. The span label sits
+  % beside the arrow, so neither the arrow nor the axis runs through text.
+  \draw[densely dashed, draw=sccdAmber] (0.60,1.06) -- (0.60,0.84);
+  \draw[densely dashed, draw=sccdAmber] (2.60,1.06) -- (2.60,0.84);
+  \draw[<->, draw=sccdAmber, line width=0.7pt] (0.60,0.76) -- (2.60,0.76);
+  \node[tag, text=sccdAmber, anchor=west] at (2.78,0.76) {window on $a$};
+
+  \draw[->, draw=sccdInk] (-0.05,0.34) -- (5.05,0.34)
+    node[anchor=west, inner sep=3pt] {$a$};
+
+  \node[note] at (-0.05,0.06)
+    {Every shaded box overlaps the query on $a$ and is therefore tested in full.
+     On a draped surface almost all of them then fail on one of the other two
+     axes: about $2100$ candidates are walked for each pair actually found, and
+     no choice of axis rescues it. The two good axes give $2882$ and $2838$
+     candidates per pair, the third $126\,063$.};
+\end{scope}
+
+% ========================= right: 2D cell list ==========================
+\begin{scope}[xshift=74mm]
+  \node[hd, anchor=south west] at (0,4.32) {two-dimensional cell list};
+
+  \draw[step=0.62, draw=sccdGrid, line width=0.4pt] (0,1.70) grid (4.96,4.18);
+  \draw[draw=sccdGrid, line width=0.4pt] (0,1.70) rectangle (4.96,4.18);
+
+  % Teal and plum are the two primitives throughout the paper: the same two
+  % whose difference function Equations (1) and (2) root.
+  \draw[draw=sccdTeal, fill=sccdTeal!14, line width=0.7pt]
+    (0.62,1.95) rectangle (2.80,3.55);
+  \node[tag, text=sccdTeal, anchor=south west] at (0.66,1.99) {first};
+  \draw[draw=sccdPlum, fill=sccdPlum!14, line width=0.7pt]
+    (2.10,3.10) rectangle (4.30,3.95);
+  \node[tag, text=sccdPlum, anchor=north east] at (4.26,3.91) {second};
+
+  % The overlap, then the owning cell over both fills. The cell is outlined in
+  % ink and dashed so it stays legible where it crosses the amber overlap.
+  \fill[sccdAmber!55] (2.10,3.10) rectangle (2.80,3.55);
+  \draw[draw=sccdInk, line width=1.1pt, densely dashed]
+    (1.86,2.94) rectangle ++(0.62,0.62);
+  \fill[sccdInk] (2.10,3.10) circle (1.9pt);
+
+  % --- legend, one item per line so nothing collides at this size ---
+  \fill[sccdAmber!55] (0.05,1.34) rectangle ++(0.28,0.20);
+  \node[font=\scriptsize, anchor=west, inner sep=3pt] at (0.33,1.44)
+    {the overlap of the two primitives' boxes};
+  \draw[draw=sccdInk, line width=1.1pt, densely dashed]
+    (0.05,1.02) rectangle ++(0.28,0.20);
+  \node[font=\scriptsize, anchor=west, inner sep=3pt] at (0.33,1.12)
+    {the cell that owns the pair};
+  \fill[sccdInk] (0.19,0.80) circle (1.9pt);
+  \node[font=\scriptsize, anchor=west, inner sep=3pt] at (0.33,0.80)
+    {the overlap's minimum corner};
+
+  \node[note] at (-0.05,0.56)
+    {Each box is binned into every cell it touches, so the same pair can be met
+     in several of them. It is emitted only by the cell holding the minimum
+     corner of the overlap. Since that corner lies inside both boxes, both are
+     binned there and the cell is unique: two clamps per surviving pair, and no
+     per-pair state to allocate.};
+\end{scope}
+\end{tikzpicture}

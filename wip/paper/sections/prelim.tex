@@ -1,0 +1,159 @@
+\section{Problem statement and the inclusion function}
+\label{sec:prelim}
+
+Everything in this paper rests on two properties of one function. The collision
+queries reduce to finding roots of a map $\Fdiff$ on a three-dimensional
+parameter box, and that map is multilinear. Multilinearity means that the eight
+corner values of a box give the \emph{exact} range of $\Fdiff$ over it, which in
+real arithmetic would settle the matter. In floating point the corner values are
+perturbed, and a certified bound on the perturbation is what stands between the
+search and an unsound answer. This section sets out both properties, together
+with the tolerances that tell the search when to stop. \Cref{sec:guarantee}
+turns them into a guarantee, and \cref{sec:parallel} into two implementations.
+
+\subsection{The queries and their difference function}
+\label{sec:prelim:queries}
+
+Throughout, the two primitives of a query carry the colours they have in the
+schematics: \primA{teal} for the first and \primB{plum} for the second, so the
+boxes that overlap in \cref{fig:bp} are visibly the same pair whose difference
+function the equations below root.
+
+A mesh is given at two instants. Vertex $p$ is at $p^{0}$ at time $t=0$ and at
+$p^{1}$ at $t=1$, and moves affinely in between, $p(t) = (1-t)\,p^{0} +
+t\,p^{1}$. Two triangle meshes intersect during the step if and only if a vertex
+passes through a face or an edge crosses an edge~\citep{provot1997collision}, so
+the whole problem reduces to two elementary queries, each expressed as a root of
+a map $\Fdiff : [0,1]^{3} \to \Rthree$.
+
+For a \emph{vertex-face} query with vertex $\primA{q}$ and face
+$(\primB{f_{1}},\primB{f_{2}},\primB{f_{3}})$, writing $o = 1-u-v$ for the third
+barycentric coordinate,
+\begin{equation}
+\label{eq:fvf}
+\Fdiff(t,u,v) \;=\; \primA{q(t)} \;-\; \primB{\bigl[\,o\,f_{1}(t) + u\,f_{2}(t)
++ v\,f_{3}(t)\,\bigr]}, \qquad (u,v)\in\Delta,
+\end{equation}
+where $\Delta = \{(u,v) : u,v \ge 0,\ u+v \le 1\}$. For an \emph{edge-edge}
+query with edges $(\primA{a_{0}},\primA{a_{1}})$ and
+$(\primB{b_{0}},\primB{b_{1}})$,
+\begin{equation}
+\label{eq:fee}
+\Fdiff(t,u,v) \;=\; \primA{\bigl[a_{0}(t) + u\,(a_{1}(t)-a_{0}(t))\bigr]} \;-\;
+\primB{\bigl[b_{0}(t) + v\,(b_{1}(t)-b_{0}(t))\bigr]}, \qquad (u,v)\in[0,1]^{2}.
+\end{equation}
+A contact occurs exactly when $\Fdiff$ vanishes somewhere on the domain, and the
+earliest time of impact is $\toitrue = \min\{\,t : \Fdiff(t,u,v)=0 \text{ for
+some admissible } (u,v)\,\}$.
+
+Quad meshes add a third query of the same shape. For a vertex against a
+bilinear quad with corner nodes $\primB{g_{1}},\dots,\primB{g_{4}}$,
+\begin{equation}
+\label{eq:fvq}
+\Fdiff(t,u,v) \;=\; \primA{q(t)} \;-\; \primB{\sum_{k=1}^{4} w_{k}(u,v)\,
+g_{k}(t)}, \qquad
+w = \bigl((1-u)(1-v),\; u(1-v),\; (1-u)v,\; uv\bigr),
+\end{equation}
+on $(u,v)\in[0,1]^{2}$. The weights in \cref{eq:fvq} put the nodes in
+\emph{lexicographic} order: the corners $(0,0)$, $(1,0)$, $(0,1)$ and $(1,1)$ of
+the parameter square, and not the cyclic winding a quad is usually stored with.
+\Cref{sec:np:quad} returns to what that costs if it is got wrong.
+
+What the three have in common is the property the search exploits. Each of
+\cref{eq:fvf,eq:fee,eq:fvq} is \emph{multilinear}: affine in $t$ for fixed
+$(u,v)$, affine in $u$ for fixed $(t,v)$, and affine in $v$ for fixed $(t,u)$.
+On an axis-aligned box $\dom =
+[t_{\ell},t_{h}]\times[u_{\ell},u_{h}]\times[v_{\ell},v_{h}]$ a multilinear map
+attains its extrema at vertices of the box, so for each component $d$,
+\begin{equation}
+\label{eq:hull}
+\Fdiff_{d}(\dom) \;=\; \bigl[\;\min_{c \in V(\dom)} \Fdiff_{d}(c),\;
+\max_{c \in V(\dom)} \Fdiff_{d}(c)\;\bigr],
+\end{equation}
+where $V(\dom)$ are the eight corners. \Cref{eq:hull} is an equality and not an
+enclosure. Evaluating the eight corners and taking the componentwise hull gives
+the exact range of $\Fdiff$ over $\dom$. That property separates the inclusion
+function of \citet{wang2021tight} from generic interval arithmetic, which widens
+at every operation, and it means a box can be discarded on the strength of its
+corners alone.
+
+\subsection{What floating point costs: the error bound and the tolerances}
+\label{sec:prelim:err}
+
+The exactness of \cref{eq:hull} is a statement about real arithmetic. The eight
+values a machine computes are $\Fdiff_{d}(c)$ perturbed by rounding.
+\Cref{eq:hull} is the only thing licensing a box to be discarded, so the size of
+that perturbation is the only thing standing between the search and a lost
+root.
+
+\citet{wang2021tight} bound it by a forward error analysis in the standard
+style~\citep{higham2002accuracy}, the same reasoning that underlies the
+floating-point filters used for exact geometric
+predicates~\citep{attene2020indirect}. With $\mach$ the unit roundoff and $M$
+the largest absolute coordinate appearing among the eight input points of the
+query,
+\begin{equation}
+\label{eq:err}
+\delta \;=\; \min(M,\,1),
+\qquad
+\epsilon_{d} \;=\; \kappa\,\mach\,\delta^{3},
+\qquad
+\kappa = \begin{cases}
+30 & \text{vertex-face},\\
+28 & \text{edge-edge},
+\end{cases}
+\end{equation}
+and every computed corner value lies within $\epsilon_{d}$ of the exact one.
+
+Two details of \cref{eq:err} are load-bearing. The first is that $\delta$ is $M$
+clamped from \emph{above} by $1$. Clamping from below instead would make the pad
+grow as the cube of the scene's diameter, reaching $10^{6}$ at a scale of $100$,
+which the acceptance test would then have to spend.
+
+The second is that the bound is derived for one particular sequence of
+floating-point operations. An algebraically identical but differently associated
+expression has a different rounding profile, and $\kappa$ does not cover it. The
+corner evaluation is therefore written in TightInclusion's order and is not free
+to be rearranged. The implementation pins IEEE semantics across those regions
+and refuses to build under \texttt{-ffast-math}.
+
+No constant is certified in the literature for the bilinear query of
+\cref{eq:fvq}. We use $\kappa = 38$, which exceeds both certified constants and
+is therefore safe in the direction that matters, and record it as an over-estimate: lowering it requires a derivation.
+
+The bound says when a box may be discarded. A second quantity says when one is
+small enough to stop refining. It is measured per axis, because the three axes
+of the domain are not commensurate: a width in $t$ and a width in $u$ mean
+different things. Following \citet{wang2021tight}, a user-facing distance
+tolerance $\tau$ in the codomain becomes per-axis domain tolerances by division
+by the rate at which $\Fdiff$ changes along each axis,
+\begin{equation}
+\label{eq:tol}
+\tau_{0} = \frac{\tau}{L_{t}},\qquad
+\tau_{1} = \frac{\tau}{L_{u}},\qquad
+\tau_{2} = \frac{\tau}{L_{v}},
+\end{equation}
+with each $L$ the largest $\ell_{\infty}$ displacement of the relevant corner
+differences along that axis.
+
+\Cref{eq:tol} needs capping. A query whose geometry barely moves along one axis
+divides by nearly zero and receives an effectively infinite tolerance. Every box
+then satisfies ``width $\le$ tolerance'', the root box is accepted on sight, and
+the query reports $\toi = 0$. That outcome is conservative, being early and not
+late, and it is also useless. The quotients are therefore clamped at
+$\tau_{0}\le 10^{-3}$ and $\tau_{1},\tau_{2}\le 10^{-2}$, matching the
+reference. The same two caps are compiled into the device kernels, so both
+processors stop in the same place.
+
+Together, \cref{eq:hull,eq:err,eq:tol} fix what an implementation of this family
+can promise. Following \citet{wang2021tight}, an implementation is \emph{exact}
+if it reports a collision if and only if one occurs, \emph{conservative}
+(\cref{def:conservative}) if it never misses one and never reports late, and
+\emph{approximate} otherwise. Exactness is not attainable at simulation speed.
+Conservativeness is, and its price is false positives, which \cref{sec:results}
+reports per scene as the cost they are.
+
+Deciding a query costs far more than deciding whether it is worth asking, so a
+pipeline asks the cheap question first. \Cref{sec:bp} is that filter, and it
+needs none of the machinery above. \Cref{sec:np} is the search that uses all of
+it.

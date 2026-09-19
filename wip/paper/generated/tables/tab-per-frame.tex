@@ -1,0 +1,26 @@
+\begin{table}[htbp]
+  \centering
+  \caption{Mean time for one simulation step: the scene total, median over repeats, divided by the number of frames. A step runs both query types, so this is the cost of the vertex-face and edge-edge work of that frame together. \emph{broad} is the whole broad phase: building the swept boxes and the acceleration structure, then finding the candidate pairs over it. \emph{narrow} turns those pairs into a time of impact.}
+  \label{tab:per-frame}
+  \fittable{%
+\begin{tabular}{lrlrrr}
+    \toprule
+    scene & frames & mode & broad ms & narrow ms & total ms \\
+    \midrule
+    armadillo-rollers & 396 & GPU & 7.30 & 4.07 & 11.37 \\
+    armadillo-rollers & 396 & CPU & 6.59 & 1.83 & 8.42 \\
+    cloth-ball & 43 & GPU & 24.77 & 4.22 & 28.99 \\
+    cloth-ball & 43 & CPU & 40.29 & 14.51 & 54.80 \\
+    cloth-funnel & 372 & GPU & 4.99 & 2.31 & 7.30 \\
+    cloth-funnel & 372 & CPU & 4.72 & 0.86 & 5.57 \\
+    n-body & 74 & GPU & 100.81 & 5.67 & 106.48 \\
+    n-body & 74 & CPU & 156.26 & 77.78 & 234.04 \\
+    puffer-ball & 120 & GPU & 639.99 & 12.38 & 652.37 \\
+    puffer-ball & 120 & CPU & 649.63 & 176.34 & 825.98 \\
+    rod-twist & 2,556 & GPU & 10.54 & 6.51 & 17.05 \\
+    rod-twist & 2,556 & CPU & 16.81 & 12.73 & 29.54 \\
+    \bottomrule
+  \end{tabular}}
+  \par\smallskip\footnotesize A mean rather than a median over steps: the scene total is what a run costs, and the mean is the only average that divides back into it.
+  \par\smallskip\footnotesize Source: \texttt{benchmark/results/sweep-gh200-bp.csv}
+\end{table}

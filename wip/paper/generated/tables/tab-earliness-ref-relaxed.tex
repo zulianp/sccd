@@ -1,0 +1,49 @@
+\begin{table}[htbp]
+  \centering
+  \caption{Earliness against the dataset's exact symbolic roots: how far before the true time of impact each implementation reports, as the median over files of the within-file median, and the largest anywhere in the scene. TightInclusion is a subject here rather than the reference, because its own answer is a conservative lower bound and not the truth.}
+  \label{tab:earliness-ref-relaxed}
+  \fittable{%
+\begin{tabular}{lllrr}
+    \toprule
+    scene & phase & mode & median & worst case \\
+    \midrule
+    armadillo-rollers & EE & CPU & 3.47e-05 & 7.37e-01 \\
+    armadillo-rollers & EE & GPU & 7.59e-05 & 7.37e-01 \\
+    armadillo-rollers & EE & TightInclusion & 3.11e-06 & 1.60e-02 \\
+    armadillo-rollers & VF & CPU & 6.44e-05 & 9.41e-01 \\
+    armadillo-rollers & VF & GPU & 1.05e-04 & 9.41e-01 \\
+    armadillo-rollers & VF & TightInclusion & 3.74e-06 & 9.39e-03 \\
+    cloth-ball & EE & CPU & 3.13e-07 & 5.40e-04 \\
+    cloth-ball & EE & GPU & 1.13e-06 & 9.01e-04 \\
+    cloth-ball & EE & TightInclusion & 1.05e-07 & 1.04e-04 \\
+    cloth-ball & VF & CPU & 2.96e-07 & 7.86e-05 \\
+    cloth-ball & VF & GPU & 1.09e-06 & 2.18e-04 \\
+    cloth-ball & VF & TightInclusion & 9.76e-08 & 2.88e-05 \\
+    cloth-funnel & EE & CPU & 0 & 1.00e+00 \\
+    cloth-funnel & EE & GPU & 0 & 1.00e+00 \\
+    cloth-funnel & EE & TightInclusion & 0 & 1.00e+00 \\
+    cloth-funnel & VF & CPU & 1.56e-02 & 9.97e-01 \\
+    cloth-funnel & VF & GPU & 2.76e-02 & 9.97e-01 \\
+    cloth-funnel & VF & TightInclusion & 3.33e-04 & 2.67e-02 \\
+    n-body & EE & CPU & 1.79e-08 & 1.27e-03 \\
+    n-body & EE & GPU & 1.10e-07 & 2.56e-03 \\
+    n-body & EE & TightInclusion & 1.14e-08 & 1.89e-04 \\
+    n-body & VF & CPU & 1.84e-08 & 1.53e-04 \\
+    n-body & VF & GPU & 1.03e-07 & 2.60e-04 \\
+    n-body & VF & TightInclusion & 1.17e-08 & 1.87e-05 \\
+    puffer-ball & EE & CPU & 3.57e-02 & 9.61e-01 \\
+    puffer-ball & EE & GPU & 3.64e-02 & 9.62e-01 \\
+    puffer-ball & EE & TightInclusion & 3.54e-05 & 2.61e-01 \\
+    puffer-ball & VF & CPU & 4.68e-02 & 9.75e-01 \\
+    puffer-ball & VF & GPU & 4.62e-02 & 9.75e-01 \\
+    puffer-ball & VF & TightInclusion & 4.58e-05 & 5.04e-02 \\
+    rod-twist & EE & CPU & 3.23e-02 & 9.93e-01 \\
+    rod-twist & EE & GPU & 3.53e-02 & 9.93e-01 \\
+    rod-twist & EE & TightInclusion & 3.69e-04 & 9.85e-01 \\
+    rod-twist & VF & CPU & 1.71e-02 & 9.96e-01 \\
+    rod-twist & VF & GPU & 1.90e-02 & 9.96e-01 \\
+    rod-twist & VF & TightInclusion & 1.54e-04 & 9.93e-01 \\
+    \bottomrule
+  \end{tabular}}
+  \par\smallskip\footnotesize Source: \texttt{benchmark/results/oracle-gh200-all.csv}
+\end{table}

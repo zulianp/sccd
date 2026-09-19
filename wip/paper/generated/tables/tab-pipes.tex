@@ -1,0 +1,29 @@
+\begin{table}[!tb]
+  \centering
+  \caption{Functional-unit use in the device search kernel. The first three
+    columns are each pipe's share of its peak issue rate \emph{while the SM is
+    active}; \emph{SM} is the whole multiprocessor's share of peak over
+    \emph{elapsed} time, so the gap between them is the machine standing idle
+    rather than the pipes running slowly. \emph{int/fp64} is integer
+    thread-instructions per double-precision one. No flop rate is reported: the
+    throughput figure for this pipeline is candidate pairs resolved per second
+    (\cref{tab:throughput}), and an implementation that raised its arithmetic
+    rate while returning the same answers would be a worse one.}
+  \label{tab:pipes}
+  \begin{tabular}{lrrrrr}
+    \toprule
+    & \multicolumn{3}{c}{pipe, \% of peak while active}
+      & \multicolumn{2}{c}{} \\
+    \cmidrule(lr){2-4}
+    scene & FP64 & ALU & LSU & SM \% & int/fp64 \\
+    \midrule
+    armadillo-rollers & 18.3 & 16.5 & 5.0 & 4.89 & 0.77 \\
+    cloth-ball & 24.3 & 19.6 & 4.4 & 4.03 & 0.71 \\
+    cloth-funnel & 18.3 & 14.8 & 3.1 & 2.25 & 0.58 \\
+    n-body & 23.8 & 22.0 & 8.1 & 26.37 & 0.95 \\
+    puffer-ball & 24.6 & 21.4 & 6.7 & 28.61 & 0.90 \\
+    rod-twist & 29.1 & 25.2 & 6.6 & 28.43 & 0.72 \\
+    \bottomrule
+  \end{tabular}
+  \par\smallskip\footnotesize Source: \texttt{benchmark/results/profile/}
+\end{table}

@@ -1,0 +1,49 @@
+\begin{table}[htbp]
+  \centering
+  \caption{SCCD against TightInclusion over the same queries: hits reported, and time taken. TightInclusion is the reference implementation of a certified conservative narrow phase, so matching its hit count is the strongest agreement available; reporting more hits is a false positive, which costs work but is never unsafe.}
+  \label{tab:reference-relaxed}
+  \fittable{%
+\begin{tabular}{lllrrrr}
+    \toprule
+    scene & phase & mode & queries & hits & time (ms) & vs.\ TI \\
+    \midrule
+    armadillo-rollers & EE & GPU & 99,104 & 98,933 & 1876 / 1883 & 5.4× \\
+    armadillo-rollers & EE & CPU & 99,104 & 98,895 & 2906 / 2909 & 3.5× \\
+    armadillo-rollers & EE & TightInclusion & 99,104 & 98,761 & 10113 / 10133 & 1.0× (ref) \\
+    armadillo-rollers & VF & GPU & 32,337 & 32,248 & 1431 / 1440 & 5.1× \\
+    armadillo-rollers & VF & CPU & 32,337 & 32,196 & 1794 / 1804 & 4.0× \\
+    armadillo-rollers & VF & TightInclusion & 32,337 & 32,122 & 7231 / 7231 & 1.0× (ref) \\
+    cloth-ball & EE & GPU & 557,683 & 557,669 & 517 / 522 & 5.1× \\
+    cloth-ball & EE & CPU & 557,683 & 557,669 & 648 / 650 & 4.1× \\
+    cloth-ball & EE & TightInclusion & 557,683 & 557,668 & 2655 / 2655 & 1.0× (ref) \\
+    cloth-ball & VF & GPU & 107,257 & 107,252 & 372 / 377 & 3.4× \\
+    cloth-ball & VF & CPU & 107,257 & 107,252 & 282 / 282 & 4.5× \\
+    cloth-ball & VF & TightInclusion & 107,257 & 107,252 & 1280 / 1281 & 1.0× (ref) \\
+    cloth-funnel & EE & GPU & 6,751 & 6,734 & 670 / 690 & 4.3× \\
+    cloth-funnel & EE & CPU & 6,751 & 6,700 & 668 / 678 & 4.3× \\
+    cloth-funnel & EE & TightInclusion & 6,751 & 6,259 & 2874 / 2935 & 1.0× (ref) \\
+    cloth-funnel & VF & GPU & 801 & 781 & 323 / 330 & 3.7× \\
+    cloth-funnel & VF & CPU & 801 & 760 & 79 / 81 & 15.1× \\
+    cloth-funnel & VF & TightInclusion & 801 & 529 & 1197 / 1199 & 1.0× (ref) \\
+    n-body & EE & GPU & 2,399,812 & 2,399,762 & 1087 / 1091 & 4.7× \\
+    n-body & EE & CPU & 2,399,812 & 2,399,747 & 6603 / 6612 & 0.8× \\
+    n-body & EE & TightInclusion & 2,399,812 & 2,399,746 & 5094 / 5111 & 1.0× (ref) \\
+    n-body & VF & GPU & 547,907 & 547,877 & 650 / 653 & 2.9× \\
+    n-body & VF & CPU & 547,907 & 547,873 & 437 / 438 & 4.4× \\
+    n-body & VF & TightInclusion & 547,907 & 547,873 & 1911 / 1914 & 1.0× (ref) \\
+    puffer-ball & EE & GPU & 1,206,952 & 1,206,951 & 323 / 325 & 12.2× \\
+    puffer-ball & EE & CPU & 1,206,952 & 1,206,951 & 213 / 215 & 18.5× \\
+    puffer-ball & EE & TightInclusion & 1,206,952 & 1,187,650 & 3958 / 3998 & 1.0× (ref) \\
+    puffer-ball & VF & GPU & 307,220 & 307,219 & 248 / 253 & 7.0× \\
+    puffer-ball & VF & CPU & 307,220 & 307,219 & 75 / 76 & 23.0× \\
+    puffer-ball & VF & TightInclusion & 307,220 & 299,676 & 1733 / 1747 & 1.0× (ref) \\
+    rod-twist & EE & GPU & 492,120 & 474,114 & 9269 / 9387 & 46.6× \\
+    rod-twist & EE & CPU & 492,120 & 458,641 & 38006 / 38053 & 11.4× \\
+    rod-twist & EE & TightInclusion & 492,120 & 246,132 & 432019 / 432263 & 1.0× (ref) \\
+    rod-twist & VF & GPU & 57,088 & 56,290 & 4801 / 4805 & 15.8× \\
+    rod-twist & VF & CPU & 57,088 & 55,398 & 5024 / 5074 & 15.1× \\
+    rod-twist & VF & TightInclusion & 57,088 & 40,542 & 75762 / 75815 & 1.0× (ref) \\
+    \bottomrule
+  \end{tabular}}
+  \par\smallskip\footnotesize Source: \texttt{benchmark/results/oracle-gh200-all.csv}
+\end{table}
