@@ -199,7 +199,13 @@ namespace {
         ptrdiff_t* cursor = nullptr;
         SCCD_CUDA_CHECK(cudaMalloc(&cellidx, sizeof(idx_t) * (size_t)(spans > 0 ? spans : 1)));
         SCCD_CUDA_CHECK(cudaMalloc(&cursor, sizeof(ptrdiff_t) * (size_t)(grid.ncells() + 1)));
-        sccd::device::cell2d_fill<scalar_t, idx_t>(e.n, e.aabbs, grid, cellptr, cellidx, cursor);
+        ptrdiff_t rejected = 0;
+        sccd::device::cell2d_fill<scalar_t, idx_t>(
+            e.n, e.aabbs, grid, cellptr, cellidx, spans > 0 ? spans : 1, cursor, &rejected);
+        if (rejected) {
+            fprintf(stderr, "cell2d_fill rejected %ld of %ld spans\n", (long)rejected, (long)spans);
+            std::exit(1);
+        }
 
         ptrdiff_t* ccdptr = nullptr;
         SCCD_CUDA_CHECK(cudaMalloc(&ccdptr, sizeof(ptrdiff_t) * (size_t)(e.n + 1)));

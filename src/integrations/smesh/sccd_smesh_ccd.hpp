@@ -420,12 +420,26 @@ namespace sccd {
             sccd::device::cell2d_setup_and_count<scalar_t, smesh::idx_t>(
                 n, aabb, grid, cellptr->data(), &spans);
 
-            if (!cellidx || cellidx->size() < spans) {
-                cellidx = smesh::create_buffer<smesh::idx_t>(spans > 0 ? spans : 1, execution_space_);
+            const ptrdiff_t want = spans > 0 ? spans : 1;
+            if (!cellidx || cellidx->size() < want) {
+                cellidx = smesh::create_buffer<smesh::idx_t>(want, execution_space_);
             }
 
+            ptrdiff_t rejected[2] = {0, 0};
             sccd::device::cell2d_fill<scalar_t, smesh::idx_t>(
-                n, aabb, grid, cellptr->data(), cellidx->data(), cursor->data());
+                n, aabb, grid, cellptr->data(), cellidx->data(), cellidx->size(),
+                cursor->data(), rejected);
+            if (rejected[0]) {
+                fprintf(stderr, "sccd: fill attempted %ld writes, count reserved %ld\n",
+                        (long)rejected[1], (long)spans);
+                // The counting pass reserves one slot per span, so this cannot
+                // happen while the two passes agree. Saying so is better than
+                // running the query over a cell list that is quietly missing
+                // entries, which would drop candidate pairs.
+                SMESH_ERROR("sccd: device cell list rejected %ld of %ld spans over %ld boxes "
+                            "(grid %dx%d)\n",
+                            (long)rejected[0], (long)spans, (long)n, grid.n0, grid.n1);
+            }
         }
 #endif
 

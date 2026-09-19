@@ -70,13 +70,25 @@ namespace sccd {
                                     ptrdiff_t* const SCCD_RESTRICT cellptr,
                                     ptrdiff_t* const SCCD_RESTRICT span_count);
 
+        /**
+         * \brief Scatter each box into its cells.
+         *
+         * \p capacity is how many entries \p cellidx holds, and \p cursor must
+         * have `ncells + 1` of them: the last counts writes the kernel refused
+         * because they fell outside the array. The counting pass reserved
+         * exactly one slot per span, so a non-zero count means the two passes
+         * disagreed and the result is incomplete -- it is reported through
+         * \p out_rejected (which may be null) rather than written past the end.
+         */
         template <typename T, typename I>
         void cell2d_fill(const ptrdiff_t n,
                          T** const SCCD_RESTRICT aabbs,
                          const Cell2DGridD<T>& grid,
                          const ptrdiff_t* const SCCD_RESTRICT cellptr,
                          I* const SCCD_RESTRICT cellidx,
-                         ptrdiff_t* const SCCD_RESTRICT cursor);
+                         const ptrdiff_t capacity,
+                         ptrdiff_t* const SCCD_RESTRICT cursor,
+                         ptrdiff_t* const SCCD_RESTRICT out_rejected);
 
         template <int first_nxe, int second_nxe, typename T, typename I>
         void cell2d_count_overlaps(const ptrdiff_t first_count,

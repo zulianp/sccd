@@ -172,6 +172,7 @@ namespace sccd {
                                             const Cell2DGridD<T> grid,
                                             const ptrdiff_t* const SCCD_RESTRICT cellptr,
                                             I* const SCCD_RESTRICT cellidx,
+                                            const ptrdiff_t capacity,
                                             ptrdiff_t* const SCCD_RESTRICT cursor) {
                 const ptrdiff_t i = (ptrdiff_t)blockIdx.x * blockDim.x + threadIdx.x;
                 if (i >= n) return;
@@ -180,13 +181,28 @@ namespace sccd {
                 const int b = cell0<T>(grid, hi0[i]);
                 const int c = cell1<T>(grid, lo1[i]);
                 const int d = cell1<T>(grid, hi1[i]);
+                const ptrdiff_t ncells = grid.ncells();
 
                 for (int j = c; j <= d; ++j) {
                     for (int k = a; k <= b; ++k) {
                         const ptrdiff_t cell = cell_of<T>(grid, k, j);
+                        atomicAdd((unsigned long long*)&cursor[ncells + 1], 1ull);
+                        // A write outside the array is counted rather than made.
+                        // The counting pass reserved exactly one slot per span,
+                        // so a bad index here means the two passes disagreed,
+                        // which the caller reports instead of corrupting memory.
+                        if (cell < 0 || cell >= ncells) {
+                            atomicAdd((unsigned long long*)&cursor[ncells], 1ull);
+                            continue;
+                        }
                         const unsigned long long at =
                             atomicAdd((unsigned long long*)&cursor[cell], 1ull);
-                        cellidx[cellptr[cell] + (ptrdiff_t)at] = (I)i;
+                        const ptrdiff_t pos = cellptr[cell] + (ptrdiff_t)at;
+                        if (pos < 0 || pos >= capacity) {
+                            atomicAdd((unsigned long long*)&cursor[ncells], 1ull);
+                            continue;
+                        }
+                        cellidx[pos] = (I)i;
                     }
                 }
             }
@@ -436,6 +452,30 @@ namespace sccd {
 
         }  // namespace detail
 
+        /**
+         * \brief Shrink a grid until it holds at most `4 * n` cells.
+         *
+         * The caller sizes its cell array from this bound, so it has to hold
+         * exactly, not approximately. The host cell list enforces it the same
+         * way, in `cap_cells`.
+         */
+        static void cap_cells_device(const ptrdiff_t n, int& n0, int& n1) {
+            ptrdiff_t cap = 4 * n;
+            if (cap < 1) cap = 1;
+            if (n0 < 1) n0 = 1;
+            if (n1 < 1) n1 = 1;
+            if ((ptrdiff_t)n0 > cap) n0 = (int)cap;
+            if ((ptrdiff_t)n1 > cap) n1 = (int)cap;
+            if ((ptrdiff_t)n0 * (ptrdiff_t)n1 <= cap) return;
+            if (n0 >= n1) {
+                const ptrdiff_t v = cap / (ptrdiff_t)n1;
+                n0 = (int)(v < 1 ? 1 : v);
+            } else {
+                const ptrdiff_t v = cap / (ptrdiff_t)n0;
+                n1 = (int)(v < 1 ? 1 : v);
+            }
+        }
+
         template <typename T, typename I>
         void cell2d_setup_and_count(const ptrdiff_t n,
                                     T** const SCCD_RESTRICT aabbs,
@@ -495,16 +535,29 @@ namespace sccd {
 
             double want0 = (double)(s0 / mean0);
             double want1 = (double)(s1 / mean1);
-            if (want0 < 1) want0 = 1;
-            if (want1 < 1) want1 = 1;
+            // Negated so a NaN extent lands on one cell rather than on whatever
+            // the cast to int makes of it.
+            if (!(want0 >= 1)) want0 = 1;
+            if (!(want1 >= 1)) want1 = 1;
             const double cap = 4.0 * (double)n;
             if (want0 * want1 > cap) {
                 const double sc = sqrt(cap / (want0 * want1));
                 want0 = want0 * sc < 1 ? 1 : want0 * sc;
                 want1 = want1 * sc < 1 ? 1 : want1 * sc;
             }
+            // An infinite or still-huge side would be undefined as an int, so
+            // both are brought inside the cap before the cast.
+            if (want0 > cap) want0 = cap;
+            if (want1 > cap) want1 = cap;
             grid.n0 = (int)want0;
             grid.n1 = (int)want1;
+            // Scaling both sides by the same factor does not enforce the cap on
+            // a scene whose two axes differ wildly: a side scaled below one is
+            // raised back to one, and the product grows past the cap again by
+            // exactly that much. n-body-simulation, puffer-ball and rod-twist
+            // are all such scenes, and the caller sizes cellptr from this bound,
+            // so the bound is enforced on the integers it is sized by.
+            cap_cells_device(n, grid.n0, grid.n1);
             grid.min0 = h_min[grid.axis0];
             grid.min1 = h_min[grid.axis1];
             grid.inv0 = (T)grid.n0 / (s0 * (T)1.0000001);
@@ -543,9 +596,15 @@ namespace sccd {
                          const Cell2DGridD<T>& grid,
                          const ptrdiff_t* const SCCD_RESTRICT cellptr,
                          I* const SCCD_RESTRICT cellidx,
-                         ptrdiff_t* const SCCD_RESTRICT cursor) {
-            if (n <= 0) return;
-            SCCD_CHECK_CUDA(cudaMemset(cursor, 0, sizeof(ptrdiff_t) * (size_t)grid.ncells()));
+                         const ptrdiff_t capacity,
+                         ptrdiff_t* const SCCD_RESTRICT cursor,
+                         ptrdiff_t* const SCCD_RESTRICT out_rejected) {
+            if (n <= 0) {
+                if (out_rejected) *out_rejected = 0;
+                return;
+            }
+            // One past the cells: the slot the kernel counts rejected writes in.
+            SCCD_CHECK_CUDA(cudaMemset(cursor, 0, sizeof(ptrdiff_t) * (size_t)(grid.ncells() + 2)));
 
             dim3 block(SCCD_C2D_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
             dim3 gridsz((n + block.x - 1) / block.x);
@@ -557,8 +616,16 @@ namespace sccd {
                                                           grid,
                                                           cellptr,
                                                           cellidx,
+                                                          capacity,
                                                           cursor);
             SCCD_CUDA_LAST_ERROR();
+            if (out_rejected) {
+                ptrdiff_t both[2] = {0, 0};
+                SCCD_CHECK_CUDA(cudaMemcpy(both, cursor + grid.ncells(),
+                                           sizeof(ptrdiff_t) * 2, cudaMemcpyDeviceToHost));
+                out_rejected[0] = both[0];
+                out_rejected[1] = both[1];
+            }
         }
 
         template <int first_nxe, int second_nxe, typename T, typename I>
@@ -735,6 +802,8 @@ SCCD_C2D_INSTANTIATE_IDX(int32_t)
                                                   const sccd::device::Cell2DGridD<T>&,         \
                                                   const ptrdiff_t*,                            \
                                                   I*,                                          \
+                                                  const ptrdiff_t,                             \
+                                                  ptrdiff_t*,                                  \
                                                   ptrdiff_t*);                                 \
     SCCD_C2D_INSTANTIATE_FV(3, T, I)                                                           \
     SCCD_C2D_INSTANTIATE_FV(4, T, I)                                                           \
