@@ -19,11 +19,17 @@
 #
 # Options:
 #   --out DIR       chunk tree       (default $SCRATCH/sccd-compare)
-#   --scenes "..."  scenes           (default the three with verified ground truth)
+#   --scenes "..."  scenes           (default: every prepared scene)
 #   --repeats N     independent runs (default 3)
 #   --chunk N       cases per chunk  (default 400)
 #   --time T        per-job limit    (default 00:29:00)
 #   --partition P   (default debug)   --account A (default c40)
+#   --jobs N        chunk jobs in flight at once (default 1)
+#
+# The debug partition caps a job at 30 minutes and its QOS admits one running
+# job, so the default is one chunk at a time sized to fit. The normal partition
+# allows a day per job and no per-user cap, so a long tail belongs there with
+# --jobs above one and a --time to match.
 #
 # Submitting blocks until the last job ends, so run it detached (`setsid nohup`):
 # a plain background job dies with the ssh session and leaves its chunk jobs
@@ -33,12 +39,13 @@ set -u
 
 SCRATCH=${SCRATCH:-/ritom/scratch/cscs/zulianp}
 OUT_DIR="$SCRATCH/sccd-compare"
-SCENES="armadillo-rollers cloth-ball cloth-funnel"
+SCENES="armadillo-rollers cloth-ball cloth-funnel n-body-simulation puffer-ball rod-twist"
 REPEATS=3
 CHUNK=400
 TIME_LIMIT="00:29:00"
 PARTITION="debug"
 ACCOUNT="c40"
+JOBS=1
 UENV="prgenv-gnu/24.11:v2"
 DRY_RUN=0
 MERGE_ONLY=0
@@ -52,6 +59,7 @@ while [[ $# -gt 0 ]]; do
         --time) TIME_LIMIT="$2"; shift 2 ;;
         --partition) PARTITION="$2"; shift 2 ;;
         --account) ACCOUNT="$2"; shift 2 ;;
+        --jobs) JOBS="$2"; shift 2 ;;
         --dry-run) DRY_RUN=1; shift ;;
         --merge) MERGE_ONLY=1; shift ;;
         -h|--help) sed -n '2,31p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -156,7 +164,7 @@ submit_with_retry() {
     done
 }
 
-mkdir -p "$OUT_DIR/logs"
+mkdir -p "$OUT_DIR/logs" "$OUT_DIR/status"
 failures=0
 for k in "${todo[@]:-}"; do
     [[ -n "$k" ]] || continue
@@ -164,17 +172,35 @@ for k in "${todo[@]:-}"; do
     out="$(chunk_path "$scene" "$r" "$b" "$e")"
     name="$scene-r$r-$b"
     echo "==> $scene r$r [$b, $e)  $(date +%T)"
-    # --wait serialises the chunks, which is what one running job per user
-    # amounts to anyway, and lets a failure be reported against its chunk.
-    if ! submit_with_retry --account="$ACCOUNT" --partition="$PARTITION" \
+    submit() {
+        submit_with_retry --account="$ACCOUNT" --partition="$PARTITION" \
             --nodes=1 --ntasks=1 --cpus-per-task=72 --gpus-per-task=1 \
             --time="$TIME_LIMIT" --uenv="$UENV" --view=default \
             --job-name="cmp-$name" \
             --output="$OUT_DIR/logs/$name.out" --error="$OUT_DIR/logs/$name.err" \
-            --wrap="bash '$HERE/run_comparison.sh' '$scene' '$b' '$e' '$out'"; then
+            --wrap="bash '$HERE/run_comparison.sh' '$scene' '$b' '$e' '$out'"
+    }
+    if [[ "$JOBS" -gt 1 ]]; then
+        # Several chunks in flight. Each records its own status, because a
+        # background job's exit cannot be attributed to its chunk by `wait`
+        # alone, and a silently dropped failure is the one outcome a sweep must
+        # not have.
+        while [[ "$(jobs -rp | wc -l)" -ge "$JOBS" ]]; do wait -n 2>/dev/null || true; done
+        ( if submit; then echo ok > "$OUT_DIR/status/$name"; \
+          else echo FAILED > "$OUT_DIR/status/$name"; fi ) &
+    elif ! submit; then
         echo "FAILED $name (see $OUT_DIR/logs/$name.err)" >&2
         failures=$((failures + 1))
     fi
+done
+wait
+for f in "$OUT_DIR"/status/*; do
+    [[ -e "$f" ]] || continue
+    if [[ "$(cat "$f")" == FAILED ]]; then
+        echo "FAILED $(basename "$f") (see $OUT_DIR/logs/$(basename "$f").err)" >&2
+        failures=$((failures + 1))
+    fi
+    rm -f "$f"
 done
 
 echo "submitted ${#todo[@]} chunks, $failures failed"

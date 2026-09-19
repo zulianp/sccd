@@ -128,9 +128,10 @@ bash benchmark/competitors/sweep_comparison.sh --merge
 python3 benchmark/competitors/compare_table.py $SCRATCH/sccd-compare/compare.csv
 ```
 
-The defaults are the three scenes with verified ground truth, three repeats and
-400 cases per chunk. The binaries come from `$SCCD_COMPETITOR_BUILD`
-(default `$SCRATCH/sccd/build-comp`) and the data from `$SCCD_DATA_DIR`. The
+The defaults are all six scenes, three repeats and 400 cases per chunk, which is
+66 chunks; `--jobs N` keeps N of them in flight at once. The binaries come from
+`$SCCD_COMPETITOR_BUILD` (default `$SCRATCH/sccd/build-comp-f64`) and the data
+from `$SCCD_DATA_DIR`. The
 binding matters for Scalable CCD's host broad phase, which is oneTBB and follows
 the CPU affinity mask, not `OMP_NUM_THREADS`.
 

@@ -25,18 +25,24 @@ ROOT = HERE.parent.parent.parent
 DATA = ROOT / "benchmark" / "competitors" / "results"
 OUT = HERE.parent / "generated" / "tables"
 
-SCENES = ["armadillo-rollers", "cloth-ball", "cloth-funnel"]
+SCENES = ["armadillo-rollers", "cloth-ball", "cloth-funnel", "n-body-simulation",
+          "puffer-ball", "rod-twist"]
+# The name the paper's other tables use for each scene.
 PRETTY = {"armadillo-rollers": "armadillo-rollers", "cloth-ball": "cloth-ball",
-          "cloth-funnel": "cloth-funnel"}
+          "cloth-funnel": "cloth-funnel", "n-body-simulation": "n-body",
+          "puffer-ball": "puffer-ball", "rod-twist": "rod-twist"}
 
 
 def rows():
     """Every per-case row of the newest comparison CSV, gzipped or not."""
+    # Newest by name, whichever form it is in. Sorting the two globs separately
+    # and taking the last would prefer an ungzipped leftover over a newer
+    # archive, which is how a stale file got read once.
     candidates = sorted(DATA.glob("compare-gh200-full-*.csv.gz")) + \
         sorted(DATA.glob("compare-gh200-full-*.csv"))
     if not candidates:
         sys.exit(f"error: no comparison CSV under {DATA}")
-    path = candidates[-1]
+    path = max(candidates, key=lambda p: p.name.replace(".csv.gz", "").replace(".csv", ""))
     opener = gzip.open if path.suffix == ".gz" else open
     with opener(path, "rt") as fh:
         data = [r for r in csv.DictReader(fh) if r.get("type") in ("vf", "ee")]

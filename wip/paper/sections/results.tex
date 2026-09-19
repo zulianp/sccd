@@ -277,8 +277,7 @@ without measuring.
 inherits. Two other implementations answer neighbouring questions, and each is
 compared on the question it answers rather than on a single shared table. Both
 are used exactly as released, built with the same compiler flags, and run on the
-same node over the three scenes whose ground truth the dataset verifies without
-gaps.
+same node over all six scenes and all $6{,}394$ cases, three repeats each.
 
 \textbf{Scalable CCD} returns one earliest time of impact for a simulation step,
 pruning every box against the running bound~\citep{belgrod2025toi}. Both
@@ -288,29 +287,38 @@ scores the step's answer against the step's earliest exact root.
 
 \input{generated/tables/tab-competitor-earliest}
 
-End to end SCCD is $3.4\times$ ahead on armadillo-rollers, $3.7\times$ on
-cloth-ball and $4.4\times$ on cloth-funnel, over the same candidates. On the
-host, where Scalable CCD implements only a broad phase, its sweep costs $5.9$,
-$22.9$ and $4.7\,\mathrm{ms}$ against the cell list's $5.3$, $21.4$ and $4.1$.
+End to end SCCD is ahead on every scene, by $3.1\times$ on rod-twist,
+$3.4\times$ on armadillo-rollers, $3.7\times$ on cloth-ball and $4.1\times$ to
+$4.4\times$ on the other three. On the host, where Scalable CCD implements only a
+broad phase, its sweep costs $5.9$, $22.9$, $4.7$, $55.2$, $4644.6$ and
+$15.2\,\mathrm{ms}$ against the cell list's $5.3$, $21.4$, $4.1$, $82.0$,
+$1508.6$ and $9.9$: the cell list leads on four scenes and the sweep on n-body
+and puffer-ball, which is the same split \cref{tab:broadphase} reports between
+our own two strategies.
 
 The accuracy column is the one to read carefully, because it reports a defect
 rather than a difference in tightness. On armadillo-rollers Scalable CCD's
 answer lands after the true root on $265$ of the $394$ steps that carry a
 contact, by as much as $0.999$: for those steps it reports no contact at all
-where one exists early. On cloth-funnel it does so on $8$ of $363$, and on
-cloth-ball not at all. The cause is a race in its subdivision buffer, whose
-overflow check tests that the buffer is full and then advances the tail as two
-separate operations, so that concurrent pushes can wrap the tail onto domains
-that have not been processed yet with no overflow flagged. Three observations
-identify it. Padding a query list with pairs that fail their first inclusion
-test -- which changes nothing but the length of the list, and hence the size the
-buffer is given -- turns $0$ of $1{,}299$ contacts found at one step into all
-$1{,}299$. The answer differs between identical runs. And a copy of the library
-whose overflow check is made race-free finds every one of the $54{,}664$ curated
-contacts of armadillo's first $400$ cases with nothing missed and nothing late.
-The comparison above reports the library as published; the patched copy is
-diagnosis only. The behaviour bites where a candidate list is short relative to
-the search it starts, which is armadillo's situation and not cloth-ball's.
+where one exists early. It does so on $33$ of rod-twist's $2{,}481$ steps and $8$
+of cloth-funnel's $363$, and not at all on cloth-ball, n-body or puffer-ball.
+The cause is a race in its subdivision buffer, whose overflow check tests that
+the buffer is full and then advances the tail as two separate operations, so
+that concurrent pushes can wrap the tail onto domains that have not been
+processed yet with no overflow flagged. Three observations identify it. Padding a
+query list with pairs that fail their first inclusion test -- which changes
+nothing but the length of the list, and hence the size the buffer is given --
+turns $0$ of $1{,}299$ contacts found at one step into all $1{,}299$. The answer
+differs between identical runs. And a copy of the library whose overflow check is
+made race-free finds every one of the $54{,}664$ curated contacts of armadillo's
+first $400$ cases with nothing missed and nothing late. The comparison above
+reports the library as published; the patched copy is diagnosis only.
+
+Which scenes it bites is itself evidence for that reading. The buffer is sized
+from the number of queries it is handed, so a short candidate list gives a small
+buffer: the three scenes it fails are the three with the fewest candidate pairs
+per step in \cref{tab:dataset}, and the three it answers correctly are those
+with millions.
 
 \textbf{Additive CCD} answers per pair, advancing conservatively until contact
 rather than isolating a root~\citep{li2021codim}. It is the narrow phase of a
@@ -319,18 +327,20 @@ candidates and the same curated queries.
 
 \input{generated/tables/tab-competitor-pair}
 
-It is the cheaper narrow phase, by $4.9\times$ per candidate on
-armadillo-rollers, $6.4\times$ on cloth-ball and $2.0\times$ on cloth-funnel
-against \textsc{Tight} on the host. What it gives up is the answer: its median
-error is $-2.9\times10^{-2}$, $-6.6\times10^{-2}$ and $-8.6\times10^{-3}$ where
-\textsc{Tight}'s is $-3.4\times10^{-6}$, $-2.7\times10^{-7}$ and
-$-6.9\times10^{-6}$, three to four orders of magnitude further from the root,
-and it reports $444$ contacts that do not exist on armadillo-rollers against
-$24$. Both are conservative throughout: neither misses a contact and neither
-reports a time of impact after the true one, which is what
-\cref{thm:conservative} and the method's own construction each guarantee. A
-solver pays for the gap with a shortened step, so the choice between them is the
-one \cref{sec:results:relaxed} makes within SCCD, at a wider setting.
+It is the cheaper narrow phase on every scene, by $2.0\times$ per candidate on
+cloth-funnel, around $5\times$ to $6\times$ on armadillo-rollers, cloth-ball,
+n-body and puffer-ball, and $11.6\times$ on rod-twist, against \textsc{Tight} on
+the host. What it gives up is the answer. Its median error runs from
+$-8.6\times10^{-3}$ to $-1.1\times10^{-1}$ where \textsc{Tight}'s runs from
+$-3.0\times10^{-8}$ to $-2.8\times10^{-4}$, two orders of magnitude further from
+the root on rod-twist and six on n-body, and it reports $27{,}374$ contacts that do not exist on
+puffer-ball against $536$. That last figure is worth putting beside
+\cref{sec:results:relaxed}: on the same scene our own \textsc{Relaxed} reports
+$27{,}380$, so additive CCD at its shipped $0.9$ rescaling sits about where the
+looser of our two acceptance tests does. Both are conservative throughout:
+neither misses a contact and neither reports a time of impact after the true one,
+which is what \cref{thm:conservative} and the method's own construction each
+guarantee. A solver pays for the gap with a shortened step.
 
 \subsection{Scaling with element count}
 \label{sec:results:scaling}
