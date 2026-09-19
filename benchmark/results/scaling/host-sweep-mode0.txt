@@ -1,7 +1,8 @@
-# mode=relaxed max_depth=69 tol=3e-08 scale=-0.5 space=host base_topology=TRI3 broadphase=sweep t0=/capstor/scratch/cscs/zulianp/sccd-assess/data/cloth-ball/frames_raw/cloth_ball0 t1=/capstor/scratch/cscs/zulianp/sccd-assess/data/cloth-ball/frames_raw/cloth_ball1
-level      faces     vf_pairs     ee_pairs   prep_ms  bp_fv_ms  bp_ee_ms  broad_ms  narrow_ms    ns/pair            toi
-    0      92230         1299        16683      2.14      0.67      1.86      4.67       0.22       12.4   1.0000000000
-    1     368920         5196        82652      8.38      4.12     12.50     25.01       0.77        8.8   1.0000000000
-    2    1475680        20784       360140     26.86     28.07    118.61    173.54       2.97        7.8   1.0000000000
-    3    5902720        83136      1498006    107.14    215.11   1007.45   1329.70      12.18        7.7   1.0000000000
-    4   23610880       332800      6108123    425.50   2097.75   9092.88  11616.13      47.49        7.4   1.0000000000
+# mode=relaxed max_depth=69 tol=3e-08 scale=-0.5 space=host base_topology=TRI3 broadphase=sweep t0=/ritom/scratch/cscs/zulianp/sccd-data/cloth-ball/frames_raw/cloth_ball0 t1=/ritom/scratch/cscs/zulianp/sccd-data/cloth-ball/frames_raw/cloth_ball1
+level      faces     vf_pairs     ee_pairs   prep_ms  bp_fv_ms  bp_ee_ms bp_total_ms  narrow_ms    ns/pair            toi
+    0      92230         1299        16683      2.12      0.68      1.88      4.68       0.22       12.1   1.0000000000
+    1     368920         5196        82575      8.58      4.27     12.43     25.29       0.75        8.6   1.0000000000
+    2    1475680        20784       359034     26.82     28.26    117.33    172.41       3.08        8.1   1.0000000000
+    3    5902720        83136      1490605    107.12    329.03   1015.24   1451.39      11.83        7.5   1.0000000000
+    4   23610880       332800      6069281    458.07   2160.43   8819.86  11438.36      46.36        7.2   1.0000000000
+    5   94443520      1331200     24493502   1932.73  18142.85  74033.48  94109.06     179.59        7.0   1.0000000000

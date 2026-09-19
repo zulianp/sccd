@@ -1,7 +1,8 @@
-# mode=relaxed max_depth=69 tol=3e-08 scale=-0.5 space=device base_topology=TRI3 broadphase=auto t0=/capstor/scratch/cscs/zulianp/sccd-assess/data/cloth-ball/frames_raw/cloth_ball0 t1=/capstor/scratch/cscs/zulianp/sccd-assess/data/cloth-ball/frames_raw/cloth_ball1
+# mode=relaxed max_depth=69 tol=3e-08 scale=-0.5 space=device base_topology=TRI3 broadphase=auto t0=/ritom/scratch/cscs/zulianp/sccd-data/cloth-ball/frames_raw/cloth_ball0 t1=/ritom/scratch/cscs/zulianp/sccd-data/cloth-ball/frames_raw/cloth_ball1
 level      faces     vf_pairs     ee_pairs   prep_ms  bp_fv_ms  bp_ee_ms bp_total_ms  narrow_ms    ns/pair            toi
-    0      92230         1299        16683      3.03      0.42      1.89      5.35       2.41      133.8   1.0000000000
-    1     368920         5196        82652     20.96      1.85      5.51     28.31       4.95       56.3   1.0000000000
-    2    1475680        20784       360140     80.53      7.29     24.09    111.91      18.16       47.7   1.0000000000
-    3    5902720        83136      1498006    345.17     45.48    173.46    564.10     135.41       85.6   1.0000000000
-    4   23610880       332800      6108123   1766.46    344.22   1544.61   3655.29    1092.10      169.6   1.0000000000
+    0      92230         1299        16683      2.84      0.94      2.79      6.57       1.57       87.5   1.0000000000
+    1     368920         5196        82575     21.57      2.60      8.33     32.50       2.13       24.3   1.0000000000
+    2    1475680        20784       359034     81.62      9.64     38.76    130.02       2.19        5.8   1.0000000000
+    3    5902720        83136      1490605    342.00     52.84    294.03    688.86       3.23        2.1   1.0000000000
+    4   23610880       332800      6069281   1600.15    399.36   2366.52   4366.03       6.70        1.0   1.0000000000
+    5   94443520      1331200     24493502  12349.56   3132.04  21445.70  36927.31      15.94        0.6   1.0000000000
