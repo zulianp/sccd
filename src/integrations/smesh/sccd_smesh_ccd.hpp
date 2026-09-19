@@ -25,6 +25,7 @@
 #endif
 
 #include <algorithm>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -205,20 +206,65 @@ namespace sccd {
         std::vector<ptrdiff_t> e_cursor_;
         std::vector<smesh::idx_t> e_cellidx_;
 
+
+#if defined(SCCD_ENABLE_CUDA)
+        /**
+         * \brief A plain cudaMalloc array owned by this object.
+         *
+         * The cell list's row pointer, cursor and range arrays are read and
+         * atomically updated by the device, and they have to be real device
+         * allocations for that to be reliable: taken from smesh's buffer
+         * factory they landed outside the device allocator's range, and the
+         * scatter pass then read stale counts and misplaced a few thousand of
+         * three hundred thousand writes, differently on every run. Holding them
+         * here keeps the guarantee local and explicit.
+         */
+        template <typename T>
+        struct DeviceArray {
+            T* ptr{nullptr};
+            ptrdiff_t count{0};
+
+            DeviceArray() = default;
+            DeviceArray(const DeviceArray&) = delete;
+            DeviceArray& operator=(const DeviceArray&) = delete;
+            ~DeviceArray() {
+                if (ptr) cudaFree(ptr);
+            }
+
+            /** \brief At least \p n elements, never shrinking. */
+            T* reserve(const ptrdiff_t n) {
+                if (n > count) {
+                    if (ptr) cudaFree(ptr);
+                    ptr = nullptr;
+                    if (cudaMalloc((void**)&ptr, sizeof(T) * (size_t)(n > 0 ? n : 1)) != cudaSuccess) {
+                        SMESH_ERROR("sccd: out of device memory for %ld cell-list entries\n", (long)n);
+                    }
+                    count = n > 0 ? n : 1;
+                }
+                return ptr;
+            }
+
+            T* get() const { return ptr; }
+            ptrdiff_t size() const { return count; }
+        };
+#endif
+
 #if defined(SCCD_ENABLE_CUDA)
         // The device cell list, mirroring the five host members above. cellptr
         // and cursor are sized once from the element count, because the setup
         // caps the grid at 4n cells, so a step allocates only cellidx, whose
         // length is the span count the setup reports back.
         sccd::device::Cell2DGridD<scalar_t> v_grid_d_;
-        smesh::SharedBuffer<ptrdiff_t> v_cellptr_d_;
-        smesh::SharedBuffer<ptrdiff_t> v_cursor_d_;
-        smesh::SharedBuffer<smesh::idx_t> v_cellidx_d_;
+        DeviceArray<ptrdiff_t> v_cellptr_d_;
+        DeviceArray<ptrdiff_t> v_cursor_d_;
+        DeviceArray<int> v_ranges_d_;
+        DeviceArray<smesh::idx_t> v_cellidx_d_;
 
         sccd::device::Cell2DGridD<scalar_t> e_grid_d_;
-        smesh::SharedBuffer<ptrdiff_t> e_cellptr_d_;
-        smesh::SharedBuffer<ptrdiff_t> e_cursor_d_;
-        smesh::SharedBuffer<smesh::idx_t> e_cellidx_d_;
+        DeviceArray<ptrdiff_t> e_cellptr_d_;
+        DeviceArray<ptrdiff_t> e_cursor_d_;
+        DeviceArray<int> e_ranges_d_;
+        DeviceArray<smesh::idx_t> e_cellidx_d_;
 #endif
 
 
@@ -413,22 +459,19 @@ namespace sccd {
         void bin_device_(const ptrdiff_t n,
                          scalar_t** const SCCD_RESTRICT aabb,
                          sccd::device::Cell2DGridD<scalar_t>& grid,
-                         smesh::SharedBuffer<ptrdiff_t>& cellptr,
-                         smesh::SharedBuffer<smesh::idx_t>& cellidx,
-                         smesh::SharedBuffer<ptrdiff_t>& cursor) {
+                         DeviceArray<ptrdiff_t>& cellptr,
+                         DeviceArray<smesh::idx_t>& cellidx,
+                         DeviceArray<ptrdiff_t>& cursor,
+                         DeviceArray<int>& ranges) {
             ptrdiff_t spans = 0;
             sccd::device::cell2d_setup_and_count<scalar_t, smesh::idx_t>(
-                n, aabb, grid, cellptr->data(), &spans);
-
-            const ptrdiff_t want = spans > 0 ? spans : 1;
-            if (!cellidx || cellidx->size() < want) {
-                cellidx = smesh::create_device_buffer<smesh::idx_t>(want);
-            }
+                n, aabb, grid, cellptr.get(), ranges.get(), &spans);
 
             ptrdiff_t rejected = 0;
             sccd::device::cell2d_fill<scalar_t, smesh::idx_t>(
-                n, aabb, grid, cellptr->data(), cellidx->data(), cellidx->size(),
-                cursor->data(), &rejected);
+                n, aabb, grid, cellptr.get(), ranges.get(),
+                cellidx.reserve(spans > 0 ? spans : 1), cellidx.size(),
+                cursor.get(), &rejected);
             if (rejected) {
                 // The counting pass reserves one slot per span, so this cannot
                 // happen while the two passes agree. Saying so is better than
@@ -930,8 +973,10 @@ namespace sccd {
                 sccd::device::fill_identity<smesh::idx_t>(n_faces, fidx_->data());
                 sccd::device::fill_identity<smesh::idx_t>(n_edges, eidx_->data());
 
-                bin_device_(n_nodes, vaabb_->data(), v_grid_d_, v_cellptr_d_, v_cellidx_d_, v_cursor_d_);
-                bin_device_(n_edges, eaabb_->data(), e_grid_d_, e_cellptr_d_, e_cellidx_d_, e_cursor_d_);
+                bin_device_(n_nodes, vaabb_->data(), v_grid_d_, v_cellptr_d_, v_cellidx_d_,
+                            v_cursor_d_, v_ranges_d_);
+                bin_device_(n_edges, eaabb_->data(), e_grid_d_, e_cellptr_d_, e_cellidx_d_,
+                            e_cursor_d_, e_ranges_d_);
             } else {
                 SMESH_TRACE_SCOPE("Sorting AABBs (device)");
 
@@ -970,8 +1015,8 @@ namespace sccd {
                                                                                     0,
                                                                                     (smesh::idx_t**)nullptr,
                                                                                     v_grid_d_,
-                                                                                    v_cellptr_d_->data(),
-                                                                                    v_cellidx_d_->data(),
+                                                                                    v_cellptr_d_.get(),
+                                                                                    v_cellidx_d_.get(),
                                                                                     ccdptr_->data());
             }
 
@@ -1000,8 +1045,8 @@ namespace sccd {
                                                                                       0,
                                                                                       (smesh::idx_t**)nullptr,
                                                                                       v_grid_d_,
-                                                                                      v_cellptr_d_->data(),
-                                                                                      v_cellidx_d_->data(),
+                                                                                      v_cellptr_d_.get(),
+                                                                                      v_cellidx_d_.get(),
                                                                                       ccdptr_->data(),
                                                                                       f_overlap_->data(),
                                                                                       v_overlap_->data());
@@ -1151,8 +1196,8 @@ namespace sccd {
                                                                                     1,
                                                                                     edges_->data(),
                                                                                     e_grid_d_,
-                                                                                    e_cellptr_d_->data(),
-                                                                                    e_cellidx_d_->data(),
+                                                                                    e_cellptr_d_.get(),
+                                                                                    e_cellidx_d_.get(),
                                                                                     ccdptr_->data());
             } else {
                 SMESH_TRACE_SCOPE("count_self_overlaps");
@@ -1181,8 +1226,8 @@ namespace sccd {
                                                                                           1,
                                                                                           edges_->data(),
                                                                                           e_grid_d_,
-                                                                                          e_cellptr_d_->data(),
-                                                                                          e_cellidx_d_->data(),
+                                                                                          e_cellptr_d_.get(),
+                                                                                          e_cellidx_d_.get(),
                                                                                           ccdptr_->data(),
                                                                                           e0_overlap_->data(),
                                                                                           e1_overlap_->data());
@@ -1451,16 +1496,15 @@ namespace sccd {
                 // cap the grid setup enforces so that no step reallocates them.
                 // One-time per mesh, like everything else here, and so outside
                 // what a step is timed for.
-                // create_device_buffer, not create_buffer: the fill pass takes a
-                // device atomic on the cursor, and a buffer the allocator places
-                // in system memory is reachable from the device through address
-                // translation but does not carry those atomics reliably. The
-                // counts then come out wrong, intermittently and only for the
-                // list that landed there.
-                v_cellptr_d_ = smesh::create_device_buffer<ptrdiff_t>(4 * n_nodes + 2);
-                v_cursor_d_ = smesh::create_device_buffer<ptrdiff_t>(4 * n_nodes + 2);
-                e_cellptr_d_ = smesh::create_device_buffer<ptrdiff_t>(4 * n_edges + 2);
-                e_cursor_d_ = smesh::create_device_buffer<ptrdiff_t>(4 * n_edges + 2);
+                // Sized for the grid's 4n cell cap, so a step reallocates
+                // nothing. One-time per mesh, and so outside what a step is
+                // timed for.
+                v_cellptr_d_.reserve(4 * n_nodes + 2);
+                v_cursor_d_.reserve(4 * n_nodes + 2);
+                v_ranges_d_.reserve(4 * n_nodes + 4);
+                e_cellptr_d_.reserve(4 * n_edges + 2);
+                e_cursor_d_.reserve(4 * n_edges + 2);
+                e_ranges_d_.reserve(4 * n_edges + 4);
             }
 #endif
         }

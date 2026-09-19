@@ -152,6 +152,12 @@ namespace sccd {
                 // The scatter pass reads these back rather than recomputing
                 // them, so the two passes cannot disagree about which cells a
                 // box covers however the arithmetic is scheduled.
+                if (i == 0) {
+                    ranges[4 * n + 0] = grid.n0;
+                    ranges[4 * n + 1] = grid.n1;
+                    ranges[4 * n + 2] = grid.axis0;
+                    ranges[4 * n + 3] = grid.axis1;
+                }
                 ranges[4 * i + 0] = a;
                 ranges[4 * i + 1] = b;
                 ranges[4 * i + 2] = c;
@@ -188,6 +194,12 @@ namespace sccd {
                 const int c = ranges[4 * i + 2];
                 const int d = ranges[4 * i + 3];
                 const ptrdiff_t ncells = grid.ncells();
+                if (i == 0 && (ranges[4 * n + 0] != grid.n0 || ranges[4 * n + 1] != grid.n1 ||
+                               ranges[4 * n + 2] != grid.axis0 || ranges[4 * n + 3] != grid.axis1)) {
+                    printf("GRID MISMATCH count=%dx%d axes %d,%d  fill=%dx%d axes %d,%d\n",
+                           ranges[4 * n + 0], ranges[4 * n + 1], ranges[4 * n + 2], ranges[4 * n + 3],
+                           grid.n0, grid.n1, grid.axis0, grid.axis1);
+                }
 
                 for (int j = c; j <= d; ++j) {
                     for (int k = a; k <= b; ++k) {
@@ -486,6 +498,7 @@ namespace sccd {
                                     T** const SCCD_RESTRICT aabbs,
                                     Cell2DGridD<T>& grid,
                                     ptrdiff_t* const SCCD_RESTRICT cellptr,
+                                    int* const SCCD_RESTRICT ranges,
                                     ptrdiff_t* const SCCD_RESTRICT span_count) {
             SCCD_CUDA_LAST_ERROR();
             if (n <= 0) {
@@ -573,7 +586,6 @@ namespace sccd {
 
             dim3 block(SCCD_C2D_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
             dim3 gridsz((n + block.x - 1) / block.x);
-            int* const ranges = workspace(WorkspaceSlot::CellRange).get_as<int>(4 * (size_t)n);
             detail::bin_count_kernel<T><<<gridsz, block>>>(n,
                                                         soa_device_row<T>(aabbs, grid.axis0),
                                                         soa_device_row<T>(aabbs, SCCD_DIM + grid.axis0),
@@ -602,6 +614,7 @@ namespace sccd {
                          T** const SCCD_RESTRICT aabbs,
                          const Cell2DGridD<T>& grid,
                          const ptrdiff_t* const SCCD_RESTRICT cellptr,
+                         const int* const SCCD_RESTRICT ranges,
                          I* const SCCD_RESTRICT cellidx,
                          const ptrdiff_t capacity,
                          ptrdiff_t* const SCCD_RESTRICT cursor,
@@ -615,7 +628,6 @@ namespace sccd {
 
             dim3 block(SCCD_C2D_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
             dim3 gridsz((n + block.x - 1) / block.x);
-            const int* const ranges = workspace(WorkspaceSlot::CellRange).get_as<int>(4 * (size_t)n);
             detail::bin_fill_kernel<T, I><<<gridsz, block>>>(n,
                                                           ranges,
                                                           grid,
@@ -798,11 +810,12 @@ SCCD_C2D_INSTANTIATE_IDX(int32_t)
 
 #define SCCD_C2D_INSTANTIATE(T, I)                                                             \
     template void sccd::device::cell2d_setup_and_count<T, I>(                                  \
-        const ptrdiff_t, T**, sccd::device::Cell2DGridD<T>&, ptrdiff_t*, ptrdiff_t*);          \
+        const ptrdiff_t, T**, sccd::device::Cell2DGridD<T>&, ptrdiff_t*, int*, ptrdiff_t*);          \
     template void sccd::device::cell2d_fill<T, I>(const ptrdiff_t,                             \
                                                   T**,                                         \
                                                   const sccd::device::Cell2DGridD<T>&,         \
                                                   const ptrdiff_t*,                            \
+                                                  const int*,                                  \
                                                   I*,                                          \
                                                   const ptrdiff_t,                             \
                                                   ptrdiff_t*,                                  \

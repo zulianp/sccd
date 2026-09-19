@@ -58,6 +58,10 @@ namespace sccd {
         /**
          * \brief Size the grid and bin \p n boxes into it.
          *
+         * \p ranges must have `4 * n + 4` entries: the cell range each box
+         * covers, which the scatter pass reads back so the two passes cannot
+         * disagree about it, and the grid it was computed for.
+         *
          * \p cellptr must have ncells + 1 entries and \p cellidx must have room
          * for the total span count; the caller gets that count back through
          * \p span_count so it can size \p cellidx between the two calls, exactly
@@ -68,6 +72,7 @@ namespace sccd {
                                     T** const SCCD_RESTRICT aabbs,
                                     Cell2DGridD<T>& grid,
                                     ptrdiff_t* const SCCD_RESTRICT cellptr,
+                                    int* const SCCD_RESTRICT ranges,
                                     ptrdiff_t* const SCCD_RESTRICT span_count);
 
         /**
@@ -85,6 +90,7 @@ namespace sccd {
                          T** const SCCD_RESTRICT aabbs,
                          const Cell2DGridD<T>& grid,
                          const ptrdiff_t* const SCCD_RESTRICT cellptr,
+                         const int* const SCCD_RESTRICT ranges,
                          I* const SCCD_RESTRICT cellidx,
                          const ptrdiff_t capacity,
                          ptrdiff_t* const SCCD_RESTRICT cursor,
