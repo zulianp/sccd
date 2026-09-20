@@ -1,0 +1,19 @@
+
+ Performance counter stats for '/capstor/scratch/cscs/zulianp/sccd-bench/build-bench/ti_oracle /capstor/scratch/cscs/zulianp/sccd-assess/data/armadillo-rollers --phase ee --max-files 6 --no-strict':
+
+        9603911406      cycles                                                                  (71.71%)
+        7660184642      instructions                     #    0.80  insn per cycle              (73.33%)
+          11087289      branch-misses                                                           (78.63%)
+        3071227951      cache-references                                                        (79.54%)
+          10522865      cache-misses                     #    0.34% of all cache refs           (79.92%)
+        3040189219      L1-dcache-loads                                                         (79.77%)
+          10714875      L1-dcache-load-misses            #    0.35% of all L1-dcache accesses   (79.89%)
+          11150966      LLC-loads                                                               (67.36%)
+           6089586      LLC-load-misses                  #   54.61% of all LL-cache accesses    (61.56%)
+
+       3.399685317 seconds time elapsed
+
+       0.283778000 seconds user
+       2.869756000 seconds sys
+
+

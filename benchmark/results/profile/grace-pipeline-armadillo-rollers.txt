@@ -1,0 +1,19 @@
+
+ Performance counter stats for '/capstor/scratch/cscs/zulianp/sccd-assess/build-grace/sccd_bench /capstor/scratch/cscs/zulianp/sccd-assess/data armadillo-rollers':
+
+        6930340089      cycles                                                                  (70.76%)
+       22822063595      instructions                     #    3.29  insn per cycle              (83.06%)
+          57420987      branch-misses                                                           (90.09%)
+        7060467675      cache-references                                                        (93.56%)
+          49846076      cache-misses                     #    0.71% of all cache refs           (85.72%)
+        7559290017      L1-dcache-loads                                                         (73.07%)
+          55431012      L1-dcache-load-misses            #    0.73% of all L1-dcache accesses   (65.00%)
+          41560243      LLC-loads                                                               (50.31%)
+           6525459      LLC-load-misses                  #   15.70% of all LL-cache accesses    (59.19%)
+
+       3.304671317 seconds time elapsed
+
+       2.017764000 seconds user
+       0.264043000 seconds sys
+
+

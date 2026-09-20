@@ -1,0 +1,19 @@
+
+ Performance counter stats for '/capstor/scratch/cscs/zulianp/sccd-assess/build-grace/sccd_bench /capstor/scratch/cscs/zulianp/sccd-assess/data cloth-ball':
+
+       53942606073      cycles                                                                  (76.38%)
+      149931016306      instructions                     #    2.78  insn per cycle              (77.73%)
+         701721084      branch-misses                                                           (78.68%)
+       60635218788      cache-references                                                        (78.69%)
+         817817823      cache-misses                     #    1.35% of all cache refs           (79.14%)
+       60498850801      L1-dcache-loads                                                         (78.00%)
+         836000479      L1-dcache-load-misses            #    1.38% of all L1-dcache accesses   (77.15%)
+         401859811      LLC-loads                                                               (65.58%)
+          66183216      LLC-load-misses                  #   16.47% of all LL-cache accesses    (65.04%)
+
+       5.807556601 seconds time elapsed
+
+      16.249910000 seconds user
+       0.635780000 seconds sys
+
+

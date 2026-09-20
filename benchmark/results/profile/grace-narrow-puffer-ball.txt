@@ -1,0 +1,19 @@
+
+ Performance counter stats for '/capstor/scratch/cscs/zulianp/sccd-bench/build-bench/ti_oracle /capstor/scratch/cscs/zulianp/sccd-assess/data/puffer-ball --phase ee --max-files 6 --no-strict':
+
+        9941249471      cycles                                                                  (76.12%)
+       11264562092      instructions                     #    1.13  insn per cycle              (79.07%)
+          16660213      branch-misses                                                           (79.95%)
+        3630076282      cache-references                                                        (80.07%)
+          10373426      cache-misses                     #    0.29% of all cache refs           (80.15%)
+        3693239407      L1-dcache-loads                                                         (80.48%)
+          11336587      L1-dcache-load-misses            #    0.31% of all L1-dcache accesses   (77.57%)
+          12128328      LLC-loads                                                               (60.39%)
+           5606950      LLC-load-misses                  #   46.23% of all LL-cache accesses    (62.32%)
+
+       3.565945231 seconds time elapsed
+
+       0.893746000 seconds user
+       2.319399000 seconds sys
+
+

@@ -395,15 +395,14 @@ def broadphase_table(per_strategy: dict[str, dict[tuple[str, str], SceneSummary]
     names = sorted(per_strategy)
     table = Table(
         label="tab:broadphase",
-        caption=("Broad-phase strategies over the same cases on the host, "
+        caption=("Broad-phase strategies over the same cases, "
                  "as whole-scene totals in milliseconds, "
                  "median over repeats. \\emph{broad} is the whole phase for "
                  "each strategy; the \\emph{structure} column decomposes it, "
                  "showing how much of that went on building the sorted "
                  "intervals or the grid. Both strategies report identical "
                  "candidate pairs, so the difference is entirely in how they "
-                 "are found. The device is absent because its broad phase "
-                 "implements only the sweep."),
+                 "are found."),
         columns=([Column("scene", "l"), Column("mode", "l")]
                  + [Column(f"{n} structure ms", tex_header=f"{n} struct.") for n in names]
                  + [Column(f"{n} broad ms", tex_header=f"{n} broad") for n in names]
@@ -412,14 +411,10 @@ def broadphase_table(per_strategy: dict[str, dict[tuple[str, str], SceneSummary]
         notes=("`faster` names the winning strategy and by how much on the whole "
                "broad phase. A margin inside the run-to-run spread is a tie."),
     )
-    # Host modes only. `use_cell2d_` is read in broad_phase_prep_host_,
-    # broad_phase_fv_step_host_ and broad_phase_ee_step_host_ and nowhere else:
-    # the device steps have no branch on it, so SCCD_BROADPHASE does not reach
-    # them and a GPU row here would compare one implementation against itself.
-    # Measured, they come out as ties to within a millisecond, which is the
-    # evidence for the statement rather than an interesting result.
-    keys = sorted({k for s in per_strategy.values() for k in s
-                   if not k[1].startswith("device-")})
+    # Both processors. `use_cell2d_` is read by the prep and by both steps on
+    # each of them, so SCCD_BROADPHASE selects a real implementation either way
+    # and a GPU row compares two of them rather than one against itself.
+    keys = sorted({k for s in per_strategy.values() for k in s})
     for scene, mode in keys:
         structure, broad, spreads = {}, {}, {}
         for n in names:
