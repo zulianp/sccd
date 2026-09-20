@@ -1,0 +1,19 @@
+
+ Performance counter stats for '/capstor/scratch/cscs/zulianp/sccd-bench/build-bench/ti_oracle /capstor/scratch/cscs/zulianp/sccd-assess/data/n-body-simulation --phase ee --max-files 6 --no-strict':
+
+      154181054128      cycles                                                                  (77.46%)
+      443201872556      instructions                     #    2.87  insn per cycle              (77.50%)
+        1301056924      branch-misses                                                           (77.61%)
+      174435663707      cache-references                                                        (77.80%)
+          24204623      cache-misses                     #    0.01% of all cache refs           (77.91%)
+      173427258477      L1-dcache-loads                                                         (77.96%)
+          25315986      L1-dcache-load-misses            #    0.01% of all L1-dcache accesses   (78.15%)
+          22452523      LLC-loads                                                               (66.75%)
+          10016314      LLC-load-misses                  #   44.61% of all LL-cache accesses    (66.33%)
+
+      28.340475564 seconds time elapsed
+
+      44.280477000 seconds user
+       3.006624000 seconds sys
+
+

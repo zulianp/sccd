@@ -121,13 +121,13 @@ def _build(only_modes: set[str], label_override: dict[str, str], suffix: str):
 # note are replaced for the article and the discrepancy is stated in the prose.
 CAPTION_OVERRIDE = {
     "tab:broadphase": (
-        "Broad-phase strategies over the same cases on the host, median over "
+        "Broad-phase strategies over the same cases, median over "
         "repeats. \\emph{prep} builds the acceleration structure -- the sweep's "
         "sorted intervals or the cell list's grid -- and \\emph{broad} is the "
         "traversal that runs over it; the cost of a broad phase is the two "
         "added. Both strategies report identical candidate pairs, so the "
-        "difference is entirely in how they are found. The device is not listed: "
-        "its broad phase does not implement the choice.",
+        "difference is entirely in how they are found. Both processors "
+        "implement both strategies, so each is listed for each.",
         "\\emph{faster} ranks the traversal column alone. On the sum of the two "
         "columns, which is what a caller pays, the ranking differs; see the "
         "text. A margin inside the run-to-run spread is a tie rather than a "
@@ -178,7 +178,7 @@ def _write(built, tables_mod, suffix: str) -> list[str]:
 PROSE_CLAIMS = [
     ("26.6", "tab-reference"),
     ("5.75", "tab-broadphase"),
-    ("0.76", "tab-processor"),
+    ("0.61", "tab-processor"),
     # The scaling ratios are quoted as divisions of these cells, so the reader
     # can do the arithmetic; checking the cells checks the ratios.
     ("998.7", "tab-scaling"),

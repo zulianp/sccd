@@ -10,8 +10,8 @@ answers for their pipeline and ours did not answer for this one:
   strong-scaling   speedup of each host phase against thread count, with the
                    perfect line, from benchmark/results/profile/strong-*.csv
   per-frame        cost through a simulation rather than aggregated over it
-  broad-per-frame  the same for the broad phase alone, with both host
-                   strategies against the device
+  broad-per-frame  the same for the broad phase alone, with both strategies
+                   on both processors
 
 Written into figures/ as PDF. They are committed, so building the article needs
 no Python; this is only for regenerating them after new data.
@@ -216,17 +216,16 @@ def per_frame():
 # settings are one code path measured twice and are pooled as repeats rather
 # than drawn as a comparison that does not exist.
 # Colour carries the processor and intensity the strategy: the cell list at full
-# strength, the sweep at the same hue lightened. The device curve is the sweep,
-# so it takes the sweep's intensity, and the absence of a full-strength device
-# curve is the point -- there is no device cell list in the CCD path to draw.
+# strength, the sweep at the same hue lightened.
 SWEEP_TINT = 0.45
 SERIES_BP = (("cell list, CPU", HOST, ("cell2d",), 0.0),
              ("sweep, CPU", HOST, ("sweep",), SWEEP_TINT),
-             ("sweep, GPU", DEV, ("cell2d", "sweep"), SWEEP_TINT))
+             ("cell list, GPU", DEV, ("cell2d",), 0.0),
+             ("sweep, GPU", DEV, ("sweep",), SWEEP_TINT))
 
 
 def broad_per_frame():
-    """Broad-phase cost through a simulation, both strategies against the device.
+    """Broad-phase cost through a simulation, both strategies on both processors.
 
     The broad phase here is the whole of it, the acceleration structure and the
     traversal over it, summed over the vertex-face and edge-edge case of the
@@ -278,7 +277,7 @@ def broad_per_frame():
                 f"broad-per-frame: {scene} draws {drawn} of {len(SERIES_BP)} series")
 
     h, l = axes[0].get_legend_handles_labels()
-    fig.legend(h, l, frameon=False, fontsize=7, ncol=3,
+    fig.legend(h, l, frameon=False, fontsize=7, ncol=4,
                loc="lower center", bbox_to_anchor=(0.5, -0.06))
     fig.tight_layout()
     p = OUT / "broad-per-frame.pdf"

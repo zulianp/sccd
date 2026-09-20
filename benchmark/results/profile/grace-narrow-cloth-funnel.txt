@@ -1,0 +1,19 @@
+
+ Performance counter stats for '/capstor/scratch/cscs/zulianp/sccd-bench/build-bench/ti_oracle /capstor/scratch/cscs/zulianp/sccd-assess/data/cloth-funnel --phase ee --max-files 6 --no-strict':
+
+        8484386994      cycles                                                                  (79.67%)
+        7101072844      instructions                     #    0.84  insn per cycle              (79.51%)
+           3897142      branch-misses                                                           (79.50%)
+        1749972298      cache-references                                                        (75.37%)
+           8440543      cache-misses                     #    0.48% of all cache refs           (71.34%)
+        1795805309      L1-dcache-loads                                                         (75.68%)
+           9850108      L1-dcache-load-misses            #    0.55% of all L1-dcache accesses   (79.78%)
+          10928656      LLC-loads                                                               (69.44%)
+           5662596      LLC-load-misses                  #   51.81% of all LL-cache accesses    (69.38%)
+
+       3.155757931 seconds time elapsed
+
+       0.046236000 seconds user
+       2.748976000 seconds sys
+
+

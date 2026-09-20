@@ -1,0 +1,19 @@
+
+ Performance counter stats for '/capstor/scratch/cscs/zulianp/sccd-bench/build-bench/ti_oracle /capstor/scratch/cscs/zulianp/sccd-assess/data/rod-twist --phase ee --max-files 6 --no-strict':
+
+        8484400009      cycles                                                                  (79.36%)
+        7382798880      instructions                     #    0.87  insn per cycle              (79.45%)
+           3592869      branch-misses                                                           (79.56%)
+        2029187578      cache-references                                                        (79.77%)
+          10480747      cache-misses                     #    0.52% of all cache refs           (74.20%)
+        1646355343      L1-dcache-loads                                                         (71.80%)
+          10630503      L1-dcache-load-misses            #    0.65% of all L1-dcache accesses   (77.46%)
+          10487194      LLC-loads                                                               (68.98%)
+           4556715      LLC-load-misses                  #   43.45% of all LL-cache accesses    (68.78%)
+
+       3.563011038 seconds time elapsed
+
+       0.312804000 seconds user
+       2.514017000 seconds sys
+
+

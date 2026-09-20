@@ -1,0 +1,19 @@
+
+ Performance counter stats for '/capstor/scratch/cscs/zulianp/sccd-assess/build-grace/sccd_bench /capstor/scratch/cscs/zulianp/sccd-assess/data puffer-ball':
+
+     1052743204942      cycles                                                                  (77.76%)
+     3968280242533      instructions                     #    3.77  insn per cycle              (77.78%)
+        5356398608      branch-misses                                                           (77.76%)
+     1030069052826      cache-references                                                        (77.77%)
+       21726752132      cache-misses                     #    2.11% of all cache refs           (77.78%)
+     1030165796986      L1-dcache-loads                                                         (77.80%)
+       21715793541      L1-dcache-load-misses            #    2.11% of all L1-dcache accesses   (77.82%)
+       62975618197      LLC-loads                                                               (66.65%)
+       12920052778      LLC-load-misses                  #   20.52% of all LL-cache accesses    (66.64%)
+
+      50.031136052 seconds time elapsed
+
+     327.455193000 seconds user
+       1.029168000 seconds sys
+
+
