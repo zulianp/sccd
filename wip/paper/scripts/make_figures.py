@@ -12,6 +12,7 @@ answers for their pipeline and ours did not answer for this one:
   per-frame        cost through a simulation rather than aggregated over it
   broad-per-frame  the same for the broad phase alone, with both strategies
                    on both processors
+  broad-vs-scalable  the device broad phase against Scalable CCD's, per frame
 
 Written into figures/ as PDF. They are committed, so building the article needs
 no Python; this is only for regenerating them after new data.
@@ -37,6 +38,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
 SWEEP = REPO / "benchmark" / "results" / "sweep-gh200-bp.csv"
+COMPARE = REPO / "benchmark" / "competitors" / "results"
 PROF = REPO / "benchmark" / "results" / "profile"
 OUT = PAPER / "figures"
 
@@ -285,10 +287,103 @@ def broad_per_frame():
     return p
 
 
+# ------------------------------------------------ device against the competitor ---
+def compare_rows():
+    """Every per-case row of the newest competitor comparison, gzipped or not."""
+    import gzip
+    cands = sorted(COMPARE.glob("compare-gh200-full-*.csv.gz")) + \
+        sorted(COMPARE.glob("compare-gh200-full-*.csv"))
+    if not cands:
+        return None
+    path = max(cands, key=lambda p: p.name.replace(".csv.gz", "").replace(".csv", ""))
+    opener = gzip.open if path.suffix == ".gz" else open
+    with opener(path, "rt") as fh:
+        return [r for r in csv.DictReader(fh) if r.get("type") in ("vf", "ee")]
+
+
+# Our two strategies and theirs. Colour separates the library, intensity the
+# strategy, matching broad-per-frame.
+SERIES_VS = (("cell list (ours)", "device-tight", "cell2d", DEV, 0.0),
+             ("sweep (ours)", "device-tight", "sweep", DEV, SWEEP_TINT),
+             ("Scalable CCD", "scalable-ccd-device", None, "relaxed", 0.0))
+
+
+def broad_vs_scalable():
+    """The device broad phase against Scalable CCD's, step by step.
+
+    All three come from one comparison run, because between allocations this
+    harness varies by about 40% -- far more than the differences drawn here.
+    """
+    data = compare_rows()
+    if not data:
+        print("no comparison CSV; skipping broad-vs-scalable", file=sys.stderr)
+        return None
+
+    # scene -> series -> frame -> summed ms over the vf and ee case of the frame
+    acc = collections.defaultdict(lambda: collections.defaultdict(
+        lambda: collections.defaultdict(list)))
+    for r in data:
+        fr = frame_of(r["case"])
+        if fr is None:
+            continue
+        for lab, mode, strategy, _, _ in SERIES_VS:
+            if r["mode"] != mode:
+                continue
+            if strategy is not None and (r.get("broadphase") or "") != strategy:
+                continue
+            try:
+                acc[r["dataset"]][lab][fr].append(
+                    float(r["prep_ms"]) + float(r["broad_ms"]))
+            except ValueError:
+                pass
+
+    present = [s for s in SCENES if acc[s]]
+    if not present:
+        print("comparison CSV has no usable rows; skipping", file=sys.stderr)
+        return None
+
+    fig, axes = plt.subplots(1, len(present), figsize=style.figsize(
+        style.FULL_WIDTH_IN, 0.30))
+    axes = [axes] if len(present) == 1 else list(axes)
+    for ax, scene in zip(axes, present):
+        for lab, _, _, colour_mode, tint in SERIES_VS:
+            d = acc[scene][lab]
+            if not d:
+                continue
+            frames = sorted(d)
+            # The two cases of a frame are summed per repeat, then the repeats
+            # reduced, so one slow pass cannot move the curve.
+            ys = [st.median(d[f]) for f in frames]
+            ax.plot(frames, ys, lw=0.7,
+                    color=lighten(style.MODE_COLOR[colour_mode], tint), label=lab)
+        log_y(ax)
+        ax.set_title(LABEL.get(scene, scene), fontsize=7)
+        ax.set_xlabel("frame", fontsize=7)
+        ax.tick_params(labelsize=6)
+        ax.grid(True, which="major", lw=0.4, color=style.GRID_INK)
+        ax.set_axisbelow(True)
+    axes[0].set_ylabel("broad phase, ms per step", fontsize=7)
+
+    check_ticks(fig, axes, present, "broad-vs-scalable")
+    for ax, scene in zip(axes, present):
+        drawn = len(ax.get_legend_handles_labels()[0])
+        if drawn != len(SERIES_VS):
+            raise SystemExit(
+                f"broad-vs-scalable: {scene} draws {drawn} of {len(SERIES_VS)} series")
+
+    h, l = axes[0].get_legend_handles_labels()
+    fig.legend(h, l, frameon=False, fontsize=7, ncol=3,
+               loc="lower center", bbox_to_anchor=(0.5, -0.06))
+    fig.tight_layout()
+    p = OUT / "broad-vs-scalable.pdf"
+    fig.savefig(p, bbox_inches="tight"); plt.close(fig)
+    return p
+
+
 def main() -> int:
     style.apply_rcparams()
     OUT.mkdir(parents=True, exist_ok=True)
-    for fn in (strong_scaling, per_frame, broad_per_frame):
+    for fn in (strong_scaling, per_frame, broad_per_frame, broad_vs_scalable):
         p = fn()
         if p:
             print(f"wrote {p.relative_to(PAPER)}")

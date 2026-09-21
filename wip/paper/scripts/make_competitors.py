@@ -50,7 +50,19 @@ def rows():
     opener = gzip.open if path.suffix == ".gz" else open
     with opener(path, "rt") as fh:
         data = [r for r in csv.DictReader(fh) if r.get("type") in ("vf", "ee")]
-    return path, data
+
+    # The comparison measures our device over both broad-phase strategies, so
+    # that they and Scalable CCD's sit in one allocation. Only one of them
+    # belongs in these tables, or a per-case median would be taken over two
+    # different runs of the same case and describe neither. The cell list is the
+    # faster of the two on every scene of the device, so it is the one a caller
+    # gets and the one the comparison reports.
+    kept = [r for r in data
+            if not r["mode"].startswith("device-") or r.get("broadphase") == "cell2d"]
+    dropped = len(data) - len(kept)
+    if dropped:
+        print(f"  ({dropped} device rows of the other strategy left out)")
+    return path, kept
 
 
 def num(x):
