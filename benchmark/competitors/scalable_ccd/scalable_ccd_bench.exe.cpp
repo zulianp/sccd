@@ -293,7 +293,13 @@ namespace {
 
     /// One case on the host. Scalable CCD has no host narrow phase, so this
     /// measures the broad phase alone.
-    bool run_case_host(const MeshArrays& mesh, const bool is_vf, Row& row, BroadAccounting& acct) {
+    ///
+    /// Unreachable: the comparison is on the device only, and the caller refuses
+    /// the host space. Kept because it is the only record of how their host
+    /// broad phase would be timed, and deleting it would invite someone to
+    /// rebuild it differently.
+    [[maybe_unused]] bool run_case_host(const MeshArrays& mesh, const bool is_vf, Row& row,
+                                        BroadAccounting& acct) {
         namespace sc = scalable_ccd;
 
         // The boxes are the structure, so they are prep; `sort_and_sweep` sorts
@@ -440,6 +446,11 @@ namespace {
             scalable_ccd::cuda::ccd(mesh.V0, mesh.V1, mesh.E, mesh.F, kMinDistance, kMaxIterations, tolerance(),
                                     kAllowZeroToi, /*memory_limit_GB=*/0);
 #endif
+        // Every timer in this file stops behind a device synchronisation, as the
+        // three in the per-case path do. Their entry point returns a time of
+        // impact and so reads back internally, but a timing claim should not
+        // rest on that being true of a version we did not write.
+        cudaDeviceSynchronize();
         const double elapsed = ms_since(begin);
 
         std::printf("scalable_ccd::cuda::ccd  %s step %d  toi=%.9g  %.1f ms\n", scene.c_str(), step,
@@ -574,7 +585,11 @@ int main(int argc, char** argv) {
                 ok = run_case_device(mesh, d, c.is_vf, row, acct, collisions, case_toi);
 #endif
             } else {
-                ok = run_case_host(mesh, c.is_vf, row, acct);
+                std::fprintf(stderr,
+                             "error: Scalable CCD is compared on the device only. Its narrow phase "
+                             "is CUDA, so its host side is a broad phase with no pipeline behind it "
+                             "and not something a caller runs end to end.\n");
+                return EXIT_FAILURE;
             }
             if (!ok) {
                 ++failures;
