@@ -725,12 +725,32 @@ namespace {
         return run;
     }
 
+
+    /**
+     * \brief Wait for the device before stopping a clock.
+     *
+     * A device phase ends with a kernel launch, which returns to the host long
+     * before the kernel finishes. Stopping the clock there bills the tail of the
+     * phase to whichever later call happens to synchronise -- the broad phase
+     * looks cheaper than it is and the narrow phase dearer. Scalable CCD's
+     * harness synchronises before each of its timers, so a comparison against it
+     * has to do the same or it is not measuring the same thing.
+     */
+    void finish_device_work() {
+#if defined(SCCD_ENABLE_CUDA)
+        if (benchmark_execution_space() != smesh::EXECUTION_SPACE_HOST) {
+            cudaDeviceSynchronize();
+        }
+#endif
+    }
+
     BroadphaseResult run_broadphase(const bool is_vf, CCDRun& ccd_run) {
         SMESH_TRACE_SCOPE("benchmark broadphase");
 
         BroadphaseResult result;
         auto start = std::chrono::steady_clock::now();
         result.err = ccd_run.ccd->broad_phase_prep(ccd_run.points0, ccd_run.points1);
+        finish_device_work();
         auto stop = std::chrono::steady_clock::now();
         result.prep_elapsed_ms = std::chrono::duration<double, std::milli>(stop - start).count();
         if (result.err != SCCD_SUCCESS) {
@@ -743,6 +763,7 @@ namespace {
         } else {
             result.err = ccd_run.ccd->broad_phase_ee_step(result.e0_overlap, result.e1_overlap);
         }
+        finish_device_work();
         stop = std::chrono::steady_clock::now();
         result.elapsed_ms = std::chrono::duration<double, std::milli>(stop - start).count();
 
@@ -829,6 +850,7 @@ namespace {
         } else {
             err = ccd_run.ccd->narrow_phase_ee(toi, ee_tois, narrowphase_max_depth, narrowphase_tol, sccd::ToiOutput::PerPair);
         }
+        finish_device_work();
         const auto stop = std::chrono::steady_clock::now();
         static volatile scalar_t toi_sink;
         toi_sink = toi;
@@ -846,6 +868,7 @@ namespace {
         } else {
             err = ccd_run.ccd->narrow_phase_ee(toi, ee_tois, narrowphase_max_depth, narrowphase_tol, sccd::ToiOutput::Earliest);
         }
+        finish_device_work();
         const auto stop = std::chrono::steady_clock::now();
         if (out_toi != nullptr) {
             // From the buffer, not the parameter: the two entry points disagreed
