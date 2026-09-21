@@ -251,6 +251,10 @@ namespace {
         // Boxes, their upload and `BroadPhase::build`, which sorts, are the
         // structure and line up with `sccd_bench`'s `prep_ms`; the sweep below
         // is the query and lines up with `broad_ms`.
+        // The caller has just uploaded the mesh, and an upload still in flight
+        // would be charged to whichever clock starts next. Every timer here
+        // starts behind a synchronisation as well as stopping behind one.
+        cudaDeviceSynchronize();
         const auto prep_begin = Clock::now();
         std::vector<scc::AABB> vertex_boxes, edge_boxes, face_boxes;
         scc::build_vertex_boxes(mesh.V0, mesh.V1, vertex_boxes, kMinDistance);
@@ -269,6 +273,7 @@ namespace {
 
         // --- alternating batches -------------------------------------------
         while (!broad_phase.is_complete()) {
+            cudaDeviceSynchronize();
             const auto bp = Clock::now();
             broad_phase.detect_overlaps_partial();
             cudaDeviceSynchronize();
@@ -282,6 +287,7 @@ namespace {
             thrust::copy(d_overlaps.begin(), d_overlaps.end(), h_overlaps.begin());
             for (const int2& o : h_overlaps) acct.add(o.x, o.y, row.broad_fp);
 
+            cudaDeviceSynchronize();
             const auto np = Clock::now();
             call_narrow_phase(d, is_vf, d_overlaps, memory_handler, collisions, toi);
             cudaDeviceSynchronize();
@@ -435,6 +441,7 @@ namespace {
         MeshArrays mesh;
         if (!load_mesh_arrays(comm, data_dir / scene, scene, step, mesh)) return EXIT_FAILURE;
 
+        cudaDeviceSynchronize();
         const auto begin = Clock::now();
 #if defined(SCALABLE_CCD_TOI_PER_QUERY)
         Collisions collisions;

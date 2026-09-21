@@ -735,6 +735,10 @@ namespace {
      * looks cheaper than it is and the narrow phase dearer. Scalable CCD's
      * harness synchronises before each of its timers, so a comparison against it
      * has to do the same or it is not measuring the same thing.
+     *
+     * It is called before a clock starts as well as before it stops. Uploads and
+     * the previous phase's kernels are queued device work, and a clock started
+     * while they are in flight charges them to whatever it is timing.
      */
     void finish_device_work() {
 #if defined(SCCD_ENABLE_CUDA)
@@ -748,6 +752,7 @@ namespace {
         SMESH_TRACE_SCOPE("benchmark broadphase");
 
         BroadphaseResult result;
+        finish_device_work();
         auto start = std::chrono::steady_clock::now();
         result.err = ccd_run.ccd->broad_phase_prep(ccd_run.points0, ccd_run.points1);
         finish_device_work();
@@ -757,6 +762,7 @@ namespace {
             return result;
         }
 
+        finish_device_work();
         start = std::chrono::steady_clock::now();
         if (is_vf) {
             result.err = ccd_run.ccd->broad_phase_fv_step(result.v_overlap, result.f_overlap);
@@ -844,6 +850,7 @@ namespace {
         smesh::SharedBuffer<scalar_t> vf_tois;
         smesh::SharedBuffer<scalar_t> ee_tois;
 
+        finish_device_work();
         const auto start = std::chrono::steady_clock::now();
         if (is_vf) {
             err = ccd_run.ccd->narrow_phase_vf(toi, vf_tois, narrowphase_max_depth, narrowphase_tol, sccd::ToiOutput::PerPair);
@@ -862,6 +869,7 @@ namespace {
         smesh::SharedBuffer<scalar_t> vf_tois;
         smesh::SharedBuffer<scalar_t> ee_tois;
 
+        finish_device_work();
         const auto start = std::chrono::steady_clock::now();
         if (is_vf) {
             err = ccd_run.ccd->narrow_phase_vf(toi, vf_tois, narrowphase_max_depth, narrowphase_tol, sccd::ToiOutput::Earliest);
@@ -925,6 +933,7 @@ namespace {
 
             if (is_vf) {
                 smesh::SharedBuffer<idx_t*> faces = make_2d_buffer(query_geometry.faces, execution_space);
+                finish_device_work();
                 const auto start = std::chrono::steady_clock::now();
                 sccd::device::narrow_phase_vf(query_geometry.q0.size(),
                                                  q0->data(),
@@ -938,10 +947,12 @@ namespace {
                                                  narrowphase_max_depth,
                                                  narrowphase_tol,
                                                  sccd::ToiOutput::PerPair);
+                finish_device_work();
                 const auto stop = std::chrono::steady_clock::now();
                 query_narrow_ms = std::chrono::duration<double, std::milli>(stop - start).count();
             } else {
                 smesh::SharedBuffer<idx_t*> edges = make_2d_buffer(query_geometry.edges, execution_space);
+                finish_device_work();
                 const auto start = std::chrono::steady_clock::now();
                 sccd::device::narrow_phase_ee(query_geometry.q0.size(),
                                               q0->data(),
@@ -954,6 +965,7 @@ namespace {
                                               toi->data(),
                                               narrowphase_max_depth,
                                               narrowphase_tol, sccd::ToiOutput::PerPair);
+                finish_device_work();
                 const auto stop = std::chrono::steady_clock::now();
                 query_narrow_ms = std::chrono::duration<double, std::milli>(stop - start).count();
             }
