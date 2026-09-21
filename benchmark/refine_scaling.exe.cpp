@@ -53,6 +53,25 @@ namespace {
     double now_ms() { return smesh::time_seconds() * 1e3; }
 
     /**
+     * \brief Wait for the device, so a clock brackets device work rather than
+     *        the launches that queue it.
+     *
+     * A device phase ends with a kernel launch, which returns long before the
+     * kernel finishes, and begins after uploads that may still be in flight.
+     * Without this the phases here report the launches and not the work: the
+     * cost of a phase lands on whichever later call happens to synchronise.
+     */
+    void finish_device_work(const smesh::ExecutionSpace space) {
+#if defined(SCCD_ENABLE_CUDA)
+        if (space == smesh::EXECUTION_SPACE_DEVICE) {
+            cudaDeviceSynchronize();
+        }
+#else
+        SMESH_UNUSED(space);
+#endif
+    }
+
+    /**
      * \brief Displace the surface so it self-intersects at a time set by the
      *        scene rather than by the mesh resolution.
      *
@@ -293,16 +312,20 @@ int main(int argc, char** argv) {
         // scale with how much the sorted intervals overlap. Those are different
         // costs with different fixes, and a single total hides which
         // one is growing.
+        finish_device_work(space);
         const double t_prep0 = now_ms();
         ccd->broad_phase_prep(points0, points1);
+        finish_device_work(space);
         const double prep_ms = now_ms() - t_prep0;
 
         const double t_fv0 = now_ms();
         ccd->broad_phase_fv_step(v_overlap, f_overlap);
+        finish_device_work(space);
         const double fv_ms = now_ms() - t_fv0;
 
         const double t_ee0 = now_ms();
         ccd->broad_phase_ee_step(e0_overlap, e1_overlap);
+        finish_device_work(space);
         const double ee_ms = now_ms() - t_ee0;
 
         // Preparation plus both traversals: a whole broad phase, which is what
@@ -315,6 +338,7 @@ int main(int argc, char** argv) {
         smesh::SharedBuffer<scalar_t> vf_tois, ee_tois;
         const double t_narrow0 = now_ms();
         ccd->narrow_phase(toi, vf_tois, ee_tois, SCCD_MAX_DEPTH, SCCD_TOL);
+        finish_device_work(space);
         const double narrow_ms = now_ms() - t_narrow0;
 
         const ptrdiff_t n_vf = f_overlap ? f_overlap->size() : 0;
