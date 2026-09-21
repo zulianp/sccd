@@ -11,12 +11,15 @@
 #
 # What each run contributes:
 #
-#   sccd_bench           both processors, Relaxed (0) and Tight (2), sweep broad
-#                        phase. `narrow_ms` is the earliest-time-of-impact path,
+#   sccd_bench           both processors, Relaxed (0) and Tight (2). The host runs
+#                        the sweep broad phase; the device runs both strategies,
+#                        so they and Scalable CCD's are in one allocation.
+#                        `narrow_ms` is the earliest-time-of-impact path,
 #                        `narrow_ms_s1` the per-pair path, and the accuracy
 #                        columns score the curated queries.
-#   scalable_ccd_bench   device: its earliest-time-of-impact pipeline per case,
-#                        as shipped. host: its broad phase alone.
+#   scalable_ccd_bench   its earliest-time-of-impact pipeline per case, as
+#                        shipped. Device only: its narrow phase is CUDA, so it
+#                        has no host pipeline to compare.
 #   accd_bench           per pair over SCCD's host sweep candidates, and scored on
 #                        the curated queries.
 #
@@ -42,10 +45,10 @@ export PATH=$SMESH_PREFIX/bin:$PATH
 D=${SCCD_DATA_DIR:-$SCRATCH/sccd-data}
 B=${SCCD_COMPETITOR_BUILD:-$SCRATCH/sccd/build-comp-f64}
 
-# One Grace, 72 threads. OMP_NUM_THREADS covers SCCD; Scalable CCD's host broad
-# phase runs on oneTBB, which follows the CPU affinity mask instead, so the job
-# has to be bound to one Grace (--cpus-per-task=72). The line records what the
-# chunk actually had.
+# One Grace, 72 threads. OMP_NUM_THREADS covers SCCD; additive CCD is driven
+# through oneTBB, which follows the CPU affinity mask instead, so the job has to
+# be bound to one Grace (--cpus-per-task=72). The line records what the chunk
+# actually had.
 export OMP_NUM_THREADS=72
 echo "$(hostname) cpus=$(nproc) OMP_NUM_THREADS=$OMP_NUM_THREADS GPU=${CUDA_VISIBLE_DEVICES:-unset} $scene [$begin,$end)"
 
@@ -78,10 +81,23 @@ for space in device host; do
     done
 done
 
-for space in device host; do
-    run "scalable-$space" env "${range[@]}" SCCD_BENCH_EXECUTION_SPACE=$space \
-        "$B/benchmark/competitors/scalable_ccd_bench" "$D" "$scene"
+# The device again over the cell list, so our two broad-phase strategies and
+# Scalable CCD's sit in one allocation and can be put on one axis. Between
+# allocations this harness varies by about 40%, which is far more than the
+# differences being compared. The host stays on the sweep: additive CCD is handed
+# the candidates the host produces, and changing them would change that
+# comparison rather than this one.
+for mode in 0 2; do
+    run "sccd-device-cell2d-m$mode" env "${range[@]}" \
+        SCCD_BENCH_EXECUTION_SPACE=device SCCD_NARROWPHASE_MODE=$mode SCCD_BROADPHASE=cell2d \
+        "$B/sccd_bench" "$D" "$scene"
 done
+
+# The device only. Scalable CCD's narrow phase is CUDA, so its host side is a
+# broad phase with no pipeline behind it -- not something anyone runs end to end,
+# and not what the library offers. Its device pipeline is the subject.
+run "scalable-device" env "${range[@]}" SCCD_BENCH_EXECUTION_SPACE=device \
+    "$B/benchmark/competitors/scalable_ccd_bench" "$D" "$scene"
 
 # The same sweep broad phase the SCCD rows use, so both per-pair narrow phases
 # are handed the same candidates.

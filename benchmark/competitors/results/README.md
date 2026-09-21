@@ -1,11 +1,11 @@
 # Comparison: SCCD, Scalable CCD and Additive CCD
 
-`compare-gh200-full-2026-09-19.csv.gz`, produced by `../sweep_comparison.sh` and
-tabulated by `../compare_table.py` (`gunzip -k` it first; the raw CSV is 20 MB).
+`compare-gh200-full-2026-09-21.csv.gz`, produced by `../sweep_comparison.sh` and
+tabulated by `../compare_table.py` (`gunzip -k` it first; the raw CSV is 26 MB).
 One GH200 module per job -- one Hopper, and one Grace bound to 72 CPUs -- over
 whole scenes: every prepared case of armadillo-rollers (781), cloth-ball (79),
 cloth-funnel (577), n-body-simulation (146), puffer-ball (240) and rod-twist
-(4,571), `6,394` in all, three repeats each, as 66 resumable Slurm chunks.
+(4,571), `6,394` in all, three repeats each, as 57 resumable Slurm chunks.
 
 **Double precision throughout.** smesh is built with `SMESH_GEOM_TYPE=float64`
 and the frames are converted to match, so the mesh path and the dataset's exact
@@ -19,6 +19,14 @@ armadillo's steps. In double that count is zero.
 Every narrow phase runs on the same hardware: SCCD's host path and ACCD on 72 CPU
 threads (OpenMP and oneTBB respectively), SCCD's device path and Scalable CCD on
 the Hopper. All of them score identical broad-phase candidate lists, case by case.
+
+**Scalable CCD is compared on the device only.** Its narrow phase is CUDA, so its
+host side is a broad phase with no pipeline behind it and not something a caller
+runs end to end. SCCD's device runs twice, over the cell list and over the sweep,
+so both of our broad-phase strategies and Scalable CCD's sit in one allocation
+and can be put on one axis; between allocations this harness varies by about
+40%. The host stays on the sweep, because ACCD is handed the candidates it
+produces.
 
 Each competitor is compared on the question it answers, so there are two tables
 per scene.
@@ -55,12 +63,11 @@ time over the candidates handed to it.
 
 | library               |  prep ms |         broad ms |        narrow ms |    total |     ns/q |     err med |     err worst | late |
 |-----------------------|----------|------------------|------------------|----------|----------|-------------|---------------|------|
-| SCCD host Relaxed     |    4.607 |   1.485 /    7.70 |   0.600 /   27.28 |    6.661 |    7.948 |   -1.43e-05 |      -1.4e-07 |    0 |
-| SCCD host Tight       |    3.758 |   1.461 /    7.87 |   0.720 /   17.91 |    6.086 |    8.368 |   -1.24e-06 |        -2e-08 |    0 |
-| SCCD device Relaxed   |    1.630 |   1.942 /   14.85 |   1.672 /    3.55 |    5.177 |    15.75 |    -3.6e-05 |     -1.04e-06 |    0 |
-| SCCD device Tight     |    1.645 |   1.954 /   14.50 |   1.950 /    9.75 |    5.503 |    18.52 |   -1.32e-06 |     -1.92e-08 |    0 |
-| Scalable CCD device   |    1.293 |  12.533 /   27.45 |   4.223 /  108.61 |   18.559 |    57.27 |     0.00892 |         0.999 |  265 |
-| Scalable CCD host     |    0.646 |   5.290 /   17.40 |   0.000 /    0.00 |    5.940 |        - |           - |             - |    - |
+| SCCD host Relaxed     |    4.663 |   1.464 /    7.86 |   0.597 /   27.74 |    6.732 |    7.923 |   -1.44e-05 |      -1.4e-07 |    0 |
+| SCCD host Tight       |    5.028 |   1.520 /    8.21 |   0.737 /   17.72 |    7.188 |    8.515 |   -1.24e-06 |        -2e-08 |    0 |
+| SCCD device Relaxed   |    1.322 |   1.547 /   14.69 |   1.841 /   25.85 |    4.900 |    21.29 |   -3.59e-05 |     -1.04e-06 |    0 |
+| SCCD device Tight     |    1.289 |   1.555 /   14.48 |   2.113 /   27.43 |    5.200 |    23.81 |   -1.32e-06 |     -1.92e-08 |    0 |
+| Scalable CCD device   |    1.329 |  12.713 /   21.62 |   4.178 /  109.31 |   18.514 |    55.36 |     0.00976 |             1 |  272 |
 
   steps with a known contact: 394
 
@@ -68,11 +75,11 @@ time over the candidates handed to it.
 
 | library               |  prep ms |         broad ms |        narrow ms |    total |     ns/q |    fp |    fn | late |    err med | worst late | worst early |
 |-----------------------|----------|------------------|------------------|----------|----------|-------|-------|------|------------|------------|-------------|
-| SCCD host Relaxed     |    4.607 |   1.485 /    7.70 |   1.788 /   50.65 |    8.101 |    26.78 |   232 |     0 |    0 |  -4.66e-05 |          0 |      -0.941 |
-| SCCD host Tight       |    3.758 |   1.461 /    7.87 |   2.084 /   49.43 |    7.638 |    32.56 |    24 |     0 |    0 |  -3.39e-06 |          0 |      -0.016 |
-| SCCD device Relaxed   |    1.630 |   1.942 /   14.85 |   2.673 /   29.49 |    6.350 |    27.52 |   322 |     0 |    0 |  -9.22e-05 |          0 |      -0.942 |
-| SCCD device Tight     |    1.645 |   1.954 /   14.50 |   2.979 /   22.95 |    6.670 |     31.4 |    24 |     0 |    0 |  -3.41e-06 |          0 |      -0.016 |
-| ACCD host             |    4.648 |   1.432 /    9.89 |   0.600 /    7.49 |    6.534 |    6.612 |   444 |     0 |    0 |    -0.0286 |          0 |      -0.996 |
+| SCCD host Relaxed     |    4.663 |   1.464 /    7.86 |   1.812 /   51.07 |    8.360 |    26.76 |   232 |     0 |    0 |  -4.66e-05 |          0 |      -0.941 |
+| SCCD host Tight       |    5.028 |   1.520 /    8.21 |   2.124 /   49.31 |    8.908 |    32.86 |    24 |     0 |    0 |  -3.39e-06 |          0 |      -0.016 |
+| SCCD device Relaxed   |    1.322 |   1.547 /   14.69 |   2.761 /   30.85 |    5.588 |    28.32 |   322 |     0 |    0 |  -9.29e-05 |          0 |      -0.942 |
+| SCCD device Tight     |    1.289 |   1.555 /   14.48 |   3.018 /   21.98 |    5.907 |    31.94 |    24 |     0 |    0 |   -3.4e-06 |          0 |      -0.016 |
+| ACCD host             |    3.836 |   1.409 /    9.79 |   0.610 /    6.59 |    5.961 |    6.622 |   444 |     0 |    0 |    -0.0286 |          0 |      -0.996 |
 
   curated queries with a contact per pass: 130859
 
@@ -80,12 +87,11 @@ time over the candidates handed to it.
 
 | library               |  prep ms |         broad ms |        narrow ms |    total |     ns/q |     err med |     err worst | late |
 |-----------------------|----------|------------------|------------------|----------|----------|-------------|---------------|------|
-| SCCD host Relaxed     |    7.917 |  13.009 /   30.70 |   8.505 /  159.34 |   29.659 |    6.661 |    -3.8e-07 |             0 |    0 |
-| SCCD host Tight       |    8.016 |  12.973 /   30.51 |   5.476 /   23.00 |   26.573 |    3.656 |   -1.66e-07 |             0 |    0 |
-| SCCD device Relaxed   |    4.556 |   6.129 /   23.30 |   2.220 /    4.13 |   13.209 |   0.9954 |   -1.45e-06 |             0 |    0 |
-| SCCD device Tight     |    4.574 |   6.282 /   22.61 |   2.320 /    4.50 |   13.470 |     1.04 |   -1.69e-07 |             0 |    0 |
-| Scalable CCD device   |    1.900 |  19.343 /   28.32 |  28.040 /  220.87 |   50.105 |    21.83 |   -9.97e-06 |     -1.66e-07 |    0 |
-| Scalable CCD host     |    1.194 |  21.727 /   28.54 |   0.000 /    0.00 |   22.893 |        - |           - |             - |    - |
+| SCCD host Relaxed     |    7.307 |  13.005 /   31.55 |   8.413 /   37.90 |   28.843 |     5.81 |    -3.8e-07 |             0 |    0 |
+| SCCD host Tight       |    7.479 |  13.101 /   31.84 |   5.455 /   22.95 |   26.122 |    3.629 |   -1.66e-07 |             0 |    0 |
+| SCCD device Relaxed   |    2.830 |   6.669 /   22.68 |   2.702 /   14.07 |   14.210 |    2.013 |   -1.47e-06 |             0 |    0 |
+| SCCD device Tight     |    2.788 |   6.721 /   22.65 |   2.871 /   14.21 |   14.232 |    2.058 |    -1.8e-07 |             0 |    0 |
+| Scalable CCD device   |    2.066 |  19.351 /   28.54 |  27.877 /  224.90 |   50.246 |    22.13 |   -9.97e-06 |     -1.66e-07 |    0 |
 
   steps with a known contact: 43
 
@@ -93,11 +99,11 @@ time over the candidates handed to it.
 
 | library               |  prep ms |         broad ms |        narrow ms |    total |     ns/q |    fp |    fn | late |    err med | worst late | worst early |
 |-----------------------|----------|------------------|------------------|----------|----------|-------|-------|------|------------|------------|-------------|
-| SCCD host Relaxed     |    7.917 |  13.009 /   30.70 |  15.860 /  118.12 |   36.004 |    10.81 |     2 |     0 |    0 |  -3.06e-07 |          0 |    -0.00054 |
-| SCCD host Tight       |    8.016 |  12.973 /   30.51 |  17.903 /   87.92 |   40.790 |    9.169 |     1 |     0 |    0 |  -2.72e-07 |          0 |   -0.000193 |
-| SCCD device Relaxed   |    4.556 |   6.129 /   23.30 |   7.866 /   72.41 |   18.047 |    5.205 |     2 |     0 |    0 |   -1.1e-06 |          0 |   -0.000898 |
-| SCCD device Tight     |    4.574 |   6.282 /   22.61 |   8.827 /   38.97 |   18.549 |    4.906 |     1 |     0 |    0 |   -2.7e-07 |          0 |   -0.000193 |
-| ACCD host             |    8.067 |  13.044 /   31.01 |   3.003 /    8.85 |   24.451 |     1.44 |    21 |     0 |    0 |    -0.0656 |          0 |       -0.94 |
+| SCCD host Relaxed     |    7.307 |  13.005 /   31.55 |  16.266 /  108.45 |   34.955 |    10.29 |     2 |     0 |    0 |  -3.06e-07 |          0 |    -0.00054 |
+| SCCD host Tight       |    7.479 |  13.101 /   31.84 |  12.278 /   87.62 |   31.561 |      7.9 |     1 |     0 |    0 |  -2.72e-07 |          0 |   -0.000193 |
+| SCCD device Relaxed   |    2.830 |   6.669 /   22.68 |   7.695 /   73.15 |   16.064 |    5.089 |     2 |     0 |    0 |   -1.1e-06 |          0 |   -0.000923 |
+| SCCD device Tight     |    2.788 |   6.721 /   22.65 |   8.762 /   39.73 |   16.821 |    4.896 |     1 |     0 |    0 |   -2.7e-07 |          0 |   -0.000193 |
+| ACCD host             |    4.460 |  12.770 /   31.42 |   3.285 /    8.14 |   21.456 |    1.526 |    21 |     0 |    0 |    -0.0656 |          0 |       -0.94 |
 
   curated queries with a contact per pass: 664919
 
@@ -105,12 +111,11 @@ time over the candidates handed to it.
 
 | library               |  prep ms |         broad ms |        narrow ms |    total |     ns/q |     err med |     err worst | late |
 |-----------------------|----------|------------------|------------------|----------|----------|-------------|---------------|------|
-| SCCD host Relaxed     |    2.842 |   1.025 /    6.42 |   0.246 /    3.49 |    4.188 |    8.141 |           0 |             0 |    0 |
-| SCCD host Tight       |    2.976 |   1.043 /    6.39 |   0.272 /   80.62 |    4.453 |    13.13 |           0 |             0 |    0 |
-| SCCD device Relaxed   |    1.385 |   1.194 /    7.29 |   1.138 /    5.95 |    3.794 |    27.08 |           0 |             0 |    0 |
-| SCCD device Tight     |    1.377 |   1.151 /    7.26 |   1.389 /    3.65 |    4.039 |    32.99 |           0 |             0 |    0 |
-| Scalable CCD device   |    1.111 |  13.960 /   22.04 |   2.183 /   12.55 |   17.486 |    56.31 |           0 |             1 |    8 |
-| Scalable CCD host     |    0.607 |   4.090 /   13.30 |   0.000 /    0.00 |    4.707 |        - |           - |             - |    - |
+| SCCD host Relaxed     |    2.880 |   1.012 /    6.21 |   0.247 /    3.34 |    4.264 |        8 |           0 |             0 |    0 |
+| SCCD host Tight       |    2.626 |   1.013 /    6.09 |   0.262 /   81.52 |    4.350 |    12.92 |           0 |             0 |    0 |
+| SCCD device Relaxed   |    0.963 |   1.805 /    7.36 |   1.354 /    5.25 |    4.274 |    42.83 |           0 |             0 |    0 |
+| SCCD device Tight     |    0.951 |   1.807 /    7.36 |   1.609 /    5.97 |    4.375 |    47.87 |           0 |             0 |    0 |
+| Scalable CCD device   |    1.068 |  14.210 /   24.88 |   2.126 /   18.11 |   17.627 |     54.9 |           0 |             1 |   10 |
 
   steps with a known contact: 363
 
@@ -118,11 +123,11 @@ time over the candidates handed to it.
 
 | library               |  prep ms |         broad ms |        narrow ms |    total |     ns/q |    fp |    fn | late |    err med | worst late | worst early |
 |-----------------------|----------|------------------|------------------|----------|----------|-------|-------|------|------------|------------|-------------|
-| SCCD host Relaxed     |    2.842 |   1.025 /    6.42 |   0.482 /    4.38 |    4.487 |    14.28 |   687 |     0 |    0 |  -0.000357 |          0 |          -1 |
-| SCCD host Tight       |    2.976 |   1.043 /    6.39 |   0.579 /  222.51 |    4.796 |    28.92 |    15 |     0 |    0 |  -6.87e-06 |          0 |          -1 |
-| SCCD device Relaxed   |    1.385 |   1.194 /    7.29 |   1.176 /    4.00 |    3.875 |    28.76 |   742 |     0 |    0 |  -0.000522 |          0 |          -1 |
-| SCCD device Tight     |    1.377 |   1.151 /    7.26 |   1.950 /   16.34 |    4.582 |    42.21 |    15 |     0 |    0 |  -6.83e-06 |          0 |          -1 |
-| ACCD host             |    3.080 |   1.004 /    6.72 |   0.370 /   55.80 |    4.598 |    14.37 |   422 |     0 |    0 |   -0.00857 |          0 |      -0.956 |
+| SCCD host Relaxed     |    2.880 |   1.012 /    6.21 |   0.471 /    4.37 |    4.523 |    14.14 |   687 |     0 |    0 |  -0.000357 |          0 |          -1 |
+| SCCD host Tight       |    2.626 |   1.013 /    6.09 |   0.542 /  227.01 |    4.631 |    28.57 |    15 |     0 |    0 |  -6.87e-06 |          0 |          -1 |
+| SCCD device Relaxed   |    0.963 |   1.805 /    7.36 |   1.140 /    3.56 |    3.894 |    28.18 |   742 |     0 |    0 |  -0.000539 |          0 |          -1 |
+| SCCD device Tight     |    0.951 |   1.807 /    7.36 |   1.852 /   16.41 |    4.424 |    40.46 |    15 |     0 |    0 |   -6.9e-06 |          0 |          -1 |
+| ACCD host             |    3.893 |   1.066 /    7.84 |   0.380 /   55.13 |    5.482 |    13.98 |   422 |     0 |    0 |   -0.00857 |          0 |      -0.956 |
 
   curated queries with a contact per pass: 6773
 
@@ -130,12 +135,11 @@ time over the candidates handed to it.
 
 | library               |  prep ms |         broad ms |        narrow ms |    total |     ns/q |     err med |     err worst | late |
 |-----------------------|----------|------------------|------------------|----------|----------|-------------|---------------|------|
-| SCCD host Relaxed     |   10.021 |  71.595 /  160.36 |  56.538 /   99.30 |  135.141 |    2.798 |           0 |             0 |    0 |
-| SCCD host Tight       |   10.582 |  71.449 /  170.30 |  44.001 /   80.43 |  121.829 |    2.266 |           0 |             0 |    0 |
-| SCCD device Relaxed   |    6.942 |  52.256 /  104.34 |   2.919 /    5.29 |   62.476 |   0.1864 |           0 |             0 |    0 |
-| SCCD device Tight     |    6.874 |  53.527 /  104.63 |   2.913 /    4.42 |   63.528 |   0.1854 |           0 |             0 |    0 |
-| Scalable CCD device   |    3.007 |  39.981 /   54.35 | 222.156 /  470.49 |  260.500 |     10.7 |           0 |             0 |    0 |
-| Scalable CCD host     |    1.916 |  53.291 /   89.36 |   0.000 /    0.00 |   55.181 |        - |           - |             - |    - |
+| SCCD host Relaxed     |    7.778 |  72.604 /  147.72 |  54.891 /   97.48 |  131.660 |    2.707 |           0 |             0 |    0 |
+| SCCD host Tight       |    7.650 |  72.178 /  161.35 |  44.276 /   81.23 |  118.919 |    2.264 |           0 |             0 |    0 |
+| SCCD device Relaxed   |    4.093 |  18.241 /  106.37 |   4.315 /  103.63 |   53.906 |     1.26 |           0 |             0 |    0 |
+| SCCD device Tight     |    4.078 |  18.308 /  105.31 |   4.106 /  108.64 |   53.575 |    1.275 |           0 |             0 |    0 |
+| Scalable CCD device   |    2.945 |  39.883 /   53.79 | 215.337 /  470.45 |  254.285 |    10.65 |           0 |             0 |    0 |
 
   steps with a known contact: 74
 
@@ -143,11 +147,11 @@ time over the candidates handed to it.
 
 | library               |  prep ms |         broad ms |        narrow ms |    total |     ns/q |    fp |    fn | late |    err med | worst late | worst early |
 |-----------------------|----------|------------------|------------------|----------|----------|-------|-------|------|------------|------------|-------------|
-| SCCD host Relaxed     |   10.021 |  71.595 /  160.36 | 150.401 /  306.75 |  230.759 |    6.993 |     9 |     0 |    0 |  -1.82e-08 |          0 |    -0.00127 |
-| SCCD host Tight       |   10.582 |  71.449 /  170.30 | 140.621 /  320.61 |  241.023 |    9.076 |    11 |     0 |    0 |  -3.02e-08 |          0 |    -0.00024 |
-| SCCD device Relaxed   |    6.942 |  52.256 /  104.34 |  36.667 /  130.37 |   96.829 |    2.068 |    28 |     0 |    0 |  -1.04e-07 |          0 |    -0.00263 |
-| SCCD device Tight     |    6.874 |  53.527 /  104.63 |  34.395 /   87.75 |   95.467 |    1.936 |    12 |     0 |    0 |  -3.02e-08 |          0 |    -0.00024 |
-| ACCD host             |   10.303 |  71.557 /  151.35 |  20.933 /   44.78 |  105.386 |    1.468 |   107 |     0 |    0 |    -0.0643 |          0 |      -0.897 |
+| SCCD host Relaxed     |    7.778 |  72.604 /  147.72 | 149.907 /  305.57 |  227.337 |    6.925 |     9 |     0 |    0 |  -1.82e-08 |          0 |    -0.00127 |
+| SCCD host Tight       |    7.650 |  72.178 /  161.35 |  89.396 /  264.41 |  179.368 |    7.018 |    11 |     0 |    0 |  -3.02e-08 |          0 |    -0.00024 |
+| SCCD device Relaxed   |    4.093 |  18.241 /  106.37 |  34.625 /  128.94 |   50.121 |    2.009 |    28 |     0 |    0 |  -1.04e-07 |          0 |    -0.00263 |
+| SCCD device Tight     |    4.078 |  18.308 /  105.31 |  33.312 /   88.43 |   48.720 |    1.859 |    12 |     0 |    0 |  -3.02e-08 |          0 |    -0.00024 |
+| ACCD host             |    9.223 |  72.090 /  161.29 |  21.500 /   46.05 |  105.921 |    1.474 |   107 |     0 |    0 |    -0.0643 |          0 |      -0.897 |
 
   curated queries with a contact per pass: 2947611
 
@@ -155,12 +159,11 @@ time over the candidates handed to it.
 
 | library               |  prep ms |         broad ms |        narrow ms |    total |     ns/q |     err med |     err worst | late |
 |-----------------------|----------|------------------|------------------|----------|----------|-------------|---------------|------|
-| SCCD host Relaxed     |   34.696 | 1448.995 / 4348.33 | 111.825 / 3734.16 | 1593.714 |    5.399 |     -0.0325 |       -0.0005 |    0 |
-| SCCD host Tight       |   35.607 | 1472.220 / 4411.97 |  69.182 /  645.97 | 1581.523 |    2.993 |   -1.76e-05 |     -1.37e-06 |    0 |
-| SCCD device Relaxed   |   49.488 | 191.803 /  938.98 |   2.900 /  188.09 |  243.261 |   0.1204 |     -0.0584 |      -0.00251 |    0 |
-| SCCD device Tight     |   49.706 | 193.499 /  951.18 |   5.100 /   38.37 |  246.353 |   0.1995 |   -1.85e-05 |      -7.6e-07 |    0 |
-| Scalable CCD device   |   10.764 | 856.337 / 2090.40 | 157.686 / 1561.35 | 1014.892 |    6.986 |     -0.0584 |      -0.00251 |    0 |
-| Scalable CCD host     |   11.091 | 4632.390 /14896.80 |   0.000 /    0.00 | 4644.581 |        - |           - |             - |    - |
+| SCCD host Relaxed     |   36.954 | 1496.290 / 4847.71 | 111.661 / 1043.15 | 1650.859 |    4.719 |     -0.0325 |       -0.0005 |    0 |
+| SCCD host Tight       |   38.277 | 1495.055 / 4584.35 |  69.825 /  759.53 | 1605.304 |    2.993 |   -1.75e-05 |     -1.37e-06 |    0 |
+| SCCD device Relaxed   |   27.141 |  54.663 /  998.64 |   8.838 /  763.56 |  160.951 |    1.216 |     -0.0584 |      -0.00251 |    0 |
+| SCCD device Tight     |   27.085 |  54.978 /  991.15 |  11.841 /  775.02 |  161.786 |    1.272 |   -1.91e-05 |        -7e-07 |    0 |
+| Scalable CCD device   |   10.517 | 858.211 / 2093.04 | 157.623 / 1586.40 | 1013.981 |    6.979 |     -0.0584 |      -0.00251 |    0 |
 
   steps with a known contact: 120
 
@@ -168,11 +171,11 @@ time over the candidates handed to it.
 
 | library               |  prep ms |         broad ms |        narrow ms |    total |     ns/q |    fp |    fn | late |    err med | worst late | worst early |
 |-----------------------|----------|------------------|------------------|----------|----------|-------|-------|------|------------|------------|-------------|
-| SCCD host Relaxed     |   34.696 | 1448.995 / 4348.33 | 115.887 / 3336.12 | 1601.138 |    5.612 | 27380 |     0 |    0 |    -0.0398 |          0 |      -0.975 |
-| SCCD host Tight       |   35.607 | 1472.220 / 4411.97 | 131.416 / 2021.25 | 1765.613 |    6.072 |   536 |     0 |    0 |     -4e-05 |          0 |      -0.261 |
-| SCCD device Relaxed   |   49.488 | 191.803 /  938.98 |  33.160 /  475.57 |  271.319 |    1.447 | 27380 |     0 |    0 |     -0.042 |          0 |      -0.975 |
-| SCCD device Tight     |   49.706 | 193.499 /  951.18 |  32.599 /  656.20 |  273.630 |    1.521 |   558 |     0 |    0 |  -4.03e-05 |          0 |      -0.261 |
-| ACCD host             |   33.612 | 1481.095 / 4732.60 |  27.346 /  228.13 | 1567.887 |    1.219 | 27374 |     0 |    0 |     -0.105 |          0 |      -0.976 |
+| SCCD host Relaxed     |   36.954 | 1496.290 / 4847.71 | 117.065 / 1177.17 | 1660.480 |    5.028 | 27380 |     0 |    0 |    -0.0398 |          0 |      -0.975 |
+| SCCD host Tight       |   38.277 | 1495.055 / 4584.35 | 128.516 / 1798.88 | 1776.293 |    5.998 |   536 |     0 |    0 |     -4e-05 |          0 |      -0.261 |
+| SCCD device Relaxed   |   27.141 |  54.663 /  998.64 |  30.193 /  553.82 |  136.452 |    1.357 | 27380 |     0 |    0 |    -0.0416 |          0 |      -0.975 |
+| SCCD device Tight     |   27.085 |  54.978 /  991.15 |  31.554 /  846.93 |  146.688 |    1.462 |   558 |     0 |    0 |  -4.02e-05 |          0 |      -0.261 |
+| ACCD host             |   52.913 | 1475.890 / 5436.89 |  26.604 /  222.13 | 1564.583 |     1.19 | 27374 |     0 |    0 |     -0.105 |          0 |      -0.976 |
 
   curated queries with a contact per pass: 1486790
 
@@ -180,12 +183,11 @@ time over the candidates handed to it.
 
 | library               |  prep ms |         broad ms |        narrow ms |    total |     ns/q |     err med |     err worst | late |
 |-----------------------|----------|------------------|------------------|----------|----------|-------------|---------------|------|
-| SCCD host Relaxed     |    6.244 |   3.133 /   12.46 |   5.469 /   28.62 |   15.587 |    9.427 |      -0.012 |     -5.11e-06 |    0 |
-| SCCD host Tight       |    6.482 |   3.079 /   10.22 |   5.204 /  126.97 |   14.724 |    8.425 |   -7.32e-05 |      -3.3e-07 |    0 |
-| SCCD device Relaxed   |    4.009 |   1.783 /    9.97 |   1.845 /   58.52 |    7.392 |    2.316 |     -0.0146 |     -9.92e-06 |    0 |
-| SCCD device Tight     |    4.020 |   1.851 /   24.82 |   2.938 /  142.51 |    8.588 |    4.373 |   -7.23e-05 |     -2.15e-07 |    0 |
-| Scalable CCD device   |    1.691 |  10.438 /   30.86 |  13.858 /  137.57 |   26.363 |    22.07 |     -0.0203 |         0.969 |   33 |
-| Scalable CCD host     |    1.166 |  14.001 /   30.37 |   0.000 /    0.00 |   15.198 |        - |           - |             - |    - |
+| SCCD host Relaxed     |    6.466 |   3.122 /   11.96 |   5.507 /   29.06 |   15.707 |    9.475 |     -0.0119 |     -5.57e-06 |    0 |
+| SCCD host Tight       |    6.362 |   3.112 /   14.02 |   5.183 /  127.47 |   14.357 |    8.423 |   -7.32e-05 |      -3.3e-07 |    0 |
+| SCCD device Relaxed   |    2.465 |   1.584 /    9.46 |   1.920 /   11.14 |    6.602 |    2.903 |     -0.0147 |     -9.92e-06 |    0 |
+| SCCD device Tight     |    2.503 |   1.567 /    9.03 |   3.035 /   22.90 |    7.488 |    4.864 |   -7.26e-05 |     -2.15e-07 |    0 |
+| Scalable CCD device   |    1.679 |  10.566 /   24.61 |  13.909 /  121.49 |   26.481 |    22.04 |     -0.0202 |         0.985 |   36 |
 
   steps with a known contact: 2481
 
@@ -193,11 +195,11 @@ time over the candidates handed to it.
 
 | library               |  prep ms |         broad ms |        narrow ms |    total |     ns/q |    fp |    fn | late |    err med | worst late | worst early |
 |-----------------------|----------|------------------|------------------|----------|----------|-------|-------|------|------------|------------|-------------|
-| SCCD host Relaxed     |    6.244 |   3.133 /   12.46 |   8.061 /  492.85 |   18.624 |    16.93 | 228608 |     0 |    0 |    -0.0268 |          0 |      -0.996 |
-| SCCD host Tight       |    6.482 |   3.079 /   10.22 |   7.733 / 1978.78 |   18.372 |    21.29 |  1243 |     0 |    0 |  -0.000275 |          0 |      -0.993 |
-| SCCD device Relaxed   |    4.009 |   1.783 /    9.97 |   3.153 /   34.72 |    8.758 |    5.055 | 244973 |     0 |    0 |    -0.0294 |          0 |      -0.996 |
-| SCCD device Tight     |    4.020 |   1.851 /   24.82 |   4.142 /   80.14 |    9.713 |    7.083 |  1245 |     0 |    0 |  -0.000275 |          0 |      -0.993 |
-| ACCD host             |    7.183 |   3.038 /   10.06 |   1.304 /   26.72 |   11.429 |    1.841 | 16708 |     0 |    0 |    -0.0232 |          0 |      -0.994 |
+| SCCD host Relaxed     |    6.466 |   3.122 /   11.96 |   8.082 /  490.18 |   18.842 |    16.98 | 228608 |     0 |    0 |    -0.0268 |          0 |      -0.996 |
+| SCCD host Tight       |    6.362 |   3.112 /   14.02 |   7.714 / 2002.34 |   17.760 |    21.28 |  1243 |     0 |    0 |  -0.000275 |          0 |      -0.993 |
+| SCCD device Relaxed   |    2.465 |   1.584 /    9.46 |   3.164 /   34.62 |    7.643 |    5.079 | 244973 |     0 |    0 |    -0.0294 |          0 |      -0.996 |
+| SCCD device Tight     |    2.503 |   1.567 /    9.03 |   4.145 /   81.66 |    8.484 |    7.091 |  1245 |     0 |    0 |  -0.000275 |          0 |      -0.993 |
+| ACCD host             |    5.787 |   3.017 /   10.14 |   1.293 /   28.46 |   10.355 |    1.818 | 16708 |     0 |    0 |    -0.0232 |          0 |      -0.994 |
 
   curated queries with a contact per pass: 285431
 
@@ -217,9 +219,9 @@ late answers over the `5,522,383` curated contacts scored per pass. Its worst
 signed step error is negative on every scene. ACCD is likewise never late and
 never misses.
 
-Scalable CCD's earliest time of impact lands after the true one on `265` of `394`
-armadillo steps per pass, by up to `0.999` -- reporting no contact at all for
-steps that have one -- on `33` of rod-twist's `2,481` and on `8` of
+Scalable CCD's earliest time of impact lands after the true one on `272` of `394`
+armadillo steps per pass, by up to `1.000` -- reporting no contact at all for
+steps that have one -- on `36` of rod-twist's `2,481` and on `10` of
 cloth-funnel's `363`. On cloth-ball, n-body-simulation and puffer-ball it is
 conservative throughout. The cause is a race in its subdivision buffer's overflow
 check, described in `../README.md` and diagnosed in `wip/DECISIONS.md` section 8.
@@ -232,22 +234,24 @@ armadillo.
 
 **Against Scalable CCD, on cost.** The figures below are per-case medians. The
 paper's tables sum whole scenes instead, which weights the heavy cases and puts
-the same comparison at `3.2x` to `4.5x`.
+the same comparison at `3.0x` to `10.3x`.
 
-At the median, end to end, SCCD on the device
-is `3.4x` faster on armadillo (`5.50` against `18.56` ms per case), `3.7x` on
-cloth-ball (`13.47` against `50.11`), `4.3x` on cloth-funnel (`4.04` against
-`17.49`), `4.1x` on n-body (`63.53` against `260.50`), `4.1x` on puffer-ball
-(`246.35` against `1014.89`) and `3.1x` on rod-twist (`8.59` against `26.36`).
-Per candidate its narrow phase costs `18.5` against `57.3` ns on armadillo, `1.04`
-against `21.8` on cloth-ball, `33.0` against `56.3` on cloth-funnel, `0.19`
-against `10.7` on n-body, `0.20` against `6.99` on puffer-ball and `4.37` against
-`22.1` on rod-twist. On the host, where Scalable CCD has only a broad phase,
-SCCD's prep plus query is `5.22` against `5.94` ms on armadillo, `21.0` against
-`22.9` on cloth-ball, `4.02` against `4.71` on cloth-funnel and `9.56` against
-`15.20` on rod-twist; the sweep leads on the other two, `55.2` against `82.0` on
-n-body and `4644.6` against `1507.8` on puffer-ball, which is the same split the
-broad-phase study reports between our own two strategies.
+At the median, end to end, SCCD on the device is `3.6x` faster on armadillo
+(`5.20` against `18.51` ms per case), `3.5x` on cloth-ball (`14.23` against
+`50.25`), `4.0x` on cloth-funnel (`4.38` against `17.63`), `4.7x` on n-body
+(`53.58` against `254.29`), `6.3x` on puffer-ball (`161.79` against `1013.98`)
+and `3.5x` on rod-twist (`7.49` against `26.48`). Per candidate its narrow phase
+costs `23.8` against `55.4` ns on armadillo, `2.06` against `22.1` on cloth-ball,
+`47.9` against `54.9` on cloth-funnel, `1.28` against `10.7` on n-body, `1.27`
+against `6.98` on puffer-ball and `4.86` against `22.0` on rod-twist.
+
+The broad phase is where the device gap is widest, and the run measures both of
+our strategies so the algorithm and the implementation can be told apart. Summed
+over the benchmark our device broad phase costs `30.3 s` against Scalable CCD's
+`313.8 s`, and on puffer-ball `10.4 s` against `227.2 s`. Our own sweep sits
+between the two at `111.5 s`, and on n-body it is actually the slower of the
+two implementations -- `7.4 s` against Scalable CCD's `6.3` -- where our cell
+list takes the scene at `1.9`.
 
 **Against ACCD, per collision pair, the cost goes the other way.** Over the same
 candidates on the same 72 threads, ACCD is the cheaper narrow phase on every
