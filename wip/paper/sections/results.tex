@@ -268,13 +268,21 @@ is drawn dashed to remain visible.
 \begin{figure}[htbp]
   \centering
   \input{tikz/broadphase}
-  \caption{Why the two broad phases differ, drawn schematically rather than to
-    scale. \textbf{(a)} Sorting on one axis prunes on one axis: the band is the
-    query's extent on $a$, every box it crosses is tested in full, and on a
-    draped surface almost all of those then fail on another axis. \textbf{(b)}
-    The cell list bins instead, which meets the same pair in several cells, and
-    resolves the duplicates by attributing each pair to the cell holding the
-    minimum corner of the overlap.}
+  \caption{Why the two broad phases differ, schematically and not to scale.
+    \textbf{(a)} Sorting on one axis prunes on one axis. Candidate boxes are
+    drawn sorted by their minimum on $a$; the shaded band is the query's extent
+    on that axis, so every box the band crosses is tested in full and only the
+    two clear of it are pruned by the sort. On a draped surface almost all of
+    those tested then fail on one of the other two axes -- about $2100$
+    candidates are walked for each pair actually found, and no choice of axis
+    rescues it, the two good axes giving $2882$ and $2838$ candidates per pair
+    and the third $126\,063$. Here one of the six is a real overlap, outlined in
+    the primitive colour. \textbf{(b)} The cell list bins instead. Each box
+    enters every cell it touches, so the same pair can be met in several of
+    them, and it is emitted only by the cell holding the minimum corner of the
+    two boxes' overlap. That corner lies inside both boxes, so both are binned
+    in that cell and the cell is unique: two clamps per surviving pair, and no
+    per-pair state to allocate.}
   \label{fig:bp}
 \end{figure}
 
