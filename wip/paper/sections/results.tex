@@ -269,20 +269,22 @@ is drawn dashed to remain visible.
   \centering
   \input{tikz/broadphase}
   \caption{Why the two broad phases differ, schematically and not to scale.
-    \textbf{(a)} Sorting on one axis prunes on one axis. Candidate boxes are
-    drawn sorted by their minimum on $a$; the shaded band is the query's extent
-    on that axis, so every box the band crosses is tested in full and only the
-    two clear of it are pruned by the sort. On a draped surface almost all of
-    those tested then fail on one of the other two axes -- about $2100$
-    candidates are walked for each pair actually found, and no choice of axis
-    rescues it, the two good axes giving $2882$ and $2838$ candidates per pair
-    and the third $126\,063$. Here one of the six is a real overlap, outlined in
-    the primitive colour. \textbf{(b)} The cell list bins instead. Each box
-    enters every cell it touches, so the same pair can be met in several of
-    them, and it is emitted only by the cell holding the minimum corner of the
-    two boxes' overlap. That corner lies inside both boxes, so both are binned
-    in that cell and the cell is unique: two clamps per surviving pair, and no
-    per-pair state to allocate.}
+    \textbf{(a)} Sorting on one axis prunes on one axis. Boxes are drawn sorted
+    by their minimum on $a$ and the walk runs forward, so the boxes above the
+    current one were paired with it when each of them was current and are not
+    revisited. The band is the current box's extent: the boxes below it that the
+    band still reaches are tested in full, and the walk stops at the first whose
+    minimum passes the band. On a draped surface almost all of those tested then
+    fail on one of the other two axes -- about $2100$ candidates are walked for
+    each pair actually found, and no choice of axis rescues it, the two good axes
+    giving $2882$ and $2838$ candidates per pair and the third $126\,063$.
+    \textbf{(b)} The cell list bins instead. A cell is at least as large as the
+    largest box, being sized from the mean box extent, so a box reaches a
+    handful of cells; it enters every one it touches, which is also the range it
+    queries. The same pair is therefore met in several cells and is emitted only
+    by the one holding the minimum corner of the two boxes' overlap. That corner
+    lies inside both boxes, so both are binned in that cell and the cell is
+    unique: two clamps per surviving pair, and no per-pair state to allocate.}
   \label{fig:bp}
 \end{figure}
 

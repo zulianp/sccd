@@ -3,80 +3,93 @@
 %
 % No prose inside the drawing. What the panels mean belongs in the caption,
 % where it can be read at caption size and does not compete with the marks.
-% Colour is carried by the marks alone: every label is ink, and the only hues
-% are the two primitives of the rest of the paper plus one accent for the query.
 \begin{tikzpicture}[
   font=\scriptsize,
   >={Stealth[length=1.6mm]},
   lbl/.style={font=\scriptsize, text=sccdInk, inner sep=1.5pt},
   ttl/.style={font=\scriptsize\bfseries, text=sccdInk, inner sep=0pt},
-  box/.style={draw=sccdInk!35, fill=white, line width=0.4pt},
-  hit/.style={draw=sccdInk, fill=sccdInk!8, line width=0.4pt},
+  done/.style={draw=sccdInk!25, fill=white, line width=0.4pt},
+  test/.style={draw=sccdInk, fill=sccdInk!8, line width=0.4pt},
+  prune/.style={draw=sccdInk!25, fill=white, line width=0.4pt, densely dotted},
   lead/.style={draw=sccdInk!55, line width=0.3pt},
 ]
 
 % ============================ (a) sweep and prune ============================
+% The walk is forward only. A box is paired with the current one when the
+% current one reaches it, so the boxes above are already done; the walk stops at
+% the first box whose minimum passes the current box's maximum.
 \begin{scope}
-  \node[ttl, anchor=south west] at (0,3.30) {(a) sweep and prune on axis $a$};
+  \node[ttl, anchor=south west] at (0,3.52) {(a) sweep and prune on axis $a$};
 
-  % The query's extent: a band behind the list, and the interval itself on the
-  % axis below it. Light enough to sit under the bars without competing.
-  \fill[sccdAmber!8] (0.55,0.46) rectangle (2.35,3.16);
+  \fill[sccdAmber!8] (0.50,0.46) rectangle (2.45,3.30);
   \draw[draw=sccdAmber!70, line width=0.4pt, densely dashed]
-    (0.55,0.46) -- (0.55,3.16)  (2.35,0.46) -- (2.35,3.16);
+    (0.50,0.46) -- (0.50,3.30)  (2.45,0.46) -- (2.45,3.30);
 
-  % Candidate boxes, sorted by their minimum on a. Those the band crosses are
-  % tested; the two below it are pruned by the sort alone.
+  % Boxes sorted by their minimum on a, top to bottom.
   \foreach \i/\s/\w/\st in {
-      0/0.00/1.55/hit, 1/0.30/1.75/hit, 2/0.50/1.95/hit,
-      3/0.72/1.45/hit, 4/0.95/2.10/hit, 5/1.18/1.65/hit,
-      6/2.66/1.55/box, 7/2.98/1.35/box} {
+      0/0.00/1.55/done, 1/0.30/1.75/done,
+      3/0.72/1.45/test, 4/0.95/2.10/test, 5/1.18/1.65/test,
+      6/2.66/1.55/prune, 7/2.98/1.35/prune} {
     \pgfmathsetmacro{\y}{3.00 - 0.29*\i}
     \draw[\st] (\s,\y) rectangle ++(\w,0.17);
   }
+  % The current box, whose extent is the band.
+  \draw[draw=sccdAmber, fill=sccdAmber!30, line width=0.9pt]
+    (0.50,2.42) rectangle ++(1.95,0.17);
 
-  % The one candidate that is a real overlap, marked rather than annotated.
-  \draw[draw=sccdTeal, line width=0.9pt] (0.50,2.42) rectangle ++(1.95,0.17);
-
-  % Which rows were tested and which were pruned, as tick marks and words at
-  % the same size as everything else.
-  \draw[lead] (4.42,1.55) -- (4.58,1.55) -- (4.58,3.17) -- (4.42,3.17);
-  \node[lbl, anchor=west] at (4.62,2.36) {tested};
+  \draw[lead] (4.42,2.71) -- (4.58,2.71) -- (4.58,3.17) -- (4.42,3.17);
+  \node[lbl, anchor=west, text=sccdInk!55, align=left] at (4.62,2.94)
+    {already\\paired};
+  \node[lbl, anchor=west, text=sccdAmber] at (4.62,2.50) {current};
+  \draw[lead] (4.42,1.55) -- (4.58,1.55) -- (4.58,2.30) -- (4.42,2.30);
+  \node[lbl, anchor=west, align=left] at (4.62,1.92) {tested\\against it};
   \draw[lead] (4.42,0.97) -- (4.58,0.97) -- (4.58,1.43) -- (4.42,1.43);
-  \node[lbl, anchor=west, text=sccdInk!60] at (4.62,1.20) {pruned};
+  \node[lbl, anchor=west, text=sccdInk!55, align=left] at (4.62,1.20)
+    {walk\\stops};
 
-  % The axis, with the query interval drawn on it.
   \draw[draw=sccdInk, line width=0.4pt] (0,0.46) -- (4.30,0.46);
   \foreach \x in {0,1,2,3,4} \draw[draw=sccdInk, line width=0.4pt] (\x,0.46) -- (\x,0.38);
   \draw[->, draw=sccdInk, line width=0.4pt] (4.30,0.46) -- (4.62,0.46)
     node[lbl, anchor=west, inner sep=2pt] {$a$};
-  \draw[draw=sccdAmber, line width=1.1pt] (0.55,0.20) -- (2.35,0.20);
-  \node[lbl, anchor=north] at (1.45,0.14) {query extent};
+  \draw[draw=sccdAmber, line width=1.1pt] (0.50,0.20) -- (2.45,0.20);
+  \node[lbl, anchor=north] at (1.48,0.14) {extent of the current box};
 \end{scope}
 
 % ============================ (b) the cell list ==============================
+% The grid is drawn line by line rather than with TikZ's `grid`, which places
+% its lines at multiples of the step measured from the origin and not from the
+% corner of the rectangle given to it. A cell is at least as large as the
+% largest box, as the shipped grid is -- it is sized from the mean box extent --
+% so a box reaches a handful of cells and not a block of them.
 \begin{scope}[xshift=63mm]
-  \node[ttl, anchor=south west] at (0,3.30) {(b) two-dimensional cell list};
+  \node[ttl, anchor=south west] at (0,3.52) {(b) two-dimensional cell list};
 
-  \draw[step=0.52, draw=sccdInk!18, line width=0.3pt] (0,0.46) grid (4.16,3.06);
-  \draw[draw=sccdInk!40, line width=0.4pt] (0,0.46) rectangle (4.16,3.06);
+  \fill[sccdTeal!10] (0.85,0.80) rectangle (2.55,2.50);
 
-  % The two primitives, in the colours the rest of the paper gives them.
-  \draw[draw=sccdTeal, line width=0.9pt] (0.52,0.72) rectangle (2.34,2.28);
-  \draw[draw=sccdPlum, line width=0.9pt] (1.82,1.86) rectangle (3.64,2.80);
+  \foreach \x in {0,0.85,1.70,2.55,3.40}
+    \draw[draw=sccdInk!18, line width=0.3pt] (\x,0.80) -- (\x,3.35);
+  \foreach \y in {0.80,1.65,2.50,3.35}
+    \draw[draw=sccdInk!18, line width=0.3pt] (0,\y) -- (3.40,\y);
+  \draw[draw=sccdInk!40, line width=0.4pt] (0,0.80) rectangle (3.40,3.35);
 
-  % Their overlap, the cell that owns it, and the corner the rule keys on.
-  \fill[sccdAmber!35] (1.82,1.86) rectangle (2.34,2.28);
-  \draw[draw=sccdInk, line width=1.0pt] (1.56,1.50) rectangle ++(0.52,0.52);
-  \fill[sccdInk] (1.82,1.86) circle (1.5pt);
+  \draw[draw=sccdTeal, line width=0.9pt] (1.30,1.10) rectangle (2.05,1.80);
+  \draw[draw=sccdPlum, line width=0.9pt] (1.75,1.55) rectangle (2.55,2.30);
+  \node[lbl, text=sccdTeal, anchor=east] at (1.26,1.20) {first};
+  \node[lbl, text=sccdPlum, anchor=west] at (2.59,2.20) {second};
 
-  \draw[lead] (2.02,2.30) -- (1.42,2.86);
-  \node[lbl, anchor=south east] at (1.46,2.84) {overlap};
-  \draw[lead] (1.86,1.90) -- (2.62,1.12);
-  \node[lbl, anchor=north west] at (2.58,1.16) {minimum corner};
-  \draw[lead] (1.58,1.62) -- (0.86,1.06);
-  \node[lbl, anchor=north east] at (0.90,1.10) {owning cell};
-  \node[lbl, text=sccdTeal, anchor=north west] at (0.58,0.70) {first};
-  \node[lbl, text=sccdPlum, anchor=south east] at (3.60,2.84) {second};
+  \fill[sccdAmber!40] (1.75,1.55) rectangle (2.05,1.80);
+  \draw[draw=sccdInk, line width=1.0pt] (1.70,0.80) rectangle (2.55,1.65);
+  \fill[sccdInk] (1.75,1.55) circle (1.6pt);
+
+  % --- key in one column, so no label can run into the next ---
+  \fill[sccdTeal!10] (0.00,0.54) rectangle ++(0.22,0.16);
+  \draw[draw=sccdInk!25, line width=0.3pt] (0.00,0.54) rectangle ++(0.22,0.16);
+  \node[lbl, anchor=west] at (0.26,0.62) {cells the first box is binned into};
+  \fill[sccdAmber!40] (0.00,0.32) rectangle ++(0.22,0.16);
+  \node[lbl, anchor=west] at (0.26,0.40) {overlap of the two boxes};
+  \draw[draw=sccdInk, line width=1.0pt] (0.00,0.10) rectangle ++(0.22,0.16);
+  \node[lbl, anchor=west] at (0.26,0.18) {owning cell};
+  \fill[sccdInk] (0.11,-0.04) circle (1.6pt);
+  \node[lbl, anchor=west] at (0.26,-0.04) {minimum corner of the overlap};
 \end{scope}
 \end{tikzpicture}
