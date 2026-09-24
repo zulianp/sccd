@@ -202,7 +202,7 @@ def figure(runs: list[ScalingRun], out_dir: Path):
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_xlabel("surface elements")
-    ax.set_ylabel("broad + narrow phase (ms)")
+    ax.set_ylabel("BP full + NP (ms)")
     ax.grid(True, which="both", axis="both")
     ax.legend(loc="upper left")
     fig.tight_layout()

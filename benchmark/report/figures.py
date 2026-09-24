@@ -82,7 +82,7 @@ def narrow_phase_per_case(case_series: dict, out_dir: Path) -> Figure:
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_xlabel("candidate pairs in the case")
-    ax.set_ylabel("narrow phase (ms)")
+    ax.set_ylabel("NP (ms)")
     ax.grid(True, which="both", axis="both")
     ax.legend(loc="upper left")
     fig.tight_layout()
@@ -124,8 +124,8 @@ def results_grid(case_series: dict, out_dir: Path) -> Figure:
     # box collapses onto the axis and the panel spends a quarter of the figure
     # saying nothing; the count per scene is in the conservativeness table,
     # which is the right place for a number that is usually the same number.
-    rows = [("broad_ms", "broad phase (ms)"),
-            ("narrow_ms", "narrow phase (ms)"),
+    rows = [("broad_ms", "BP queries (ms)"),
+            ("narrow_ms", "NP (ms)"),
             ("toi_max_early", "error")]
 
     fig, axes = plt.subplots(len(rows), len(scenes), squeeze=False,
@@ -232,8 +232,8 @@ def runtime_breakdown(summaries: dict[tuple[str, str], SceneSummary],
     # The broad phase is one bar: building the acceleration structure and
     # traversing it. Its two halves are shaded apart so the split stays
     # readable, and the narrow phase is the second bar.
-    parts = [("prep_ms", "structure"), ("broad_ms", "traversal"),
-             ("narrow_ms", "narrow")]
+    parts = [("prep_ms", "BP prep"), ("broad_ms", "BP queries"),
+             ("narrow_ms", "NP")]
     part_ink = [SERIES[3], SERIES[0], SERIES[2]]
 
     fig, axes = plt.subplots(1, len(scenes), squeeze=False,

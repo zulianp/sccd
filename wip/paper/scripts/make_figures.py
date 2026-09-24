@@ -142,9 +142,12 @@ def strong_scaling():
         ax.plot(threads, threads, ls="--", lw=0.9, color=style.REFERENCE_INK,
                 label="perfect", zorder=1)
         for i, phase in enumerate(("total", "prep", "broad", "narrow")):
+            # The tags the tables and captions use, so one vocabulary covers both.
+            tag = {"total": "BP full + NP", "prep": "BP prep",
+                   "broad": "BP queries", "narrow": "NP"}[phase]
             ax.plot(threads, [one[phase] / best[t][phase] for t in threads],
                     marker="os^D"[i], ms=3.4, lw=1.2,
-                    color=style.SERIES[i], label=phase, zorder=2)
+                    color=style.SERIES[i], label=tag, zorder=2)
         ax.set_xscale("log", base=2)
         ax.set_yscale("log", base=2)
         shown = [t for t in threads if t in (1, 2, 4, 8, 16, 32, 72)]
@@ -198,7 +201,7 @@ def per_frame():
         ax.tick_params(labelsize=6)
         ax.grid(True, which="major", lw=0.4, color=style.GRID_INK)
         ax.set_axisbelow(True)
-    axes[0].set_ylabel("ms per step", fontsize=7)
+    axes[0].set_ylabel("BP full + NP, ms per step", fontsize=7)
 
     check_ticks(fig, axes, SCENES, "per-frame")
 
@@ -266,7 +269,7 @@ def broad_per_frame():
         ax.tick_params(labelsize=6)
         ax.grid(True, which="major", lw=0.4, color=style.GRID_INK)
         ax.set_axisbelow(True)
-    axes[0].set_ylabel("broad phase, ms per step", fontsize=7)
+    axes[0].set_ylabel("BP full, ms per step", fontsize=7)
 
     check_ticks(fig, axes, SCENES, "broad-per-frame")
 
@@ -362,7 +365,7 @@ def broad_vs_scalable():
         ax.tick_params(labelsize=6)
         ax.grid(True, which="major", lw=0.4, color=style.GRID_INK)
         ax.set_axisbelow(True)
-    axes[0].set_ylabel("broad phase, ms per step", fontsize=7)
+    axes[0].set_ylabel("BP full, ms per step", fontsize=7)
 
     check_ticks(fig, axes, present, "broad-vs-scalable")
     for ax, scene in zip(axes, present):
