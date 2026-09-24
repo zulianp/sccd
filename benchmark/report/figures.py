@@ -124,9 +124,14 @@ def results_grid(case_series: dict, out_dir: Path) -> Figure:
     # box collapses onto the axis and the panel spends a quarter of the figure
     # saying nothing; the count per scene is in the conservativeness table,
     # which is the right place for a number that is usually the same number.
-    rows = [("broad_ms", "BP queries (ms)"),
-            ("narrow_ms", "NP (ms)"),
-            ("toi_max_early", "error")]
+    # BP full and not BP queries: the structure is where the two strategies
+    # differ most, so a row that leaves it out describes neither the cost a
+    # caller pays nor the thing the broad-phase study is about. Named columns
+    # are summed per repeat before the median, so the box is over whole broad
+    # phases and not over a median of one part added to a median of another.
+    rows = [(("prep_ms", "broad_ms"), "BP full (ms)"),
+            (("narrow_ms",), "NP (ms)"),
+            (("toi_max_early",), "error")]
 
     fig, axes = plt.subplots(len(rows), len(scenes), squeeze=False,
                              figsize=(FULL_WIDTH_IN, 1.35 * len(rows) + 0.9),
@@ -134,21 +139,30 @@ def results_grid(case_series: dict, out_dir: Path) -> Figure:
 
     for c, scene in enumerate(scenes):
         axes[0][c].set_title(SCENE_LABEL.get(scene, scene), fontsize=7, pad=3)
-        for r, (column, ylabel) in enumerate(rows):
+        for r, (columns, ylabel) in enumerate(rows):
             ax = axes[r][c]
+            column = columns[0]
             data, colours = [], []
             for mode in modes:
                 vals = []
                 for s in case_series.values():
                     if s.dataset != scene or s.mode != mode:
                         continue
-                    stat = (s.timings if column in s.timings else s.accuracy).get(column)
+                    parts = [(s.timings if col in s.timings else s.accuracy).get(col)
+                             for col in columns]
+                    if any(q is None or not q.n for q in parts):
+                        continue
+                    if len(parts) == 1:
+                        stat = parts[0]
+                    else:
+                        stat = Stat()
+                        for i in range(min(q.n for q in parts)):
+                            stat.add(sum(q.values[i] for q in parts))
                     # A count of zero is a result -- this mode reported no false
                     # positive on that case -- so counts keep their zeros and are
                     # drawn on a symmetric-log axis, which has room for them.
                     floor = -1.0 if column == "fp" else 0.0
-                    if stat is not None and stat.n and math.isfinite(stat.median) \
-                            and stat.median > floor:
+                    if stat.n and math.isfinite(stat.median) and stat.median > floor:
                         vals.append(stat.median)
                 data.append(np.asarray(vals) if vals else np.asarray([np.nan]))
                 colours.append(mode_color(mode))
