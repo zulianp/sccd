@@ -3,6 +3,9 @@
 
 #include "sccd_broadphase_cell2d.hpp"
 
+#include <cstdio>
+#include <cstdlib>
+
 /**
  * \file
  * \brief Broad phase over two nested cell lists, binned by centroid.
@@ -303,6 +306,32 @@ namespace sccd {
         grid.coarse.min1 = b.lo1;
         grid.coarse.inv0 = (T)grid.coarse.n0 / (span0 * eps);
         grid.coarse.inv1 = (T)grid.coarse.n1 / (span1 * eps);
+
+        // `SCCD_HGRID2_VERBOSE` reports where the cut fell and what each level
+        // came out as. How much of the scene is on the coarse level is the
+        // number that decides whether two levels were worth having, and it is a
+        // property of the step's geometry rather than of the code.
+        if (getenv("SCCD_HGRID2_VERBOSE")) {
+            ptrdiff_t coarse_n = 0;
+            for (int k = best_bucket + 1; k < detail::SCCD_HGRID2_BUCKETS; ++k) coarse_n += hist.count[k];
+            fprintf(stderr,
+                    "sccd hgrid2: n %ld  axes %d,%d  mean box %.4g/%.4g  widest %.4g/%.4g  "
+                    "cut %.4g means  fine %dx%d  coarse %dx%d  on coarse %ld (%.2f%%)\n",
+                    (long)n,
+                    d0,
+                    d1,
+                    (double)mean0,
+                    (double)mean1,
+                    (double)b.ext0,
+                    (double)b.ext1,
+                    cut,
+                    grid.fine.n0,
+                    grid.fine.n1,
+                    grid.coarse.n0,
+                    grid.coarse.n1,
+                    (long)coarse_n,
+                    100.0 * (double)coarse_n / (double)safe_n);
+        }
     }
 
     namespace detail {
@@ -643,7 +672,10 @@ namespace sccd {
                                               true,
                                               visit);
 
-            if (fine) {
+            // Nine cell reads per box is worth a branch when there is nothing
+            // in them: a scene whose boxes are all of a size leaves the coarse
+            // level empty, and every fine box would otherwise walk it.
+            if (fine && coarse_cellptr[grid.coarse.ncells()] > 0) {
                 // A fine box is no wider than a coarse cell, so the two centroids
                 // are at most one coarse cell apart and the ordinary radius holds.
                 hgrid2_walk_level<NXE, NXE, T, I>(aabbs,
@@ -689,6 +721,7 @@ namespace sccd {
 
             const T cw0 = (T)1 / grid.coarse.inv0;
             const T cw1 = (T)1 / grid.coarse.inv1;
+            const bool coarse_occupied = coarse_cellptr[grid.coarse.ncells()] > 0;
 
             hgrid2_walk_level<F, S, T, I>(first_aabbs,
                                           fi,
@@ -705,20 +738,22 @@ namespace sccd {
                                           false,
                                           visit);
 
-            hgrid2_walk_level<F, S, T, I>(first_aabbs,
-                                          fi,
-                                          second_aabbs,
-                                          second_idx,
-                                          second_elements,
-                                          second_element_stride,
-                                          ev,
-                                          grid.coarse,
-                                          coarse_cellptr,
-                                          coarse_cellidx,
-                                          stencil_radius<T>(e0, cw0),
-                                          stencil_radius<T>(e1, cw1),
-                                          false,
-                                          visit);
+            if (coarse_occupied) {
+                hgrid2_walk_level<F, S, T, I>(first_aabbs,
+                                              fi,
+                                              second_aabbs,
+                                              second_idx,
+                                              second_elements,
+                                              second_element_stride,
+                                              ev,
+                                              grid.coarse,
+                                              coarse_cellptr,
+                                              coarse_cellidx,
+                                              stencil_radius<T>(e0, cw0),
+                                              stencil_radius<T>(e1, cw1),
+                                              false,
+                                              visit);
+            }
         }
 
     }  // namespace detail
