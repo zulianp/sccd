@@ -148,7 +148,9 @@ def dataset_table(summaries: dict[tuple[str, str], SceneSummary],
         caption=("The benchmark problems. \\emph{cases} is simulation steps with "
                  "a runnable query set, \\emph{candidate pairs} the mean number "
                  "the broad phase produces per step, and \\emph{queries} the "
-                 "curated per-step query sets that carry exact symbolic roots."),
+                 "curated per-step query sets that carry exact symbolic roots. Cases and "
+                 "queries are counts over the whole scene; candidate pairs is a "
+                 "per-step mean."),
         columns=[Column("scene", "l"), Column("cases"),
                  Column("candidate pairs/step", tex_header=r"pairs/step"),
                  Column("queries"), Column("with a root", tex_header=r"w/ root")],
@@ -194,7 +196,8 @@ def throughput_table(summaries: dict[tuple[str, str], SceneSummary], source: str
         label="tab:throughput",
         caption=("Broad- and narrow-phase throughput in candidate pairs per "
                  "second, median over repeats. A rate, so it is directly "
-                 "comparable between scenes of very different size. " + TAGS),
+                 "comparable between scenes of very different size: a rate, so it is "
+                 "neither a whole-scene total nor a per-step figure. " + TAGS),
         columns=[Column("scene", "l"), Column("mode", "l"),
                  Column("broad Mpair/s", tex_header=r"BP full (Mpair/s)"),
                  Column("narrow Mpair/s", tex_header=r"NP EToI (Mpair/s)")],
@@ -261,7 +264,8 @@ def conservativeness_table(summaries: dict[tuple[str, str], SceneSummary],
                            source: str) -> Table:
     table = Table(
         label="tab:conservativeness",
-        caption=("Conservativeness against the dataset's exact roots. "
+        caption=("Conservativeness against the dataset's exact roots, as counts over "
+                 "the whole scene summed across its cases. "
                  "\\emph{late} counts queries whose reported time of impact "
                  "falls after the true one; it must be zero, because a late "
                  "time of impact lets a simulation step through the contact, "
@@ -270,9 +274,11 @@ def conservativeness_table(summaries: dict[tuple[str, str], SceneSummary],
                  "\\emph{queries} is how many carry ground-truth data at all, "
                  "no-collision cases included; \\emph{toi compared} is how many "
                  "times of impact were actually placed beside an exact root, "
-                 "which is what the claim rests on."),
+                 "which is what the claim rests on. One row per scene: the two "
+                 "processors agree except on false positives, where the host's "
+                 "count is given first and the device's in parentheses."),
         columns=[
-            Column("scene", "l"), Column("mode", "l"),
+            Column("scene", "l"),
             Column("queries", tex_header=r"queries"),
             Column("toi compared", tex_header=r"toi compared"),
             Column("late"), Column("false pos."), Column("false neg."),
@@ -283,10 +289,28 @@ def conservativeness_table(summaries: dict[tuple[str, str], SceneSummary],
                "lower bound on the truth, so comparing against it over-reports "
                "lateness."),
     )
+    # One row per scene. The processors agree on every column but the false
+    # positives, and there only on three scenes, so a row each would repeat
+    # itself twelve times to show four differing numbers. Where they differ the
+    # host's count is given with the device's in parentheses.
+    def cell(values: list[str]) -> str:
+        first = values[0]
+        rest = [v for v in values[1:] if v != first]
+        return first if not rest else f"{first} ({', '.join(rest)})"
+
+    by_scene: dict[str, list[tuple[str, SceneSummary]]] = {}
     for (scene, mode), s in sorted(summaries.items()):
-        table.add(SCENE_LABEL.get(scene, scene), mode_label(mode),
-                  f"{s.gt_queries:,}", f"{s.toi_compared:,}",
-                  f"{s.toi_late}", f"{s.fp:,}", f"{s.fn}")
+        by_scene.setdefault(scene, []).append((mode, s))
+
+    for scene, entries in by_scene.items():
+        # Host first, so the parenthesised value is always the device's.
+        entries.sort(key=lambda e: e[0].startswith("device-"))
+        cols = [[f"{s.gt_queries:,}" for _, s in entries],
+                [f"{s.toi_compared:,}" for _, s in entries],
+                [f"{s.toi_late}" for _, s in entries],
+                [f"{s.fp:,}" for _, s in entries],
+                [f"{s.fn}" for _, s in entries]]
+        table.add(SCENE_LABEL.get(scene, scene), *(cell(c) for c in cols))
     return table
 
 

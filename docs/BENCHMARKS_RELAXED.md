@@ -77,20 +77,14 @@ Source: `benchmark/results/oracle-gh200-all.csv`
 
 <!-- sccd:begin conservativeness -->
 
-| scene             | mode |   queries | toi compared | late | false pos. | false neg. |
-|-------------------|------|----------:|-------------:|-----:|-----------:|-----------:|
-| armadillo-rollers | GPU  |   131,441 |      130,859 |    0 |        322 |          0 |
-| armadillo-rollers | CPU  |   131,441 |      130,859 |    0 |        232 |          0 |
-| cloth-ball        | GPU  |   664,940 |      664,919 |    0 |          2 |          0 |
-| cloth-ball        | CPU  |   664,940 |      664,919 |    0 |          2 |          0 |
-| cloth-funnel      | GPU  |     7,552 |        6,773 |    0 |        742 |          0 |
-| cloth-funnel      | CPU  |     7,552 |        6,773 |    0 |        687 |          0 |
-| n-body            | GPU  | 2,947,719 |    2,947,611 |    0 |         28 |          0 |
-| n-body            | CPU  | 2,947,719 |    2,947,611 |    0 |          9 |          0 |
-| puffer-ball       | GPU  | 1,514,172 |    1,486,790 |    0 |     27,380 |          0 |
-| puffer-ball       | CPU  | 1,514,172 |    1,486,790 |    0 |     27,380 |          0 |
-| rod-twist         | GPU  |   549,208 |      285,431 |    0 |    244,973 |          0 |
-| rod-twist         | CPU  |   549,208 |      285,431 |    0 |    228,608 |          0 |
+| scene             |   queries | toi compared | late |        false pos. | false neg. |
+|-------------------|----------:|-------------:|-----:|------------------:|-----------:|
+| armadillo-rollers |   131,441 |      130,859 |    0 |         232 (322) |          0 |
+| cloth-ball        |   664,940 |      664,919 |    0 |                 2 |          0 |
+| cloth-funnel      |     7,552 |        6,773 |    0 |         687 (742) |          0 |
+| n-body            | 2,947,719 |    2,947,611 |    0 |            9 (28) |          0 |
+| puffer-ball       | 1,514,172 |    1,486,790 |    0 |            27,380 |          0 |
+| rod-twist         |   549,208 |      285,431 |    0 | 228,608 (244,973) |          0 |
 
 Measured against the exact roots shipped with the dataset, not against TightInclusion: TightInclusion's own answer is itself a lower bound on the truth, so comparing against it over-reports lateness.
 
