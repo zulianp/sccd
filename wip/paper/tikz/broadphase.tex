@@ -19,7 +19,7 @@
 % current one reaches it, so the boxes above are already done; the walk stops at
 % the first box whose minimum passes the current box's maximum.
 \begin{scope}
-  \node[ttl, anchor=south west] at (0,3.52) {(a) sweep and prune on axis $a$};
+  \node[ttl, anchor=south west] at (0,3.52) {(a) sweep and prune on axis $x$};
 
   \fill[sccdAmber!8] (0.50,0.46) rectangle (2.45,3.30);
   \draw[draw=sccdAmber!70, line width=0.4pt, densely dashed]
@@ -38,19 +38,17 @@
     (0.50,2.42) rectangle ++(1.95,0.17);
 
   \draw[lead] (4.42,2.71) -- (4.58,2.71) -- (4.58,3.17) -- (4.42,3.17);
-  \node[lbl, anchor=west, text=sccdInk!55, align=left] at (4.62,2.94)
-    {already\\paired};
-  \node[lbl, anchor=west, text=sccdAmber] at (4.62,2.50) {current};
+  \node[lbl, anchor=west, align=left] at (4.62,2.94) {prior\\steps};
+  \node[lbl, anchor=west] at (4.62,2.50) {current};
   \draw[lead] (4.42,1.55) -- (4.58,1.55) -- (4.58,2.30) -- (4.42,2.30);
   \node[lbl, anchor=west, align=left] at (4.62,1.92) {tested\\against it};
   \draw[lead] (4.42,0.97) -- (4.58,0.97) -- (4.58,1.43) -- (4.42,1.43);
-  \node[lbl, anchor=west, text=sccdInk!55, align=left] at (4.62,1.20)
-    {walk\\stops};
+  \node[lbl, anchor=west] at (4.62,1.20) {pruned};
 
   \draw[draw=sccdInk, line width=0.4pt] (0,0.46) -- (4.30,0.46);
   \foreach \x in {0,1,2,3,4} \draw[draw=sccdInk, line width=0.4pt] (\x,0.46) -- (\x,0.38);
   \draw[->, draw=sccdInk, line width=0.4pt] (4.30,0.46) -- (4.62,0.46)
-    node[lbl, anchor=west, inner sep=2pt] {$a$};
+    node[lbl, anchor=west, inner sep=2pt] {$x$};
   \draw[draw=sccdAmber, line width=1.1pt] (0.50,0.20) -- (2.45,0.20);
   \node[lbl, anchor=north] at (1.48,0.14) {extent of the current box};
 \end{scope}
