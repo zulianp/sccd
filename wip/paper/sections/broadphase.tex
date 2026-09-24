@@ -135,14 +135,30 @@ The third axis is not abandoned. The ordinary three-dimensional box test inside
 the cell culls it, where it costs nothing extra.
 
 The cell size is derived, not chosen. The grid spacing on each of the two axes
-is the \emph{mean extent of the swept boxes} on that axis. Sizing on the element
-size instead would be wrong here. A swept box is much larger than the element it
-came from, so every box would span a block of cells, and the binning pass would
-cost more than the query saves. The resulting cell counts are then scaled
-isotropically so that their product does not exceed $4N$. Past that point more
-resolution does not pay, and a degenerate extent could otherwise allocate
-without bound. No voxel size is left for a caller to supply, and none to get
-wrong.
+is the \emph{mean extent of the swept boxes} on that axis. The resulting cell
+counts are then scaled isotropically so that their product does not exceed $4N$:
+past that point more resolution does not pay, and a degenerate extent could
+otherwise allocate without bound. No voxel size is left for a caller to supply,
+and none to get wrong.
+
+Two other spacings suggest themselves and both are worse, for opposite reasons.
+Sizing on the \emph{element} size makes the grid far too fine: a swept box is
+much larger than the element it came from, so every box would span a block of
+cells and the binning pass would cost more than the query saves. Sizing on the
+\emph{largest} box is the textbook uniform-grid rule, and it is the more
+tempting of the two, because it buys a property the mean does not -- if no box
+is wider than a cell, then two overlapping boxes lie within one cell of each
+other and a fixed $3\times3$ stencil around a single owning cell finds every
+partner, with no duplicates to settle. What that rule costs is that the widest
+box in the scene sets the spacing for all of them. The swept boxes are not of
+one size: the widest is $4.5\times$ the mean on armadillo-rollers' vertices and
+$24\times$ on cloth-funnel's edges, because a few elements move fast while most
+barely move. On armadillo-rollers one swept edge spans $11\%$ of the scene, so a
+cell at least that wide admits an $8\times9$ grid at any element count, and the
+scene's $36{,}363$ edges land in $72$ cells, $505$ to a cell. Measured, that
+costs the host broad phase up to $11.9\times$. The mean keeps the cost of a box
+proportional to that box's own size, which is what a heavy-tailed size
+distribution requires.
 
 \begin{algorithm}[htbp]
 \caption{Cell-list broad phase, one pass (count or fill)}
@@ -153,8 +169,8 @@ wrong.
   \State $h_{k} \gets$ mean extent of the boxes on axis $a_{k}$;\quad
          $n_{k} \gets \lfloor \operatorname{span}_{k}/h_{k} \rfloor$,
          scaled so $n_{0}n_{1} \le 4N$
-  \State bin every box of $B$ into each cell its $(a_{0},a_{1})$ footprint
-         touches, by counting sort
+  \State count the cells of each box of $B$, prefix-sum them, and scatter
+         each box index into its cells
   \ForAll{$i$ \textbf{in parallel}}
     \ForAll{cells $c$ touched by $A_{i}$, and $j$ listed in $c$}
       \If{$A_{i}$ and $B_{j}$ are disjoint in 3D} \textbf{continue} \EndIf
@@ -171,23 +187,53 @@ wrong.
 \end{algorithmic}
 \end{algorithm}
 
+\begin{figure}[htbp]
+  \centering
+  \input{tikz/cell2d}
+  \caption{The cell list, schematically and not to scale.
+    \textbf{(a)} Construction is count-then-fill, the same shape as the pair
+    collection that follows it. One pass over the boxes counts the cells each
+    one's extent covers, a prefix sum turns those counts into \texttt{cellptr},
+    and a second pass scatters each box index into each of its cells. The
+    result is a CRS structure: \texttt{cellptr[c]} to \texttt{cellptr[c+1]} is
+    the run of \texttt{cellidx} holding cell $c$'s boxes.
+    \textbf{(b)} The query walks the same cells the box was binned into. A pair
+    whose boxes share more than one cell is therefore met more than once, and
+    it is emitted from the cell holding the minimum corner of their overlap.}
+  \label{fig:cell2d}
+\end{figure}
+
+Construction is count-then-fill, drawn in \cref{fig:cell2d}(a) and the same
+shape as the pair collection that follows it. One pass over the boxes counts the
+cells each one covers, a prefix sum over the cells turns those counts into the
+row pointer, and a second pass scatters each box index into each of its cells.
+Nothing is appended to a growing container, so the allocation is exact and known
+before a single index is written, and no thread needs a private buffer sized for
+a worst case it will not reach. The two passes share one function for deciding
+which cells a box covers, so they cannot disagree about it -- a disagreement
+there would corrupt the cell array silently rather than fail. The pair output is
+built the same way, which is why the whole broad phase allocates exactly twice
+and both sizes are counted rather than guessed.
+
 Duplicates are then settled without per-pair state. A box spans several cells,
-so a pair can be discovered in several of them. The usual remedies, a hash set
-of emitted pairs or a mark array, cost memory proportional to the number of
-pairs and are awkward on a GPU. Instead the pair is \emph{attributed} to the
-cell containing the minimum corner of the two boxes' overlap, on line 8 of
-\cref{alg:cell}. That corner lies inside both boxes, so both are binned in that
-cell, and the cell is unique. The rule costs two clamps per surviving pair and
-no state at all, which is why the same code runs unchanged on the device.
+so a pair can be discovered in several of them, as in \cref{fig:cell2d}(b). The
+usual remedies, a hash set of emitted pairs or a mark array, cost memory
+proportional to the number of pairs and are awkward on a GPU. Instead the pair
+is \emph{attributed} to the cell containing the minimum corner of the two boxes'
+overlap, on line 8 of \cref{alg:cell}. That corner lies inside both boxes, so
+both are binned in that cell, and the cell is unique. The rule costs two clamps
+per surviving pair and no state at all, which is why the same code runs
+unchanged on the device.
 
 Nothing on this path is sorted and nothing assumes an order. The query tests
 every entry of a touched cell and never breaks on a first miss, so the sort is
 removed and not merely moved. Binning costs
-$O\bigl(\sum_{i}\text{cells}(i)\bigr)$, with $\text{cells}(i) = O(1)$ by
-construction of the cell size, and the query
-$O\bigl(\sum_{i}\sum_{c \ni i} \text{occupancy}(c)\bigr)$. There is no
-logarithmic factor. \Cref{sec:results:scaling} measures the exponents both
-achieve in practice.
+$O\bigl(\sum_{i}\text{cells}(i)\bigr)$ and the query
+$O\bigl(\sum_{i}\sum_{c \ni i}\text{occupancy}(c)\bigr)$, with no logarithmic
+factor in either. Here $\text{cells}(i)$ is the footprint of box $i$ at the mean
+spacing, so it is $O(1)$ in the mean and larger for the few boxes that are
+larger: a box pays for its own size and for no other box's.
+\Cref{sec:results:scaling} measures the exponents both achieve in practice.
 
 \subsection{Which one to run}
 \label{sec:bp:choose}

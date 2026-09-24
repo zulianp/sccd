@@ -287,51 +287,6 @@ is drawn dashed to remain visible.
   \label{fig:bp}
 \end{figure}
 
-\begin{figure}[htbp]
-  \centering
-  \input{tikz/cell2d}
-  \caption{The cell list, schematically and not to scale.
-    \textbf{(a)} Construction is count-then-fill, the same shape as the pair
-    collection that follows it. Each box is visited once to count the cells its
-    extent covers, a prefix sum turns those counts into \texttt{cellptr}, and a
-    second visit scatters the box index into each of its cells. The result is a
-    CRS structure: \texttt{cellptr[c]} to \texttt{cellptr[c+1]} is the run of
-    \texttt{cellidx} holding cell $c$'s boxes. The allocation is exact and known
-    before anything is written, and nothing is sorted -- which is the point,
-    since removing the sort is most of what a cell list is for.
-    \textbf{(b)} The query walks the same cells the box was binned into and
-    tests every entry it finds there, with no break-on-first-miss, so nothing
-    depends on an order. A pair whose boxes share more than one cell is
-    therefore met more than once. It is emitted from the cell holding the
-    minimum corner of the two boxes' overlap: that corner lies inside both
-    boxes, so both are binned in that cell and the cell is unique. Two clamps
-    per surviving pair settle it, where a hash or a mark array would cost memory
-    proportional to the pair count.}
-  \label{fig:cell2d}
-\end{figure}
-
-\begin{figure}[htbp]
-  \centering
-  \input{tikz/hgrid2}
-  \caption{The two-level grid, schematically and not to scale. Boxes are split
-    by size and each is binned into the one cell holding its centroid.
-    \textbf{(a)} The fine level holds every box that fits in one of its cells.
-    Two such boxes that overlap have centroids at most one cell apart on each
-    axis, so a fixed stencil finds every partner, and walking only the five
-    cells whose linear index is at least the box's own reports each unordered
-    pair once -- no duplicate test, and a reach that does not grow with the
-    scene.
-    \textbf{(b)} The coarse level holds the rest, with a cell as wide as the
-    widest box there is. That is the grid a single level would have been forced
-    to use for everything; here it carries only the tail, so its occupancy is
-    the tail count. A fine box also reads the nine coarse cells around it, and
-    it is the fine box that emits a fine-coarse pair, because a fine box fits
-    inside a coarse cell while the reverse does not hold. Where to cut between
-    the two levels is chosen per step by costing every candidate against a
-    histogram of box sizes.}
-  \label{fig:hgrid2}
-\end{figure}
-
 \Cref{fig:bp} contrasts the two algorithms on the geometry that separates them,
 and \cref{tab:broadphase} measures them over the whole benchmark.
 
