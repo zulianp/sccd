@@ -433,9 +433,8 @@ namespace sccd {
                               sccd::Cell2DPartition& part,
                               std::vector<ptrdiff_t>& cellptr,
                               std::vector<smesh::idx_t>& cellidx,
-                              std::vector<ptrdiff_t>& cursor,
-                              const scalar_t* const query_extent = nullptr) {
-            sccd::cell2d_setup<scalar_t>(n, aabb, grid, query_extent);
+                              std::vector<ptrdiff_t>& cursor) {
+            sccd::cell2d_setup<scalar_t>(n, aabb, grid);
             sccd::cell2d_partition<scalar_t>(n, aabb, grid, part);
 
             cellptr.resize((size_t)grid.ncells() + 1);
@@ -463,11 +462,10 @@ namespace sccd {
                          DeviceArray<ptrdiff_t>& cellptr,
                          DeviceArray<smesh::idx_t>& cellidx,
                          DeviceArray<ptrdiff_t>& cursor,
-                         DeviceArray<int>& ranges,
-                         const scalar_t* const query_extent = nullptr) {
+                         DeviceArray<int>& ranges) {
             ptrdiff_t spans = 0;
             sccd::device::cell2d_setup_and_count<scalar_t, smesh::idx_t>(
-                n, aabb, grid, cellptr.get(), ranges.get(), &spans, query_extent);
+                n, aabb, grid, cellptr.get(), ranges.get(), &spans);
 
             ptrdiff_t rejected = 0;
             sccd::device::cell2d_fill<scalar_t, smesh::idx_t>(
@@ -593,13 +591,7 @@ namespace sccd {
                 fill_identity_(fidx_->data(), n_faces);
                 fill_identity_(eidx_->data(), n_edges);
 
-                // The vertex grid is queried by faces, which are the wider boxes,
-                // so the face extent is what has to fit in a cell for the query's
-                // stencil to reach every candidate. The edge grid queries itself.
-                scalar_t fext[3];
-                sccd::max_box_extent<scalar_t>(n_faces, faabb_->data(), fext);
-
-                bin_host_(n_nodes, vaabb_->data(), v_grid_, v_part_, v_cellptr_, v_cellidx_, v_cursor_, fext);
+                bin_host_(n_nodes, vaabb_->data(), v_grid_, v_part_, v_cellptr_, v_cellidx_, v_cursor_);
                 bin_host_(n_edges, eaabb_->data(), e_grid_, e_part_, e_cellptr_, e_cellidx_, e_cursor_);
             } else {
                 SMESH_TRACE_SCOPE("Sorting AABBs (host)");
@@ -981,14 +973,8 @@ namespace sccd {
                 sccd::device::fill_identity<smesh::idx_t>(n_faces, fidx_->data());
                 sccd::device::fill_identity<smesh::idx_t>(n_edges, eidx_->data());
 
-                // The vertex grid is queried by faces, which are the wider boxes,
-                // so the face extent is what has to fit in a cell for the query's
-                // stencil to reach every candidate. The edge grid queries itself.
-                scalar_t fmin[3], fmax[3], fext[3];
-                sccd::device::cell2d_box_stats<scalar_t>(n_faces, faabb_->data(), fmin, fmax, fext);
-
                 bin_device_(n_nodes, vaabb_->data(), v_grid_d_, v_cellptr_d_, v_cellidx_d_,
-                            v_cursor_d_, v_ranges_d_, fext);
+                            v_cursor_d_, v_ranges_d_);
                 bin_device_(n_edges, eaabb_->data(), e_grid_d_, e_cellptr_d_, e_cellidx_d_,
                             e_cursor_d_, e_ranges_d_);
             } else {
@@ -1515,10 +1501,10 @@ namespace sccd {
                 // timed for.
                 v_cellptr_d_.reserve(4 * n_nodes + 2);
                 v_cursor_d_.reserve(4 * n_nodes + 2);
-                v_ranges_d_.reserve(2 * n_nodes + 4);
+                v_ranges_d_.reserve(4 * n_nodes + 4);
                 e_cellptr_d_.reserve(4 * n_edges + 2);
                 e_cursor_d_.reserve(4 * n_edges + 2);
-                e_ranges_d_.reserve(2 * n_edges + 4);
+                e_ranges_d_.reserve(4 * n_edges + 4);
             }
 #endif
         }
