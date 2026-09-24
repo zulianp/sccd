@@ -12,7 +12,6 @@
 
 #include "sccd_broadphase_sweep.hpp"
 #include "sccd_broadphase_cell2d.hpp"
-#include "sccd_broadphase_hgrid2.hpp"
 
 #include <algorithm>
 #include <cstdio>
@@ -205,130 +204,6 @@ namespace {
                                                           ccdptr.data(),
                                                           a.data(),
                                                           b.data());
-        for (size_t i = 0; i < a.size(); ++i) out.insert({a[i], b[i]});
-        return out;
-    }
-
-    // The two-level grid, bound into the same shape as the two above so every
-    // case in this file checks all three against each other. The levels are
-    // built and queried through one helper because the caller's job -- size,
-    // partition, count, fill, per level -- is identical for both of them.
-    struct HGrid2Buffers {
-        sccd::HGrid2<scalar_t> grid;
-        std::vector<ptrdiff_t> cellptr[2];
-        std::vector<idx_t> cellidx[2];
-
-        void build(Boxes& b) {
-            sccd::hgrid2_setup<scalar_t>(b.n, b.ptr, grid);
-            for (int level = 0; level < 2; ++level) {
-                const bool fine = level == 0;
-                const ptrdiff_t ncells = (fine ? grid.fine : grid.coarse).ncells();
-
-                sccd::Cell2DPartition part;
-                sccd::hgrid2_partition<scalar_t>(b.n, b.ptr, grid, fine, part);
-
-                cellptr[level].assign((size_t)ncells + 1, 0);
-                sccd::hgrid2_count<scalar_t>(b.n, b.ptr, grid, fine, part, cellptr[level].data());
-
-                cellidx[level].resize((size_t)cellptr[level][(size_t)ncells]);
-                std::vector<ptrdiff_t> cursor((size_t)ncells);
-                sccd::hgrid2_fill<scalar_t, idx_t>(
-                    b.n, b.ptr, grid, fine, part, cellptr[level].data(), cellidx[level].data(), cursor.data());
-            }
-        }
-
-        // How the split fell, which is the thing worth seeing when a case is
-        // slow rather than wrong.
-        ptrdiff_t coarse_count() const { return (ptrdiff_t)cellidx[1].size(); }
-    };
-
-    template <int first_nxe, int second_nxe = 1>
-    PairSet hgrid2_pairs(Boxes& first, Boxes& second) {
-        HGrid2Buffers h;
-        h.build(second);
-
-        std::vector<ptrdiff_t> ccdptr(first.n + 1, 0);
-        const bool any = sccd::hgrid2_count_overlaps<first_nxe, second_nxe, scalar_t, idx_t>(
-            first.n,
-            first.ptr,
-            first.idx.data(),
-            1,
-            first.elem_ptr,
-            second.ptr,
-            second.idx.data(),
-            second_nxe > 1 ? 1 : 0,
-            second_nxe > 1 ? second.elem_ptr : nullptr,
-            h.grid,
-            h.cellptr[0].data(),
-            h.cellidx[0].data(),
-            h.cellptr[1].data(),
-            h.cellidx[1].data(),
-            ccdptr.data());
-        PairSet out;
-        if (!any) return out;
-
-        std::vector<idx_t> a(ccdptr[first.n]), b(ccdptr[first.n]);
-        sccd::hgrid2_fill_overlaps<first_nxe, second_nxe, scalar_t, idx_t>(first.n,
-                                                                           first.ptr,
-                                                                           first.idx.data(),
-                                                                           1,
-                                                                           first.elem_ptr,
-                                                                           second.ptr,
-                                                                           second.idx.data(),
-                                                                           second_nxe > 1 ? 1 : 0,
-                                                                           second_nxe > 1 ? second.elem_ptr : nullptr,
-                                                                           h.grid,
-                                                                           h.cellptr[0].data(),
-                                                                           h.cellidx[0].data(),
-                                                                           h.cellptr[1].data(),
-                                                                           h.cellidx[1].data(),
-                                                                           ccdptr.data(),
-                                                                           a.data(),
-                                                                           b.data());
-        for (size_t i = 0; i < a.size(); ++i) out.insert({a[i], b[i]});
-        return out;
-    }
-
-    PairSet hgrid2_self_pairs(Boxes& e, ptrdiff_t* coarse = nullptr, int* levels = nullptr) {
-        HGrid2Buffers h;
-        h.build(e);
-        if (levels) {
-            levels[0] = h.grid.fine.n0;
-            levels[1] = h.grid.fine.n1;
-            levels[2] = h.grid.coarse.n0;
-            levels[3] = h.grid.coarse.n1;
-        }
-        if (coarse) *coarse = h.coarse_count();
-
-        std::vector<ptrdiff_t> ccdptr(e.n + 1, 0);
-        const bool any = sccd::hgrid2_count_self_overlaps<2, scalar_t, idx_t>(e.n,
-                                                                              e.ptr,
-                                                                              e.idx.data(),
-                                                                              1,
-                                                                              e.elem_ptr,
-                                                                              h.grid,
-                                                                              h.cellptr[0].data(),
-                                                                              h.cellidx[0].data(),
-                                                                              h.cellptr[1].data(),
-                                                                              h.cellidx[1].data(),
-                                                                              ccdptr.data());
-        PairSet out;
-        if (!any) return out;
-
-        std::vector<idx_t> a(ccdptr[e.n]), b(ccdptr[e.n]);
-        sccd::hgrid2_fill_self_overlaps<2, scalar_t, idx_t>(e.n,
-                                                            e.ptr,
-                                                            e.idx.data(),
-                                                            1,
-                                                            e.elem_ptr,
-                                                            h.grid,
-                                                            h.cellptr[0].data(),
-                                                            h.cellidx[0].data(),
-                                                            h.cellptr[1].data(),
-                                                            h.cellidx[1].data(),
-                                                            ccdptr.data(),
-                                                            a.data(),
-                                                            b.data());
         for (size_t i = 0; i < a.size(); ++i) out.insert({a[i], b[i]});
         return out;
     }
@@ -538,10 +413,7 @@ namespace {
         Boxes e_c = e;
         e_c.bind();
 
-        Boxes e_h = e;
-        e_h.bind();
         const PairSet cell = cell2d_self_pairs(e_c);
-        const PairSet hgrid = hgrid2_self_pairs(e_h);
 
         int bad = 0;
         for (int axis = 0; axis < 3; ++axis) {
@@ -553,9 +425,9 @@ namespace {
             std::set_difference(cell.begin(), cell.end(), sweep.begin(), sweep.end(),
                                 std::back_inserter(only_cell));
 
-            const bool ok = (cell == sweep) && (hgrid == sweep);
-            std::printf("%-24s axis=%d boxes=%-6ld planes=%-3d sweep=%-8zu cell=%-8zu hgrid2=%-8zu  %s\n",
-                        name, axis, (long)n, planes, sweep.size(), cell.size(), hgrid.size(),
+            const bool ok = (cell == sweep);
+            std::printf("%-24s axis=%d boxes=%-6ld planes=%-3d sweep=%-8zu cell=%-8zu  %s\n",
+                        name, axis, (long)n, planes, sweep.size(), cell.size(),
                         ok ? "ok" : "MISMATCH");
             if (!only_cell.empty()) {
                 std::printf("    the sweep MISSED %zu pairs the cell list found -- "
@@ -568,35 +440,28 @@ namespace {
     }
 
     int run_self_boxes(const char* name, Boxes& e, const ptrdiff_t n) {
-        Boxes e_c = e, e_h = e;
+        Boxes e_c = e;
         e_c.bind();
-        e_h.bind();
 
-        ptrdiff_t coarse = 0;
         const PairSet cell = cell2d_self_pairs(e_c);
-        int levels[4] = {0, 0, 0, 0};
-        const PairSet hgrid = hgrid2_self_pairs(e_h, &coarse, levels);
         const PairSet sweep = sweep_self_pairs(e);
 
-        const bool ok = (cell == sweep) && (hgrid == sweep);
-        std::printf("%-26s edges=%-6ld sweep=%-8zu cell=%-8zu hgrid2=%-8zu fine=%dx%d coarse=%dx%d n=%-5ld  %s\n",
+        const bool ok = (cell == sweep);
+        std::printf("%-26s edges=%-6ld sweep=%-8zu cell=%-8zu  %s\n",
                     name,
                     (long)n,
                     sweep.size(),
                     cell.size(),
-                    hgrid.size(),
-                    levels[0], levels[1], levels[2], levels[3],
-                    (long)coarse,
                     ok ? "ok" : "MISMATCH");
-        if (!ok && hgrid != sweep) {
-            std::vector<std::pair<idx_t, idx_t>> only_sweep, only_hgrid;
+        if (!ok) {
+            std::vector<std::pair<idx_t, idx_t>> only_sweep, only_cell;
             std::set_difference(
-                sweep.begin(), sweep.end(), hgrid.begin(), hgrid.end(), std::back_inserter(only_sweep));
+                sweep.begin(), sweep.end(), cell.begin(), cell.end(), std::back_inserter(only_sweep));
             std::set_difference(
-                hgrid.begin(), hgrid.end(), sweep.begin(), sweep.end(), std::back_inserter(only_hgrid));
-            std::printf("    missed by hgrid2: %zu   extra in hgrid2: %zu\n",
+                cell.begin(), cell.end(), sweep.begin(), sweep.end(), std::back_inserter(only_cell));
+            std::printf("    missed by cell list: %zu   extra in cell list: %zu\n",
                         only_sweep.size(),
-                        only_hgrid.size());
+                        only_cell.size());
             for (size_t i = 0; i < only_sweep.size() && i < 5; ++i) {
                 std::printf("    missing (%d,%d)\n", only_sweep[i].first, only_sweep[i].second);
             }
@@ -613,11 +478,11 @@ namespace {
     // Most boxes small, a handful enormous.
     //
     // This is what a swept AABB set looks like when a few elements move fast,
-    // and it is the case the two-level grid exists for: a single grid sized to
-    // the widest box collapses to a handful of cells, while the same widest box
-    // is only a few entries on the coarse level. It is also where a completeness
-    // bug would show, because every cross-level pair goes through the rule that
-    // the fine box is the one that emits it.
+    // and it is where the duplicate rule earns its keep: a box a hundred times
+    // the mean covers hundreds of cells, meets each partner in as many of them
+    // as the two share, and must still emit each pair once. The uniform
+    // generator above never produces that, and the real scenes do -- on
+    // armadillo-rollers the widest swept edge is 7.5 times the mean.
     Boxes make_spread_boxes(std::mt19937& rng,
                             const ptrdiff_t n,
                             const int nxe,
@@ -658,30 +523,26 @@ namespace {
                         const double big,
                         const ptrdiff_t n_big) {
         std::mt19937 rng(31337);
-        // The spread is on the querying list, which is where it bites: a face
-        // wider than a cell has to widen its own walk rather than the grid.
+        // The spread is on both lists, so wide faces walk many cells and wide
+        // vertices sit in many.
         Boxes faces = make_spread_boxes(rng, nf, 3, spread, small, big, n_big);
         Boxes verts = make_spread_boxes(rng, nv, 1, spread, small * 0.1, big * 0.5, n_big);
 
         Boxes faces_c = faces, verts_c = verts;
-        Boxes faces_h = faces, verts_h = verts;
         faces_c.bind();
         verts_c.bind();
-        faces_h.bind();
-        verts_h.bind();
 
         const PairSet cell = cell2d_pairs<3>(faces_c, verts_c);
-        const PairSet hgrid = hgrid2_pairs<3>(faces_h, verts_h);
         const PairSet sweep = sweep_pairs<3>(faces, verts);
 
-        const bool ok = (cell == sweep) && (hgrid == sweep);
-        std::printf("%-28s faces=%-7ld verts=%-7ld sweep=%-8zu cell=%-8zu hgrid2=%-8zu  %s\n",
-                    name, (long)nf, (long)nv, sweep.size(), cell.size(), hgrid.size(), ok ? "ok" : "MISMATCH");
+        const bool ok = (cell == sweep);
+        std::printf("%-28s faces=%-7ld verts=%-7ld sweep=%-8zu cell=%-8zu  %s\n",
+                    name, (long)nf, (long)nv, sweep.size(), cell.size(), ok ? "ok" : "MISMATCH");
         if (!ok) {
             std::vector<std::pair<idx_t, idx_t>> only_sweep;
             std::set_difference(
-                sweep.begin(), sweep.end(), hgrid.begin(), hgrid.end(), std::back_inserter(only_sweep));
-            std::printf("    missed by hgrid2: %zu\n", only_sweep.size());
+                sweep.begin(), sweep.end(), cell.begin(), cell.end(), std::back_inserter(only_sweep));
+            std::printf("    missed by cell list: %zu\n", only_sweep.size());
             for (size_t i = 0; i < only_sweep.size() && i < 5; ++i) {
                 std::printf("    missing (%d,%d)\n", only_sweep[i].first, only_sweep[i].second);
             }
@@ -700,27 +561,21 @@ namespace {
         faces_c.bind();
         verts_c.bind();
 
-        Boxes faces_h = faces, verts_h = verts;
-        faces_h.bind();
-        verts_h.bind();
-
         const PairSet cell = cell2d_pairs<nxe>(faces_c, verts_c);
-        const PairSet hgrid = hgrid2_pairs<nxe>(faces_h, verts_h);
         const PairSet sweep = sweep_pairs<nxe>(faces, verts);
 
         std::vector<std::pair<idx_t, idx_t>> only_sweep, only_cell;
         std::set_difference(sweep.begin(), sweep.end(), cell.begin(), cell.end(), std::back_inserter(only_sweep));
         std::set_difference(cell.begin(), cell.end(), sweep.begin(), sweep.end(), std::back_inserter(only_cell));
 
-        const bool ok = only_sweep.empty() && only_cell.empty() && (hgrid == sweep);
-        std::printf("%-20s nxe=%d faces=%-7ld verts=%-7ld sweep=%-8zu cell=%-8zu hgrid2=%-8zu  %s\n",
+        const bool ok = only_sweep.empty() && only_cell.empty();
+        std::printf("%-20s nxe=%d faces=%-7ld verts=%-7ld sweep=%-8zu cell=%-8zu  %s\n",
                     name,
                     nxe,
                     (long)nf,
                     (long)nv,
                     sweep.size(),
                     cell.size(),
-                    hgrid.size(),
                     ok ? "ok" : "MISMATCH");
         if (!ok) {
             std::printf("    missed by cell list: %zu   extra in cell list: %zu\n",
@@ -763,21 +618,15 @@ namespace {
         Boxes a_c = a, b_c = b;
         a_c.bind();
         b_c.bind();
-        Boxes a_h = a, b_h = b;
-        a_h.bind();
-        b_h.bind();
-
         const PairSet cell = cell2d_pairs<first_nxe, second_nxe>(a_c, b_c);
-        const PairSet hgrid = hgrid2_pairs<first_nxe, second_nxe>(a_h, b_h);
         const PairSet sweep = sweep_pairs<first_nxe, second_nxe>(a, b);
 
         // If the masking removed nothing, the branch ran but proved nothing --
         // the scene has to contain shared nodes for this to be a test.
-        const bool ok =
-            (sweep == expected) && (cell == expected) && (hgrid == expected) && (masked > 0);
-        std::printf("%-22s <%d,%d> a=%-6ld b=%-6ld brute=%-7zu masked=%-6ld sweep=%-7zu cell=%-7zu hgrid2=%-7zu  %s\n",
+        const bool ok = (sweep == expected) && (cell == expected) && (masked > 0);
+        std::printf("%-22s <%d,%d> a=%-6ld b=%-6ld brute=%-7zu masked=%-6ld sweep=%-7zu cell=%-7zu  %s\n",
                     name, first_nxe, second_nxe, (long)na, (long)nb,
-                    expected.size(), (long)masked, sweep.size(), cell.size(), hgrid.size(),
+                    expected.size(), (long)masked, sweep.size(), cell.size(),
                     ok ? "ok" : "MISMATCH");
         return ok ? 0 : 1;
     }
@@ -840,11 +689,8 @@ int main() {
     bad |= run_flat_self_case("self: flat, coincident", 2000, 4);
     bad |= run_flat_self_case("self: flat, one plane", 500, 1);
 
-    // A size spread, which is what the two-level grid is for. The ratio between
-    // the small boxes and the few big ones is what a single grid cannot absorb:
-    // at 1:200 a cell sized to the widest box holds the whole scene. The last
-    // case puts a tenth of the boxes on the coarse level, so the split is
-    // exercised where it is not just a handful of outliers.
+    // A size spread, where the duplicate rule does real work: a box far wider
+    // than a cell covers many of them and shares several with each partner.
     bad |= run_spread_self_case("spread: one outlier", 4000, 100.0, 1.0, 60.0, 1);
     bad |= run_spread_self_case("spread: 1 in 200", 4000, 100.0, 0.5, 40.0, 20);
     bad |= run_spread_self_case("spread: heavy tail", 3000, 100.0, 0.5, 20.0, 300);

@@ -271,7 +271,6 @@ set(SCCD_PUBLIC_HEADERS
   src/narrowphase/sccd_narrowphase_quad.hpp
   src/broadphase/sccd_broadphase_sweep.hpp
   src/broadphase/sccd_broadphase_cell2d.hpp
-  src/broadphase/sccd_broadphase_hgrid2.hpp
   src/broadphase/sccd_broadphase_strategy.hpp
   # Configuration and shared vocabulary.
   src/core/sccd_base.hpp
