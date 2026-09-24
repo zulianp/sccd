@@ -158,7 +158,11 @@ namespace {
     template <int first_nxe, int second_nxe = 1>
     PairSet cell2d_pairs(Boxes& first, Boxes& second) {
         sccd::Cell2DGrid<scalar_t> grid;
-        sccd::cell2d_setup<scalar_t>(second.n, second.ptr, grid);
+        // The first list queries the grid, so its boxes are the ones that have to
+        // fit in a cell for the stencil to reach every candidate.
+        scalar_t qext[3];
+        sccd::max_box_extent<scalar_t>(first.n, first.ptr, qext);
+        sccd::cell2d_setup<scalar_t>(second.n, second.ptr, grid, qext);
 
         sccd::Cell2DPartition part;
         sccd::cell2d_partition<scalar_t>(second.n, second.ptr, grid, part);
