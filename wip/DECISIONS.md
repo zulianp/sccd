@@ -19,6 +19,7 @@ every one of these was believed at the time on evidence that looked sufficient.
   section 8
 - Withdrawn: "SCCD is 6x to 24x cheaper per collision pair than Additive CCD" —
   see section 9
+- Demoted: a centroid-binned cell list, at one level and at two — see below
 
 The full argument and the numbers behind each sit in
 [`ASSESSMENT.md`](ASSESSMENT.md).
@@ -395,3 +396,56 @@ straight through a stationary triangle was missed by
 because in single precision the box met a tolerance condition before the cap and
 in double it did not. Exhaustion now accepts at the box's `t` lower bound, as
 every other termination path in that loop already did.
+
+## Two levels do not beat one on these scenes
+
+A second binning rule was built, measured, and demoted to
+`spikes/src/broadphase_hgrid2.hpp`. It is recorded here because it is the
+textbook structure and will be proposed again by anyone who reads the
+broad-phase literature.
+
+**The rule.** A box is binned into the one cell holding its centroid, and a cell
+is at least as wide as any box in it. Two overlapping boxes then have centroids
+at most one cell apart on each axis, so a fixed `3x3` stencil finds every
+partner, walking the five cells of index at least a box's own reports each
+unordered pair exactly once, and there is no duplicate test at all. That is
+strictly more elegant than the shipped minimum-corner rule.
+
+**Why one level cannot have it.** The cell has to hold the *widest* box, so every
+box pays the worst case. On armadillo-rollers the widest swept edge spans 11% of
+the scene, which caps the grid at `8x9` and puts 36,363 edges into 72 cells --
+505 to a cell. Measured host-side against the sweep, the broad phase went from
+179 ms to 2,126 ms on armadillo-rollers and from 1,177 ms to 11,483 ms on
+cloth-ball, up to 11.9x. The shipped rule's cost per box follows that box's own
+size; this one's follows the largest box in the scene.
+
+**Two levels recover most of it and still lose.** Splitting the boxes by size
+across a fine grid and a coarse one, with the cut chosen per step by costing
+every candidate against a histogram of box sizes, gives a correct broad phase --
+identical pair sets to the sweep on every synthetic case, and zero missed
+collisions, zero late times of impact and identical false-positive counts on
+three scenes. It is 1.3x to 1.5x behind the minimum-corner cell list:
+
+| scene | sweep | cell list | two levels |
+|---|---|---|---|
+| armadillo-rollers | 586 ms | 372 ms | 480 ms |
+| cloth-ball | 1787 ms | 1801 ms | 2395 ms |
+| cloth-funnel | 468 ms | 370 ms | 546 ms |
+
+Whole-scene broad-phase totals including preparation, 72 threads on one Grace,
+120 cases per scene.
+
+**Why two is the wrong number.** The size ratios on these scenes run from 4.5x to
+24x, which is two to five octaves, and one cut has to straddle all of it. The
+cost model is left trading the fine level's resolution away to keep the coarse
+level's population down, and its choices show it: on armadillo's edges it picks a
+`33x45` fine grid holding 31,739 boxes, 21 to a cell, when the cell cap would
+have allowed 145,000 cells. It refuses to go finer because every step finer
+pushes more boxes onto a coarse level stuck at `8x9`. On cloth-funnel's vertices,
+at a 16x ratio, it gives up and makes both levels the same grid -- `163x231`
+against `162x230`, half the scene on each.
+
+The structure that would work is a geometric ladder of levels with the level
+count taken from the size distribution, which is what the polydisperse-particle
+literature does (Ogarko and Luding, *A fast multilevel algorithm for contact
+detection of arbitrarily polydisperse objects*). That was not built.
