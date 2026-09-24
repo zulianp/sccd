@@ -1,23 +1,23 @@
 \begin{table}[htbp]
   \centering
-  \caption{Mean time for one simulation step: the scene total, median over repeats, divided by the number of frames. A step runs both query types, so this is the cost of the vertex-face and edge-edge work of that frame together. \emph{broad} is the whole broad phase: building the swept boxes and the acceleration structure, then finding the candidate pairs over it. \emph{narrow} turns those pairs into a time of impact.}
+  \caption{Mean time for one simulation step: the scene total, median over repeats, divided by the number of frames. A step runs both query types, so this is the cost of the vertex-face and edge-edge work of that frame together. \emph{BP full} is the whole broad phase, the acceleration structure plus the queries over it; \emph{BP prep} is the structure alone and \emph{BP queries} the queries alone; \emph{NP} is the narrow phase. BP full here includes building the swept boxes.}
   \label{tab:per-frame-relaxed}
   \fittable{%
 \begin{tabular}{lrlrrr}
     \toprule
-    scene & frames & mode & broad ms & narrow ms & total ms \\
+    scene & frames & mode & BP full (ms) & NP (ms) & total ms \\
     \midrule
-    armadillo-rollers & 396 & GPU & 4.22 & 5.75 & 9.97 \\
+    armadillo-rollers & 396 & GPU & 8.19 & 3.42 & 11.60 \\
     armadillo-rollers & 396 & CPU & 6.70 & 1.67 & 8.37 \\
-    cloth-ball & 43 & GPU & 13.36 & 12.56 & 25.92 \\
+    cloth-ball & 43 & GPU & 23.88 & 4.07 & 27.95 \\
     cloth-ball & 43 & CPU & 40.30 & 22.84 & 63.14 \\
-    cloth-funnel & 372 & GPU & 4.71 & 4.05 & 8.76 \\
+    cloth-funnel & 372 & GPU & 8.41 & 1.80 & 10.20 \\
     cloth-funnel & 372 & CPU & 4.67 & 0.60 & 5.26 \\
-    n-body & 74 & GPU & 25.07 & 73.21 & 98.28 \\
+    n-body & 74 & GPU & 95.06 & 6.34 & 101.40 \\
     n-body & 74 & CPU & 156.92 & 119.89 & 276.80 \\
-    puffer-ball & 120 & GPU & 88.61 & 141.74 & 230.35 \\
+    puffer-ball & 120 & GPU & 236.26 & 6.60 & 242.86 \\
     puffer-ball & 120 & CPU & 655.03 & 267.64 & 922.66 \\
-    rod-twist & 2,556 & GPU & 5.23 & 5.28 & 10.51 \\
+    rod-twist & 2,556 & GPU & 8.44 & 3.53 & 11.97 \\
     rod-twist & 2,556 & CPU & 16.83 & 13.69 & 30.52 \\
     \bottomrule
   \end{tabular}}

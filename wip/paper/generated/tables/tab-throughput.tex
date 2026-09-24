@@ -1,23 +1,23 @@
 \begin{table}[htbp]
   \centering
-  \caption{Broad- and narrow-phase throughput in candidate pairs per second, median over repeats. A rate, so it is directly comparable between scenes of very different size.}
+  \caption{Broad- and narrow-phase throughput in candidate pairs per second, median over repeats. A rate, so it is directly comparable between scenes of very different size. \emph{BP full} is the whole broad phase, the acceleration structure plus the queries over it; \emph{BP prep} is the structure alone and \emph{BP queries} the queries alone; \emph{NP} is the narrow phase. }
   \label{tab:throughput}
   \fittable{%
 \begin{tabular}{llrr}
     \toprule
-    scene & mode & broad (Mpair/s) & narrow (Mpair/s) \\
+    scene & mode & BP full (Mpair/s) & NP (Mpair/s) \\
     \midrule
-    armadillo-rollers & GPU & 51.0 & 34.2 \\
+    armadillo-rollers & GPU & 26.5 & 54.3 \\
     armadillo-rollers & CPU & 32.7 & 117.8 \\
-    cloth-ball & GPU & 301.2 & 318.3 \\
+    cloth-ball & GPU & 165.1 & 954.4 \\
     cloth-ball & CPU & 101.3 & 280.8 \\
-    cloth-funnel & GPU & 14.2 & 15.4 \\
+    cloth-funnel & GPU & 8.1 & 32.8 \\
     cloth-funnel & CPU & 14.4 & 79.1 \\
-    n-body & GPU & 1211.3 & 423.4 \\
+    n-body & GPU & 324.7 & 4750.8 \\
     n-body & CPU & 194.9 & 391.6 \\
-    puffer-ball & GPU & 739.2 & 426.5 \\
+    puffer-ball & GPU & 273.5 & 5241.7 \\
     puffer-ball & CPU & 93.9 & 346.2 \\
-    rod-twist & GPU & 288.1 & 184.4 \\
+    rod-twist & GPU & 181.7 & 234.5 \\
     rod-twist & CPU & 90.0 & 119.1 \\
     \bottomrule
   \end{tabular}}

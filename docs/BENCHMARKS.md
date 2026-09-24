@@ -253,12 +253,12 @@ already-touching configuration.
 
 | scene             | CPU ms | GPU ms | total | broad | narrow |
 |-------------------|-------:|-------:|------:|------:|-------:|
-| armadillo-rollers |  3,335 |  4,171 | 0.80x | 1.56x |  0.29x |
-| cloth-ball        |  2,356 |  1,123 | 2.10x | 3.03x |  1.13x |
-| cloth-funnel      |  2,073 |  3,402 | 0.61x | 0.99x |  0.19x |
-| n-body            | 17,319 |  7,183 | 2.41x | 6.22x |  1.08x |
-| puffer-ball       | 99,117 | 26,944 | 3.68x | 7.98x |  1.23x |
-| rod-twist         | 75,502 | 34,455 | 2.19x | 3.19x |  1.55x |
+| armadillo-rollers |  3,335 |  4,790 | 0.70x | 0.81x |  0.46x |
+| cloth-ball        |  2,356 |  1,240 | 1.90x | 1.64x |  3.40x |
+| cloth-funnel      |  2,073 |  3,892 | 0.53x | 0.56x |  0.41x |
+| n-body            | 17,319 |  7,398 | 2.34x | 1.67x | 12.13x |
+| puffer-ball       | 99,117 | 28,257 | 3.51x | 2.90x | 15.14x |
+| rod-twist         | 75,502 | 37,829 | 2.00x | 2.02x |  1.97x |
 
 A ratio is the host median over the device median, so 2.0 means the device takes half the time. Ratios below 1.0 are the cases where the host wins and are the ones worth reading.
 
@@ -285,17 +285,17 @@ one comparable between a 79-step scene and a 4,571-step one:
 
 | scene             | frames | mode | broad ms | narrow ms | total ms |
 |-------------------|-------:|------|---------:|----------:|---------:|
-| armadillo-rollers |    396 | GPU  |     4.23 |      6.30 |    10.53 |
+| armadillo-rollers |    396 | GPU  |     8.13 |      3.97 |    12.10 |
 | armadillo-rollers |    396 | CPU  |     6.59 |      1.83 |     8.42 |
-| cloth-ball        |     43 | GPU  |    13.31 |     12.80 |    26.11 |
+| cloth-ball        |     43 | GPU  |    24.56 |      4.27 |    28.83 |
 | cloth-ball        |     43 | CPU  |    40.29 |     14.51 |    54.80 |
-| cloth-funnel      |    372 | GPU  |     4.75 |      4.40 |     9.14 |
+| cloth-funnel      |    372 | GPU  |     8.40 |      2.07 |    10.46 |
 | cloth-funnel      |    372 | CPU  |     4.72 |      0.86 |     5.57 |
-| n-body            |     74 | GPU  |    25.14 |     71.93 |    97.07 |
+| n-body            |     74 | GPU  |    93.56 |      6.41 |    99.97 |
 | n-body            |     74 | CPU  |   156.26 |     77.78 |   234.04 |
-| puffer-ball       |    120 | GPU  |    81.36 |    143.17 |   224.53 |
+| puffer-ball       |    120 | GPU  |   223.83 |     11.65 |   235.47 |
 | puffer-ball       |    120 | CPU  |   649.63 |    176.34 |   825.98 |
-| rod-twist         |  2,556 | GPU  |     5.26 |      8.22 |    13.48 |
+| rod-twist         |  2,556 | GPU  |     8.34 |      6.46 |    14.80 |
 | rod-twist         |  2,556 | CPU  |    16.81 |     12.73 |    29.54 |
 
 A mean rather than a median over steps: the scene total is what a run costs, and the mean is the only average that divides back into it.
@@ -316,17 +316,17 @@ shipped default races them per scene rather than fixing a winner.
 
 | scene             | mode | cell2d structure ms | sweep structure ms | cell2d broad ms | sweep broad ms | faster       |
 |-------------------|------|--------------------:|-------------------:|----------------:|---------------:|--------------|
-| armadillo-rollers | GPU  |                 325 |               1217 |            1674 |           2775 | cell2d 1.66x |
+| armadillo-rollers | GPU  |                 310 |               1302 |            3219 |           2847 | sweep 1.13x  |
 | armadillo-rollers | CPU  |                 955 |               3152 |            2606 |           4333 | cell2d 1.66x |
-| cloth-ball        | GPU  |                  88 |                365 |             582 |           1037 | cell2d 1.78x |
+| cloth-ball        | GPU  |                  88 |                239 |            1061 |            881 | tie          |
 | cloth-ball        | CPU  |                 169 |                507 |            1728 |           1659 | tie          |
-| cloth-funnel      | GPU  |                 339 |                797 |            1773 |           1844 | cell2d 1.04x |
+| cloth-funnel      | GPU  |                 335 |                730 |            3124 |           1769 | sweep 1.77x  |
 | cloth-funnel      | CPU  |                 889 |               1717 |            1754 |           2639 | cell2d 1.50x |
-| n-body            | GPU  |                 311 |               1004 |            1861 |           7387 | cell2d 3.97x |
+| n-body            | GPU  |                 242 |                723 |            6941 |           6345 | tie          |
 | n-body            | CPU  |                 422 |               1652 |           11563 |          12740 | cell2d 1.10x |
-| puffer-ball       | GPU  |                3887 |              12969 |            9913 |          76362 | cell2d 7.70x |
+| puffer-ball       | GPU  |                3342 |              11480 |           26792 |          75322 | cell2d 2.81x |
 | puffer-ball       | CPU  |                2920 |              10101 |           78001 |         448796 | cell2d 5.75x |
-| rod-twist         | GPU  |                4071 |              16746 |           13442 |          26848 | cell2d 2.00x |
+| rod-twist         | GPU  |                3938 |              14144 |           21318 |          23482 | cell2d 1.10x |
 | rod-twist         | CPU  |               12138 |              29135 |           43015 |          44219 | tie          |
 
 `faster` names the winning strategy and by how much on the whole broad phase. A margin inside the run-to-run spread is a tie.

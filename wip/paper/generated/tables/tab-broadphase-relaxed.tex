@@ -1,26 +1,26 @@
 \begin{table}[htbp]
   \centering
-  \caption{Broad-phase strategies over the same cases, median over repeats. \emph{prep} builds the acceleration structure -- the sweep's sorted intervals or the cell list's grid -- and \emph{broad} is the traversal that runs over it; the cost of a broad phase is the two added. Both strategies report identical candidate pairs, so the difference is entirely in how they are found. Both processors implement both strategies, so each is listed for each.}
+  \caption{Broad-phase strategies over the same cases, as whole-scene totals in milliseconds, median over repeats. \emph{BP full} is the whole broad phase, the acceleration structure plus the queries over it; \emph{BP prep} is the structure alone and \emph{BP queries} the queries alone; \emph{NP} is the narrow phase. The two columns per strategy are BP prep, building the sorted intervals or the grid, and BP queries over it; BP full is the two added, which is what the \emph{faster} verdict ranks. Both strategies report identical candidate pairs, so the difference is entirely in how they are found.}
   \label{tab:broadphase-relaxed}
   \fittable{%
 \begin{tabular}{llrrrrl}
     \toprule
-    scene & mode & cell2d struct. & sweep struct. & cell2d broad & sweep broad & faster \\
+    scene & mode & cell2d BP prep & sweep BP prep & cell2d BP queries & sweep BP queries & faster \\
     \midrule
-    armadillo-rollers & GPU & 321 & 1280 & 1672 & 2847 & cell2d 1.70x \\
+    armadillo-rollers & GPU & 338 & 1275 & 3250 & 2819 & sweep 1.15x \\
     armadillo-rollers & CPU & 986 & 3030 & 2654 & 4193 & cell2d 1.58x \\
-    cloth-ball & GPU & 89 & 364 & 582 & 1043 & cell2d 1.79x \\
+    cloth-ball & GPU & 84 & 233 & 1024 & 854 & tie \\
     cloth-ball & CPU & 184 & 525 & 1737 & 1690 & tie \\
-    cloth-funnel & GPU & 332 & 784 & 1756 & 1828 & tie \\
+    cloth-funnel & GPU & 341 & 709 & 3145 & 1747 & sweep 1.80x \\
     cloth-funnel & CPU & 880 & 1668 & 1740 & 2583 & cell2d 1.48x \\
-    n-body & GPU & 308 & 839 & 1849 & 6977 & cell2d 3.77x \\
+    n-body & GPU & 238 & 1002 & 7034 & 7243 & tie \\
     n-body & CPU & 472 & 1797 & 11612 & 12699 & cell2d 1.09x \\
-    puffer-ball & GPU & 4679 & 13043 & 10657 & 75946 & cell2d 7.13x \\
+    puffer-ball & GPU & 4524 & 12910 & 28358 & 76833 & cell2d 2.71x \\
     puffer-ball & CPU & 2974 & 10235 & 78663 & 446939 & cell2d 5.68x \\
-    rod-twist & GPU & 3984 & 16940 & 13360 & 26992 & cell2d 2.02x \\
+    rod-twist & GPU & 3976 & 14640 & 21562 & 24093 & cell2d 1.12x \\
     rod-twist & CPU & 12262 & 31435 & 43160 & 46756 & tie \\
     \bottomrule
   \end{tabular}}
-  \par\smallskip\footnotesize \emph{faster} ranks the traversal column alone. On the sum of the two columns, which is what a caller pays, the ranking differs; see the text. A margin inside the run-to-run spread is a tie rather than a winner.
+  \par\smallskip\footnotesize \texttt{faster} names the winning strategy and by how much on the whole broad phase. A margin inside the run-to-run spread is a tie.
   \par\smallskip\footnotesize Source: \texttt{benchmark/results/sweep-gh200-bp.csv}
 \end{table}

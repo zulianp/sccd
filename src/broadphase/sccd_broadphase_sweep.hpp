@@ -19,12 +19,6 @@ namespace sccd {
      * \param aabb SoA arrays of size 6: minx,miny,minz,maxx,maxy,maxz; each of
      * length n. \return Axis index in {0,1,2}.
      */
-    /** \brief Three per-axis sums, the accumulator of the two passes below. */
-    template <typename T>
-    struct AxisSum3 {
-        T v[3];
-    };
-
     /**
      * \brief Accumulate per-axis center means and variances in two sweeps.
      *
@@ -45,17 +39,23 @@ namespace sccd {
             return;
         }
 
-        const auto join = [](const AxisSum3<T> a, const AxisSum3<T> b) {
-            AxisSum3<T> r;
+        // Three per-axis sums, the accumulator both passes reduce into. Local
+        // because nothing outside this function has any use for it.
+        struct Sum3 {
+            T v[3];
+        };
+
+        const auto join = [](const Sum3 a, const Sum3 b) {
+            Sum3 r;
             for (int d = 0; d < 3; d++) r.v[d] = a.v[d] + b.v[d];
             return r;
         };
 
-        const AxisSum3<T> total = sccd::parallel_tiled_reduce<AxisSum3<T>>(
+        const Sum3 total = sccd::parallel_tiled_reduce<Sum3>(
             0,
             n,
             [&](const ptrdiff_t lo, const ptrdiff_t hi) {
-                AxisSum3<T> acc = {{0, 0, 0}};
+                Sum3 acc = {{0, 0, 0}};
                 for (ptrdiff_t i = lo; i < hi; i++) {
                     for (int d = 0; d < 3; d++) {
                         acc.v[d] += (aabb[d + 3][i] + aabb[d][i]) / 2;
@@ -70,11 +70,11 @@ namespace sccd {
             mean[d] = total.v[d] / (T)n;
         }
 
-        const AxisSum3<T> sq = sccd::parallel_tiled_reduce<AxisSum3<T>>(
+        const Sum3 sq = sccd::parallel_tiled_reduce<Sum3>(
             0,
             n,
             [&](const ptrdiff_t lo, const ptrdiff_t hi) {
-                AxisSum3<T> acc = {{0, 0, 0}};
+                Sum3 acc = {{0, 0, 0}};
                 for (ptrdiff_t i = lo; i < hi; i++) {
                     for (int d = 0; d < 3; d++) {
                         const T c = (aabb[d + 3][i] + aabb[d][i]) / 2;

@@ -19,11 +19,20 @@ scheduled with OpenMP~\citep{dagum1998openmp}. oneTBB~\citep{onetbb} is an
 alternative backend and is not used here.
 
 The timing protocol bounds what the numbers can support, so we state it. Each case is timed as three consecutive calls with their own clocks, reported as
-two phases. \emph{Broad} is the whole broad phase: building the swept boxes and
-the acceleration structure, then querying it for overlaps. \emph{Narrow} is the
-branch and bound over the candidates it returns. Where the text explains the
-broad phase we decompose it into the \emph{structure} and the \emph{traversal}
-over it, which are the two calls the harness times apart. The first case of a scene is run once untimed, to pay for
+two phases, which every table and figure names with the same four tags.
+\emph{BP full} is the whole broad phase: building the swept boxes and the
+acceleration structure, then querying it for overlaps. It decomposes into
+\emph{BP prep}, the structure, and \emph{BP queries}, the overlap queries over
+it, which are the two calls the harness times apart. \emph{NP} is the narrow
+phase, the branch and bound over the candidates BP full returns. A figure or
+table that reports only part of a phase says which part in its caption.
+
+Device timings bracket every clock with a synchronisation, before it starts and
+before it stops. A device phase ends with a kernel launch, which returns long
+before the kernel finishes, so an unsynchronised clock charges a phase's tail to
+whichever later call happens to wait -- BP full reads low and NP high by the
+same amount. The competitor harness synchronises the same way, so the two
+measure the same thing. The first case of a scene is run once untimed, to pay for
 allocation and first touch. Repeats are separate processes, because the driver
 measures each case once per run and run-to-run spread is visible only across
 processes; three repeats are reported throughout. Every table gives the
@@ -191,28 +200,28 @@ is drawn dashed to remain visible.
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures/per-frame.pdf}
-  \caption{Per-frame cost of the whole pipeline: preparation, broad phase and
-    narrow phase added, in milliseconds for one simulation step, both query
-    types together, against frame index.}
+  \caption{Per-frame cost of the whole pipeline, BP full plus NP, in
+    milliseconds for one simulation step, both query types together, against
+    frame index. BP full is the acceleration structure and the queries over it;
+    NP is the narrow phase.}
   \label{fig:perframe}
 \end{figure}
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures/runtime-breakdown.pdf}
-  \caption{Whole-scene totals split into the broad phase and the narrow phase,
-    as a share of each processor's total. The broad bar is shaded into the
-    \emph{structure} it builds and the \emph{traversal} over it. The broad
-    phase dominates on the host, and within it the structure; on the device the
-    narrow phase dominates.}
+  \caption{Whole-scene totals split into BP full and NP, as a share of each
+    processor's total. The BP bar is shaded into BP prep, the structure it
+    builds, and BP queries over it. BP full dominates on the host, and within it
+    BP prep.}
   \label{fig:breakdown}
 \end{figure}
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures/results-grid.pdf}
-  \caption{Per-case distributions over the six scenes: broad-phase time and
-    narrow-phase time for one case, and error against the exact root. Each box spans the first
+  \caption{Per-case distributions over the six scenes: BP full and NP for one
+    case, and error against the exact root. Each box spans the first
     to the third quartile with the median inside, whiskers reach the furthest case
     within $1.5$ interquartile ranges, and cases beyond are drawn individually.}
   \label{fig:grid}
@@ -265,9 +274,9 @@ sweep's sort is the one sequential structure in the pipeline.
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures/broad-per-frame.pdf}
-  \caption{Broad-phase cost through each simulation: the acceleration structure
-    and the traversal over it added, in milliseconds for one step, both query
-    types together, against frame index. Colour carries the processor and
+  \caption{BP full through each simulation -- the acceleration structure and
+    the queries over it added -- in milliseconds for one step, both query types
+    together, against frame index. Colour carries the processor and
     intensity the strategy, the cell list at full strength and the sweep
     lightened. Both processors run both strategies over the same cases.}
   \label{fig:bpframe}
@@ -340,8 +349,8 @@ caller runs end to end.
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures/broad-vs-scalable.pdf}
-  \caption{The device broad phase against Scalable CCD's, step by step: the
-    acceleration structure and the traversal over it added, in milliseconds for
+  \caption{Device BP full against Scalable CCD's, step by step -- the
+    acceleration structure and the queries over it added -- in milliseconds for
     one step, both query types together. All three curves come from one
     comparison run, so they are measured in one allocation. Both of our
     strategies are drawn, because which of the two is running accounts for part

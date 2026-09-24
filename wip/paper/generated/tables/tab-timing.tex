@@ -1,23 +1,23 @@
 \begin{table}[htbp]
   \centering
-  \caption{Wall-clock time per scene and narrow-phase mode, as a whole-scene total in milliseconds summed over every case in the scene, given as median / slowest over independent repeats. \emph{broad} is the whole broad phase, the acceleration structure and the traversal over it together. The two narrow-phase columns are the two output modes: \emph{earliest} returns one time of impact for the step, so every query prunes against the running minimum, while \emph{per-pair} returns one per candidate with no shared bound. \emph{total} is broad + earliest.}
+  \caption{Wall-clock time per scene and narrow-phase mode, as a whole-scene total in milliseconds summed over every case in the scene, given as median / slowest over independent repeats. \emph{BP full} is the whole broad phase, the acceleration structure plus the queries over it; \emph{BP prep} is the structure alone and \emph{BP queries} the queries alone; \emph{NP} is the narrow phase. The two narrow-phase columns are the two output modes: \emph{earliest} returns one time of impact for the step, so every query prunes against the running minimum, while \emph{per-pair} returns one per candidate with no shared bound. \emph{total} is BP full + NP earliest.}
   \label{tab:timing}
   \fittable{%
 \begin{tabular}{llrrrrrrr}
     \toprule
-    scene & mode & cases & pairs & rep & broad (ms) & earliest (ms) & per-pair (ms) & total (ms) \\
+    scene & mode & cases & pairs & rep & BP full (ms) & NP earliest (ms) & NP per-pair (ms) & total (ms) \\
     \midrule
-    armadillo-rollers & GPU & 781 & 85,296,282 & 3 & 1673.9 / 1692.2 & 2496.8 / 2509.3 & 2762.6 / 2776.2 & 4161.3 / 4201.5 \\
+    armadillo-rollers & GPU & 781 & 85,296,282 & 3 & 3219.4 / 3220.2 & 1570.3 / 1610.0 & 2794.5 / 2821.7 & 4789.7 / 4830.1 \\
     armadillo-rollers & CPU & 781 & 85,296,282 & 3 & 2606.5 / 2942.6 & 723.9 / 739.4 & 2840.8 / 2847.3 & 3327.9 / 3682.0 \\
-    cloth-ball & GPU & 79 & 175,150,856 & 3 & 581.6 / 582.2 & 550.3 / 583.2 & 869.1 / 873.0 & 1132.6 / 1164.8 \\
+    cloth-ball & GPU & 79 & 175,150,856 & 3 & 1060.9 / 1067.3 & 183.5 / 184.4 & 887.0 / 894.8 & 1244.5 / 1247.1 \\
     cloth-ball & CPU & 79 & 175,150,856 & 3 & 1728.5 / 1748.8 & 623.7 / 625.6 & 1408.7 / 1415.1 & 2352.2 / 2374.3 \\
-    cloth-funnel & GPU & 577 & 25,192,698 & 3 & 1773.0 / 1774.0 & 1636.1 / 1645.8 & 976.2 / 990.4 & 3410.1 / 3418.7 \\
+    cloth-funnel & GPU & 577 & 25,192,698 & 3 & 3124.4 / 3125.1 & 768.2 / 783.3 & 986.0 / 987.2 & 3893.3 / 3907.7 \\
     cloth-funnel & CPU & 577 & 25,192,698 & 3 & 1754.5 / 1842.2 & 318.4 / 319.2 & 718.1 / 721.5 & 2072.8 / 2161.4 \\
-    n-body & GPU & 146 & 2,253,766,609 & 3 & 1860.6 / 1869.5 & 5323.2 / 5385.7 & 4291.3 / 4414.2 & 7183.7 / 7255.2 \\
+    n-body & GPU & 146 & 2,253,766,609 & 3 & 6940.8 / 6997.8 & 474.4 / 479.0 & 4467.5 / 4479.9 & 7419.9 / 7472.2 \\
     n-body & CPU & 146 & 2,253,766,609 & 3 & 11563.3 / 11573.8 & 5755.6 / 5765.1 & 19100.8 / 19156.0 & 17318.9 / 17338.9 \\
-    puffer-ball & GPU & 240 & 7,327,014,600 & 3 & 9912.7 / 10617.5 & 17180.9 / 18680.2 & 11127.6 / 11710.4 & 27798.3 / 28073.1 \\
+    puffer-ball & GPU & 240 & 7,327,014,600 & 3 & 26792.1 / 27099.5 & 1397.8 / 1400.2 & 10741.6 / 10956.8 & 28189.9 / 28464.8 \\
     puffer-ball & CPU & 240 & 7,327,014,600 & 3 & 78000.6 / 78474.1 & 21161.3 / 21201.5 & 52144.2 / 53081.7 & 99081.7 / 99675.6 \\
-    rod-twist & GPU & 4571 & 3,872,779,843 & 3 & 13442.4 / 13928.2 & 21003.6 / 21031.5 & 27189.2 / 27560.2 & 34458.5 / 34931.8 \\
+    rod-twist & GPU & 4571 & 3,872,779,843 & 3 & 21317.8 / 21591.1 & 16511.6 / 16520.2 & 27223.4 / 27360.5 & 37791.6 / 38102.7 \\
     rod-twist & CPU & 4571 & 3,872,779,843 & 3 & 43015.5 / 43701.6 & 32529.5 / 32701.1 & 79758.2 / 79886.2 & 75716.6 / 76231.1 \\
     \bottomrule
   \end{tabular}}

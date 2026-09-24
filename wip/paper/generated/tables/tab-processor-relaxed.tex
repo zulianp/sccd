@@ -1,18 +1,18 @@
 \begin{table}[htbp]
   \centering
-  \caption{Host against device for the same mode and the same cases. Every time is a whole-scene total in milliseconds, summed over every case of the scene. \emph{broad} is the whole broad phase, the acceleration structure and the traversal over it together; \emph{total} adds the narrow phase to it, median over repeats. A ratio above one means the GPU is faster.}
+  \caption{Host against device for the same mode and the same cases. Every time is a whole-scene total in milliseconds, summed over every case of the scene. \emph{BP full} is the whole broad phase, the acceleration structure plus the queries over it; \emph{BP prep} is the structure alone and \emph{BP queries} the queries alone; \emph{NP} is the narrow phase. \emph{total} is BP full + NP, median over repeats. A ratio above one means the GPU is faster.}
   \label{tab:processor-relaxed}
   \fittable{%
 \begin{tabular}{lrrrrr}
     \toprule
-    scene & CPU ms & GPU ms & total$\times$ & broad$\times$ & narrow$\times$ \\
+    scene & CPU ms & GPU ms & total$\times$ & BP full$\times$ & NP$\times$ \\
     \midrule
-    armadillo-rollers & 3,315 & 3,948 & 0.84x & 1.59x & 0.29x \\
-    cloth-ball & 2,715 & 1,115 & 2.44x & 3.02x & 1.82x \\
-    cloth-funnel & 1,957 & 3,258 & 0.60x & 0.99x & 0.15x \\
-    n-body & 20,484 & 7,273 & 2.82x & 6.26x & 1.64x \\
-    puffer-ball & 110,719 & 27,642 & 4.01x & 7.39x & 1.89x \\
-    rod-twist & 78,021 & 26,864 & 2.90x & 3.22x & 2.59x \\
+    armadillo-rollers & 3,315 & 4,595 & 0.72x & 0.82x & 0.49x \\
+    cloth-ball & 2,715 & 1,202 & 2.26x & 1.69x & 5.61x \\
+    cloth-funnel & 1,957 & 3,796 & 0.52x & 0.55x & 0.33x \\
+    n-body & 20,484 & 7,504 & 2.73x & 1.65x & 18.90x \\
+    puffer-ball & 110,719 & 29,144 & 3.80x & 2.77x & 40.53x \\
+    rod-twist & 78,021 & 30,585 & 2.55x & 2.00x & 3.88x \\
     \bottomrule
   \end{tabular}}
   \par\smallskip\footnotesize A ratio is the host median over the device median, so 2.0 means the device takes half the time. Ratios below 1.0 are the cases where the host wins and are the ones worth reading.

@@ -112,27 +112,12 @@ def _build(only_modes: set[str], label_override: dict[str, str], suffix: str):
 # generator, the two lines are rebuilt here from the unescaped source. The
 # captions contain LaTeX commands and math but none of the characters that would
 # need escaping, so escaping them at all is the mistake.
-# One table's upstream caption misdescribes its own columns: it says `broad` is
-# "the whole broad phase including it" (the preparation), when the two are
-# separate timers and `broad` is the traversal alone -- which is also what its
-# `faster` verdict ranks on. The rows are right and are what this article shows;
-# only the words around them are wrong. Correcting the generator is a change to
-# the library's published documentation and out of scope here, so the caption and
-# note are replaced for the article and the discrepancy is stated in the prose.
-CAPTION_OVERRIDE = {
-    "tab:broadphase": (
-        "Broad-phase strategies over the same cases, median over "
-        "repeats. \\emph{prep} builds the acceleration structure -- the sweep's "
-        "sorted intervals or the cell list's grid -- and \\emph{broad} is the "
-        "traversal that runs over it; the cost of a broad phase is the two "
-        "added. Both strategies report identical candidate pairs, so the "
-        "difference is entirely in how they are found. Both processors "
-        "implement both strategies, so each is listed for each.",
-        "\\emph{faster} ranks the traversal column alone. On the sum of the two "
-        "columns, which is what a caller pays, the ranking differs; see the "
-        "text. A margin inside the run-to-run spread is a tie rather than a "
-        "winner."),
-}
+# The article uses the captions the generator writes. One of them used to
+# misdescribe its own columns -- it called the traversal "broad", which is what
+# the whole phase is called elsewhere -- and was replaced here. That is fixed at
+# the source now, in benchmark/report/tables.py, where every caption states the
+# phase tags: BP full, BP prep, BP queries and NP.
+CAPTION_OVERRIDE: dict[str, tuple[str, str]] = {}
 
 _CAPTION = re.compile(r"^(\s*)\\caption\{.*\}$", re.M)
 _TABULAR = re.compile(r"(\\begin\{tabular\}.*?\\end\{tabular\})", re.S)

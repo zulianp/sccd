@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .style import (COLUMN_WIDTH_IN, SERIES, apply_rcparams, figsize)
+from .tables import TAGS
 
 _HEADER_RE = re.compile(r"^\s*level\s+faces\s+")
 _META_RE = re.compile(r"(\w+)=(\S+)")
@@ -126,18 +127,17 @@ def table(runs: list[ScalingRun], source: str):
         label="tab:scaling",
         caption=("Cost against element count on a repeatedly refined surface, "
                  "each level quadrupling the element count. Every time is one "
-                 "collision step at that level, in milliseconds. \\emph{broad} "
-                 "is the whole broad phase; the \\emph{structure} and "
-                 "\\emph{traversal} columns decompose it into building the "
-                 "acceleration structure and the two overlap queries over it. "
+                 "collision step at that level, in milliseconds. " + TAGS +
+                 "BP prep here is the acceleration structure and BP queries the "
+                 "two overlap queries over it. "
                  "$p$ is the least-squares exponent in $t \\sim n^{p}$ fitted "
                  "over all levels of that series."),
         columns=[Column(_first_header, "l"), Column("level"), Column("elements"),
                  Column("candidate pairs"),
-                 Column("structure ms", tex_header="structure (ms)"),
-                 Column("traversal ms", tex_header="traversal (ms)"),
-                 Column("broad ms", tex_header="broad (ms)"),
-                 Column("narrow ms", tex_header="narrow (ms)"),
+                 Column("structure ms", tex_header="BP prep (ms)"),
+                 Column("traversal ms", tex_header="BP queries (ms)"),
+                 Column("broad ms", tex_header="BP full (ms)"),
+                 Column("narrow ms", tex_header="NP (ms)"),
                  Column("p")],
         source=source,
         notes=("The two frames used here do not come into contact, so the narrow "
