@@ -57,45 +57,42 @@
 % ============================ (b) the cell list ==============================
 % The grid is drawn line by line rather than with TikZ's `grid`, which places
 % its lines at multiples of the step measured from the origin and not from the
-% corner of the rectangle given to it. The cell is drawn wider than the widest
-% box, as the shipped grid sizes it, which is what bounds the search to the
-% eight neighbours.
+% corner of the rectangle given to it, so a cell boundary would sit where no
+% boundary is and the marked cell would not line up with the box in it.
 \begin{scope}[xshift=63mm]
   \node[ttl, anchor=south west] at (0,3.52) {(b) two-dimensional cell list};
 
-  % The nine cells the query reads, and the one holding its centroid. Tints
-  % rather than a second outline: a heavy rectangle around the middle cell reads
-  % as another box and competes with the three that are boxes.
-  \fill[sccdTeal!10] (0,0.55) rectangle (2.16,2.71);
-  \fill[sccdTeal!28] (0.72,1.27) rectangle (1.44,1.99);
+  % The cells the first box covers, which are both the cells it is binned into
+  % and the cells it reads.
+  \fill[sccdTeal!12] (0.60,1.15) rectangle (1.80,2.95);
 
-  \foreach \x in {0,0.72,1.44,2.16,2.88,3.60}
-    \draw[draw=sccdInk!30, line width=0.3pt] (\x,0.55) -- (\x,3.43);
-  \foreach \y in {0.55,1.27,1.99,2.71,3.43}
+  \foreach \x in {0,0.60,1.20,1.80,2.40,3.00,3.60}
+    \draw[draw=sccdInk!30, line width=0.3pt] (\x,0.55) -- (\x,3.55);
+  \foreach \y in {0.55,1.15,1.75,2.35,2.95,3.55}
     \draw[draw=sccdInk!30, line width=0.3pt] (0,\y) -- (3.60,\y);
-  \draw[draw=sccdInk!45, line width=0.4pt] (0,0.55) rectangle (3.60,3.43);
+  \draw[draw=sccdInk!45, line width=0.4pt] (0,0.55) rectangle (3.60,3.55);
 
-  % The query, a partner one cell away, and a box the stencil does not reach.
-  % Every box is drawn narrower than a cell, which is how the grid is sized.
-  \draw[draw=sccdInk!35, line width=0.7pt] (3.00,1.50) rectangle (3.52,2.02);
-  \fill[sccdInk!35] (3.26,1.76) circle (1.5pt);
-  \draw[draw=sccdPlum, line width=0.9pt] (1.46,2.00) rectangle (2.01,2.55);
-  \fill[sccdPlum] (1.735,2.275) circle (1.5pt);
-  \draw[draw=sccdTeal, line width=0.9pt] (0.98,1.52) rectangle (1.53,2.07);
-  \fill[sccdTeal] (1.255,1.795) circle (1.5pt);
+  % The cells the second box covers, outlined rather than filled so the two
+  % ranges can overlap and still be read apart.
+  \draw[draw=sccdPlum!55, line width=0.5pt, densely dashed] (1.20,1.75) rectangle (3.00,2.95);
 
-  \node[lbl, text=sccdTeal, anchor=east] at (0.94,1.62) {query};
-  \node[lbl, text=sccdPlum, anchor=west] at (2.05,2.45) {partner};
-  \node[lbl, text=sccdInk!50, anchor=north] at (3.26,1.46) {out of reach};
+  \fill[sccdAmber!45] (1.40,1.90) rectangle (1.75,2.35);
+  \draw[draw=sccdInk, line width=1.0pt] (1.20,1.75) rectangle (1.80,2.35);
+
+  \draw[draw=sccdTeal, line width=0.9pt] (0.70,1.30) rectangle (1.75,2.35);
+  \draw[draw=sccdPlum, line width=0.9pt] (1.40,1.90) rectangle (2.45,2.90);
+  \fill[sccdInk] (1.40,1.90) circle (1.6pt);
+
+  \node[lbl, text=sccdTeal, anchor=east] at (0.66,1.42) {first};
+  \node[lbl, text=sccdPlum, anchor=west] at (2.49,2.80) {second};
 
   % --- key in one column, so no label can run into the next ---
-  \fill[sccdTeal!10] (0.00,0.24) rectangle ++(0.22,0.16);
+  \fill[sccdTeal!12] (0.00,0.24) rectangle ++(0.22,0.16);
   \draw[draw=sccdInk!30, line width=0.3pt] (0.00,0.24) rectangle ++(0.22,0.16);
-  \node[lbl, anchor=west] at (0.26,0.32) {the nine cells the query reads};
-  \fill[sccdTeal!28] (0.00,0.02) rectangle ++(0.22,0.16);
-  \draw[draw=sccdInk!30, line width=0.3pt] (0.00,0.02) rectangle ++(0.22,0.16);
-  \node[lbl, anchor=west] at (0.26,0.10) {cell of the query's centroid};
-  \fill[sccdInk] (0.11,-0.16) circle (1.5pt);
-  \node[lbl, anchor=west] at (0.26,-0.16) {centroid, which decides the cell};
+  \node[lbl, anchor=west] at (0.26,0.32) {the cells the first box covers and reads};
+  \fill[sccdAmber!45] (0.00,0.02) rectangle ++(0.22,0.16);
+  \node[lbl, anchor=west] at (0.26,0.10) {overlap of the two boxes};
+  \draw[draw=sccdInk, line width=1.0pt] (0.00,-0.20) rectangle ++(0.22,0.16);
+  \node[lbl, anchor=west] at (0.26,-0.12) {the cell that emits the pair};
 \end{scope}
 \end{tikzpicture}

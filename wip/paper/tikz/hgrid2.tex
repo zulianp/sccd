@@ -1,0 +1,79 @@
+% The two-level grid: (a) the fine level and what a box there reads, (b) the
+% coarse level, which holds the boxes too wide for a fine cell and which every
+% fine box also reads.
+%
+% No prose inside the drawing. What the panels mean belongs in the caption,
+% where it can be read at caption size and does not compete with the marks.
+%
+% Grids are drawn line by line rather than with TikZ's `grid`, which places its
+% lines at multiples of the step measured from the origin and not from the
+% corner of the rectangle given to it.
+\begin{tikzpicture}[
+  font=\scriptsize,
+  >={Stealth[length=1.6mm]},
+  lbl/.style={font=\scriptsize, text=sccdInk, inner sep=1.5pt},
+  ttl/.style={font=\scriptsize\bfseries, text=sccdInk, inner sep=0pt},
+  small/.style={draw=sccdTeal!70, line width=0.5pt},
+  big/.style={draw=sccdPlum, line width=0.9pt},
+]
+
+% ================================ (a) fine level =============================
+\begin{scope}
+  \node[ttl, anchor=south west] at (0,3.42) {(a) fine level};
+
+  % The five cells a fine box reads: its own and the four of higher index.
+  \fill[sccdTeal!14] (1.20,1.65) rectangle (2.00,2.05);
+  \fill[sccdTeal!14] (0.80,2.05) rectangle (2.00,2.45);
+
+  \foreach \x in {0,0.4,0.8,1.2,1.6,2.0,2.4,2.8,3.2,3.6}
+    \draw[draw=sccdInk!25, line width=0.25pt] (\x,0.45) -- (\x,3.25);
+  \foreach \y in {0.45,0.85,1.25,1.65,2.05,2.45,2.85,3.25}
+    \draw[draw=sccdInk!25, line width=0.25pt] (0,\y) -- (3.6,\y);
+  \draw[draw=sccdInk!45, line width=0.4pt] (0,0.45) rectangle (3.6,3.25);
+
+  % Boxes that fit a cell, each drawn with the centroid that places it.
+  \foreach \x/\y in {0.22/0.62, 0.74/1.02, 0.38/1.52, 1.02/1.88, 0.62/2.34,
+                     1.34/2.62, 1.90/2.92, 2.46/2.52, 2.84/1.96, 2.30/1.40,
+                     2.92/0.88, 1.66/0.74, 3.16/2.66, 0.94/3.00, 2.02/1.16} {
+    \draw[small] (\x,\y) rectangle ++(0.26,0.26);
+    \fill[sccdTeal!70] ({\x+0.13},{\y+0.13}) circle (1.1pt);
+  }
+
+  % The one whose walk is drawn, in the middle of the shaded cells.
+  \draw[draw=sccdTeal, line width=1.0pt] (1.30,1.72) rectangle ++(0.28,0.28);
+  \fill[sccdInk] (1.44,1.86) circle (1.5pt);
+
+  \fill[sccdTeal!14] (0.00,0.02) rectangle ++(0.22,0.16);
+  \draw[draw=sccdInk!30, line width=0.3pt] (0.00,0.02) rectangle ++(0.22,0.16);
+  \node[lbl, anchor=west] at (0.26,0.10) {the five cells this box reads};
+\end{scope}
+
+% =============================== (b) coarse level ============================
+\begin{scope}[xshift=57mm]
+  \node[ttl, anchor=south west] at (0,3.42) {(b) coarse level};
+
+  % The nine coarse cells the same fine box reads.
+  \fill[sccdTeal!14] (0,0.45) rectangle (2.70,3.25);
+
+  \foreach \x in {0,0.9,1.8,2.7,3.6}
+    \draw[draw=sccdInk!25, line width=0.25pt] (\x,0.45) -- (\x,3.25);
+  \foreach \y in {0.45,1.38,2.31,3.25}
+    \draw[draw=sccdInk!25, line width=0.25pt] (0,\y) -- (3.6,\y);
+  \draw[draw=sccdInk!45, line width=0.4pt] (0,0.45) rectangle (3.6,3.25);
+
+  % The few boxes too wide for a fine cell.
+  \foreach \x/\y/\w in {0.30/0.70/0.76, 1.22/1.70/0.82, 2.46/0.92/0.70,
+                        2.10/2.44/0.78} {
+    \draw[big] (\x,\y) rectangle ++(\w,\w);
+    \fill[sccdPlum] ({\x+0.5*\w},{\y+0.5*\w}) circle (1.3pt);
+  }
+
+  % The same fine box as in (a), at the same place in the domain.
+  \draw[draw=sccdTeal, line width=1.0pt] (1.30,1.72) rectangle ++(0.28,0.28);
+  \fill[sccdInk] (1.44,1.86) circle (1.5pt);
+
+  \fill[sccdTeal!14] (0.00,0.02) rectangle ++(0.22,0.16);
+  \draw[draw=sccdInk!30, line width=0.3pt] (0.00,0.02) rectangle ++(0.22,0.16);
+  \node[lbl, anchor=west] at (0.26,0.10) {the nine cells the same box reads};
+\end{scope}
+\end{tikzpicture}
