@@ -268,9 +268,12 @@ is drawn dashed to remain visible.
 \begin{figure}[htbp]
   \centering
   \input{tikz/broadphase}
-  \caption{Why the two broad phases differ. Sorting on one axis prunes on one
-    axis, which a draped surface defeats; the cell list bins instead and resolves
-    the resulting duplicates by attributing each pair to the cell holding the
+  \caption{Why the two broad phases differ, drawn schematically rather than to
+    scale. \textbf{(a)} Sorting on one axis prunes on one axis: the band is the
+    query's extent on $a$, every box it crosses is tested in full, and on a
+    draped surface almost all of those then fail on another axis. \textbf{(b)}
+    The cell list bins instead, which meets the same pair in several cells, and
+    resolves the duplicates by attributing each pair to the cell holding the
     minimum corner of the overlap.}
   \label{fig:bp}
 \end{figure}
