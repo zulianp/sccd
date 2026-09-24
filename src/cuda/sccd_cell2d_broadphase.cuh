@@ -56,30 +56,11 @@ namespace sccd {
         void fill_identity(const ptrdiff_t n, I* const SCCD_RESTRICT idx);
 
         /**
-         * \brief Per-axis smallest coordinate, largest coordinate and box extent.
-         *
-         * The three outputs are host arrays. A caller needs the extents when it
-         * will query a grid that was built over a different list, so that the
-         * grid can be sized on the wider of the two.
-         */
-        template <typename T>
-        void cell2d_box_stats(const ptrdiff_t n,
-                              T** const SCCD_RESTRICT aabbs,
-                              T out_min[3],
-                              T out_max[3],
-                              T out_ext[3]);
-
-        /**
          * \brief Size the grid and bin \p n boxes into it.
          *
-         * \p cells must have `2 * n + 4` entries: the cell each box is binned
-         * into, which the scatter pass reads back so the two passes cannot
+         * \p ranges must have `4 * n + 4` entries: the cell range each box
+         * covers, which the scatter pass reads back so the two passes cannot
          * disagree about it, and the grid it was computed for.
-         *
-         * \p query_extent is the per-axis largest extent of the list that will
-         * query this grid, from cell2d_box_stats, or null when the list queries
-         * itself. The cell is sized to hold the widest box of either list, which
-         * is what makes the query's fixed stencil complete.
          *
          * \p cellptr must have ncells + 1 entries and \p cellidx must have room
          * for the total span count; the caller gets that count back through
@@ -91,17 +72,16 @@ namespace sccd {
                                     T** const SCCD_RESTRICT aabbs,
                                     Cell2DGridD<T>& grid,
                                     ptrdiff_t* const SCCD_RESTRICT cellptr,
-                                    int* const SCCD_RESTRICT cells,
-                                    ptrdiff_t* const SCCD_RESTRICT span_count,
-                                    const T* const query_extent = nullptr);
+                                    int* const SCCD_RESTRICT ranges,
+                                    ptrdiff_t* const SCCD_RESTRICT span_count);
 
         /**
-         * \brief Scatter each box into its cell.
+         * \brief Scatter each box into its cells.
          *
          * \p capacity is how many entries \p cellidx holds, and \p cursor must
          * have `ncells + 1` of them: the last counts writes the kernel refused
          * because they fell outside the array. The counting pass reserved
-         * exactly one slot per box, so a non-zero count means the two passes
+         * exactly one slot per span, so a non-zero count means the two passes
          * disagreed and the result is incomplete -- it is reported through
          * \p out_rejected (which may be null) rather than written past the end.
          */
@@ -110,7 +90,7 @@ namespace sccd {
                          T** const SCCD_RESTRICT aabbs,
                          const Cell2DGridD<T>& grid,
                          const ptrdiff_t* const SCCD_RESTRICT cellptr,
-                         const int* const SCCD_RESTRICT cells,
+                         const int* const SCCD_RESTRICT ranges,
                          I* const SCCD_RESTRICT cellidx,
                          const ptrdiff_t capacity,
                          ptrdiff_t* const SCCD_RESTRICT cursor,

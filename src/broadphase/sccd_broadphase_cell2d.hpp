@@ -6,8 +6,6 @@
 #include "sccd_aabb.hpp"
 
 #include <cmath>
-#include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <vector>
 
@@ -21,15 +19,8 @@
  * two good axes give 2,882 and 2,838, the bad one 126,063. One-dimensional
  * pruning cannot separate a draped surface.
  *
- * This bins instead. Three points of design worth stating because all three were
+ * This bins instead. Two points of design worth stating because both were
  * deliberate:
- *
- * **The centroid decides the cell, and the cell is at least a box wide.** A box
- * goes in one cell, the one holding its centroid, and a cell is as wide as the
- * widest box the grid will see. Two overlapping boxes then have centroids at most
- * one maximum extent apart on each axis, so their cells differ by at most one and
- * a fixed 3x3 stencil finds every partner. The search radius is a property of the
- * grid rather than of the data, which is what the cell size buys.
  *
  * **Two axes, not three.** The geometry is surfaces, so with N elements of size h
  * in a box of side L, N ~ (L/h)^2. A 2D grid at that resolution has ~N cells and
@@ -100,59 +91,17 @@ namespace sccd {
             a1 = order[1];
         }
 
-        /** \brief The midpoint of a box on one axis, written so it cannot overflow. */
-        template <typename T>
-        static inline T midpoint(const T lo, const T hi) {
-            return lo + (hi - lo) * T(0.5);
-        }
-
-        /** \brief The column of the cell holding box \p i's centroid. */
-        template <typename T>
-        static inline int centroid_col(T** const SCCD_RESTRICT aabb, const Cell2DGrid<T>& grid, const ptrdiff_t i) {
-            return grid.clamp0(midpoint<T>(aabb[grid.axis0][i], aabb[3 + grid.axis0][i]));
-        }
-
-        /** \brief The row of the cell holding box \p i's centroid. */
-        template <typename T>
-        static inline int centroid_row(T** const SCCD_RESTRICT aabb, const Cell2DGrid<T>& grid, const ptrdiff_t i) {
-            return grid.clamp1(midpoint<T>(aabb[grid.axis1][i], aabb[3 + grid.axis1][i]));
-        }
-
     }  // namespace detail
 
-    /** \brief The largest AABB extent on each axis, for sizing a grid. */
-    template <typename T>
-    static void max_box_extent(const ptrdiff_t n, T** const SCCD_RESTRICT aabb, T out[3]) {
-        struct Ext3 {
-            T e[3];
-        };
-
-        if (n <= 0) {
-            out[0] = out[1] = out[2] = T(0);
-            return;
-        }
-
-        const Ext3 m = sccd::parallel_tiled_reduce<Ext3>(
-            0,
-            n,
-            [&](const ptrdiff_t begin, const ptrdiff_t end) {
-                Ext3 e{{T(0), T(0), T(0)}};
-                for (ptrdiff_t i = begin; i < end; ++i) {
-                    for (int d = 0; d < 3; ++d) {
-                        e.e[d] = sccd::max<T>(e.e[d], aabb[3 + d][i] - aabb[d][i]);
-                    }
-                }
-                return e;
-            },
-            [](const Ext3 a, const Ext3 b) {
-                return Ext3{{sccd::max<T>(a.e[0], b.e[0]),
-                             sccd::max<T>(a.e[1], b.e[1]),
-                             sccd::max<T>(a.e[2], b.e[2])}};
-            });
-
-        for (int d = 0; d < 3; ++d) out[d] = m.e[d];
-    }
-
+    /**
+     * \brief Size a grid for \p n boxes so a box spans O(1) cells.
+     *
+     * The cell is the mean AABB extent, which keeps occupancy near one box per
+     * cell and the number of cells near n. Sweep AABBs are much larger than the
+     * elements they came from, so sizing on the element size instead would make
+     * every box touch a large block of cells and give the counting pass more work
+     * than the query saves.
+     */
     /**
      * \brief Shrink a grid until it holds at most `4 * n` cells.
      *
@@ -174,33 +123,15 @@ namespace sccd {
         }
     }
 
-    /**
-     * \brief Size a grid over \p n boxes so that a cell is at least a box wide.
-     *
-     * The cell width is the largest AABB extent on the axis, which is what makes
-     * the query a fixed 3x3 stencil: two overlapping boxes have centroids no more
-     * than one maximum extent apart on each axis, so their centroid cells differ
-     * by at most one. Every subsequent shrink of the grid widens the cells, so the
-     * bound survives the cell cap.
-     *
-     * \p query_extent is the per-axis largest extent of the list that will query
-     * this grid, for the two-list form where the querying boxes are not the boxes
-     * in the cells. A face is wider than a vertex, so the face-vertex query needs
-     * the face width here for its stencil to be complete. Null means the list
-     * queries itself.
-     */
     template <typename T>
-    static void cell2d_setup(const ptrdiff_t n,
-                             T** const SCCD_RESTRICT aabb,
-                             Cell2DGrid<T>& grid,
-                             const T* const query_extent = nullptr) {
+    static void cell2d_setup(const ptrdiff_t n, T** const SCCD_RESTRICT aabb, Cell2DGrid<T>& grid) {
         detail::choose_two_axes<T>(n, aabb, grid.axis0, grid.axis1);
 
         const int d0 = grid.axis0;
         const int d1 = grid.axis1;
 
         struct Extent {
-            T lo0, hi0, lo1, hi1, ext0, ext1;
+            T lo0, hi0, lo1, hi1, sum0, sum1;
         };
 
         const Extent ext = sccd::parallel_tiled_reduce<Extent>(
@@ -213,8 +144,8 @@ namespace sccd {
                     e.hi0 = sccd::max<T>(e.hi0, aabb[3 + d0][i]);
                     e.lo1 = sccd::min<T>(e.lo1, aabb[d1][i]);
                     e.hi1 = sccd::max<T>(e.hi1, aabb[3 + d1][i]);
-                    e.ext0 = sccd::max<T>(e.ext0, aabb[3 + d0][i] - aabb[d0][i]);
-                    e.ext1 = sccd::max<T>(e.ext1, aabb[3 + d1][i] - aabb[d1][i]);
+                    e.sum0 += aabb[3 + d0][i] - aabb[d0][i];
+                    e.sum1 += aabb[3 + d1][i] - aabb[d1][i];
                 }
                 return e;
             },
@@ -223,28 +154,24 @@ namespace sccd {
                               sccd::max<T>(a.hi0, b.hi0),
                               sccd::min<T>(a.lo1, b.lo1),
                               sccd::max<T>(a.hi1, b.hi1),
-                              sccd::max<T>(a.ext0, b.ext0),
-                              sccd::max<T>(a.ext1, b.ext1)};
+                              a.sum0 + b.sum0,
+                              a.sum1 + b.sum1};
             });
 
         const T lo0 = ext.lo0, hi0 = ext.hi0;
         const T lo1 = ext.lo1, hi1 = ext.hi1;
+        const T sum0 = ext.sum0, sum1 = ext.sum1;
 
         const T span0 = sccd::max<T>(hi0 - lo0, std::numeric_limits<T>::min());
         const T span1 = sccd::max<T>(hi1 - lo1, std::numeric_limits<T>::min());
-
-        // The widest box either list can put in a cell, and never finer than the
-        // span divided by a million so a scene of points still gets a grid.
-        const T q0 = query_extent ? query_extent[d0] : T(0);
-        const T q1 = query_extent ? query_extent[d1] : T(0);
-        const T cell0 = sccd::max<T>(sccd::max<T>(ext.ext0, q0), span0 / (T)(1 << 20));
-        const T cell1 = sccd::max<T>(sccd::max<T>(ext.ext1, q1), span1 / (T)(1 << 20));
+        const T mean0 = sccd::max<T>(sum0 / (T)n, span0 / (T)(1 << 20));
+        const T mean1 = sccd::max<T>(sum1 / (T)n, span1 / (T)(1 << 20));
 
         // Cap the cell count so a degenerate extent cannot allocate unboundedly.
         // 4n cells is already past the point where more resolution pays.
         const double cap = 4.0 * (double)sccd::max<ptrdiff_t>(n, 1);
-        double want0 = (double)(span0 / cell0);
-        double want1 = (double)(span1 / cell1);
+        double want0 = (double)(span0 / mean0);
+        double want1 = (double)(span1 / mean1);
         if (want0 < 1) want0 = 1;
         if (want1 < 1) want1 = 1;
         const double total = want0 * want1;
@@ -264,27 +191,6 @@ namespace sccd {
         // much. The bound is what the caller sizes its cell array from, so it is
         // enforced here on the integers that array is sized by.
         cap_cells(sccd::max<ptrdiff_t>(n, 1), grid.n0, grid.n1);
-        // `SCCD_CELL2D_VERBOSE` reports the shape of the grid the boxes asked
-        // for. The cell is the widest box, so how much coarser the grid is than
-        // the box count would suggest is a property of the size spread, and that
-        // is the number to look at when the query walks more candidates than
-        // expected.
-        if (getenv("SCCD_CELL2D_VERBOSE")) {
-            fprintf(stderr,
-                    "sccd cell2d: n %ld  axes %d,%d  span %.4g/%.4g  widest box %.4g/%.4g  "
-                    "grid %dx%d (%.2f cells per box)\n",
-                    (long)n,
-                    d0,
-                    d1,
-                    (double)span0,
-                    (double)span1,
-                    (double)ext.ext0,
-                    (double)ext.ext1,
-                    grid.n0,
-                    grid.n1,
-                    (double)grid.ncells() / (double)sccd::max<ptrdiff_t>(n, 1));
-        }
-
         grid.min0 = lo0;
         grid.min1 = lo1;
         // Nudge the span so the largest coordinate lands inside the last cell.
@@ -295,16 +201,18 @@ namespace sccd {
     /**
      * \brief Which boxes a block of cell rows has to look at.
      *
-     * The histogram and the scatter both write a counter per box, so neither is
-     * safe to run box-parallel without either atomics or one private copy of the
-     * whole cell array per worker. Neither is affordable: the cell count is of the
-     * order of the box count, so private copies cost workers times that.
+     * The histogram and the scatter both write one counter per (box, cell)
+     * incidence, so neither is safe to run box-parallel without either atomics
+     * or one private copy of the whole cell array per worker. Neither is
+     * affordable: the cell count is of the order of the box count, so private
+     * copies cost workers times that.
      *
      * Partitioning by cell row avoids both. A block owns a contiguous
      * range of rows on the grid's second axis, and no two blocks own a cell, so
      * each can write its own slice of the cell array with no synchronisation at
-     * all. A box is binned by its centroid, so it lands in exactly one block's
-     * list and the lists partition the boxes.
+     * all. A box that spans several row blocks appears in each of their lists,
+     * which is why the lists are built by the same count-then-fill pass as
+     * everything else here.
      *
      * Boxes stay in index order within a block's list, and blocks cover the rows
      * in order, so both passes visit each cell's boxes in exactly the order the
@@ -387,7 +295,11 @@ namespace sccd {
             const ptrdiff_t begin = c * chunk;
             const ptrdiff_t end = sccd::min<ptrdiff_t>(begin + chunk, n);
             for (ptrdiff_t i = begin; i < end; ++i) {
-                row[grid.clamp1(detail::midpoint<T>(lo1[i], hi1[i])) / rpb] += 1;
+                const int b0 = grid.clamp1(lo1[i]) / rpb;
+                const int b1 = grid.clamp1(hi1[i]) / rpb;
+                for (int b = b0; b <= b1; ++b) {
+                    row[b] += 1;
+                }
             }
         });
 
@@ -412,8 +324,11 @@ namespace sccd {
             const ptrdiff_t begin = c * chunk;
             const ptrdiff_t end = sccd::min<ptrdiff_t>(begin + chunk, n);
             for (ptrdiff_t i = begin; i < end; ++i) {
-                const int b = grid.clamp1(detail::midpoint<T>(lo1[i], hi1[i])) / rpb;
-                part.blockbox[(size_t)row[b]++] = (int)i;
+                const int b0 = grid.clamp1(lo1[i]) / rpb;
+                const int b1 = grid.clamp1(hi1[i]) / rpb;
+                for (int b = b0; b <= b1; ++b) {
+                    part.blockbox[(size_t)row[b]++] = (int)i;
+                }
             }
         });
     }
@@ -421,14 +336,10 @@ namespace sccd {
     namespace detail {
 
         /**
-         * \brief Visit the one cell box \p i belongs to, if a block of rows owns it.
-         *
-         * A box is binned by its centroid and so belongs to exactly one cell. The
-         * query relies on that: the cell is at least as wide as the widest box, so
-         * a partner's centroid is at most one cell away and the stencil is fixed.
+         * \brief Visit every (cell, box) incidence a block of rows owns.
          *
          * Shared by the counting and the scatter pass so that the two cannot
-         * disagree about which cell a box belongs to, which is the failure that
+         * disagree about which cells a box belongs to, which is the failure that
          * would corrupt the cell array silently.
          */
         template <typename T, typename Visit>
@@ -438,9 +349,15 @@ namespace sccd {
                                               const int row_begin,
                                               const int row_end,
                                               Visit&& visit) {
-            const int c1 = centroid_row<T>(aabb, grid, i);
-            if (c1 < row_begin || c1 >= row_end) return;
-            visit(grid.cell_of(centroid_col<T>(aabb, grid, i), c1));
+            const int a = grid.clamp0(aabb[grid.axis0][i]);
+            const int b = grid.clamp0(aabb[3 + grid.axis0][i]);
+            const int c = sccd::max<int>(grid.clamp1(aabb[grid.axis1][i]), row_begin);
+            const int d = sccd::min<int>(grid.clamp1(aabb[3 + grid.axis1][i]), row_end - 1);
+            for (int j = c; j <= d; ++j) {
+                for (int k = a; k <= b; ++k) {
+                    visit(grid.cell_of(k, j));
+                }
+            }
         }
 
     }  // namespace detail
@@ -541,12 +458,13 @@ namespace sccd {
     namespace detail {
 
         /**
-         * \brief Walk the nine cells around a box, reporting every overlapping partner.
+         * \brief Walk the cells a box touches, reporting each overlapping partner once.
          *
-         * The two lists are distinct, so every pair is reported by its first-list
-         * box and once only; nothing has to be deduplicated. The nine cells are
-         * enough because the grid was sized on the wider of the two lists, which
-         * puts a partner's centroid at most one cell away on each axis.
+         * A box spans several cells, so a pair can be met in several of them. The
+         * pair is attributed to the cell holding the minimum corner of the two
+         * boxes' overlap: that corner lies inside both boxes, so both are binned
+         * there and the cell is unique. This is exact and costs two clamps, where
+         * a hash or a mark array would cost memory proportional to the pair count.
          */
         template <int F, int S, typename T, typename I, typename Visit>
         static inline void for_each_unique_partner(T** const SCCD_RESTRICT first_aabbs,
@@ -563,17 +481,16 @@ namespace sccd {
             const T aminx = first_aabbs[0][fi], aminy = first_aabbs[1][fi], aminz = first_aabbs[2][fi];
             const T amaxx = first_aabbs[3][fi], amaxy = first_aabbs[4][fi], amaxz = first_aabbs[5][fi];
 
-            const int col = centroid_col<T>(first_aabbs, grid, fi);
-            const int row = centroid_row<T>(first_aabbs, grid, fi);
+            const T amin0 = first_aabbs[grid.axis0][fi];
+            const T amax0 = first_aabbs[3 + grid.axis0][fi];
+            const T amin1 = first_aabbs[grid.axis1][fi];
+            const T amax1 = first_aabbs[3 + grid.axis1][fi];
 
-            for (int dr = -1; dr <= 1; ++dr) {
-                const int c1 = row + dr;
-                if (c1 < 0 || c1 >= grid.n1) continue;
+            const int c0b = grid.clamp0(amin0), c0e = grid.clamp0(amax0);
+            const int c1b = grid.clamp1(amin1), c1e = grid.clamp1(amax1);
 
-                for (int dc = -1; dc <= 1; ++dc) {
-                    const int c0 = col + dc;
-                    if (c0 < 0 || c0 >= grid.n0) continue;
-
+            for (int c1 = c1b; c1 <= c1e; ++c1) {
+                for (int c0 = c0b; c0 <= c0e; ++c0) {
                     const ptrdiff_t cell = grid.cell_of(c0, c1);
                     const ptrdiff_t begin = cellptr[cell];
                     const ptrdiff_t end = cellptr[cell + 1];
@@ -593,6 +510,13 @@ namespace sccd {
                                               second_aabbs[3][j],
                                               second_aabbs[4][j],
                                               second_aabbs[5][j])) {
+                            continue;
+                        }
+
+                        // Report only from the cell owning the overlap's min corner.
+                        const T o0 = sccd::max<T>(amin0, second_aabbs[grid.axis0][j]);
+                        const T o1 = sccd::max<T>(amin1, second_aabbs[grid.axis1][j]);
+                        if (grid.clamp0(o0) != c0 || grid.clamp1(o1) != c1) {
                             continue;
                         }
 
@@ -625,12 +549,11 @@ namespace sccd {
         /**
          * \brief The self-overlap form: one list against itself.
          *
-         * Half the stencil, and one index test. The walk takes the row above and
-         * its own row from its own column on, which is the half of the nine cells
-         * whose linear index is at least its own. A pair in two different cells is
-         * therefore reported by the box in the lower cell, and a pair inside one
-         * cell by the lower index, so each unordered pair is reported once by
-         * construction and the query reads five cells rather than nine.
+         * Two filters, and both are needed. `j > fi` makes each unordered pair
+         * appear once rather than twice; the canonical cell makes it appear once
+         * rather than once per cell the two boxes share. The sweep gets the first
+         * for free by starting its window at fi + 1 in sorted order, which is not
+         * available here because nothing is sorted.
          */
         template <int NXE, typename T, typename I, typename Visit>
         static inline void for_each_unique_self_partner(T** const SCCD_RESTRICT aabbs,
@@ -646,25 +569,23 @@ namespace sccd {
             const T aminx = aabbs[0][fi], aminy = aabbs[1][fi], aminz = aabbs[2][fi];
             const T amaxx = aabbs[3][fi], amaxy = aabbs[4][fi], amaxz = aabbs[5][fi];
 
-            const int col = centroid_col<T>(aabbs, grid, fi);
-            const int row = centroid_row<T>(aabbs, grid, fi);
+            const T amin0 = aabbs[grid.axis0][fi];
+            const T amax0 = aabbs[3 + grid.axis0][fi];
+            const T amin1 = aabbs[grid.axis1][fi];
+            const T amax1 = aabbs[3 + grid.axis1][fi];
 
-            for (int dr = 0; dr <= 1; ++dr) {
-                const int c1 = row + dr;
-                if (c1 >= grid.n1) continue;
+            const int c0b = grid.clamp0(amin0), c0e = grid.clamp0(amax0);
+            const int c1b = grid.clamp1(amin1), c1e = grid.clamp1(amax1);
 
-                for (int dc = (dr == 0 ? 0 : -1); dc <= 1; ++dc) {
-                    const int c0 = col + dc;
-                    if (c0 < 0 || c0 >= grid.n0) continue;
-
-                    const bool own = (dr == 0 && dc == 0);
+            for (int c1 = c1b; c1 <= c1e; ++c1) {
+                for (int c0 = c0b; c0 <= c0e; ++c0) {
                     const ptrdiff_t cell = grid.cell_of(c0, c1);
                     const ptrdiff_t begin = cellptr[cell];
                     const ptrdiff_t end = cellptr[cell + 1];
 
                     for (ptrdiff_t k = begin; k < end; ++k) {
                         const ptrdiff_t j = (ptrdiff_t)cellidx[k];
-                        if (own && j <= fi) {
+                        if (j <= fi) {
                             continue;
                         }
 
@@ -680,6 +601,12 @@ namespace sccd {
                                               aabbs[3][j],
                                               aabbs[4][j],
                                               aabbs[5][j])) {
+                            continue;
+                        }
+
+                        const T o0 = sccd::max<T>(amin0, aabbs[grid.axis0][j]);
+                        const T o1 = sccd::max<T>(amin1, aabbs[grid.axis1][j]);
+                        if (grid.clamp0(o0) != c0 || grid.clamp1(o1) != c1) {
                             continue;
                         }
 
