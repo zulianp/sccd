@@ -1,11 +1,11 @@
 \begin{table}[htbp]
   \centering
-  \caption{Mean time for one simulation step: the scene total, median over repeats, divided by the number of frames. A step runs both query types, so this is the cost of the vertex-face and edge-edge work of that frame together. \emph{BP full} is the whole broad phase, the acceleration structure plus the queries over it; \emph{BP prep} is the structure alone and \emph{BP queries} the queries alone; \emph{NP} is the narrow phase. BP full here includes building the swept boxes.}
+  \caption{Mean time for one simulation step: the scene total, median over repeats, divided by the number of frames. A step runs both query types, so this is the cost of the vertex-face and edge-edge work of that frame together. \emph{BP full} is the whole broad phase, the acceleration structure plus the queries over it; \emph{BP prep} is the structure alone and \emph{BP queries} the queries alone. The narrow phase is named by the answer it is asked for: \emph{NP EToI} returns one earliest time of impact for the step, so every query prunes against the running minimum, and \emph{NP per-pair} returns one per candidate with no shared bound. BP full here includes building the swept boxes.}
   \label{tab:per-frame-relaxed}
   \fittable{%
 \begin{tabular}{lrlrrr}
     \toprule
-    scene & frames & mode & BP full (ms) & NP (ms) & total ms \\
+    scene & frames & mode & BP full (ms) & NP EToI (ms) & total ms \\
     \midrule
     armadillo-rollers & 396 & GPU & 8.19 & 3.42 & 11.60 \\
     armadillo-rollers & 396 & CPU & 6.70 & 1.67 & 8.37 \\

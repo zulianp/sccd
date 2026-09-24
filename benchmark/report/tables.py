@@ -21,7 +21,10 @@ from .style import SCENE_LABEL, mode_label
 # another, and a reader had no way to tell which.
 TAGS = ("\\emph{BP full} is the whole broad phase, the acceleration structure "
         "plus the queries over it; \\emph{BP prep} is the structure alone and "
-        "\\emph{BP queries} the queries alone; \\emph{NP} is the narrow phase. ")
+        "\\emph{BP queries} the queries alone. The narrow phase is named by the "
+        "answer it is asked for: \\emph{NP EToI} returns one earliest time of "
+        "impact for the step, so every query prunes against the running minimum, "
+        "and \\emph{NP per-pair} returns one per candidate with no shared bound. ")
 
 
 @dataclass
@@ -194,7 +197,7 @@ def throughput_table(summaries: dict[tuple[str, str], SceneSummary], source: str
                  "comparable between scenes of very different size. " + TAGS),
         columns=[Column("scene", "l"), Column("mode", "l"),
                  Column("broad Mpair/s", tex_header=r"BP full (Mpair/s)"),
-                 Column("narrow Mpair/s", tex_header=r"NP (Mpair/s)")],
+                 Column("narrow Mpair/s", tex_header=r"NP EToI (Mpair/s)")],
         source=source,
     )
     for (scene, mode), s in sorted(summaries.items()):
@@ -220,17 +223,12 @@ def timing_table(summaries: dict[tuple[str, str], SceneSummary], source: str) ->
                  "whole-scene total in milliseconds summed over every case in "
                  "the scene, given as median / slowest over independent "
                  "repeats. " + TAGS +
-                 "The two "
-                 "narrow-phase columns are the two output modes: "
-                 "\\emph{earliest} returns one time of impact for the step, so "
-                 "every query prunes against the running minimum, while "
-                 "\\emph{per-pair} returns one per candidate with no shared "
-                 "bound. \\emph{total} is BP full + NP earliest."),
+                 "\\emph{total} is BP full + NP EToI."),
         columns=[
             Column("scene", "l"), Column("mode", "l"), Column("cases"),
             Column("pairs"), Column("rep"),
             Column("broad ms", tex_header=r"BP full (ms)"),
-            Column("earliest ms", tex_header=r"NP earliest (ms)"),
+            Column("earliest ms", tex_header=r"NP EToI (ms)"),
             Column("per-pair ms", tex_header=r"NP per-pair (ms)"),
             Column("total ms", tex_header=r"total (ms)"),
         ],
@@ -469,12 +467,12 @@ def processor_table(summaries: dict[tuple[str, str], SceneSummary],
         caption=("Host against device for the same mode and the same cases. "
                  "Every time is a whole-scene total in milliseconds, summed over "
                  "every case of the scene. " + TAGS +
-                 "\\emph{total} is BP full + NP, median "
+                 "\\emph{total} is BP full + NP EToI, median "
                  "over repeats. A ratio above one means the GPU is faster."),
         columns=[Column("scene", "l"), Column("CPU ms"), Column("GPU ms"),
                  Column("total", tex_header=r"total$\times$"),
                  Column("broad", tex_header=r"BP full$\times$"),
-                 Column("narrow", tex_header=r"NP$\times$")],
+                 Column("narrow", tex_header=r"NP EToI$\times$")],
         source=source,
         notes=("A ratio is the host median over the device median, so 2.0 means "
                "the device takes half the time. Ratios below 1.0 are the cases "
@@ -521,7 +519,7 @@ def per_frame_table(summaries: dict[tuple[str, str], SceneSummary],
                  "edge-edge work of that frame together. " + TAGS +
                  "BP full here includes building the swept boxes."),
         columns=[Column("scene", "l"), Column("frames"), Column("mode", "l"),
-                 Column("broad ms", tex_header=r"BP full (ms)"), Column("narrow ms", tex_header=r"NP (ms)"),
+                 Column("broad ms", tex_header=r"BP full (ms)"), Column("narrow ms", tex_header=r"NP EToI (ms)"),
                  Column("total ms")],
         source=source,
         notes=("A mean rather than a median over steps: the scene total is what "

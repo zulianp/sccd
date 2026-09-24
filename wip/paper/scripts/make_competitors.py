@@ -203,7 +203,7 @@ def earliest_table(data):
 
     return f"""\\begin{{table}}[htbp]
   \\centering
-  \\caption{{Earliest time of impact per simulation step, against Scalable
+  \\caption{{NP EToI per simulation step, against Scalable
     CCD~\\citep{{belgrod2025toi}}. Both libraries run their
     earliest-time-of-impact path once per case from a bound of $1$, over
     identical broad-phase candidates, and a step's answer is the minimum over
@@ -211,7 +211,7 @@ def earliest_table(data):
     answer reported for it, so a positive value is conservative and a negative
     one is an answer after the root; \\emph{{late}} counts the steps where it is
     negative, per pass over the case list. \\emph{{total}} is the whole scene,
-    prep and broad phase and narrow phase together, summed over every case with
+    BP full plus NP EToI together, summed over every case with
     the median over repeats taken first; \\emph{{avg}} divides it by the cases of
     the scene. \\emph{{speedup}} is Scalable CCD's total over ours, so above one
     is our lead, and \\emph{{tighter}} is its median earliness over ours, so
@@ -293,7 +293,7 @@ def pair_table(data):
                  f"{round(late_total)} queries are answered after their root.")
     return f"""\\begin{{table}}[htbp]
   \\centering
-  \\caption{{Per collision pair, against additive CCD~\\citep{{li2021codim}} as the
+  \\caption{{NP per-pair, against additive CCD~\\citep{{li2021codim}} as the
     IPC toolkit implements it. Both narrow phases are timed over the same
     broad-phase candidates -- additive CCD answers one pair at a time and carries
     no parallelism of its own, so it is driven by the parallel loop the toolkit's
@@ -302,7 +302,7 @@ def pair_table(data):
     \\emph{{f.p.}} and \\emph{{missed}} are counts per pass over the case list.
     \\emph{{earliness}} is the query's exact root minus the time of impact
     reported for it, so a positive value is conservative, and {late_note}
-    \\emph{{total}} is the narrow phase over the whole scene, summed over every case with the median
+    \\emph{{total}} is NP per-pair over the whole scene, summed over every case with the median
     over repeats taken first, and \\emph{{avg}} divides it by the candidates it
     was handed. \\emph{{slowdown}} is our total over additive CCD's, so above one
     is what the tighter answer costs, and \\emph{{tighter}} is its median

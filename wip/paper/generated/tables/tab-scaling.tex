@@ -1,11 +1,11 @@
 \begin{table}[htbp]
   \centering
-  \caption{Cost against element count on a repeatedly refined surface, each level quadrupling the element count. Every time is one collision step at that level, in milliseconds. \emph{BP full} is the whole broad phase, the acceleration structure plus the queries over it; \emph{BP prep} is the structure alone and \emph{BP queries} the queries alone; \emph{NP} is the narrow phase. BP prep here is the acceleration structure and BP queries the two overlap queries over it. $p$ is the least-squares exponent in $t \sim n^{p}$ fitted over all levels of that series.}
+  \caption{Cost against element count on a repeatedly refined surface, each level quadrupling the element count. Every time is one collision step at that level, in milliseconds. \emph{BP full} is the whole broad phase, the acceleration structure plus the queries over it; \emph{BP prep} is the structure alone and \emph{BP queries} the queries alone. The narrow phase is named by the answer it is asked for: \emph{NP EToI} returns one earliest time of impact for the step, so every query prunes against the running minimum, and \emph{NP per-pair} returns one per candidate with no shared bound. BP prep here is the acceleration structure and BP queries the two overlap queries over it. $p$ is the least-squares exponent in $t \sim n^{p}$ fitted over all levels of that series.}
   \label{tab:scaling}
   \fittable{%
 \begin{tabular}{lrrrrrrrr}
     \toprule
-    series & level & elements & candidate pairs & BP prep (ms) & BP queries (ms) & BP full (ms) & NP (ms) & p \\
+    series & level & elements & candidate pairs & BP prep (ms) & BP queries (ms) & BP full (ms) & NP EToI (ms) & p \\
     \midrule
     CPU / cell2d & 0 & 92,230 & 17,982 & 0.9 & 3.1 & 4.0 & 0.4 & 1.00 \\
      & 1 & 368,920 & 87,771 & 4.7 & 14.2 & 18.9 & 0.6 &  \\

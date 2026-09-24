@@ -23,9 +23,13 @@ two phases, which every table and figure names with the same four tags.
 \emph{BP full} is the whole broad phase: building the swept boxes and the
 acceleration structure, then querying it for overlaps. It decomposes into
 \emph{BP prep}, the structure, and \emph{BP queries}, the overlap queries over
-it, which are the two calls the harness times apart. \emph{NP} is the narrow
-phase, the branch and bound over the candidates BP full returns. A figure or
-table that reports only part of a phase says which part in its caption.
+it, which are the two calls the harness times apart. The narrow phase is named
+by the answer it is asked for, because the two cost differently: \emph{NP EToI}
+returns one earliest time of impact for the step, so every query prunes against
+the running minimum, while \emph{NP per-pair} returns one time of impact per
+candidate and has no shared bound to prune with. Unless a table names per-pair,
+its narrow-phase column is NP EToI. A figure or table that reports only part of
+a phase says which part in its caption.
 
 Device timings bracket every clock with a synchronisation, before it starts and
 before it stops. A device phase ends with a kernel launch, which returns long
@@ -201,17 +205,17 @@ is drawn dashed to remain visible.
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures/per-frame.pdf}
-  \caption{Per-frame cost of the whole pipeline, BP full plus NP, in
+  \caption{Per-frame cost of the whole pipeline, BP full plus NP EToI, in
     milliseconds for one simulation step, both query types together, against
     frame index. BP full is the acceleration structure and the queries over it;
-    NP is the narrow phase.}
+    NP EToI is the narrow phase asked for one earliest time of impact per step.}
   \label{fig:perframe}
 \end{figure}
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures/runtime-breakdown.pdf}
-  \caption{Whole-scene totals split into BP full and NP, as a share of each
+  \caption{Whole-scene totals split into BP full and NP EToI, as a share of each
     processor's total. The BP bar is shaded into BP prep, the structure it
     builds, and BP queries over it. BP full dominates on the host, and within it
     BP prep.}
@@ -221,8 +225,8 @@ is drawn dashed to remain visible.
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures/results-grid.pdf}
-  \caption{Per-case distributions over the six scenes: BP full and NP for one
-    case, and error against the exact root. Each box spans the first
+  \caption{Per-case distributions over the six scenes: BP full and NP EToI for
+    one case, and error against the exact root. Each box spans the first
     to the third quartile with the median inside, whiskers reach the furthest case
     within $1.5$ interquartile ranges, and cases beyond are drawn individually.}
   \label{fig:grid}

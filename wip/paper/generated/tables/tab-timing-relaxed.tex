@@ -1,11 +1,11 @@
 \begin{table}[htbp]
   \centering
-  \caption{Wall-clock time per scene and narrow-phase mode, as a whole-scene total in milliseconds summed over every case in the scene, given as median / slowest over independent repeats. \emph{BP full} is the whole broad phase, the acceleration structure plus the queries over it; \emph{BP prep} is the structure alone and \emph{BP queries} the queries alone; \emph{NP} is the narrow phase. The two narrow-phase columns are the two output modes: \emph{earliest} returns one time of impact for the step, so every query prunes against the running minimum, while \emph{per-pair} returns one per candidate with no shared bound. \emph{total} is BP full + NP earliest.}
+  \caption{Wall-clock time per scene and narrow-phase mode, as a whole-scene total in milliseconds summed over every case in the scene, given as median / slowest over independent repeats. \emph{BP full} is the whole broad phase, the acceleration structure plus the queries over it; \emph{BP prep} is the structure alone and \emph{BP queries} the queries alone. The narrow phase is named by the answer it is asked for: \emph{NP EToI} returns one earliest time of impact for the step, so every query prunes against the running minimum, and \emph{NP per-pair} returns one per candidate with no shared bound. \emph{total} is BP full + NP EToI.}
   \label{tab:timing-relaxed}
   \fittable{%
 \begin{tabular}{llrrrrrrr}
     \toprule
-    scene & mode & cases & pairs & rep & BP full (ms) & NP earliest (ms) & NP per-pair (ms) & total (ms) \\
+    scene & mode & cases & pairs & rep & BP full (ms) & NP EToI (ms) & NP per-pair (ms) & total (ms) \\
     \midrule
     armadillo-rollers & GPU & 781 & 85,296,282 & 3 & 3249.7 / 3253.8 & 1353.0 / 1397.3 & 2461.2 / 2507.9 & 4602.7 / 4651.2 \\
     armadillo-rollers & CPU & 781 & 85,296,282 & 3 & 2653.9 / 2830.6 & 661.3 / 675.7 & 2125.2 / 2182.5 & 3315.2 / 3506.3 \\
