@@ -137,7 +137,7 @@ def table(runs: list[ScalingRun], source: str):
                  Column("structure ms", tex_header="BP prep (ms)"),
                  Column("traversal ms", tex_header="BP queries (ms)"),
                  Column("broad ms", tex_header="BP full (ms)"),
-                 Column("narrow ms", tex_header="NP (ms)"),
+                 Column("narrow ms", tex_header="NP EToI (ms)"),
                  Column("p")],
         source=source,
         notes=("The two frames used here do not come into contact, so the narrow "
@@ -202,7 +202,7 @@ def figure(runs: list[ScalingRun], out_dir: Path):
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_xlabel("surface elements")
-    ax.set_ylabel("BP full + NP (ms)")
+    ax.set_ylabel("BP full + NP EToI (ms)")
     ax.grid(True, which="both", axis="both")
     ax.legend(loc="upper left")
     fig.tight_layout()

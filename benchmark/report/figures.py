@@ -82,7 +82,7 @@ def narrow_phase_per_case(case_series: dict, out_dir: Path) -> Figure:
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_xlabel("candidate pairs in the case")
-    ax.set_ylabel("NP (ms)")
+    ax.set_ylabel("NP EToI (ms)")
     ax.grid(True, which="both", axis="both")
     ax.legend(loc="upper left")
     fig.tight_layout()
@@ -130,7 +130,7 @@ def results_grid(case_series: dict, out_dir: Path) -> Figure:
     # are summed per repeat before the median, so the box is over whole broad
     # phases and not over a median of one part added to a median of another.
     rows = [(("prep_ms", "broad_ms"), "BP full (ms)"),
-            (("narrow_ms",), "NP (ms)"),
+            (("narrow_ms",), "NP EToI (ms)"),
             (("toi_max_early",), "error")]
 
     fig, axes = plt.subplots(len(rows), len(scenes), squeeze=False,
@@ -247,7 +247,7 @@ def runtime_breakdown(summaries: dict[tuple[str, str], SceneSummary],
     # traversing it. Its two halves are shaded apart so the split stays
     # readable, and the narrow phase is the second bar.
     parts = [("prep_ms", "BP prep"), ("broad_ms", "BP queries"),
-             ("narrow_ms", "NP")]
+             ("narrow_ms", "NP EToI")]
     part_ink = [SERIES[3], SERIES[0], SERIES[2]]
 
     fig, axes = plt.subplots(1, len(scenes), squeeze=False,
