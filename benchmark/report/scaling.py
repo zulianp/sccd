@@ -101,24 +101,59 @@ def fitted_exponent(x: list[float], y: list[float]) -> float:
     return (n * sxy - sx * sy) / denom
 
 
+def _processor(run: ScalingRun) -> str:
+    return "GPU" if run.meta.get("space", "host") == "device" else "CPU"
+
+
+def _strategy(run: ScalingRun) -> str:
+    """
+    The broad phase a run actually ran, or nothing when it did not choose one.
+
+    A run made without SCCD_BROADPHASE records `broadphase=auto`, and `auto` is
+    not a strategy: it is the tuner, which races the two and keeps the winner.
+    Printing it beside `sweep` and `cell2d` puts a mechanism in a list of
+    algorithms, and on this driver it is worse than uninformative -- the driver
+    builds one CCD object per refinement level, so each level starts a fresh
+    tuner that has not raced anything yet. Such a series is left unnamed here
+    rather than given a label it did not earn.
+    """
+    bp = run.meta.get("broadphase", "")
+    return "" if bp == "auto" else bp
+
+
+def series_labels(runs: list[ScalingRun]) -> list[str]:
+    """
+    Name each run by what distinguishes it from the others, and nothing else.
+
+    Every series in one figure or table shares most of its configuration --
+    the same mode, the same topology -- and repeating those on every entry is
+    noise around the one axis the reader is being shown. So a field is printed
+    only where the runs disagree about it.
+    """
+    def fields(r: ScalingRun) -> tuple[str, str, str, str]:
+        return (r.meta.get("mode", "?"), _processor(r),
+                "quad" if "QUAD" in r.meta.get("base_topology", "").upper() else "tri",
+                _strategy(r))
+
+    varying = [i for i in range(4) if len({fields(r)[i] for r in runs}) > 1]
+    out = []
+    for r in runs:
+        f = fields(r)
+        parts = [f[i] for i in (varying or [0, 1, 2, 3]) if f[i]]
+        out.append(" / ".join(parts) if parts else r.label)
+    return out
+
+
 def table(runs: list[ScalingRun], source: str):
     """Cost per refinement level, with the fitted exponent per series."""
     from .tables import Column, Table
 
-    def _processor(r):
-        return "GPU" if r.meta.get("space", "host") == "device" else "CPU"
-
-    def _broadphase(r):
-        # The device broad phase does not implement the strategy choice --
-        # SCCD_BROADPHASE is read only in the host functions -- so a device run
-        # records "auto" and means nothing by it. Naming a strategy on a GPU row
-        # would claim a choice that was never made.
-        return "" if _processor(r) == "GPU" else r.meta.get("broadphase", "")
+    labels = series_labels(runs)
 
     def _fields0(r):
         return (r.meta.get("mode", "?"), _processor(r),
                 "quad" if "QUAD" in r.meta.get("base_topology", "").upper() else "tri",
-                _broadphase(r))
+                _strategy(r))
     _varying0 = [i for i in range(4) if len({_fields0(r)[i] for r in runs}) > 1]
     _first_header = {0: "mode", 1: "processor", 2: "topology", 3: "broad phase"}.get(
         _varying0[0], "series") if len(_varying0) == 1 else "series"
@@ -152,28 +187,12 @@ def table(runs: list[ScalingRun], source: str):
                "the traversal that reports pairs; the two strategies divide "
                "the work between those columns quite differently."),
     )
-    # Label by what actually differs between the runs. When every series shares
-    # a mode, a space and a topology, repeating all three on every row is noise:
-    # the reader is being shown one axis of variation, so name that one.
-    def _fields(r):
-        return (r.meta.get("mode", "?"), _processor(r),
-                "quad" if "QUAD" in r.meta.get("base_topology", "").upper() else "tri",
-                _broadphase(r))
-
-    varying = [i for i in range(4)
-               if len({_fields(r)[i] for r in runs}) > 1]
-
-    def _label(r):
-        f = _fields(r)
-        parts = [f[i] for i in (varying or [0, 1, 2, 3]) if f[i]]
-        return " / ".join(parts) if parts else r.label
-
-    for run in runs:
+    for run, label in zip(runs, labels):
         faces = [float(f) for f in run.faces]
         totals = [b + n for b, n in zip(run.broad_ms, run.narrow_ms)]
         p_fit = fitted_exponent(faces, totals)
         for i, level in enumerate(run.levels):
-            t.add(_label(run) if i == 0 else "", f"{level}", f"{run.faces[i]:,}",
+            t.add(label if i == 0 else "", f"{level}", f"{run.faces[i]:,}",
                   f"{run.vf_pairs[i] + run.ee_pairs[i]:,}",
                   f"{run.prep_ms[i]:.1f}", f"{run.step_ms[i]:.1f}",
                   f"{run.broad_ms[i]:.1f}", f"{run.narrow_ms[i]:.1f}",
@@ -190,14 +209,15 @@ def figure(runs: list[ScalingRun], out_dir: Path):
     apply_rcparams()
     fig, ax = plt.subplots(figsize=figsize(COLUMN_WIDTH_IN, 0.70))
 
-    for i, run in enumerate(runs):
+    labels = series_labels(runs)
+    for i, (run, label) in enumerate(zip(runs, labels)):
         if not run.faces:
             continue
         total = [b + n for b, n in zip(run.broad_ms, run.narrow_ms)]
         p = fitted_exponent([float(f) for f in run.faces], total)
         colour = SERIES[i % len(SERIES)]
         ax.plot(run.faces, total, marker="o", color=colour,
-                label=f"{run.label} ($p={p:.2f}$)")
+                label=f"{label} ($p={p:.2f}$)")
 
     ax.set_xscale("log")
     ax.set_yscale("log")
