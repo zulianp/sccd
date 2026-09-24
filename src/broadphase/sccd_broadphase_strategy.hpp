@@ -83,14 +83,16 @@
  * not one workload -- and a verdict reached on frame one should not bind frame
  * ten thousand.
  *
- * `SCCD_BROADPHASE=sweep` or `=cell2d` forces one and skips the race entirely,
- * and `broadphase_stats` is still exposed for a caller who wants to look at the
- * geometry itself.
+ * `SCCD_BROADPHASE=sweep`, `=cell2d` or `=hgrid2` forces one and skips the race
+ * entirely, and `broadphase_stats` is still exposed for a caller who wants to
+ * look at the geometry itself. The race is between the sweep and the cell list;
+ * the two-level grid is reached by asking for it, which is how it is measured
+ * against the other two.
  */
 
 namespace sccd {
 
-    enum class BroadPhaseStrategy : int { Auto = 0, Sweep = 1, Cell2D = 2 };
+    enum class BroadPhaseStrategy : int { Auto = 0, Sweep = 1, Cell2D = 2, HGrid2 = 3 };
 
     /**
      * \brief Cheap shape and density statistics for the AABB set.
@@ -151,6 +153,7 @@ namespace sccd {
         if (!v) return BroadPhaseStrategy::Auto;
         if (std::strcmp(v, "sweep") == 0) return BroadPhaseStrategy::Sweep;
         if (std::strcmp(v, "cell2d") == 0) return BroadPhaseStrategy::Cell2D;
+        if (std::strcmp(v, "hgrid2") == 0) return BroadPhaseStrategy::HGrid2;
         return BroadPhaseStrategy::Auto;
     }
 
@@ -267,6 +270,7 @@ namespace sccd {
         switch (s) {
             case BroadPhaseStrategy::Sweep: return "sweep";
             case BroadPhaseStrategy::Cell2D: return "cell2d";
+            case BroadPhaseStrategy::HGrid2: return "hgrid2";
             case BroadPhaseStrategy::Auto: return "auto";
         }
         return "?";
