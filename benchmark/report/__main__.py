@@ -147,6 +147,8 @@ def main(argv: list[str]) -> int:
         figures.runtime_breakdown(scenes, figure_dir),
         figures.toi_error_histogram(cases, figure_dir),
     ]
+    if oracle_rows_early:
+        drawn.append(oracle_mod.reference_figure(oracle_rows_early, figure_dir))
     scaling_runs = []
     if scaling_files:
         scaling_runs = [r for r in (scaling_mod.parse(p) for p in scaling_files)
@@ -177,7 +179,6 @@ def main(argv: list[str]) -> int:
     if oracle_rows:
         oracle_source = _repo_relative(oracle_csv)
         built.append(oracle_mod.gate_table(oracle_rows, oracle_source))
-        built.append(oracle_mod.reference_table(oracle_rows, oracle_source))
         built.append(oracle_mod.earliness_table(oracle_rows, oracle_source))
     if scaling_runs:
         built.append(scaling_mod.table(

@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .data import Stat
-from .style import SCENE_LABEL, mode_label, normalise_mode
+from .style import SCENE_LABEL, SERIES, FULL_WIDTH_IN, mode_label, normalise_mode
 from .tables import Column, Table
 
 
@@ -241,3 +241,87 @@ def earliness_table(rows: dict[tuple[str, str, str], OracleRow], source: str) ->
         mx = f"{r.max_early:.2e}" if r.max_early > 0 else "--"
         table.add(SCENE_LABEL.get(scene, scene), phase, mode_label(mode), med, mx)
     return table
+
+
+def reference_figure(rows: dict[tuple[str, str, str], "OracleRow"], out_dir) -> "Figure":
+    """
+    SCCD against TightInclusion, as a bar per processor rather than a table.
+
+    The table this replaces spent two of its seven columns on queries and hits,
+    which tab:dataset and tab:conservativeness already carry, and asked the
+    reader to add two rows to get the cost of a step. Here each bar is one
+    processor's whole narrow phase, stacked into the vertex-face and edge-edge
+    work that make it up, with the total and the speedup over the reference
+    written above it.
+
+    One panel per scene, because the scenes span three orders of magnitude and a
+    stacked bar cannot be read on a logarithmic axis: the segments would no
+    longer add up to the bar.
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from .figures import Figure, _stem, _save
+
+    scenes = sorted({sc for sc, _, _ in rows})
+    if not scenes:
+        return Figure(_stem("reference-speedup"), "fig:reference", "no data", FULL_WIDTH_IN)
+
+    # CPU and GPU side by side; TightInclusion is the baseline the speedup is
+    # measured against and is named in the annotation rather than drawn.
+    bars = [("tight", "CPU"), ("device-tight", "GPU")]
+    phases = [("VF", SERIES[0]), ("EE", SERIES[2])]
+
+    fig, axes = plt.subplots(1, len(scenes), squeeze=False,
+                             figsize=(FULL_WIDTH_IN, 2.05))
+    x = np.arange(len(bars))
+
+    for c, scene in enumerate(scenes):
+        ax = axes[0][c]
+        bottom = np.zeros(len(bars))
+        totals = np.zeros(len(bars))
+        for phase, ink in phases:
+            h = []
+            for mode, _ in bars:
+                r = rows.get((scene, phase, mode))
+                h.append(r.ms.median if r is not None and r.ms.n else 0.0)
+            h = np.asarray(h)
+            ax.bar(x, h, bottom=bottom, width=0.62, color=ink, linewidth=0,
+                   label=f"NP EToI {phase}" if c == 0 else None)
+            bottom += h
+            totals += h
+
+        ti = sum((rows[(scene, ph, "tight-inclusion")].ms.median
+                  for ph, _ in phases if (scene, ph, "tight-inclusion") in rows), 0.0)
+        head = totals.max() if totals.max() > 0 else 1.0
+        for i, total in enumerate(totals):
+            if total <= 0:
+                continue
+            speed = f"{ti / total:.1f}$\\times$" if ti > 0 else "--"
+            ax.text(x[i], total + head * 0.04,
+                    f"{total / 1000:.1f}s\n{speed}", ha="center", va="bottom",
+                    fontsize=5.6, linespacing=1.15)
+
+        ax.set_title(SCENE_LABEL.get(scene, scene), fontsize=7, pad=3)
+        ax.set_xticks(x)
+        ax.set_xticklabels([lab for _, lab in bars], fontsize=6.5)
+        ax.set_ylim(0, head * 1.38)
+        ax.tick_params(labelsize=6, length=2, pad=1)
+        ax.grid(True, axis="y", linewidth=0.3)
+        ax.set_axisbelow(True)
+        if c == 0:
+            ax.set_ylabel("NP EToI (ms)", fontsize=6.5)
+
+    handles, labels = axes[0][0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=len(phases), fontsize=6.5,
+               frameon=False, bbox_to_anchor=(0.5, -0.02))
+    fig.tight_layout(rect=(0, 0.06, 1, 1))
+    _save(fig, out_dir, "reference-speedup")
+    return Figure(
+        _stem("reference-speedup"), "fig:reference",
+        "SCCD against TightInclusion over the same queries, as whole-scene "
+        "narrow-phase totals. Each bar is one processor, stacked into its "
+        "vertex-face and edge-edge work; above it are the total and the speedup "
+        "over TightInclusion on the same queries. Hit counts are identical to "
+        "the reference wherever the conservativeness table reports no false "
+        "positive, so they are not repeated here.",
+        FULL_WIDTH_IN)

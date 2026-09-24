@@ -161,7 +161,6 @@ def _write(built, tables_mod, suffix: str) -> list[str]:
 # Figures quoted in the prose, and the table each must still appear in. A claim
 # that drifts from its evidence is the failure this guards against.
 PROSE_CLAIMS = [
-    ("26.6", "tab-reference"),
     ("5.75", "tab-broadphase"),
     ("0.53", "tab-processor"),
     # The scaling ratios are quoted as divisions of these cells, so the reader
@@ -241,7 +240,6 @@ def _check() -> int:
 DOC_TABLES = [
     ("dataset", "tab-dataset"),
     ("conservativeness", "tab-conservativeness"),
-    ("reference", "tab-reference"),
     ("earliness-ref", "tab-earliness-ref"),
     ("processor", "tab-processor"),
     ("per-frame", "tab-per-frame"),

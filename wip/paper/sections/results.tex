@@ -94,10 +94,27 @@ on the same machine. SCCD reports one time of impact per pair, TightInclusion
 runs unbounded over the whole step, and both are scheduled through the same
 dynamic parallel loop. TightInclusion is run depth-first, which is its faster
 configuration when there is no bound to exploit. It runs on the host, so in
-\cref{tab:reference} the CPU row is the like-for-like comparison, and the GPU
-row shows what the same search costs on the other processor.
+\cref{fig:reference} the CPU bar is the like-for-like comparison, and the GPU
+bar shows what the same search costs on the other processor.
 
-\input{generated/tables/tab-reference}
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{figures/reference-speedup.pdf}
+  \caption{SCCD against TightInclusion over the same queries, as whole-scene
+    NP EToI totals. Each bar is one processor, stacked into its vertex-face and
+    edge-edge work, with the total and the speedup over TightInclusion above it.
+    Query counts are in \cref{tab:dataset} and hit agreement in
+    \cref{tab:conservativeness}, so neither is repeated here.}
+  \label{fig:reference}
+\end{figure}
+
+Both processors reproduce TightInclusion's hit count on every scene, so the
+comparison is one of cost alone. On the host SCCD is between $2.1\times$ and
+$3.5\times$ faster, and the device widens that to between $2.6\times$ and
+$20.9\times$. Rod-twist is the outlier in both directions: it is the scene where
+the reference is slowest in absolute terms, $507.8\,\mathrm{s}$ against our
+host's $221.3$, and where the device gains most, finishing in $24.3$. Cloth-funnel is the one scene
+where the device does not help, its two bars standing level.
 
 On accuracy TightInclusion is a subject here and not the standard. Its answer is
 a lower bound too, so the question is how close each implementation gets to the

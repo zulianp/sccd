@@ -141,50 +141,9 @@ TightInclusion runs on the host, so the **CPU** row is the like-for-like
 comparison and the **GPU** row is what the same search costs on the other
 processor.
 
-<!-- sccd:begin reference -->
+![SCCD against TightInclusion](figures/reference-speedup.png)
 
-| scene             | phase | mode           |   queries |      hits |         time ms |     vs. TI |
-|-------------------|-------|----------------|----------:|----------:|----------------:|-----------:|
-| armadillo-rollers | EE    | GPU            |    99,104 |    98,761 |     2345 / 2361 |       4.3× |
-| armadillo-rollers | EE    | CPU            |    99,104 |    98,761 |     5865 / 5870 |       1.7× |
-| armadillo-rollers | EE    | TightInclusion |    99,104 |    98,761 |   10113 / 10133 | 1.0× (ref) |
-| armadillo-rollers | VF    | GPU            |    32,337 |    32,122 |     1626 / 1635 |       4.4× |
-| armadillo-rollers | VF    | CPU            |    32,337 |    32,122 |     2473 / 2483 |       2.9× |
-| armadillo-rollers | VF    | TightInclusion |    32,337 |    32,122 |     7231 / 7231 | 1.0× (ref) |
-| cloth-ball        | EE    | GPU            |   557,683 |   557,668 |       491 / 495 |       5.4× |
-| cloth-ball        | EE    | CPU            |   557,683 |   557,668 |     1037 / 1038 |       2.6× |
-| cloth-ball        | EE    | TightInclusion |   557,683 |   557,668 |     2655 / 2655 | 1.0× (ref) |
-| cloth-ball        | VF    | GPU            |   107,257 |   107,252 |       341 / 342 |       3.8× |
-| cloth-ball        | VF    | CPU            |   107,257 |   107,252 |       399 / 400 |       3.2× |
-| cloth-ball        | VF    | TightInclusion |   107,257 |   107,252 |     1280 / 1281 | 1.0× (ref) |
-| cloth-funnel      | EE    | GPU            |     6,751 |     6,259 |     1135 / 1149 |       2.5× |
-| cloth-funnel      | EE    | CPU            |     6,751 |     6,259 |     1262 / 1286 |       2.3× |
-| cloth-funnel      | EE    | TightInclusion |     6,751 |     6,259 |     2874 / 2935 | 1.0× (ref) |
-| cloth-funnel      | VF    | GPU            |       801 |       529 |       416 / 421 |       2.9× |
-| cloth-funnel      | VF    | CPU            |       801 |       529 |       243 / 244 |       4.9× |
-| cloth-funnel      | VF    | TightInclusion |       801 |       529 |     1197 / 1199 | 1.0× (ref) |
-| n-body            | EE    | GPU            | 2,399,812 | 2,399,746 |       877 / 879 |       5.8× |
-| n-body            | EE    | CPU            | 2,399,812 | 2,399,746 |     1501 / 1504 |       3.4× |
-| n-body            | EE    | TightInclusion | 2,399,812 | 2,399,746 |     5094 / 5111 | 1.0× (ref) |
-| n-body            | VF    | GPU            |   547,907 |   547,874 |       631 / 645 |       3.0× |
-| n-body            | VF    | CPU            |   547,907 |   547,873 |       479 / 479 |       4.0× |
-| n-body            | VF    | TightInclusion |   547,907 |   547,873 |     1911 / 1914 | 1.0× (ref) |
-| puffer-ball       | EE    | GPU            | 1,206,952 | 1,187,650 |       919 / 922 |       4.3× |
-| puffer-ball       | EE    | CPU            | 1,206,952 | 1,187,650 |     1713 / 1737 |       2.3× |
-| puffer-ball       | EE    | TightInclusion | 1,206,952 | 1,187,650 |     3958 / 3998 | 1.0× (ref) |
-| puffer-ball       | VF    | GPU            |   307,220 |   299,698 |       625 / 626 |       2.8× |
-| puffer-ball       | VF    | CPU            |   307,220 |   299,676 |       543 / 547 |       3.2× |
-| puffer-ball       | VF    | TightInclusion |   307,220 |   299,676 |     1733 / 1747 | 1.0× (ref) |
-| rod-twist         | EE    | GPU            |   492,120 |   246,132 |   16253 / 16296 |      26.6× |
-| rod-twist         | EE    | CPU            |   492,120 |   246,132 | 202624 / 202792 |       2.1× |
-| rod-twist         | EE    | TightInclusion |   492,120 |   246,132 | 432019 / 432263 | 1.0× (ref) |
-| rod-twist         | VF    | GPU            |    57,088 |    40,544 |     8038 / 8137 |       9.4× |
-| rod-twist         | VF    | CPU            |    57,088 |    40,542 |   18672 / 18773 |       4.1× |
-| rod-twist         | VF    | TightInclusion |    57,088 |    40,542 |   75762 / 75815 | 1.0× (ref) |
-
-Source: `benchmark/results/oracle-gh200-all.csv`
-
-<!-- sccd:end reference -->
+Each bar is one processor's whole narrow phase over the same queries, stacked into its vertex-face and edge-edge work, with the total and the speedup over TightInclusion above it. Query counts are in the dataset table and hit agreement in the conservativeness table, so neither is repeated here.
 
 ### Accuracy
 
