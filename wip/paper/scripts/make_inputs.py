@@ -166,9 +166,13 @@ PROSE_CLAIMS = [
     # The scaling ratios are quoted as divisions of these cells, so the reader
     # can do the arithmetic; checking the cells checks the ratios.
     ("998.7", "tab-scaling"),
-    ("4883.7", "tab-scaling"),
-    ("2123.3", "tab-scaling"),
-    ("11470.7", "tab-scaling"),
+    ("1825.1", "tab-scaling"),
+    ("4791.5", "tab-scaling"),
+    ("20886.6", "tab-scaling"),
+    ("11724.2", "tab-scaling"),
+    ("1195.1", "tab-scaling"),
+    ("91694.1", "tab-scaling"),
+    ("42228.3", "tab-scaling"),
 ]
 
 # Totals the prose states that are sums of a generated table's columns rather

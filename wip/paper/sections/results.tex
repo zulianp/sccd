@@ -472,8 +472,9 @@ A solver pays for the gap with a shortened step.
 \label{sec:results:scaling}
 
 \Cref{tab:scaling} refines one surface repeatedly, quadrupling the element count
-at each level from $92{,}230$ to $23.6$ million, over cloth-ball frames $0$ and
-$1$. Those two frames do not come into contact, which is what makes the broad
+at each level from $92{,}230$ to $94.4$ million, over cloth-ball frames $0$ and
+$1$. Both processors run both strategies, so the table separates the effect of
+the processor from the effect of the algorithm. Those two frames do not come into contact, which is what makes the broad
 phase the quantity the study measures.
 
 \input{generated/tables/tab-scaling}
@@ -481,42 +482,47 @@ phase the quantity the study measures.
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=0.78\linewidth]{figures/refine-scaling.pdf}
-  \caption{Cost of one collision step against element count, log--log, with the
-    fitted exponent on the broad phase.}
+  \caption{Cost of one collision step against element count, log--log. Each
+    series is one processor and one broad phase, and $p$ is the exponent fitted
+    to the plotted quantity, BP full plus NP EToI.}
   \label{fig:scaling}
 \end{figure}
 
-\textbf{The host cell list leads the device broad phase at every size measured,
-and the gap widens.} \Cref{fig:scaling} plots both phases against the element
-count on logarithmic axes. Dividing the \emph{broad} column of \cref{tab:scaling}, the host is $1.65\times$
-ahead at $92{,}230$ elements ($4.0\,\mathrm{ms}$ against $6.6$), $1.94\times$ at
-$1.48$ million ($67.9$ against $131.4$), $4.89\times$ at $23.6$ million
-($998.7$ against $4883.7$) and $7.71\times$ at $94.4$ million ($4791.5$ against
-$36922.5$). The fitted exponents say why: the device broad phase
-grows at $1.21$ in the element count against the host cell list's $1.00$.
+\textbf{The cell list leads on both processors, and the device leads until the
+mesh outgrows it.} \Cref{fig:scaling} plots the four combinations on logarithmic
+axes. Taking the BP full column of \cref{tab:scaling}, the device cell list is
+$1.60\times$ ahead of the host's at $92{,}230$ elements
+($2.5\,\mathrm{ms}$ against $4.0$) and the two are level to $1.48$ million
+($72.2$ against $67.9$). Above that the host pulls away: $1.83\times$ at $23.6$
+million ($998.7$ against $1825.1$) and $4.36\times$ at $94.4$ million ($4791.5$
+against $20886.6$). The fitted exponents say the same thing before the crossover
+does, the host cell list growing at $1.00$ in the element count against the
+device's $1.18$.
 
-The structure columns locate the difference. At $23.6$ million elements the host
-builds its grid in $233.3\,\mathrm{ms}$ where the device builds its sorted
-intervals in $2123.3$, a factor of $9.1$, and that one column is over two fifths
-of the device's whole broad phase. The device sorts because its broad phase implements only the
-sweep (\cref{sec:limitations}); the cell list exists as a device kernel and is
-not wired into the device mesh path, so this comparison is between two algorithms
-as much as between two processors.
+Where the device loses is building the grid, not querying it. At $94.4$ million
+elements the host bins in $1195.1\,\mathrm{ms}$ and the device in $11724.2$, a
+factor of $9.8$, and that single column is $56\%$ of the device's whole broad
+phase against $25\%$ of the host's. The query the grid then supports is the
+cheaper half on the device and stays competitive throughout. Binning is a
+counting sort, and on the device its histogram is built with atomics into a cell
+array of the order of the element count, which is the part that does not hold its
+slope.
 
-The host sweep is the control that separates those two explanations. Run on the
-same frames it reaches $11470.7\,\mathrm{ms}$ at $23.6$ million elements
-against the cell list's $998.7$, a factor of $11.5$, and its traversal alone is
-$11052.0\,\mathrm{ms}$. The algorithm, and not the processor, is what costs most
-here.
+The sweep is the slower strategy on both processors at every size past the
+smallest, which separates the algorithm from the machine. On the host it reaches
+$91694.1\,\mathrm{ms}$ at $94.4$ million against the cell list's $4791.5$, a
+factor of $19.1$, with an exponent of $1.43$ against $1.00$. On the device the
+same comparison is $42228.3$ against $20886.6$, a factor of $2.0$. A sort is
+$O(n\log n)$ and a one-dimensional window does not separate a surface, and
+neither of those is a property of the processor.
 
 The narrow-phase columns of \cref{tab:scaling} measure something different and
 should be read with care. These two frames do not come into contact, so no root
 is ever isolated and the column prices the rejection test alone, over candidates
 that all fail it. That work is uniform, which is the shape a GPU handles best:
-across the six refinements the device stays between $1.6$ and
-$13.8\,\mathrm{ms}$ while the host climbs from $0.4$ to $118.2$, so the device
-ends $8.6\times$ ahead on the column where it was furthest behind at the coarsest
-size. It says nothing about the divergent case, where the search actually
+across the six refinements the device cell list stays between $1.6$ and
+$7.6\,\mathrm{ms}$ while the host climbs from $0.4$ to $118.2$, so the device
+ends $15.5\times$ ahead on the column where it started $3.9\times$ behind. It says nothing about the divergent case, where the search actually
 descends. \Cref{fig:percase} gives narrow-phase cost against genuine problem
 size, over cases that do collide.
 

@@ -19,14 +19,20 @@
      & 3 & 5,902,720 & 1,573,741 & 105.2 & 1230.4 & 1335.6 & 9.4 &  \\
      & 4 & 23,610,880 & 6,402,081 & 418.8 & 11052.0 & 11470.7 & 37.2 &  \\
      & 5 & 94,443,520 & 25,824,702 & 2172.9 & 89521.1 & 91694.1 & 146.2 &  \\
-    GPU & 0 & 92,230 & 17,982 & 2.9 & 3.7 & 6.6 & 1.6 & 1.21 \\
-     & 1 & 368,920 & 87,771 & 20.7 & 11.2 & 31.9 & 1.8 &  \\
-     & 2 & 1,475,680 & 379,818 & 83.1 & 48.3 & 131.4 & 2.2 &  \\
-     & 3 & 5,902,720 & 1,573,741 & 357.2 & 350.9 & 708.2 & 3.4 &  \\
-     & 4 & 23,610,880 & 6,402,081 & 2123.3 & 2760.4 & 4883.7 & 7.5 &  \\
-     & 5 & 94,443,520 & 25,824,702 & 12150.1 & 24772.4 & 36922.5 & 13.8 &  \\
+    GPU / cell2d & 0 & 92,230 & 17,982 & 0.7 & 1.8 & 2.5 & 1.6 & 1.18 \\
+     & 1 & 368,920 & 87,771 & 16.1 & 4.5 & 20.6 & 2.0 &  \\
+     & 2 & 1,475,680 & 379,818 & 61.3 & 11.0 & 72.2 & 1.9 &  \\
+     & 3 & 5,902,720 & 1,573,741 & 244.0 & 40.2 & 284.2 & 2.6 &  \\
+     & 4 & 23,610,880 & 6,402,081 & 1482.8 & 342.3 & 1825.1 & 5.6 &  \\
+     & 5 & 94,443,520 & 25,824,702 & 11724.2 & 9162.4 & 20886.6 & 7.6 &  \\
+    GPU / sweep & 0 & 92,230 & 17,982 & 4.4 & 3.9 & 8.3 & 1.9 & 1.19 \\
+     & 1 & 368,920 & 87,771 & 29.9 & 11.6 & 41.4 & 1.8 &  \\
+     & 2 & 1,475,680 & 379,818 & 111.3 & 50.6 & 161.9 & 2.4 &  \\
+     & 3 & 5,902,720 & 1,573,741 & 452.5 & 354.9 & 807.5 & 5.4 &  \\
+     & 4 & 23,610,880 & 6,402,081 & 1962.6 & 3392.7 & 5355.3 & 6.6 &  \\
+     & 5 & 94,443,520 & 25,824,702 & 15523.3 & 26705.0 & 42228.3 & 38.9 &  \\
     \bottomrule
   \end{tabular}}
   \par\smallskip\footnotesize The two frames used here do not come into contact, so the narrow phase has almost no work to do and its column is dominated by noise rather than by element count; what this measures is the broad phase and the preparation that feeds it. Narrow-phase cost against problem size is in the per-case figure, over cases that do collide. Where the exponent is below 1 it is because the fixed cost visible at the smallest size is amortised as the mesh grows. \texttt{prep} builds the acceleration structure -- the cell list's grid or the sweep's sorted intervals -- and \texttt{step} is the traversal that reports pairs; the two strategies divide the work between those columns quite differently.
-  \par\smallskip\footnotesize Source: \texttt{benchmark/results/scaling/host-cell2d-mode2.txt, benchmark/results/scaling/host-sweep-mode2.txt, benchmark/results/scaling/device-mode2.txt}
+  \par\smallskip\footnotesize Source: \texttt{benchmark/results/scaling/}
 \end{table}
