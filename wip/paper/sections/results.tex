@@ -278,13 +278,14 @@ is drawn dashed to remain visible.
     fail on one of the other two axes -- about $2100$ candidates are walked for
     each pair actually found, and no choice of axis rescues it, the two good axes
     giving $2882$ and $2838$ candidates per pair and the third $126\,063$.
-    \textbf{(b)} The cell list bins instead. A cell is at least as large as the
-    largest box, being sized from the mean box extent, so a box reaches a
-    handful of cells; it enters every one it touches, which is also the range it
-    queries. The same pair is therefore met in several cells and is emitted only
-    by the one holding the minimum corner of the two boxes' overlap. That corner
-    lies inside both boxes, so both are binned in that cell and the cell is
-    unique: two clamps per surviving pair, and no per-pair state to allocate.}
+    \textbf{(b)} The cell list bins instead. A box goes into the one cell holding
+    its centroid, and a cell is as wide as the widest box the grid will see. Two
+    overlapping boxes then have centroids at most one maximum extent apart on
+    each axis, so their cells differ by at most one and the query is the fixed
+    $3\times3$ stencil drawn here: the search radius follows from the cell size
+    rather than from the data, and a box outside the stencil cannot reach the
+    query. Each unordered pair is emitted once by walking only the five cells of
+    index at least the query's own, so there is no per-pair state to allocate.}
   \label{fig:bp}
 \end{figure}
 

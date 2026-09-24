@@ -1,5 +1,6 @@
-% Why the two broad phases differ, as line work: (a) one axis prunes on one
-% axis, (b) binning meets a pair in several cells and one rule settles it.
+% Why the two broad phases differ, as line work: (a) a sorted order prunes on
+% one axis, (b) a centroid picks one cell and the eight neighbours bound the
+% search.
 %
 % No prose inside the drawing. What the panels mean belongs in the caption,
 % where it can be read at caption size and does not compete with the marks.
@@ -56,38 +57,45 @@
 % ============================ (b) the cell list ==============================
 % The grid is drawn line by line rather than with TikZ's `grid`, which places
 % its lines at multiples of the step measured from the origin and not from the
-% corner of the rectangle given to it. A cell is at least as large as the
-% largest box, as the shipped grid is -- it is sized from the mean box extent --
-% so a box reaches a handful of cells and not a block of them.
+% corner of the rectangle given to it. The cell is drawn wider than the widest
+% box, as the shipped grid sizes it, which is what bounds the search to the
+% eight neighbours.
 \begin{scope}[xshift=63mm]
   \node[ttl, anchor=south west] at (0,3.52) {(b) two-dimensional cell list};
 
-  \fill[sccdTeal!10] (0.85,0.80) rectangle (2.55,2.50);
+  % The nine cells the query reads, and the one holding its centroid. Tints
+  % rather than a second outline: a heavy rectangle around the middle cell reads
+  % as another box and competes with the three that are boxes.
+  \fill[sccdTeal!10] (0,0.55) rectangle (2.16,2.71);
+  \fill[sccdTeal!28] (0.72,1.27) rectangle (1.44,1.99);
 
-  \foreach \x in {0,0.85,1.70,2.55,3.40}
-    \draw[draw=sccdInk!18, line width=0.3pt] (\x,0.80) -- (\x,3.35);
-  \foreach \y in {0.80,1.65,2.50,3.35}
-    \draw[draw=sccdInk!18, line width=0.3pt] (0,\y) -- (3.40,\y);
-  \draw[draw=sccdInk!40, line width=0.4pt] (0,0.80) rectangle (3.40,3.35);
+  \foreach \x in {0,0.72,1.44,2.16,2.88,3.60}
+    \draw[draw=sccdInk!30, line width=0.3pt] (\x,0.55) -- (\x,3.43);
+  \foreach \y in {0.55,1.27,1.99,2.71,3.43}
+    \draw[draw=sccdInk!30, line width=0.3pt] (0,\y) -- (3.60,\y);
+  \draw[draw=sccdInk!45, line width=0.4pt] (0,0.55) rectangle (3.60,3.43);
 
-  \draw[draw=sccdTeal, line width=0.9pt] (1.30,1.10) rectangle (2.05,1.80);
-  \draw[draw=sccdPlum, line width=0.9pt] (1.75,1.55) rectangle (2.55,2.30);
-  \node[lbl, text=sccdTeal, anchor=east] at (1.26,1.20) {first};
-  \node[lbl, text=sccdPlum, anchor=west] at (2.59,2.20) {second};
+  % The query, a partner one cell away, and a box the stencil does not reach.
+  % Every box is drawn narrower than a cell, which is how the grid is sized.
+  \draw[draw=sccdInk!35, line width=0.7pt] (3.00,1.50) rectangle (3.52,2.02);
+  \fill[sccdInk!35] (3.26,1.76) circle (1.5pt);
+  \draw[draw=sccdPlum, line width=0.9pt] (1.46,2.00) rectangle (2.01,2.55);
+  \fill[sccdPlum] (1.735,2.275) circle (1.5pt);
+  \draw[draw=sccdTeal, line width=0.9pt] (0.98,1.52) rectangle (1.53,2.07);
+  \fill[sccdTeal] (1.255,1.795) circle (1.5pt);
 
-  \fill[sccdAmber!40] (1.75,1.55) rectangle (2.05,1.80);
-  \draw[draw=sccdInk, line width=1.0pt] (1.70,0.80) rectangle (2.55,1.65);
-  \fill[sccdInk] (1.75,1.55) circle (1.6pt);
+  \node[lbl, text=sccdTeal, anchor=east] at (0.94,1.62) {query};
+  \node[lbl, text=sccdPlum, anchor=west] at (2.05,2.45) {partner};
+  \node[lbl, text=sccdInk!50, anchor=north] at (3.26,1.46) {out of reach};
 
   % --- key in one column, so no label can run into the next ---
-  \fill[sccdTeal!10] (0.00,0.54) rectangle ++(0.22,0.16);
-  \draw[draw=sccdInk!25, line width=0.3pt] (0.00,0.54) rectangle ++(0.22,0.16);
-  \node[lbl, anchor=west] at (0.26,0.62) {cells the first box is binned into};
-  \fill[sccdAmber!40] (0.00,0.32) rectangle ++(0.22,0.16);
-  \node[lbl, anchor=west] at (0.26,0.40) {overlap of the two boxes};
-  \draw[draw=sccdInk, line width=1.0pt] (0.00,0.10) rectangle ++(0.22,0.16);
-  \node[lbl, anchor=west] at (0.26,0.18) {owning cell};
-  \fill[sccdInk] (0.11,-0.04) circle (1.6pt);
-  \node[lbl, anchor=west] at (0.26,-0.04) {minimum corner of the overlap};
+  \fill[sccdTeal!10] (0.00,0.24) rectangle ++(0.22,0.16);
+  \draw[draw=sccdInk!30, line width=0.3pt] (0.00,0.24) rectangle ++(0.22,0.16);
+  \node[lbl, anchor=west] at (0.26,0.32) {the nine cells the query reads};
+  \fill[sccdTeal!28] (0.00,0.02) rectangle ++(0.22,0.16);
+  \draw[draw=sccdInk!30, line width=0.3pt] (0.00,0.02) rectangle ++(0.22,0.16);
+  \node[lbl, anchor=west] at (0.26,0.10) {cell of the query's centroid};
+  \fill[sccdInk] (0.11,-0.16) circle (1.5pt);
+  \node[lbl, anchor=west] at (0.26,-0.16) {centroid, which decides the cell};
 \end{scope}
 \end{tikzpicture}
