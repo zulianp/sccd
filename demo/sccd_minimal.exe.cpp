@@ -81,7 +81,7 @@ Scene make_scene() {
 // A six-row AABB block: rows 0..2 hold the minimum corner, rows 3..5 the
 // maximum. That is the layout every broad-phase entry point expects. `idx` maps
 // a sorted position back to the element it came from; the sort permutes both.
-struct Aabbs {
+struct AABBs {
     std::vector<T> rows_[6];
     T* rows[6];
     std::vector<I> idx;
@@ -113,7 +113,7 @@ int main() {
     // ---- broad phase, step 1: swept AABBs -----------------------------------
     // One box per node, face and edge, enclosing the whole trajectory over the
     // step: start position and end position together.
-    Aabbs vaabb, faabb, eaabb;
+    AABBs vaabb, faabb, eaabb;
     vaabb.resize(n_nodes);
     faabb.resize(n_faces);
     eaabb.resize(n_edges);
