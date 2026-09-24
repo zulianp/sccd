@@ -297,7 +297,7 @@ is wrong somewhere, and wrong by a factor of four at the worst point.
 
 `sccd_refine_scaling` refines one surface repeatedly, quadrupling the element
 count at each level, over two consecutive cloth-ball frames from 92,230 elements
-to 23.6 million.
+to 94.4 million.
 
 <!-- sccd:begin scaling -->
 
@@ -315,41 +315,51 @@ to 23.6 million.
 |              |     3 |  5,902,720 |       1,573,741 |        105.2 |       1230.4 |   1335.6 |       9.4 |      |
 |              |     4 | 23,610,880 |       6,402,081 |        418.8 |      11052.0 |  11470.7 |      37.2 |      |
 |              |     5 | 94,443,520 |      25,824,702 |       2172.9 |      89521.1 |  91694.1 |     146.2 |      |
-| GPU          |     0 |     92,230 |          17,982 |          2.9 |          3.7 |      6.6 |       1.6 | 1.21 |
-|              |     1 |    368,920 |          87,771 |         20.7 |         11.2 |     31.9 |       1.8 |      |
-|              |     2 |  1,475,680 |         379,818 |         83.1 |         48.3 |    131.4 |       2.2 |      |
-|              |     3 |  5,902,720 |       1,573,741 |        357.2 |        350.9 |    708.2 |       3.4 |      |
-|              |     4 | 23,610,880 |       6,402,081 |       2123.3 |       2760.4 |   4883.7 |       7.5 |      |
-|              |     5 | 94,443,520 |      25,824,702 |      12150.1 |      24772.4 |  36922.5 |      13.8 |      |
+| GPU / cell2d |     0 |     92,230 |          17,982 |          0.7 |          1.8 |      2.5 |       1.6 | 1.18 |
+|              |     1 |    368,920 |          87,771 |         16.1 |          4.5 |     20.6 |       2.0 |      |
+|              |     2 |  1,475,680 |         379,818 |         61.3 |         11.0 |     72.2 |       1.9 |      |
+|              |     3 |  5,902,720 |       1,573,741 |        244.0 |         40.2 |    284.2 |       2.6 |      |
+|              |     4 | 23,610,880 |       6,402,081 |       1482.8 |        342.3 |   1825.1 |       5.6 |      |
+|              |     5 | 94,443,520 |      25,824,702 |      11724.2 |       9162.4 |  20886.6 |       7.6 |      |
+| GPU / sweep  |     0 |     92,230 |          17,982 |          4.4 |          3.9 |      8.3 |       1.9 | 1.19 |
+|              |     1 |    368,920 |          87,771 |         29.9 |         11.6 |     41.4 |       1.8 |      |
+|              |     2 |  1,475,680 |         379,818 |        111.3 |         50.6 |    161.9 |       2.4 |      |
+|              |     3 |  5,902,720 |       1,573,741 |        452.5 |        354.9 |    807.5 |       5.4 |      |
+|              |     4 | 23,610,880 |       6,402,081 |       1962.6 |       3392.7 |   5355.3 |       6.6 |      |
+|              |     5 | 94,443,520 |      25,824,702 |      15523.3 |      26705.0 |  42228.3 |      38.9 |      |
 
 The two frames used here do not come into contact, so the narrow phase has almost no work to do and its column is dominated by noise rather than by element count; what this measures is the broad phase and the preparation that feeds it. Narrow-phase cost against problem size is in the per-case figure, over cases that do collide. Where the exponent is below 1 it is because the fixed cost visible at the smallest size is amortised as the mesh grows. `prep` builds the acceleration structure -- the cell list's grid or the sweep's sorted intervals -- and `step` is the traversal that reports pairs; the two strategies divide the work between those columns quite differently.
 
-Source: `benchmark/results/scaling/host-cell2d-mode2.txt, benchmark/results/scaling/host-sweep-mode2.txt, benchmark/results/scaling/device-mode2.txt`
+Source: `benchmark/results/scaling/host-cell2d-mode2.txt, benchmark/results/scaling/host-sweep-mode2.txt, benchmark/results/scaling/device-cell2d-mode2.txt, benchmark/results/scaling/device-sweep-mode2.txt`
+
+The two frames used here do not come into contact, so the narrow phase has almost no work to do and its column is dominated by noise rather than by element count; what this measures is the broad phase and the preparation that feeds it. Narrow-phase cost against problem size is in the per-case figure, over cases that do collide. Where the exponent is below 1 it is because the fixed cost visible at the smallest size is amortised as the mesh grows. `prep` builds the acceleration structure -- the cell list's grid or the sweep's sorted intervals -- and `step` is the traversal that reports pairs; the two strategies divide the work between those columns quite differently.
+
+Source: `benchmark/results/scaling/host-cell2d-mode2.txt, benchmark/results/scaling/host-sweep-mode2.txt, benchmark/results/scaling/device-cell2d-mode2.txt, benchmark/results/scaling/device-sweep-mode2.txt`
 
 <!-- sccd:end scaling -->
 
-Three series: the host at each broad-phase strategy, and the device. The device
-row names no strategy because the device broad phase does not implement the
-choice.
+Four series: each processor at each broad-phase strategy.
 
-**The host cell list leads the device broad phase at every size, and the gap
-widens:**
+**The cell list leads on both processors, and the device leads until the mesh
+outgrows it:**
 
-| elements | CPU (cell2d) | GPU | |
+| elements | CPU (cell2d) | GPU (cell2d) | |
 |---:|---:|---:|---:|
-| 92,230 | 4.0 ms | 6.6 ms | 1.65× |
-| 1,475,680 | 67.9 ms | 131.4 ms | 1.94× |
-| 23,610,880 | 998.7 ms | 4,883.7 ms | 4.89× |
-| 94,443,520 | 4,791.5 ms | 36,922.5 ms | 7.71× |
+| 92,230 | 4.0 ms | 2.5 ms | 1.60× GPU |
+| 1,475,680 | 67.9 ms | 72.2 ms | 1.06× CPU |
+| 23,610,880 | 998.7 ms | 1,825.1 ms | 1.83× CPU |
+| 94,443,520 | 4,791.5 ms | 20,886.6 ms | 4.36× CPU |
 
-The exponents say why: the GPU broad phase grows at 1.21 in the element count
-against the host cell list's 1.00. The device sorts where the host bins, and the
-structure column carries it — 2,123.3 ms against 233.3 ms at 23.6 million.
+The exponents say the same before the crossover does: the device cell list grows
+at 1.18 in the element count against the host's 1.00. Building the grid is what
+carries it, not querying it — at the largest size the host bins in 1,195.1 ms and
+the device in 11,724.2, which is 56% of the device's whole broad phase against
+25% of the host's.
 
 The narrow phase goes the other way. These two frames do not come into contact,
 so no root is isolated and the column prices the rejection test alone, over
 candidates that all fail it. That work is uniform, and the device holds it
-between 1.6 ms and 13.8 ms across the six refinements while the host climbs from
+between 1.6 ms and 7.6 ms across the six refinements while the host climbs from
 0.4 ms to 118.2 ms. A GPU suits the case where every candidate costs the same;
 the divergent case is the per-case figure, over cases that do collide.
 
