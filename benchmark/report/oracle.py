@@ -152,7 +152,8 @@ def _ms(stat: Stat) -> str:
 def gate_table(rows: dict[tuple[str, str, str], OracleRow], source: str) -> Table:
     table = Table(
         label="tab:gate",
-        caption=("The conservativeness gate: every mode's answer checked against "
+        caption=("The conservativeness gate, as counts over the whole scene: every "
+                 "mode's answer checked against "
                  "the dataset's exact symbolic roots. \\emph{missed} counts "
                  "collisions not reported and \\emph{late} counts times of "
                  "impact after the true one. Both must be zero; a late time of "
@@ -247,6 +248,10 @@ def reference_figure(rows: dict[tuple[str, str, str], "OracleRow"], out_dir) -> 
     """
     SCCD against TightInclusion, as a bar per processor rather than a table.
 
+    The comparison is the narrow phase alone. TightInclusion ships no broad
+    phase we use, so both sides are handed the same curated query sets and asked
+    for one time of impact per pair; nothing here is a pipeline timing.
+
     The table this replaces spent two of its seven columns on queries and hits,
     which tab:dataset and tab:conservativeness already carry, and asked the
     reader to add two rows to get the cost of a step. Here each bar is one
@@ -286,7 +291,7 @@ def reference_figure(rows: dict[tuple[str, str, str], "OracleRow"], out_dir) -> 
                 h.append(r.ms.median if r is not None and r.ms.n else 0.0)
             h = np.asarray(h)
             ax.bar(x, h, bottom=bottom, width=0.62, color=ink, linewidth=0,
-                   label=f"NP EToI {phase}" if c == 0 else None)
+                   label=f"NP per-pair {phase}" if c == 0 else None)
             bottom += h
             totals += h
 
@@ -309,7 +314,7 @@ def reference_figure(rows: dict[tuple[str, str, str], "OracleRow"], out_dir) -> 
         ax.grid(True, axis="y", linewidth=0.3)
         ax.set_axisbelow(True)
         if c == 0:
-            ax.set_ylabel("NP EToI (ms)", fontsize=6.5)
+            ax.set_ylabel("NP per-pair (ms)", fontsize=6.5)
 
     handles, labels = axes[0][0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="lower center", ncol=len(phases), fontsize=6.5,
@@ -318,10 +323,12 @@ def reference_figure(rows: dict[tuple[str, str, str], "OracleRow"], out_dir) -> 
     _save(fig, out_dir, "reference-speedup")
     return Figure(
         _stem("reference-speedup"), "fig:reference",
-        "SCCD against TightInclusion over the same queries, as whole-scene "
-        "narrow-phase totals. Each bar is one processor, stacked into its "
-        "vertex-face and edge-edge work; above it are the total and the speedup "
-        "over TightInclusion on the same queries. Hit counts are identical to "
-        "the reference wherever the conservativeness table reports no false "
-        "positive, so they are not repeated here.",
+        "SCCD against TightInclusion, narrow phase only, as whole-scene "
+        "totals. Neither side runs a broad phase here: both are handed the same "
+        "curated query sets and asked for one time of impact per pair, which is "
+        "what TightInclusion offers and so what the comparison can be. Each bar "
+        "is one processor, stacked into its vertex-face and edge-edge work, with "
+        "the whole-scene total and the speedup over TightInclusion above it. Hit "
+        "counts are identical to the reference wherever the conservativeness "
+        "table reports no false positive, so they are not repeated here.",
         FULL_WIDTH_IN)

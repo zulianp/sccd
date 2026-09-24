@@ -93,20 +93,14 @@ roots, on both processors, for every scene.
 
 <!-- sccd:begin conservativeness -->
 
-| scene             | mode |   queries | toi compared | late | false pos. | false neg. |
-|-------------------|------|----------:|-------------:|-----:|-----------:|-----------:|
-| armadillo-rollers | GPU  |   131,441 |      130,859 |    0 |         24 |          0 |
-| armadillo-rollers | CPU  |   131,441 |      130,859 |    0 |         24 |          0 |
-| cloth-ball        | GPU  |   664,940 |      664,919 |    0 |          1 |          0 |
-| cloth-ball        | CPU  |   664,940 |      664,919 |    0 |          1 |          0 |
-| cloth-funnel      | GPU  |     7,552 |        6,773 |    0 |         15 |          0 |
-| cloth-funnel      | CPU  |     7,552 |        6,773 |    0 |         15 |          0 |
-| n-body            | GPU  | 2,947,719 |    2,947,611 |    0 |         12 |          0 |
-| n-body            | CPU  | 2,947,719 |    2,947,611 |    0 |         11 |          0 |
-| puffer-ball       | GPU  | 1,514,172 |    1,486,790 |    0 |        558 |          0 |
-| puffer-ball       | CPU  | 1,514,172 |    1,486,790 |    0 |        536 |          0 |
-| rod-twist         | GPU  |   549,208 |      285,431 |    0 |      1,245 |          0 |
-| rod-twist         | CPU  |   549,208 |      285,431 |    0 |      1,243 |          0 |
+| scene             |   queries | toi compared | late |    false pos. | false neg. |
+|-------------------|----------:|-------------:|-----:|--------------:|-----------:|
+| armadillo-rollers |   131,441 |      130,859 |    0 |            24 |          0 |
+| cloth-ball        |   664,940 |      664,919 |    0 |             1 |          0 |
+| cloth-funnel      |     7,552 |        6,773 |    0 |            15 |          0 |
+| n-body            | 2,947,719 |    2,947,611 |    0 |       11 (12) |          0 |
+| puffer-ball       | 1,514,172 |    1,486,790 |    0 |     536 (558) |          0 |
+| rod-twist         |   549,208 |      285,431 |    0 | 1,243 (1,245) |          0 |
 
 Measured against the exact roots shipped with the dataset, not against TightInclusion: TightInclusion's own answer is itself a lower bound on the truth, so comparing against it over-reports lateness.
 

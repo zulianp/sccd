@@ -89,10 +89,11 @@ here as the price of the guarantee, not as errors.
 \subsection{Against TightInclusion}
 \label{sec:results:ref}
 
-TightInclusion is used exactly as released. Both sides are given the same task
-on the same machine. SCCD reports one time of impact per pair, TightInclusion
-runs unbounded over the whole step, and both are scheduled through the same
-dynamic parallel loop. TightInclusion is run depth-first, which is its faster
+TightInclusion is used exactly as released, and the comparison is of narrow
+phases alone: it ships no broad phase we use, so both sides are handed the same
+curated query sets rather than running a pipeline. SCCD reports one time of
+impact per pair, TightInclusion runs unbounded over the whole step, and both are
+scheduled through the same dynamic parallel loop. TightInclusion is run depth-first, which is its faster
 configuration when there is no bound to exploit. It runs on the host, so in
 \cref{fig:reference} the CPU bar is the like-for-like comparison, and the GPU
 bar shows what the same search costs on the other processor.
@@ -100,11 +101,13 @@ bar shows what the same search costs on the other processor.
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures/reference-speedup.pdf}
-  \caption{SCCD against TightInclusion over the same queries, as whole-scene
-    NP EToI totals. Each bar is one processor, stacked into its vertex-face and
-    edge-edge work, with the total and the speedup over TightInclusion above it.
-    Query counts are in \cref{tab:dataset} and hit agreement in
-    \cref{tab:conservativeness}, so neither is repeated here.}
+  \caption{SCCD against TightInclusion, narrow phase only, as whole-scene
+    totals. Neither side runs a broad phase here: TightInclusion ships none that
+    we use, so both are handed the same curated query sets and asked for one
+    time of impact per pair. Each bar is one processor, stacked into its
+    vertex-face and edge-edge work, with the whole-scene total and the speedup
+    over TightInclusion above it. Query counts are in \cref{tab:dataset} and hit
+    agreement in \cref{tab:conservativeness}, so neither is repeated here.}
   \label{fig:reference}
 \end{figure}
 
@@ -118,26 +121,24 @@ where the device does not help, its two bars standing level.
 
 On accuracy TightInclusion is a subject here and not the standard. Its answer is
 a lower bound too, so the question is how close each implementation gets to the
-exact roots. \Cref{tab:earliness-ref} reports \emph{earliness}, meaning how far
-before the true root each implementation lands, as a median over cases and as
-the worst case anywhere in the scene.
+exact roots. We measure \emph{earliness}, how far before the true root each
+implementation lands, as a median over cases and as the worst case anywhere in
+the scene, over the six scenes and both query types: twelve scene-phases.
 
-\input{generated/tables/tab-earliness-ref}
+The result is the paper's sharpest and the empirical counterpart of
+\cref{prop:order}. \textbf{On the host both statistics are identical to
+TightInclusion's on all twelve, to every printed digit.} We do not approximate
+the reference; we reproduce it, between $2.1\times$ and $3.5\times$ faster.
 
-\Cref{tab:earliness-ref} is the paper's sharpest result and the empirical
-counterpart of \cref{prop:order}. On the host, the median and the worst case
-are \emph{identical to TightInclusion's on all twelve scene-phases, to every
-printed digit}. We do not approximate the reference; we reproduce it, between
-$1.6\times$ and $3.7\times$ faster.
-
-The device agrees closely without agreeing exactly. The residue is small enough
-to round away, and we state it instead. Its worst case is identical on eleven of
-the twelve scene-phases. On the twelfth, armadillo-rollers vertex-face, it
-reports $9.81\times10^{-3}$ against the reference's $9.39\times10^{-3}$. That is
-$4.5\%$ \emph{further before} the root, and therefore on the safe side. Its
-medians are identical on seven of the twelve and differ by at most $2.9\%$ on
-the rest, in both directions: tighter than the reference on armadillo-rollers,
-cloth-ball and puffer-ball, and looser on rod-twist.
+The device agrees closely without agreeing exactly, and the residue is small
+enough that quoting it is more honest than rounding it away. Its median matches
+on eight of the twelve, and where it does not the gap is at most $0.65\%$:
+tighter than the reference on cloth-ball vertex-face, puffer-ball vertex-face
+and rod-twist edge-edge, by $0.10\%$, $0.44\%$ and $0.27\%$, and $0.65\%$
+further before the root on rod-twist vertex-face. Its worst case matches on nine
+of the twelve, deviating by $-4.5\%$ on cloth-ball vertex-face, $+1.1\%$ on
+n-body edge-edge and $+0.2\%$ on puffer-ball vertex-face. Every deviation in
+either direction is smaller than the spread between repeats.
 
 The traversal order is not the cause. \Cref{prop:order} covers that, and this
 comparison reports one time of impact per candidate pair, so no shared minimum
@@ -148,7 +149,7 @@ conservative. A box whose classification is decided in the last few units in the
 last place can nevertheless fall either way. That is why the device comes out tighter than the reference on some rows and looser
 on others. Where the device additionally discards work under queue
 pressure (\cref{sec:parallel:device}), the effect is one-sided and safe. Every
-value in \cref{tab:earliness-ref} is at or before the exact root.
+earliness measured, on either processor, is at or before the exact root.
 
 The worst cases belong to the problem and not to the implementation. On
 cloth-funnel and rod-twist the largest error approaches $1.0$ for the reference
@@ -252,7 +253,8 @@ is drawn dashed to remain visible.
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures/toi-error.pdf}
-  \caption{Error against the exact symbolic roots, logarithmic axis. Every
+  \caption{Error against the exact symbolic roots, logarithmic axis, one value
+    per case: the largest earliness anywhere in that case. Every
     reported time of impact lies at or before its root, so the whole
     distribution sits on the early side of zero.}
   \label{fig:toierr}

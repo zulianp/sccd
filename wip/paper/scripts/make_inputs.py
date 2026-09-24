@@ -175,8 +175,8 @@ PROSE_CLAIMS = [
 # than cells of it, so a grep cannot find them: (column index, expected total).
 # The reader can add the column up; this keeps us honest if the data changes.
 COLUMN_TOTALS = [
-    ("tab-conservativeness", 2, 5_815_032),   # queries carrying ground truth
-    ("tab-conservativeness", 3, 5_522_383),   # of those, compared against a root
+    ("tab-conservativeness", 1, 5_815_032),   # queries carrying ground truth
+    ("tab-conservativeness", 2, 5_522_383),   # of those, compared against a root
 ]
 
 
@@ -199,9 +199,10 @@ def _check() -> int:
                   file=sys.stderr)
             status = 1
 
-    # Column totals the prose quotes. Each scene appears once per processor, so a
-    # column summed over the table counts every query twice; the prose states the
-    # per-processor figure, which is half of it.
+    # Column totals the prose quotes. The conservativeness table carries one row
+    # per scene now -- the processors agree on these columns -- so a column sums
+    # to the per-processor figure directly, and the prose may quote that or the
+    # doubled one it gets by checking both processors.
     for table, col, expected in COLUMN_TOTALS:
         total = 0
         for line in (gen / f"{table}.tex").read_text().splitlines():
@@ -212,9 +213,9 @@ def _check() -> int:
             if len(cells) <= col or not cells[col].replace(",", "").isdigit():
                 continue
             total += int(cells[col].replace(",", ""))
-        if total != 2 * expected:
-            print(f"error: {table} column {col} sums to {total // 2:,} per "
-                  f"processor, prose says {expected:,}", file=sys.stderr)
+        if total != expected:
+            print(f"error: {table} column {col} sums to {total:,}, "
+                  f"prose says {expected:,}", file=sys.stderr)
             status = 1
         else:
             # The prose may quote the per-processor figure or the doubled one.
