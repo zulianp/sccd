@@ -420,11 +420,13 @@ when an instruction issues, there are not enough independent warps resident to
 cover that chain. Adding grid does not add residency.
 
 Barrier stalls are the one term that does move, from $0.99$ to $2.98$, and the
-scene at the top of that range is puffer-ball, whose device narrow phase is
-behind the host in \cref{tab:processor} at $0.57\times$. Three block-wide barriers per iteration cost what the slowest
-thread in the block costs, and puffer-ball has both the most candidate pairs per
-step and the widest spread of query difficulty. We note the coincidence without
-claiming the mechanism: six scenes do not establish a correlation.
+scene at the top of that range is puffer-ball. Three block-wide barriers per
+iteration cost what the slowest thread in the block costs, and puffer-ball has
+both the most candidate pairs per step and the widest spread of query
+difficulty. The stall does not decide the outcome: puffer-ball's device narrow
+phase leads the host by $15.14\times$ in \cref{tab:processor}, the largest such
+margin in the benchmark. What the counter bounds is how much of that margin the
+barriers cost, not whether the device wins.
 
 \input{generated/tables/tab-counters-host}
 \input{generated/tables/tab-symbols}

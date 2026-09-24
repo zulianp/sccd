@@ -143,18 +143,19 @@ the contact is at the very start of the step.
 \Cref{tab:processor} puts the two processors side by side as whole-scene totals,
 and the split follows \cref{sec:parallel:why} mechanically. The broad phase is
 count, prefix sum and scatter, with no sequential window walk, and it runs at
-$0.99\times$ to $7.98\times$ of host speed, ahead on five scenes and level with
-the host on cloth-funnel. The narrow phase is a divergent depth-first search,
-and it spans a wider range in the other direction, $0.19\times$ to
-$1.55\times$: behind the host on the scenes whose candidate lists are smallest,
-and ahead on rod-twist and puffer-ball, where tens of millions of candidates
-keep every lane busy.
+$0.56\times$ to $2.90\times$ of host speed: a modest range, ahead on the three
+largest scenes and behind on the three smallest. The narrow phase is a divergent
+depth-first search, and it spans a far wider range, $0.41\times$ to
+$15.14\times$: behind the host where the candidate lists are smallest, and ahead
+by an order of magnitude on n-body and puffer-ball, where tens of millions of
+candidates keep every lane busy. The device's advantage is therefore the narrow
+phase, and the broad phase is what limits it.
 
 End to end the two effects cancel to different degrees. The device wins
-puffer-ball by $3.68\times$, n-body by $2.41\times$, rod-twist by $2.19\times$
-and cloth-ball by $2.10\times$; the host wins armadillo-rollers at $0.80\times$
-and cloth-funnel at $0.61\times$, where a device broad phase merely level at
-$0.99\times$ has nothing to cover a narrow phase at $0.19\times$ with.
+puffer-ball by $3.51\times$, n-body by $2.34\times$, rod-twist by $2.00\times$
+and cloth-ball by $1.90\times$; the host wins armadillo-rollers at $0.70\times$
+and cloth-funnel at $0.53\times$, where a device broad phase behind at
+$0.56\times$ and a narrow phase behind at $0.41\times$ both point the same way.
 Cloth-funnel is the smallest scene in the benchmark by candidate pairs and
 puffer-ball the largest, and the device wins the larger one, so problem size is
 not a rule for choosing a processor on its own. \Cref{sec:results:scaling} shows
@@ -177,7 +178,7 @@ $43$-step scene with a $2{,}556$-step one.
 Those three tables aggregate over a scene, which hides the shape of the cost
 through it. \Cref{fig:perframe} plots the per-step cost against frame index
 instead, and it shows two things no aggregate can. On cloth-funnel the device is behind for most of the trajectory, so its
-$0.61\times$ is a standing gap and not a few expensive frames. On rod-twist the cost climbs steadily on both processors
+$0.53\times$ is a standing gap and not a few expensive frames. On rod-twist the cost climbs steadily on both processors
 as the rod winds up, so on either processor the median understates the end of
 the simulation.
 
@@ -254,22 +255,26 @@ is drawn dashed to remain visible.
 \Cref{fig:bp} contrasts the two algorithms on the geometry that separates them,
 and \cref{tab:broadphase} measures them over the whole benchmark.
 
-\textbf{The cell list wins or ties on every scene, on both processors.} On the
-host it leads puffer-ball by $5.75\times$, armadillo-rollers by $1.66\times$,
-cloth-funnel by $1.50\times$ and n-body by $1.10\times$, with cloth-ball and
-rod-twist coming out ties, their margins inside the repeat spread of
-\cref{sec:results:setup}. On the device it leads every scene, from $1.04\times$
-on cloth-funnel to $7.70\times$ on puffer-ball. The largest margin is the
-largest scene: $78.0\,\mathrm{s}$ against $448.8\,\mathrm{s}$ on the host over
-puffer-ball's $240$ cases, and $9.9\,\mathrm{s}$ against $76.4$ on the device.
+\textbf{The cell list wins or ties on every scene of the host, and the device
+splits.} On the host it leads puffer-ball by $5.75\times$, armadillo-rollers by
+$1.66\times$, cloth-funnel by $1.50\times$ and n-body by $1.10\times$, with
+cloth-ball and rod-twist coming out ties, their margins inside the repeat spread
+of \cref{sec:results:setup}. On the device the verdict is scene by scene: the
+cell list leads puffer-ball by $2.81\times$ and rod-twist by $1.10\times$, the
+sweep leads cloth-funnel by $1.77\times$ and armadillo-rollers by $1.13\times$,
+and cloth-ball and n-body are ties. The largest margin is the largest scene:
+$78.0\,\mathrm{s}$ against $448.8\,\mathrm{s}$ on the host over puffer-ball's
+$240$ cases, and $26.8$ against $75.3$ on the device.
 
-Summed over the whole benchmark the choice is not close. The cell list costs
-$138.7\,\mathrm{s}$ against the sweep's $513.2$ on the host, and
-$29.4\,\mathrm{s}$ against $116.2$ on the device: $3.70\times$ and
-$3.95\times$. The device favours it more than the host does, which is what
-\cref{sec:bp:cell} predicts for it -- binning is count, prefix sum and scatter,
-the idiom the rest of the device pipeline is already built from, while the
-sweep's sort is the one sequential structure in the pipeline.
+Summed over the whole benchmark the host choice is not close and the device
+choice is carried by one scene. The cell list costs $138.7\,\mathrm{s}$ against
+the sweep's $513.2$ on the host, a factor of $3.70$; on the device it costs
+$62.5\,\mathrm{s}$ against $111.0$, a factor of $1.78$ of which puffer-ball
+alone supplies $48.5\,\mathrm{s}$. Take puffer-ball out and the device totals
+are $35.7\,\mathrm{s}$ against $35.7$: the same to three figures. What
+\cref{sec:bp:cell} predicts -- that binning suits a device better than sorting,
+being the count, prefix sum and scatter the rest of the pipeline is already
+built from -- shows only where the scene is large enough to pay for the grid.
 
 \begin{figure}[htbp]
   \centering
@@ -290,23 +295,25 @@ on $24$ of $43$ and leading on the expensive ones, so the totals come out level;
 on rod-twist the cell list leads on $1{,}821$ of $2{,}556$ frames and still ends
 only $8\%$ ahead, because the frames it loses cost more than the frames it wins.
 
-On the device the same figure is one-sided. The sweep does not lead a single
-frame of cloth-ball or puffer-ball, leads $3$ of rod-twist's $2{,}556$ and one
-of n-body's $74$, and the cell list's advantage holds across the whole
-trajectory rather than accumulating at a few steps. Cloth-funnel is the
-exception and inverts the cloth-ball story: there the sweep leads $214$ of $372$
-frames and still loses the scene, because the frames the cell list takes are the
-expensive ones.
+The device figure says something the totals do not. There the sweep leads most
+frames of four scenes -- $225$ of armadillo's $396$, $26$ of cloth-ball's $43$,
+$253$ of cloth-funnel's $372$ and $40$ of n-body's $74$ -- and still the cell
+list takes the benchmark, because it does not lead a single frame of
+puffer-ball, where one scene's margin outweighs the rest put together. Counting
+frames and summing milliseconds disagree on the device, and the disagreement is
+the result: a strategy chosen per frame and a strategy chosen per benchmark are
+not the same choice.
 
-The structure columns say where the difference comes from, and it is not where
-the traversal alone would suggest. The sweep builds its sorted intervals at two
-to four times the cost of the grid on the host, $29.1\,\mathrm{s}$ against
-$12.1$ on rod-twist and $10.1$ against $2.9$ on puffer-ball, because a sort is
-$O(n\log n)$ where binning is linear. The gap is wider on the device, where the
-same two scenes cost $16.7\,\mathrm{s}$ against $4.1$ and $13.0$ against $3.9$.
-On five scenes the sweep's traversal does not recover that. On puffer-ball the
-traversal loses as well, by the margin \cref{sec:bp:cell} predicts for a draped
-surface that one axis cannot separate.
+The BP prep columns say where the difference comes from, and it is not where BP
+queries alone would suggest. The sweep builds its sorted intervals at two to
+four times the cost of the grid on the host, $29.1\,\mathrm{s}$ against $12.1$
+on rod-twist and $10.1$ against $2.9$ on puffer-ball, because a sort is
+$O(n\log n)$ where binning is linear, and the device keeps that ratio at
+$14.1\,\mathrm{s}$ against $3.9$ and $11.5$ against $3.3$. What differs between
+the processors is BP queries: on the host the grid's queries are cheaper too on
+five scenes, while on the device the sorted intervals are queried faster on four
+of the six, enough to overturn the structure's advantage everywhere except
+puffer-ball and rod-twist.
 
 \textbf{A fixed choice is defensible on this evidence, and we still do not make
 one.} Nothing here would be lost by always running the cell list. What the race

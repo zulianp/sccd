@@ -163,7 +163,7 @@ def _write(built, tables_mod, suffix: str) -> list[str]:
 PROSE_CLAIMS = [
     ("26.6", "tab-reference"),
     ("5.75", "tab-broadphase"),
-    ("0.61", "tab-processor"),
+    ("0.53", "tab-processor"),
     # The scaling ratios are quoted as divisions of these cells, so the reader
     # can do the arithmetic; checking the cells checks the ratios.
     ("998.7", "tab-scaling"),
