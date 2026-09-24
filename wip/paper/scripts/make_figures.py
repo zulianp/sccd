@@ -102,6 +102,20 @@ def check_ticks(fig, axes, scenes, name):
                 "the locator is not covering its range")
 
 
+
+def scene_grid(rows=2, cols=3, height=0.62):
+    """A panel per scene on `rows` x `cols`, which is what six scenes want.
+
+    One row of six leaves each panel about an inch wide, and these panels carry
+    a few thousand frames of a noisy curve. Two rows of three give each of them
+    twice the width and enough height to separate curves that sit within a
+    factor of two of each other.
+    """
+    fig, axes = plt.subplots(rows, cols, figsize=style.figsize(
+        style.FULL_WIDTH_IN, height), squeeze=False)
+    return fig, [a for row in axes for a in row]
+
+
 # ---------------------------------------------------------------- scaling ---
 def strong_scaling():
     """Speedup per phase against thread count, against the perfect line."""
@@ -185,9 +199,8 @@ def per_frame():
         except ValueError:
             continue
 
-    fig, axes = plt.subplots(1, len(SCENES), figsize=style.figsize(
-        style.FULL_WIDTH_IN, 0.30))
-    for ax, scene in zip(axes, SCENES):
+    fig, axes = scene_grid()
+    for i, (ax, scene) in enumerate(zip(axes, SCENES)):
         for mode, lab in ((HOST, "CPU"), (DEV, "GPU")):
             d = acc[scene][mode]
             if not d:
@@ -197,18 +210,20 @@ def per_frame():
                     color=style.MODE_COLOR[mode], label=lab)
         log_y(ax)
         ax.set_title(LABEL.get(scene, scene), fontsize=7)
-        ax.set_xlabel("frame", fontsize=7)
+        if i >= 3:
+            ax.set_xlabel("frame", fontsize=7)
+        if i % 3 == 0:
+            ax.set_ylabel("BP full + NP EToI, ms per step", fontsize=7)
         ax.tick_params(labelsize=6)
         ax.grid(True, which="major", lw=0.4, color=style.GRID_INK)
         ax.set_axisbelow(True)
-    axes[0].set_ylabel("BP full + NP EToI, ms per step", fontsize=7)
 
     check_ticks(fig, axes, SCENES, "per-frame")
 
     h, l = axes[0].get_legend_handles_labels()
     fig.legend(h, l, frameon=False, fontsize=7, ncol=2,
-               loc="lower center", bbox_to_anchor=(0.5, -0.04))
-    fig.tight_layout()
+               loc="lower center", bbox_to_anchor=(0.5, -0.03))
+    fig.tight_layout(rect=(0, 0.04, 1, 1))
     p = OUT / "per-frame.pdf"
     fig.savefig(p, bbox_inches="tight"); plt.close(fig)
     return p
@@ -251,9 +266,8 @@ def broad_per_frame():
         except ValueError:
             continue
 
-    fig, axes = plt.subplots(1, len(SCENES), figsize=style.figsize(
-        style.FULL_WIDTH_IN, 0.30))
-    for ax, scene in zip(axes, SCENES):
+    fig, axes = scene_grid()
+    for i, (ax, scene) in enumerate(zip(axes, SCENES)):
         for lab, mode, strategies, tint in SERIES_BP:
             got = [acc[scene][(mode, s)] for s in strategies
                    if acc[scene][(mode, s)]]
@@ -265,11 +279,16 @@ def broad_per_frame():
                     color=lighten(style.MODE_COLOR[mode], tint), label=lab)
         log_y(ax)
         ax.set_title(LABEL.get(scene, scene), fontsize=7)
-        ax.set_xlabel("frame", fontsize=7)
+        # The frame axis is only labelled on the bottom row, and the value axis
+        # only on the left column; every panel keeps its own ticks, because the
+        # scenes do not share a range.
+        if i >= 3:
+            ax.set_xlabel("frame", fontsize=7)
+        if i % 3 == 0:
+            ax.set_ylabel("BP full, ms per step", fontsize=7)
         ax.tick_params(labelsize=6)
         ax.grid(True, which="major", lw=0.4, color=style.GRID_INK)
         ax.set_axisbelow(True)
-    axes[0].set_ylabel("BP full, ms per step", fontsize=7)
 
     check_ticks(fig, axes, SCENES, "broad-per-frame")
 
@@ -283,8 +302,8 @@ def broad_per_frame():
 
     h, l = axes[0].get_legend_handles_labels()
     fig.legend(h, l, frameon=False, fontsize=7, ncol=4,
-               loc="lower center", bbox_to_anchor=(0.5, -0.06))
-    fig.tight_layout()
+               loc="lower center", bbox_to_anchor=(0.5, -0.03))
+    fig.tight_layout(rect=(0, 0.04, 1, 1))
     p = OUT / "broad-per-frame.pdf"
     fig.savefig(p, bbox_inches="tight"); plt.close(fig)
     return p
@@ -345,10 +364,11 @@ def broad_vs_scalable():
         print("comparison CSV has no usable rows; skipping", file=sys.stderr)
         return None
 
-    fig, axes = plt.subplots(1, len(present), figsize=style.figsize(
-        style.FULL_WIDTH_IN, 0.30))
-    axes = [axes] if len(present) == 1 else list(axes)
-    for ax, scene in zip(axes, present):
+    fig, axes = scene_grid() if len(present) == 6 else (
+        lambda f, a: (f, list(a) if len(present) > 1 else [a]))(
+            *plt.subplots(1, len(present),
+                          figsize=style.figsize(style.FULL_WIDTH_IN, 0.30)))
+    for i, (ax, scene) in enumerate(zip(axes, present)):
         for lab, _, _, colour_mode, tint in SERIES_VS:
             d = acc[scene][lab]
             if not d:
@@ -361,11 +381,13 @@ def broad_vs_scalable():
                     color=lighten(style.MODE_COLOR[colour_mode], tint), label=lab)
         log_y(ax)
         ax.set_title(LABEL.get(scene, scene), fontsize=7)
-        ax.set_xlabel("frame", fontsize=7)
+        if len(present) != 6 or i >= 3:
+            ax.set_xlabel("frame", fontsize=7)
+        if len(present) != 6 or i % 3 == 0:
+            ax.set_ylabel("BP full, ms per step", fontsize=7)
         ax.tick_params(labelsize=6)
         ax.grid(True, which="major", lw=0.4, color=style.GRID_INK)
         ax.set_axisbelow(True)
-    axes[0].set_ylabel("BP full, ms per step", fontsize=7)
 
     check_ticks(fig, axes, present, "broad-vs-scalable")
     for ax, scene in zip(axes, present):
@@ -376,8 +398,8 @@ def broad_vs_scalable():
 
     h, l = axes[0].get_legend_handles_labels()
     fig.legend(h, l, frameon=False, fontsize=7, ncol=3,
-               loc="lower center", bbox_to_anchor=(0.5, -0.06))
-    fig.tight_layout()
+               loc="lower center", bbox_to_anchor=(0.5, -0.03))
+    fig.tight_layout(rect=(0, 0.04, 1, 1))
     p = OUT / "broad-vs-scalable.pdf"
     fig.savefig(p, bbox_inches="tight"); plt.close(fig)
     return p
