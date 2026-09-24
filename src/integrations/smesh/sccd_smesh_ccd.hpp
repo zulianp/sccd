@@ -6,6 +6,7 @@
 #include "sccd_broadphase_sweep.hpp"
 #include "sccd_broadphase_strategy.hpp"
 #include "sccd_broadphase_cell2d.hpp"
+#include "sccd_broadphase_hgrid2.hpp"
 #include "sccd_narrowphase.hpp"
 #include "sccd_narrowphase_quad.hpp"
 #include "smesh_device_buffer.hpp"
@@ -171,11 +172,12 @@ namespace sccd {
         // F2V and E2E sorts/scans within the same broad_phase invocation.
         int sort_axis_{0};
 
-        // Which broad phase this call is using. Both are first class: the choice
-        // is made per call from the geometry, because neither wins everywhere and
+        // Which broad phase this call is using. All are first class: the choice
+        // is made per call from the geometry, because none wins everywhere and
         // the same mesh can change character between frames. SCCD_BROADPHASE
-        // forces it to sweep or cell2d for measurement.
+        // forces it to sweep, cell2d or hgrid2 for measurement.
         bool use_cell2d_{false};
+        bool use_hgrid2_{false};
 
         // Broad-phase strategy race. The tuner decides; these carry the pending
         // measurement from the steps back to the next prep, which is where it is
@@ -205,6 +207,39 @@ namespace sccd {
         std::vector<ptrdiff_t> e_cellptr_;
         std::vector<ptrdiff_t> e_cursor_;
         std::vector<smesh::idx_t> e_cellidx_;
+
+        // The two-level grid keeps its own buffers, one pair per level, because
+        // the two levels are separate cell lists over the same boxes.
+        sccd::HGrid2<scalar_t> v_hgrid_;
+        sccd::HGrid2<scalar_t> e_hgrid_;
+        std::vector<ptrdiff_t> v_hcellptr_[2], e_hcellptr_[2];
+        std::vector<smesh::idx_t> v_hcellidx_[2], e_hcellidx_[2];
+
+        /** \brief Size the two levels and bin one list into them, count then fill. */
+        static void bin_hgrid2_host_(const ptrdiff_t n,
+                                     scalar_t** const SCCD_RESTRICT aabb,
+                                     sccd::HGrid2<scalar_t>& grid,
+                                     std::vector<ptrdiff_t> (&cellptr)[2],
+                                     std::vector<smesh::idx_t> (&cellidx)[2],
+                                     std::vector<ptrdiff_t>& cursor) {
+            sccd::hgrid2_setup<scalar_t>(n, aabb, grid);
+
+            for (int level = 0; level < 2; ++level) {
+                const bool fine = level == 0;
+                const ptrdiff_t ncells = (fine ? grid.fine : grid.coarse).ncells();
+
+                sccd::Cell2DPartition part;
+                sccd::hgrid2_partition<scalar_t>(n, aabb, grid, fine, part);
+
+                cellptr[level].resize((size_t)ncells + 1);
+                sccd::hgrid2_count<scalar_t>(n, aabb, grid, fine, part, cellptr[level].data());
+
+                cellidx[level].resize((size_t)cellptr[level][(size_t)ncells]);
+                cursor.resize((size_t)ncells);
+                sccd::hgrid2_fill<scalar_t, smesh::idx_t>(
+                    n, aabb, grid, fine, part, cellptr[level].data(), cellidx[level].data(), cursor.data());
+            }
+        }
 
 
 #if defined(SCCD_ENABLE_CUDA)
@@ -509,6 +544,7 @@ namespace sccd {
 
             const sccd::BroadPhaseStrategy chosen = tuner_.next();
             use_cell2d_ = (chosen == sccd::BroadPhaseStrategy::Cell2D);
+            use_hgrid2_ = (chosen == sccd::BroadPhaseStrategy::HGrid2);
             timed_strategy_ = chosen;
 
             if (getenv("SCCD_BROADPHASE_VERBOSE")) {
@@ -593,6 +629,18 @@ namespace sccd {
 
                 bin_host_(n_nodes, vaabb_->data(), v_grid_, v_part_, v_cellptr_, v_cellidx_, v_cursor_);
                 bin_host_(n_edges, eaabb_->data(), e_grid_, e_part_, e_cellptr_, e_cellidx_, e_cursor_);
+            } else if (use_hgrid2_) {
+                // Two levels, and no sorting either: the same three lists get
+                // the identity permutation and the vertex and edge boxes are
+                // binned by centroid into whichever level fits them.
+                SMESH_TRACE_SCOPE("Two-level grid (host)");
+
+                fill_identity_(vidx_->data(), n_nodes);
+                fill_identity_(fidx_->data(), n_faces);
+                fill_identity_(eidx_->data(), n_edges);
+
+                bin_hgrid2_host_(n_nodes, vaabb_->data(), v_hgrid_, v_hcellptr_, v_hcellidx_, v_cursor_);
+                bin_hgrid2_host_(n_edges, eaabb_->data(), e_hgrid_, e_hcellptr_, e_hcellidx_, e_cursor_);
             } else {
                 SMESH_TRACE_SCOPE("Sorting AABBs (host)");
 
@@ -659,6 +707,89 @@ namespace sccd {
             return SCCD_SUCCESS;
         }
 
+        /**
+         * \brief The two-level face-vertex step, for a face with \p nxe vertices.
+         *
+         * Split out the same way the cell list's is, so the element type picks an
+         * instantiation. The grid is over vertices and the faces query it from
+         * outside, each with a reach taken from its own extent.
+         */
+        template <int nxe>
+        int hgrid2_fv_step_host_(const ptrdiff_t n_faces) {
+            sccd::hgrid2_count_overlaps<nxe, 1, scalar_t, smesh::idx_t>(n_faces,
+                                                                        faabb_->data(),
+                                                                        fidx_->data(),
+                                                                        1,
+                                                                        faces_->data(),
+                                                                        vaabb_->data(),
+                                                                        vidx_->data(),
+                                                                        0,
+                                                                        nullptr,
+                                                                        v_hgrid_,
+                                                                        v_hcellptr_[0].data(),
+                                                                        v_hcellidx_[0].data(),
+                                                                        v_hcellptr_[1].data(),
+                                                                        v_hcellidx_[1].data(),
+                                                                        ccdptr_->data());
+
+            const ptrdiff_t n_pairs = ccdptr_->data()[n_faces];
+            f_overlap_ = smesh::create_buffer<smesh::idx_t>(n_pairs, execution_space_);
+            v_overlap_ = smesh::create_buffer<smesh::idx_t>(n_pairs, execution_space_);
+
+            sccd::hgrid2_fill_overlaps<nxe, 1, scalar_t, smesh::idx_t>(n_faces,
+                                                                       faabb_->data(),
+                                                                       fidx_->data(),
+                                                                       1,
+                                                                       faces_->data(),
+                                                                       vaabb_->data(),
+                                                                       vidx_->data(),
+                                                                       0,
+                                                                       nullptr,
+                                                                       v_hgrid_,
+                                                                       v_hcellptr_[0].data(),
+                                                                       v_hcellidx_[0].data(),
+                                                                       v_hcellptr_[1].data(),
+                                                                       v_hcellidx_[1].data(),
+                                                                       ccdptr_->data(),
+                                                                       f_overlap_->data(),
+                                                                       v_overlap_->data());
+            return SCCD_SUCCESS;
+        }
+
+        /** \brief The two-level edge-edge step: one list against itself. */
+        int hgrid2_ee_step_host_(const ptrdiff_t n_edges) {
+            sccd::hgrid2_count_self_overlaps<2, scalar_t, smesh::idx_t>(n_edges,
+                                                                        eaabb_->data(),
+                                                                        eidx_->data(),
+                                                                        1,
+                                                                        edges_->data(),
+                                                                        e_hgrid_,
+                                                                        e_hcellptr_[0].data(),
+                                                                        e_hcellidx_[0].data(),
+                                                                        e_hcellptr_[1].data(),
+                                                                        e_hcellidx_[1].data(),
+                                                                        ccdptr_->data());
+
+            const ptrdiff_t n_pairs = ccdptr_->data()[n_edges];
+            e0_overlap_ = smesh::create_buffer<smesh::idx_t>(n_pairs, execution_space_);
+            e1_overlap_ = smesh::create_buffer<smesh::idx_t>(n_pairs, execution_space_);
+
+            sccd::hgrid2_fill_self_overlaps<2, scalar_t, smesh::idx_t>(n_edges,
+                                                                       eaabb_->data(),
+                                                                       eidx_->data(),
+                                                                       1,
+                                                                       edges_->data(),
+                                                                       e_hgrid_,
+                                                                       e_hcellptr_[0].data(),
+                                                                       e_hcellidx_[0].data(),
+                                                                       e_hcellptr_[1].data(),
+                                                                       e_hcellidx_[1].data(),
+                                                                       ccdptr_->data(),
+                                                                       e0_overlap_->data(),
+                                                                       e1_overlap_->data());
+            return SCCD_SUCCESS;
+        }
+
         int broad_phase_fv_step_host_() {
             SMESH_TRACE_SCOPE("Broad_phase: F2V");
 
@@ -673,6 +804,18 @@ namespace sccd {
                     return cell2d_fv_step_host_<3>(n_faces);
                 } else if (element_type == smesh::QUADSHELL4) {
                     return cell2d_fv_step_host_<4>(n_faces);
+                } else {
+                    SMESH_ERROR("Unsupported CCD face element type: %s\n", smesh::type_to_string(element_type));
+                    return SCCD_FAILURE;
+                }
+            }
+
+            if (use_hgrid2_) {
+                SMESH_TRACE_SCOPE("hgrid2 f2v");
+                if (element_type == smesh::TRISHELL3) {
+                    return hgrid2_fv_step_host_<3>(n_faces);
+                } else if (element_type == smesh::QUADSHELL4) {
+                    return hgrid2_fv_step_host_<4>(n_faces);
                 } else {
                     SMESH_ERROR("Unsupported CCD face element type: %s\n", smesh::type_to_string(element_type));
                     return SCCD_FAILURE;
@@ -771,6 +914,11 @@ namespace sccd {
             SMESH_TRACE_SCOPE("Broad_phase: E2E");
 
             const ptrdiff_t n_edges = e0_->size();
+
+            if (use_hgrid2_) {
+                SMESH_TRACE_SCOPE("hgrid2 e2e");
+                return hgrid2_ee_step_host_(n_edges);
+            }
 
             if (use_cell2d_) {
                 SMESH_TRACE_SCOPE("cell2d e2e");
@@ -961,6 +1109,14 @@ namespace sccd {
             }
 
             choose_strategy_(n_nodes);
+
+            if (use_hgrid2_) {
+                // The two-level grid is a host strategy so far. Saying so beats
+                // running the sweep under its name, which would put a timing
+                // against a label that did not produce it.
+                SMESH_ERROR("sccd: SCCD_BROADPHASE=hgrid2 has no device implementation yet\n");
+                return SCCD_FAILURE;
+            }
 
             if (use_cell2d_) {
                 // No sorting at all on this path, as on the host: vertices and
