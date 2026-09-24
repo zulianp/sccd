@@ -47,6 +47,12 @@ namespace sccd {
                 return (ptrdiff_t)c1 * g.n0 + c0;
             }
 
+            /** \brief The midpoint of a box on one axis, written so it cannot overflow. */
+            template <typename T>
+            static __device__ __forceinline__ T midpoint(const T lo, const T hi) {
+                return lo + (hi - lo) * T(0.5);
+            }
+
             template <typename T>
             static __device__ __forceinline__ bool disjoint(const T aminx,
                                                             const T aminy,
@@ -85,7 +91,7 @@ namespace sccd {
             }
 
             /**
-             * \brief Per-axis min, max and mean extent, for sizing the grid.
+             * \brief Per-axis min, max and largest box extent, for sizing the grid.
              *
              * One block with a shared-array tree reduction rather than atomics:
              * there is no atomic_max for floating point here, and this runs once
@@ -98,21 +104,22 @@ namespace sccd {
                                               const T* const SCCD_RESTRICT hi,
                                               T* const SCCD_RESTRICT out_min,
                                               T* const SCCD_RESTRICT out_max,
-                                              T* const SCCD_RESTRICT out_sum) {
+                                              T* const SCCD_RESTRICT out_ext) {
                 extern __shared__ char s_raw[];
                 T* const s_min = (T*)s_raw;
                 T* const s_max = s_min + blockDim.x;
-                T* const s_sum = s_max + blockDim.x;
+                T* const s_ext = s_max + blockDim.x;
 
-                T tmin = lo[0], tmax = hi[0], tsum = T(0);
+                T tmin = lo[0], tmax = hi[0], text = T(0);
                 for (ptrdiff_t i = threadIdx.x; i < n; i += blockDim.x) {
                     tmin = lo[i] < tmin ? lo[i] : tmin;
                     tmax = hi[i] > tmax ? hi[i] : tmax;
-                    tsum += hi[i] - lo[i];
+                    const T e = hi[i] - lo[i];
+                    text = e > text ? e : text;
                 }
                 s_min[threadIdx.x] = tmin;
                 s_max[threadIdx.x] = tmax;
-                s_sum[threadIdx.x] = tsum;
+                s_ext[threadIdx.x] = text;
                 __syncthreads();
 
                 for (unsigned element_stride = blockDim.x / 2; element_stride > 0; element_stride >>= 1) {
@@ -120,7 +127,7 @@ namespace sccd {
                         const unsigned o = threadIdx.x + element_stride;
                         s_min[threadIdx.x] = s_min[o] < s_min[threadIdx.x] ? s_min[o] : s_min[threadIdx.x];
                         s_max[threadIdx.x] = s_max[o] > s_max[threadIdx.x] ? s_max[o] : s_max[threadIdx.x];
-                        s_sum[threadIdx.x] += s_sum[o];
+                        s_ext[threadIdx.x] = s_ext[o] > s_ext[threadIdx.x] ? s_ext[o] : s_ext[threadIdx.x];
                     }
                     __syncthreads();
                 }
@@ -128,7 +135,7 @@ namespace sccd {
                 if (threadIdx.x == 0) {
                     *out_min = s_min[0];
                     *out_max = s_max[0];
-                    *out_sum = s_sum[0];
+                    *out_ext = s_ext[0];
                 }
             }
 
@@ -140,36 +147,28 @@ namespace sccd {
                                              const T* const SCCD_RESTRICT hi1,
                                              const Cell2DGridD<T> grid,
                                              ptrdiff_t* const SCCD_RESTRICT cellptr,
-                                             int* const SCCD_RESTRICT ranges) {
+                                             int* const SCCD_RESTRICT cells) {
                 const ptrdiff_t i = (ptrdiff_t)blockIdx.x * blockDim.x + threadIdx.x;
                 if (i >= n) return;
 
-                const int a = cell0<T>(grid, lo0[i]);
-                const int b = cell0<T>(grid, hi0[i]);
-                const int c = cell1<T>(grid, lo1[i]);
-                const int d = cell1<T>(grid, hi1[i]);
+                const int c0 = cell0<T>(grid, midpoint<T>(lo0[i], hi0[i]));
+                const int c1 = cell1<T>(grid, midpoint<T>(lo1[i], hi1[i]));
 
                 // The scatter pass reads these back rather than recomputing
-                // them, so the two passes cannot disagree about which cells a
-                // box covers however the arithmetic is scheduled.
+                // them, so the two passes cannot disagree about which cell a
+                // box lands in however the arithmetic is scheduled.
                 if (i == 0) {
-                    ranges[4 * n + 0] = grid.n0;
-                    ranges[4 * n + 1] = grid.n1;
-                    ranges[4 * n + 2] = grid.axis0;
-                    ranges[4 * n + 3] = grid.axis1;
+                    cells[2 * n + 0] = grid.n0;
+                    cells[2 * n + 1] = grid.n1;
+                    cells[2 * n + 2] = grid.axis0;
+                    cells[2 * n + 3] = grid.axis1;
                 }
-                ranges[4 * i + 0] = a;
-                ranges[4 * i + 1] = b;
-                ranges[4 * i + 2] = c;
-                ranges[4 * i + 3] = d;
+                cells[2 * i + 0] = c0;
+                cells[2 * i + 1] = c1;
 
-                for (int j = c; j <= d; ++j) {
-                    for (int k = a; k <= b; ++k) {
-                        // +1 so the array is already the CRS row pointer after an
-                        // inclusive scan, matching how ccdptr is built.
-                        atomicAdd((unsigned long long*)&cellptr[cell_of<T>(grid, k, j) + 1], 1ull);
-                    }
-                }
+                // +1 so the array is already the CRS row pointer after an
+                // inclusive scan, matching how ccdptr is built.
+                atomicAdd((unsigned long long*)&cellptr[cell_of<T>(grid, c0, c1) + 1], 1ull);
             }
 
             template <typename I>
@@ -180,7 +179,7 @@ namespace sccd {
 
             template <typename T, typename I>
             __global__ void bin_fill_kernel(const ptrdiff_t n,
-                                            const int* const SCCD_RESTRICT ranges,
+                                            const int* const SCCD_RESTRICT cells,
                                             const Cell2DGridD<T> grid,
                                             const ptrdiff_t* const SCCD_RESTRICT cellptr,
                                             I* const SCCD_RESTRICT cellidx,
@@ -189,50 +188,44 @@ namespace sccd {
                 const ptrdiff_t i = (ptrdiff_t)blockIdx.x * blockDim.x + threadIdx.x;
                 if (i >= n) return;
 
-                const int a = ranges[4 * i + 0];
-                const int b = ranges[4 * i + 1];
-                const int c = ranges[4 * i + 2];
-                const int d = ranges[4 * i + 3];
                 const ptrdiff_t ncells = grid.ncells();
-                if (i == 0 && (ranges[4 * n + 0] != grid.n0 || ranges[4 * n + 1] != grid.n1 ||
-                               ranges[4 * n + 2] != grid.axis0 || ranges[4 * n + 3] != grid.axis1)) {
+                if (i == 0 && (cells[2 * n + 0] != grid.n0 || cells[2 * n + 1] != grid.n1 ||
+                               cells[2 * n + 2] != grid.axis0 || cells[2 * n + 3] != grid.axis1)) {
                     printf("GRID MISMATCH count=%dx%d axes %d,%d  fill=%dx%d axes %d,%d\n",
-                           ranges[4 * n + 0], ranges[4 * n + 1], ranges[4 * n + 2], ranges[4 * n + 3],
+                           cells[2 * n + 0], cells[2 * n + 1], cells[2 * n + 2], cells[2 * n + 3],
                            grid.n0, grid.n1, grid.axis0, grid.axis1);
                 }
 
-                for (int j = c; j <= d; ++j) {
-                    for (int k = a; k <= b; ++k) {
-                        const ptrdiff_t cell = cell_of<T>(grid, k, j);
-                        // A write outside the array is counted rather than made.
-                        // The counting pass reserved exactly one slot per span,
-                        // so a bad index here means the two passes disagreed,
-                        // which the caller reports instead of corrupting memory.
-                        if (cell < 0 || cell >= ncells) {
-                            atomicAdd((unsigned long long*)&cursor[ncells], 1ull);
-                            continue;
-                        }
-                        const unsigned long long at =
-                            atomicAdd((unsigned long long*)&cursor[cell], 1ull);
-                        const ptrdiff_t pos = cellptr[cell] + (ptrdiff_t)at;
-                        if (pos < 0 || pos >= capacity) {
-                            atomicAdd((unsigned long long*)&cursor[ncells], 1ull);
-                            continue;
-                        }
-                        cellidx[pos] = (I)i;
-                    }
+                const ptrdiff_t cell = cell_of<T>(grid, cells[2 * i + 0], cells[2 * i + 1]);
+                // A write outside the array is counted rather than made. The
+                // counting pass reserved exactly one slot per box, so a bad index
+                // here means the two passes disagreed, which the caller reports
+                // instead of corrupting memory.
+                if (cell < 0 || cell >= ncells) {
+                    atomicAdd((unsigned long long*)&cursor[ncells], 1ull);
+                    return;
                 }
+                const unsigned long long at = atomicAdd((unsigned long long*)&cursor[cell], 1ull);
+                const ptrdiff_t pos = cellptr[cell] + (ptrdiff_t)at;
+                if (pos < 0 || pos >= capacity) {
+                    atomicAdd((unsigned long long*)&cursor[ncells], 1ull);
+                    return;
+                }
+                cellidx[pos] = (I)i;
             }
 
             /**
              * \brief Visit each partner of box \p fi exactly once.
              *
-             * A box spans several cells, so a pair can be met in several of them.
-             * It is attributed to the cell holding the minimum corner of the two
-             * boxes' overlap: that corner lies inside both boxes, so both are
-             * binned there, and the cell is unique. Two clamps, and no per-pair
-             * state -- which is what makes it usable on a GPU, where a hash set or
-             * a mark array per thread would not be.
+             * The cell is at least as wide as the widest box either list holds, so
+             * an overlapping partner's centroid is at most one cell away on each
+             * axis and the walk is a fixed stencil around the box's own cell. A
+             * two-list query walks all nine cells, since no other box reports the
+             * pair. A self query walks the five cells whose linear index is at
+             * least its own and takes `j > fi` inside its own cell, which reports
+             * each unordered pair once with no per-pair state -- which is what
+             * makes it usable on a GPU, where a hash set or a mark array per
+             * thread would not be.
              */
             template <int F, int S, typename T, typename I, typename Visit>
             static __device__ __forceinline__ void for_each_partner(T** const SCCD_RESTRICT first_aabbs,
@@ -250,23 +243,29 @@ namespace sccd {
                 const T aminx = first_aabbs[0][fi], aminy = first_aabbs[1][fi], aminz = first_aabbs[2][fi];
                 const T amaxx = first_aabbs[3][fi], amaxy = first_aabbs[4][fi], amaxz = first_aabbs[5][fi];
 
-                const T amin0 = first_aabbs[grid.axis0][fi];
-                const T amax0 = first_aabbs[3 + grid.axis0][fi];
-                const T amin1 = first_aabbs[grid.axis1][fi];
-                const T amax1 = first_aabbs[3 + grid.axis1][fi];
+                const int col = cell0<T>(grid, midpoint<T>(first_aabbs[grid.axis0][fi],
+                                                           first_aabbs[3 + grid.axis0][fi]));
+                const int row = cell1<T>(grid, midpoint<T>(first_aabbs[grid.axis1][fi],
+                                                           first_aabbs[3 + grid.axis1][fi]));
 
-                const int c0b = cell0<T>(grid, amin0), c0e = cell0<T>(grid, amax0);
-                const int c1b = cell1<T>(grid, amin1), c1e = cell1<T>(grid, amax1);
+                const int dr_begin = self_mode ? 0 : -1;
+                for (int dr = dr_begin; dr <= 1; ++dr) {
+                    const int c1 = row + dr;
+                    if (c1 < 0 || c1 >= grid.n1) continue;
 
-                for (int c1 = c1b; c1 <= c1e; ++c1) {
-                    for (int c0 = c0b; c0 <= c0e; ++c0) {
+                    const int dc_begin = (self_mode && dr == 0) ? 0 : -1;
+                    for (int dc = dc_begin; dc <= 1; ++dc) {
+                        const int c0 = col + dc;
+                        if (c0 < 0 || c0 >= grid.n0) continue;
+
+                        const bool own = self_mode && dr == 0 && dc == 0;
                         const ptrdiff_t cell = cell_of<T>(grid, c0, c1);
                         const ptrdiff_t begin = cellptr[cell];
                         const ptrdiff_t end = cellptr[cell + 1];
 
                         for (ptrdiff_t k = begin; k < end; ++k) {
                             const ptrdiff_t j = (ptrdiff_t)cellidx[k];
-                            if (self_mode && j <= fi) continue;
+                            if (own && j <= fi) continue;
 
                             if (disjoint<T>(aminx,
                                             aminy,
@@ -282,10 +281,6 @@ namespace sccd {
                                             second_aabbs[5][j])) {
                                 continue;
                             }
-
-                            const T o0 = amin0 > second_aabbs[grid.axis0][j] ? amin0 : second_aabbs[grid.axis0][j];
-                            const T o1 = amin1 > second_aabbs[grid.axis1][j] ? amin1 : second_aabbs[grid.axis1][j];
-                            if (cell0<T>(grid, o0) != c0 || cell1<T>(grid, o1) != c1) continue;
 
                             const I jidx = second_idx[j];
                             bool share = false;
@@ -493,24 +488,26 @@ namespace sccd {
             }
         }
 
-        template <typename T, typename I>
-        void cell2d_setup_and_count(const ptrdiff_t n,
-                                    T** const SCCD_RESTRICT aabbs,
-                                    Cell2DGridD<T>& grid,
-                                    ptrdiff_t* const SCCD_RESTRICT cellptr,
-                                    int* const SCCD_RESTRICT ranges,
-                                    ptrdiff_t* const SCCD_RESTRICT span_count) {
-            SCCD_CUDA_LAST_ERROR();
+        template <typename T>
+        void cell2d_box_stats(const ptrdiff_t n,
+                              T** const SCCD_RESTRICT aabbs,
+                              T out_min[3],
+                              T out_max[3],
+                              T out_ext[3]) {
             if (n <= 0) {
-                *span_count = 0;
+                for (int d = 0; d < 3; ++d) {
+                    out_min[d] = T(0);
+                    out_max[d] = T(0);
+                    out_ext[d] = T(0);
+                }
                 return;
             }
 
-            // Axis choice is on the host: it needs three reductions and then a
-            // decision, and the arrays are small enough that a kernel per axis is
-            // cheaper than the launch overhead of doing it any other way.
+            // The reduction is on the device and the decision on the host: it
+            // needs three reductions and then a comparison, and the arrays are
+            // small enough that a kernel per axis is cheaper than the launch
+            // overhead of doing it any other way.
             T* const stats = workspace(WorkspaceSlot::Scratch).get_as<T>(9);
-            T h_min[3], h_max[3], h_sum[3];
             for (int d = 0; d < 3; ++d) {
                 detail::grid_stats_kernel<T><<<1, 256, 3 * 256 * sizeof(T)>>>(n,
                                                       soa_device_row<T>(aabbs, d),
@@ -523,10 +520,28 @@ namespace sccd {
             T host_stats[9];
             SCCD_CHECK_CUDA(cudaMemcpy(host_stats, stats, sizeof(T) * 9, cudaMemcpyDeviceToHost));
             for (int d = 0; d < 3; ++d) {
-                h_min[d] = host_stats[3 * d];
-                h_max[d] = host_stats[3 * d + 1];
-                h_sum[d] = host_stats[3 * d + 2];
+                out_min[d] = host_stats[3 * d];
+                out_max[d] = host_stats[3 * d + 1];
+                out_ext[d] = host_stats[3 * d + 2];
             }
+        }
+
+        template <typename T, typename I>
+        void cell2d_setup_and_count(const ptrdiff_t n,
+                                    T** const SCCD_RESTRICT aabbs,
+                                    Cell2DGridD<T>& grid,
+                                    ptrdiff_t* const SCCD_RESTRICT cellptr,
+                                    int* const SCCD_RESTRICT cells,
+                                    ptrdiff_t* const SCCD_RESTRICT span_count,
+                                    const T* const query_extent) {
+            SCCD_CUDA_LAST_ERROR();
+            if (n <= 0) {
+                *span_count = 0;
+                return;
+            }
+
+            T h_min[3], h_max[3], h_ext[3];
+            cell2d_box_stats<T>(n, aabbs, h_min, h_max, h_ext);
 
             // Two widest axes by extent. The host version uses centre variance;
             // extent is the same decision on this geometry and needs no second
@@ -548,11 +563,23 @@ namespace sccd {
             const T span1 = h_max[grid.axis1] - h_min[grid.axis1];
             const T s0 = span0 > T(0) ? span0 : T(1);
             const T s1 = span1 > T(0) ? span1 : T(1);
-            const T mean0 = h_sum[grid.axis0] / (T)n > T(0) ? h_sum[grid.axis0] / (T)n : s0;
-            const T mean1 = h_sum[grid.axis1] / (T)n > T(0) ? h_sum[grid.axis1] / (T)n : s1;
 
-            double want0 = (double)(s0 / mean0);
-            double want1 = (double)(s1 / mean1);
+            // The cell is as wide as the widest box either list can put in it,
+            // which is what makes the query's stencil complete, and never finer
+            // than the span divided by a million so a scene of points still gets
+            // a grid.
+            T w0 = h_ext[grid.axis0], w1 = h_ext[grid.axis1];
+            if (query_extent) {
+                if (query_extent[grid.axis0] > w0) w0 = query_extent[grid.axis0];
+                if (query_extent[grid.axis1] > w1) w1 = query_extent[grid.axis1];
+            }
+            const T floor0 = s0 / (T)(1 << 20);
+            const T floor1 = s1 / (T)(1 << 20);
+            if (!(w0 > floor0)) w0 = floor0;
+            if (!(w1 > floor1)) w1 = floor1;
+
+            double want0 = (double)(s0 / w0);
+            double want1 = (double)(s1 / w1);
             // Negated so a NaN extent lands on one cell rather than on whatever
             // the cast to int makes of it.
             if (!(want0 >= 1)) want0 = 1;
@@ -593,7 +620,7 @@ namespace sccd {
                                                         soa_device_row<T>(aabbs, SCCD_DIM + grid.axis1),
                                                         grid,
                                                         cellptr,
-                                                        ranges);
+                                                        cells);
             SCCD_CUDA_LAST_ERROR();
 
             detail::inclusive_sum<T>(cellptr, ncells + 1);
@@ -614,7 +641,7 @@ namespace sccd {
                          T** const SCCD_RESTRICT aabbs,
                          const Cell2DGridD<T>& grid,
                          const ptrdiff_t* const SCCD_RESTRICT cellptr,
-                         const int* const SCCD_RESTRICT ranges,
+                         const int* const SCCD_RESTRICT cells,
                          I* const SCCD_RESTRICT cellidx,
                          const ptrdiff_t capacity,
                          ptrdiff_t* const SCCD_RESTRICT cursor,
@@ -629,7 +656,7 @@ namespace sccd {
             dim3 block(SCCD_C2D_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
             dim3 gridsz((n + block.x - 1) / block.x);
             detail::bin_fill_kernel<T, I><<<gridsz, block>>>(n,
-                                                          ranges,
+                                                          cells,
                                                           grid,
                                                           cellptr,
                                                           cellidx,
@@ -809,8 +836,9 @@ namespace sccd {
 SCCD_C2D_INSTANTIATE_IDX(int32_t)
 
 #define SCCD_C2D_INSTANTIATE(T, I)                                                             \
+    template void sccd::device::cell2d_box_stats<T>(const ptrdiff_t, T**, T[3], T[3], T[3]);   \
     template void sccd::device::cell2d_setup_and_count<T, I>(                                  \
-        const ptrdiff_t, T**, sccd::device::Cell2DGridD<T>&, ptrdiff_t*, int*, ptrdiff_t*);          \
+        const ptrdiff_t, T**, sccd::device::Cell2DGridD<T>&, ptrdiff_t*, int*, ptrdiff_t*, const T*); \
     template void sccd::device::cell2d_fill<T, I>(const ptrdiff_t,                             \
                                                   T**,                                         \
                                                   const sccd::device::Cell2DGridD<T>&,         \

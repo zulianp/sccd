@@ -229,21 +229,20 @@ namespace {
             ptrdiff_t* cellptr = nullptr;
             SCCD_CUDA_CHECK(cudaMalloc(&cellptr, sizeof(ptrdiff_t) * (size_t)(4 * n + 2)));
             int* ranges = nullptr;
-            SCCD_CUDA_CHECK(cudaMalloc(&ranges, sizeof(int) * (size_t)(4 * n + 4)));
+            SCCD_CUDA_CHECK(cudaMalloc(&ranges, sizeof(int) * (size_t)(2 * n + 4)));
             sccd::device::cell2d_setup_and_count<scalar_t, idx_t>(n, b.aabbs, grid, cellptr, ranges, &spans);
 
             const ptrdiff_t ncells = grid.ncells();
 
-            // What the boxes imply, computed here.
+            // What the boxes imply, computed here: one cell per box, the one
+            // holding its centroid.
             std::vector<ptrdiff_t> want((size_t)ncells + 1, 0);
             for (long i = 0; i < n; ++i) {
-                const int a = cell0_host(grid, b.h[grid.axis0][(size_t)i]);
-                const int bb = cell0_host(grid, b.h[3 + grid.axis0][(size_t)i]);
-                const int c = cell1_host(grid, b.h[grid.axis1][(size_t)i]);
-                const int d = cell1_host(grid, b.h[3 + grid.axis1][(size_t)i]);
-                for (int j = c; j <= d; ++j) {
-                    for (int k = a; k <= bb; ++k) want[(size_t)((ptrdiff_t)j * grid.n0 + k) + 1]++;
-                }
+                const scalar_t lo0 = b.h[grid.axis0][(size_t)i], hi0 = b.h[3 + grid.axis0][(size_t)i];
+                const scalar_t lo1 = b.h[grid.axis1][(size_t)i], hi1 = b.h[3 + grid.axis1][(size_t)i];
+                const int k = cell0_host(grid, lo0 + (hi0 - lo0) * scalar_t(0.5));
+                const int j = cell1_host(grid, lo1 + (hi1 - lo1) * scalar_t(0.5));
+                want[(size_t)((ptrdiff_t)j * grid.n0 + k) + 1]++;
             }
             for (ptrdiff_t c = 0; c < ncells; ++c) want[(size_t)c + 1] += want[(size_t)c];
 
@@ -305,7 +304,7 @@ namespace {
         // let setup memset what it needs; 4n is the cap setup itself enforces.
         SCCD_CUDA_CHECK(cudaMalloc(&cellptr, sizeof(ptrdiff_t) * (size_t)(4 * e.n + 2)));
         int* ranges = nullptr;
-        SCCD_CUDA_CHECK(cudaMalloc(&ranges, sizeof(int) * (size_t)(4 * e.n + 4)));
+        SCCD_CUDA_CHECK(cudaMalloc(&ranges, sizeof(int) * (size_t)(2 * e.n + 4)));
         sccd::device::cell2d_setup_and_count<scalar_t, idx_t>(e.n, e.aabbs, grid, cellptr, ranges, &spans);
 
         idx_t* cellidx = nullptr;
