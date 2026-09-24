@@ -6,6 +6,8 @@
 #include "sccd_aabb.hpp"
 
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <vector>
 
@@ -262,6 +264,27 @@ namespace sccd {
         // much. The bound is what the caller sizes its cell array from, so it is
         // enforced here on the integers that array is sized by.
         cap_cells(sccd::max<ptrdiff_t>(n, 1), grid.n0, grid.n1);
+        // `SCCD_CELL2D_VERBOSE` reports the shape of the grid the boxes asked
+        // for. The cell is the widest box, so how much coarser the grid is than
+        // the box count would suggest is a property of the size spread, and that
+        // is the number to look at when the query walks more candidates than
+        // expected.
+        if (getenv("SCCD_CELL2D_VERBOSE")) {
+            fprintf(stderr,
+                    "sccd cell2d: n %ld  axes %d,%d  span %.4g/%.4g  widest box %.4g/%.4g  "
+                    "grid %dx%d (%.2f cells per box)\n",
+                    (long)n,
+                    d0,
+                    d1,
+                    (double)span0,
+                    (double)span1,
+                    (double)ext.ext0,
+                    (double)ext.ext1,
+                    grid.n0,
+                    grid.n1,
+                    (double)grid.ncells() / (double)sccd::max<ptrdiff_t>(n, 1));
+        }
+
         grid.min0 = lo0;
         grid.min1 = lo1;
         // Nudge the span so the largest coordinate lands inside the last cell.
