@@ -32,7 +32,8 @@ set -euo pipefail
 #   --chunk N        cases per chunk, 0 = whole scene   (default 0)
 #   --scenes "..."   scenes to sweep         (default the three verified ones)
 #   --spaces "..."   host and/or device      (default host)
-#   --broadphases ".."  sweep, cell2d and/or auto (default cell2d)
+#   --broadphases ".."  sweep, cell2d, cell2dmin, cell2dminsort, cell2dseg and/or
+#                       auto (default cell2d)
 #   --modes "..."    narrow-phase modes      (default "0 2")
 #   --time HH:MM:SS  per-job limit           (default 00:29:00)
 #   --threads N      OMP threads per job     (default 72, one Grace)
