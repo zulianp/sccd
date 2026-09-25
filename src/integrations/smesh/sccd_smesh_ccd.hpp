@@ -171,11 +171,17 @@ namespace sccd {
         // F2V and E2E sorts/scans within the same broad_phase invocation.
         int sort_axis_{0};
 
-        // Which broad phase this call is using. Both are first class: the choice
-        // is made per call from the geometry, because neither wins everywhere and
-        // the same mesh can change character between frames. SCCD_BROADPHASE
-        // forces it to sweep or cell2d for measurement.
+        // Which broad phase this call is using. The first two are first class:
+        // the choice is made per call from the geometry, because neither wins
+        // everywhere and the same mesh can change character between frames.
+        // SCCD_BROADPHASE forces it to sweep, cell2d or cell2dmin for
+        // measurement; cell2dmin is under evaluation and is only ever asked for.
+        //
+        // cell2dmin shares everything with cell2d but the edge-edge query: the
+        // vertex grid and the face-vertex step are the same code on both paths,
+        // and only the edge binning and its query differ.
         bool use_cell2d_{false};
+        bool use_cell2d_min_{false};
 
         // Broad-phase strategy race. The tuner decides; these carry the pending
         // measurement from the steps back to the next prep, which is where it is
@@ -205,6 +211,40 @@ namespace sccd {
         std::vector<ptrdiff_t> e_cellptr_;
         std::vector<ptrdiff_t> e_cursor_;
         std::vector<smesh::idx_t> e_cellidx_;
+
+        // The bounds the minimum-corner query prunes with, one pair of scalars
+        // per cell. They cost 2 * ncells where the binning they replace saves
+        // about 3n cell entries, so the two roughly cancel; the query is what the
+        // change is for. Held here rather than allocated per step, like
+        // everything else on this path.
+        std::vector<scalar_t> e_row_prefix_;
+        std::vector<scalar_t> e_cell_hi1_;
+
+        /** \brief Size the grid, bin one list by minimum corner, and take its bounds. */
+        static void bin_min_host_(const ptrdiff_t n,
+                                  scalar_t** const SCCD_RESTRICT aabb,
+                                  sccd::Cell2DGrid<scalar_t>& grid,
+                                  sccd::Cell2DPartition& part,
+                                  std::vector<ptrdiff_t>& cellptr,
+                                  std::vector<smesh::idx_t>& cellidx,
+                                  std::vector<ptrdiff_t>& cursor,
+                                  std::vector<scalar_t>& row_prefix,
+                                  std::vector<scalar_t>& cell_hi1) {
+            sccd::cell2d_setup<scalar_t>(n, aabb, grid);
+            sccd::cell2dmin_partition<scalar_t>(n, aabb, grid, part);
+
+            cellptr.resize((size_t)grid.ncells() + 1);
+            sccd::cell2dmin_count<scalar_t>(n, aabb, grid, part, cellptr.data());
+
+            cellidx.resize((size_t)cellptr[grid.ncells()]);
+            cursor.resize((size_t)grid.ncells());
+            sccd::cell2dmin_fill<scalar_t, smesh::idx_t>(
+                n, aabb, grid, part, cellptr.data(), cellidx.data(), cursor.data());
+
+            row_prefix.resize((size_t)grid.ncells());
+            cell_hi1.resize((size_t)grid.ncells());
+            sccd::cell2dmin_bounds<scalar_t>(n, aabb, grid, part, row_prefix.data(), cell_hi1.data());
+        }
 
 #if defined(SCCD_ENABLE_CUDA)
         /**
@@ -507,7 +547,8 @@ namespace sccd {
             }
 
             const sccd::BroadPhaseStrategy chosen = tuner_.next();
-            use_cell2d_ = (chosen == sccd::BroadPhaseStrategy::Cell2D);
+            use_cell2d_min_ = (chosen == sccd::BroadPhaseStrategy::Cell2DMin);
+            use_cell2d_ = (chosen == sccd::BroadPhaseStrategy::Cell2D) || use_cell2d_min_;
             timed_strategy_ = chosen;
 
             if (getenv("SCCD_BROADPHASE_VERBOSE")) {
@@ -591,7 +632,12 @@ namespace sccd {
                 fill_identity_(eidx_->data(), n_edges);
 
                 bin_host_(n_nodes, vaabb_->data(), v_grid_, v_part_, v_cellptr_, v_cellidx_, v_cursor_);
-                bin_host_(n_edges, eaabb_->data(), e_grid_, e_part_, e_cellptr_, e_cellidx_, e_cursor_);
+                if (use_cell2d_min_) {
+                    bin_min_host_(n_edges, eaabb_->data(), e_grid_, e_part_, e_cellptr_, e_cellidx_,
+                                  e_cursor_, e_row_prefix_, e_cell_hi1_);
+                } else {
+                    bin_host_(n_edges, eaabb_->data(), e_grid_, e_part_, e_cellptr_, e_cellidx_, e_cursor_);
+                }
             } else {
                 SMESH_TRACE_SCOPE("Sorting AABBs (host)");
 
@@ -655,6 +701,40 @@ namespace sccd {
                                                                        ccdptr_->data(),
                                                                        f_overlap_->data(),
                                                                        v_overlap_->data());
+            return SCCD_SUCCESS;
+        }
+
+        /** \brief The edge-edge step over the minimum-corner binning. */
+        int cell2dmin_ee_step_host_(const ptrdiff_t n_edges) {
+            sccd::cell2dmin_count_self_overlaps<2, scalar_t, smesh::idx_t>(n_edges,
+                                                                           eaabb_->data(),
+                                                                           eidx_->data(),
+                                                                           1,
+                                                                           edges_->data(),
+                                                                           e_grid_,
+                                                                           e_cellptr_.data(),
+                                                                           e_cellidx_.data(),
+                                                                           e_row_prefix_.data(),
+                                                                           e_cell_hi1_.data(),
+                                                                           ccdptr_->data());
+
+            const ptrdiff_t n_pairs = ccdptr_->data()[n_edges];
+            e0_overlap_ = smesh::create_buffer<smesh::idx_t>(n_pairs, execution_space_);
+            e1_overlap_ = smesh::create_buffer<smesh::idx_t>(n_pairs, execution_space_);
+
+            sccd::cell2dmin_fill_self_overlaps<2, scalar_t, smesh::idx_t>(n_edges,
+                                                                          eaabb_->data(),
+                                                                          eidx_->data(),
+                                                                          1,
+                                                                          edges_->data(),
+                                                                          e_grid_,
+                                                                          e_cellptr_.data(),
+                                                                          e_cellidx_.data(),
+                                                                          e_row_prefix_.data(),
+                                                                          e_cell_hi1_.data(),
+                                                                          ccdptr_->data(),
+                                                                          e0_overlap_->data(),
+                                                                          e1_overlap_->data());
             return SCCD_SUCCESS;
         }
 
@@ -770,6 +850,11 @@ namespace sccd {
             SMESH_TRACE_SCOPE("Broad_phase: E2E");
 
             const ptrdiff_t n_edges = e0_->size();
+
+            if (use_cell2d_min_) {
+                SMESH_TRACE_SCOPE("cell2dmin e2e");
+                return cell2dmin_ee_step_host_(n_edges);
+            }
 
             if (use_cell2d_) {
                 SMESH_TRACE_SCOPE("cell2d e2e");
@@ -960,6 +1045,15 @@ namespace sccd {
             }
 
             choose_strategy_(n_nodes);
+
+            if (use_cell2d_min_) {
+                // The minimum-corner edge-edge query is a host kernel so far.
+                // Saying so beats running the extent-binned one under its name,
+                // which would put a timing against a label that did not produce
+                // it.
+                SMESH_ERROR("sccd: SCCD_BROADPHASE=cell2dmin has no device implementation yet\n");
+                return SCCD_FAILURE;
+            }
 
             if (use_cell2d_) {
                 // No sorting at all on this path, as on the host: vertices and

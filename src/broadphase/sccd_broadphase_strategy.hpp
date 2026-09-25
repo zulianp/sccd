@@ -83,14 +83,24 @@
  * not one workload -- and a verdict reached on frame one should not bind frame
  * ten thousand.
  *
- * `SCCD_BROADPHASE=sweep` or `=cell2d` forces one and skips the race entirely,
- * and `broadphase_stats` is still exposed for a caller who wants to look at the
- * geometry itself.
+ * `SCCD_BROADPHASE=sweep`, `=cell2d` or `=cell2dmin` forces one and skips the
+ * race entirely, and `broadphase_stats` is still exposed for a caller who wants
+ * to look at the geometry itself.
+ *
+ * ## The third strategy is asked for, not raced
+ *
+ * `cell2dmin` is the cell list with a different edge-edge query: one entry per
+ * box at its minimum corner, walked forward in linear cell order with the cell
+ * bounds pruning it. Its face-vertex query is the same as `cell2d`'s. The race
+ * above stays between the sweep and `cell2d`, because a strategy under
+ * evaluation has to be measured *against* the shipped pair rather than mixed
+ * into them -- a third probe would also lengthen the warm-up every caller pays.
+ * It is reached by naming it, which is what the benchmark does.
  */
 
 namespace sccd {
 
-    enum class BroadPhaseStrategy : int { Auto = 0, Sweep = 1, Cell2D = 2 };
+    enum class BroadPhaseStrategy : int { Auto = 0, Sweep = 1, Cell2D = 2, Cell2DMin = 3 };
 
     /**
      * \brief Cheap shape and density statistics for the AABB set.
@@ -151,6 +161,7 @@ namespace sccd {
         if (!v) return BroadPhaseStrategy::Auto;
         if (std::strcmp(v, "sweep") == 0) return BroadPhaseStrategy::Sweep;
         if (std::strcmp(v, "cell2d") == 0) return BroadPhaseStrategy::Cell2D;
+        if (std::strcmp(v, "cell2dmin") == 0) return BroadPhaseStrategy::Cell2DMin;
         return BroadPhaseStrategy::Auto;
     }
 
@@ -267,6 +278,7 @@ namespace sccd {
         switch (s) {
             case BroadPhaseStrategy::Sweep: return "sweep";
             case BroadPhaseStrategy::Cell2D: return "cell2d";
+            case BroadPhaseStrategy::Cell2DMin: return "cell2dmin";
             case BroadPhaseStrategy::Auto: return "auto";
         }
         return "?";
