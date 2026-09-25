@@ -565,3 +565,68 @@ search there can never return a later column than the box's own cell. Asserting
 that inside the kernel over the whole test suite found no case where it did, so
 the own row now starts at `c0b + 1` and pays no search. That, with the own-cell
 guard hoisted out of the inner loop, is the `new` column above.
+
+## Face-vertex: binning the faces and querying with the vertex segment
+
+The vertex side of a face-vertex query is the one primitive whose swept volume is
+not a box but a segment: vertices move affinely, so a vertex over a step is the
+line from its position at $t=0$ to its position at $t=1$. The proposal is to
+build the cell list over the faces and query it with that segment, walking only
+the cells the line crosses.
+
+**It is complete.** A face-vertex contact needs the vertex to lie inside the
+moving triangle at some $t$, so its position at that $t$ lies in the face's swept
+box, so the segment meets the face's swept box, so some cell the segment crosses
+holds that face -- provided the faces are binned by extent, into every cell their
+projected box touches. The filter is also strictly tighter than the shipped one:
+segment-meets-box implies box-meets-box and not the reverse.
+
+**The duplicate rule has to change.** A face met along the segment may be met in
+several cells, so the overlap-corner rule of `alg:cell` does not apply. The
+analogue is: compute the parameter at which the segment enters the face's box and
+emit only from the cell holding the segment at that parameter. Same shape, still
+$O(1)$, still stateless.
+
+**Measured on the shipped data, the gain is small.** Instrumenting the host cell
+list to count both designs on the same frames (six to eight steps per scene, M1):
+
+| scene | vertex box cells | segment cells | box/seg | face box cells |
+|---|---|---|---|---|
+| cloth-ball | 2.06 | 1.86 | 1.11x | 3.95 |
+| armadillo-rollers | 1.46 | 1.41 | 1.03x | 4.25 |
+| cloth-funnel | 1.35 | 1.30 | 1.04x | 5.05 |
+
+A vertex crosses barely more than one cell, because the grid is sized to the mean
+box extent and a step moves a vertex less than that: only 25% to 65% of vertices
+leave their own cell at all. The segment is therefore hardly tighter than the box
+it replaces.
+
+Cell *visits* look dramatic and are misleading. Today a face box is walked over a
+grid sized by vertex displacement, so it covers 8.4 cells on cloth-ball and 26.4
+on armadillo-rollers, against 1.9 and 1.4 for a segment on the face grid -- 8x to
+38x fewer visits. Occupancy cancels almost all of it, because a face-sized cell
+holds around forty faces where a displacement-sized cell holds one vertex. On
+candidates actually examined, which is the work:
+
+| scene | today | faces binned, vertex box query | faces binned, vertex segment query |
+|---|---|---|---|
+| cloth-ball | 27,108,652 | 26,456,011 (1.02x) | 23,220,596 (1.17x) |
+| armadillo-rollers | 2,375,127 | 2,128,810 (1.12x) | 2,059,618 (1.15x) |
+| cloth-funnel | 2,008,912 | 2,027,987 (0.99x) | 1,887,937 (1.06x) |
+
+So 6% to 17% fewer candidate tests, against a cell array that grows from 2.1
+entries per vertex to about 4.3 entries per face over twice as many faces -- four
+times the binning work and memory. On these scenes the build cost plausibly eats
+the query gain.
+
+**Where it would win.** The whole argument turns on displacement against cell
+size. A step that moves a vertex several cells makes its box quadratically worse
+than its segment, $(d_{0}+1)(d_{1}+1)$ cells against $1 + d_{0} + d_{1}$, and the
+gain grows without bound. Our scenes do not do this; a solver taking larger steps
+would.
+
+**The measurement not yet made** is the one most likely to matter: the pairs
+*emitted*, not the candidates examined. Segment-against-box is a strictly tighter
+predicate than box-against-box, so it hands the narrow phase fewer pairs while
+staying conservative, and the narrow phase is the expensive side. The counters
+above measure the broad phase's own work only.
