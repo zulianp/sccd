@@ -174,8 +174,9 @@ namespace {
             boxdata[d].resize((size_t)cellptr[grid.ncells()]);
             cellbox[d] = boxdata[d].data();
         }
-        sccd::cell2d_fill<scalar_t, idx_t, true>(
-            second.n, second.ptr, grid, part, cellptr.data(), cellidx.data(), cursor.data(), cellbox);
+        sccd::cell2d_fill<scalar_t, idx_t>(
+            second.n, second.ptr, grid, part, cellptr.data(), cellidx.data(), cursor.data());
+        sccd::cell2d_pack_boxes<scalar_t, idx_t>(grid, second.ptr, cellptr.data(), cellidx.data(), cellbox);
 
         std::vector<ptrdiff_t> ccdptr(first.n + 1, 0);
         const bool any = sccd::cell2d_count_overlaps<first_nxe, second_nxe, scalar_t, idx_t>(first.n,
@@ -258,8 +259,9 @@ namespace {
             boxdata[d].resize((size_t)cellptr[grid.ncells()]);
             cellbox[d] = boxdata[d].data();
         }
-        sccd::cell2d_fill<scalar_t, idx_t, true>(
-            e.n, e.ptr, grid, part, cellptr.data(), cellidx.data(), cursor.data(), cellbox);
+        sccd::cell2d_fill<scalar_t, idx_t>(
+            e.n, e.ptr, grid, part, cellptr.data(), cellidx.data(), cursor.data());
+        sccd::cell2d_pack_boxes<scalar_t, idx_t>(grid, e.ptr, cellptr.data(), cellidx.data(), cellbox);
 
         std::vector<ptrdiff_t> ccdptr(e.n + 1, 0);
         const bool any = sccd::cell2d_count_self_overlaps<2, scalar_t, idx_t>(
@@ -644,8 +646,9 @@ namespace {
             boxdata[d].resize((size_t)cellptr[grid.ncells()]);
             cellbox[d] = boxdata[d].data();
         }
-        sccd::cell2d_fill<scalar_t, idx_t, true>(
-            f.n, f.ptr, grid, part, cellptr.data(), cellidx.data(), cursor.data(), cellbox);
+        sccd::cell2d_fill<scalar_t, idx_t>(
+            f.n, f.ptr, grid, part, cellptr.data(), cellidx.data(), cursor.data());
+        sccd::cell2d_pack_boxes<scalar_t, idx_t>(grid, f.ptr, cellptr.data(), cellidx.data(), cellbox);
 
         std::vector<ptrdiff_t> ccdptr(v.n + 1, 0);
         const bool any = sccd::cell2dseg_count_vf_overlaps<nxe, scalar_t, idx_t>(

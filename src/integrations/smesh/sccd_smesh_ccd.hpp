@@ -522,8 +522,12 @@ namespace sccd {
                     cellbox[d] = boxdata[d].data();
                 }
             }
-            sccd::cell2d_fill<scalar_t, smesh::idx_t, pack>(
-                n, aabb, grid, part, cellptr.data(), cellidx.data(), cursor.data(), cellbox);
+            sccd::cell2d_fill<scalar_t, smesh::idx_t>(
+                n, aabb, grid, part, cellptr.data(), cellidx.data(), cursor.data());
+            if constexpr (pack) {
+                sccd::cell2d_pack_boxes<scalar_t, smesh::idx_t>(
+                    grid, aabb, cellptr.data(), cellidx.data(), cellbox);
+            }
         }
 
 #if defined(SCCD_ENABLE_CUDA)
