@@ -197,9 +197,11 @@ distribution requires.
     and a second pass scatters each box index into each of its cells. The
     result is a CRS structure: \texttt{cellptr[c]} to \texttt{cellptr[c+1]} is
     the run of \texttt{cellidx} holding cell $c$'s boxes.
-    \textbf{(b)} The query walks the same cells the box was binned into. A pair
-    whose boxes share more than one cell is therefore met more than once, and
-    it is emitted from the cell holding the minimum corner of their overlap.}
+    \textbf{(b)} A box is binned into \emph{every} cell its extent touches, and
+    those same cells are what it reads. So when two boxes both reach more than
+    one cell in common -- two, here -- the second box's index is listed in each
+    of them, and the first box's walk meets it once per shared cell. The pair is
+    emitted from the one holding the minimum corner of their overlap.}
   \label{fig:cell2d}
 \end{figure}
 

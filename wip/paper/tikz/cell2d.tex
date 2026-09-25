@@ -90,14 +90,21 @@
   \node[lbl, text=sccdPlum, anchor=west] at (2.34,2.70) {second};
 
   % --- key in one column, so no label can run into the next ---
-  \fill[sccdAmber!45] (0.00,0.14) rectangle ++(0.22,0.16);
-  \node[lbl, anchor=west] at (0.26,0.22) {overlap of the two boxes};
+  % The two ranges come first. Without them the reader has no way to see that
+  % the second box is listed in two of the cells the first one walks, which is
+  % the whole reason the pair is met twice.
+  \fill[sccdTeal!12] (0.00,0.28) rectangle ++(0.22,0.16);
+  \draw[draw=sccdInk!30, line width=0.3pt] (0.00,0.28) rectangle ++(0.22,0.16);
+  \draw[draw=sccdPlum!55, line width=0.5pt, densely dashed] (0.26,0.28) rectangle ++(0.22,0.16);
+  \node[lbl, anchor=west] at (0.52,0.36) {the cells each box is binned into};
+  \fill[sccdAmber!45] (0.00,0.06) rectangle ++(0.22,0.16);
+  \node[lbl, anchor=west] at (0.26,0.14) {overlap of the two boxes};
   \fill[sccdInk] (0.11,-0.08) circle (1.6pt);
   \node[lbl, anchor=west] at (0.26,-0.08) {its minimum corner};
   \draw[draw=sccdInk, line width=1.0pt] (0.00,-0.38) rectangle ++(0.22,0.16);
   \node[lbl, anchor=west] at (0.26,-0.30) {the cell that emits the pair};
   \draw[draw=sccdInk!40, line width=0.7pt] (0.02,-0.60) -- (0.20,-0.44);
   \draw[draw=sccdInk!40, line width=0.7pt] (0.20,-0.60) -- (0.02,-0.44);
-  \node[lbl, anchor=west] at (0.26,-0.52) {met again here, and dropped};
+  \node[lbl, anchor=west] at (0.26,-0.52) {the pair is met here too, and dropped};
 \end{scope}
 \end{tikzpicture}
