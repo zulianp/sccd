@@ -1095,13 +1095,91 @@ namespace sccd {
     namespace detail {
 
         /**
+         * \brief Test one cell's entries against box \p fi.
+         *
+         * \tparam OWN The cell is the one \p fi is binned in. That is the only
+         * cell holding the box itself, and the only one whose entries share its
+         * linear index, so it is the only place an index decides which of two
+         * boxes reports the pair. Everywhere else the walk is strictly forward
+         * and the question does not arise, which is why this is a template
+         * parameter: the forward scan carries no index test at all.
+         */
+        template <int NXE, bool SORTED, bool OWN, typename T, typename I, typename Visit>
+        static inline void scan_self_cell(T** const SCCD_RESTRICT aabbs,
+                                          const ptrdiff_t fi,
+                                          I* const SCCD_RESTRICT idx,
+                                          I** const SCCD_RESTRICT elements,
+                                          const ptrdiff_t element_stride,
+                                          const I (&ev)[NXE],
+                                          const I* const SCCD_RESTRICT cellidx,
+                                          const T* const SCCD_RESTRICT cell_key,
+                                          const ptrdiff_t begin,
+                                          const ptrdiff_t end,
+                                          const T aminx,
+                                          const T aminy,
+                                          const T aminz,
+                                          const T amaxx,
+                                          const T amaxy,
+                                          const T amaxz,
+                                          const T amax2,
+                                          Visit&& visit) {
+            (void)fi;
+            (void)cell_key;
+            (void)amax2;
+
+            for (ptrdiff_t k = begin; k < end; ++k) {
+                if constexpr (SORTED) {
+                    // Sorted ascending, so nothing after this one begins any
+                    // earlier either.
+                    if (cell_key[k] > amax2) {
+                        break;
+                    }
+                }
+
+                const ptrdiff_t j = (ptrdiff_t)cellidx[k];
+                if constexpr (OWN) {
+                    if (j <= fi) {
+                        continue;
+                    }
+                }
+
+                if (sccd::disjoint<T>(aminx,
+                                      aminy,
+                                      aminz,
+                                      amaxx,
+                                      amaxy,
+                                      amaxz,
+                                      aabbs[0][j],
+                                      aabbs[1][j],
+                                      aabbs[2][j],
+                                      aabbs[3][j],
+                                      aabbs[4][j],
+                                      aabbs[5][j])) {
+                    continue;
+                }
+
+                const I jidx = idx[j];
+                I sev[NXE];
+                for (int v = 0; v < NXE; ++v) {
+                    sev[v] = elements[v][jidx * element_stride];
+                }
+                if (sccd::detail::shares_vertex<NXE, NXE>(ev, sev)) {
+                    continue;
+                }
+
+                visit(j, jidx);
+            }
+        }
+
+        /**
          * \brief Walk forward in linear cell order, reporting each partner once.
          *
          * A box sits in the one cell holding its minimum corner, so a partner is
          * met at most once and nothing has to be deduplicated across cells. The
-         * pair is emitted by whichever of the two boxes comes first in row-major
-         * order, with the index deciding inside one cell -- and that is the only
-         * index test here.
+         * box's own cell is read first, where the index says which of two boxes
+         * sharing it reports the pair. The walk then goes forward and never looks
+         * back, so no cell it reads can hold this box and no cell needs an index
+         * test.
          *
          * The walk spans the rows the box covers, and within a row the columns
          * from the first one holding anything that reaches back to the box, found
@@ -1147,12 +1225,39 @@ namespace sccd {
             const int c1b = grid.clamp1(amin1), c1e = grid.clamp1(aabbs[3 + grid.axis1][fi]);
             const ptrdiff_t own = grid.cell_of(c0b, c1b);
 
+            // The box's own cell, first and on its own. Both cell bounds hold
+            // this box's own maximum, so neither can rule the cell out and
+            // neither is worth loading.
+            scan_self_cell<NXE, SORTED, true, T, I>(aabbs,
+                                                    fi,
+                                                    idx,
+                                                    elements,
+                                                    element_stride,
+                                                    ev,
+                                                    cellidx,
+                                                    cell_key,
+                                                    cellptr[own],
+                                                    cellptr[own + 1],
+                                                    aminx,
+                                                    aminy,
+                                                    aminz,
+                                                    amaxx,
+                                                    amaxy,
+                                                    amaxz,
+                                                    amax2,
+                                                    visit);
+
             for (int c1 = c1b; c1 <= c1e; ++c1) {
                 const ptrdiff_t row = (ptrdiff_t)c1 * grid.n0;
-                const T* const pre = row_prefix + row;
-                int c0 = (int)(std::lower_bound(pre, pre + c0e + 1, amin0) - pre);
+                int c0;
                 if (c1 == c1b) {
-                    c0 = sccd::max<int>(c0, c0b);
+                    // This box's own maximum is in its row's prefix at column
+                    // c0b, so a search here can never return a later column than
+                    // the cell just read. Start after it.
+                    c0 = c0b + 1;
+                } else {
+                    const T* const pre = row_prefix + row;
+                    c0 = (int)(std::lower_bound(pre, pre + c0e + 1, amin0) - pre);
                 }
 
                 for (; c0 <= c0e; ++c0) {
@@ -1166,49 +1271,24 @@ namespace sccd {
                         }
                     }
 
-                    const ptrdiff_t begin = cellptr[cell];
-                    const ptrdiff_t end = cellptr[cell + 1];
-
-                    for (ptrdiff_t k = begin; k < end; ++k) {
-                        if constexpr (SORTED) {
-                            // Sorted ascending, so nothing after this one begins
-                            // any earlier either.
-                            if (cell_key[k] > amax2) {
-                                break;
-                            }
-                        }
-
-                        const ptrdiff_t j = (ptrdiff_t)cellidx[k];
-                        if (cell == own && j <= fi) {
-                            continue;
-                        }
-
-                        if (sccd::disjoint<T>(aminx,
-                                              aminy,
-                                              aminz,
-                                              amaxx,
-                                              amaxy,
-                                              amaxz,
-                                              aabbs[0][j],
-                                              aabbs[1][j],
-                                              aabbs[2][j],
-                                              aabbs[3][j],
-                                              aabbs[4][j],
-                                              aabbs[5][j])) {
-                            continue;
-                        }
-
-                        const I jidx = idx[j];
-                        I sev[NXE];
-                        for (int v = 0; v < NXE; ++v) {
-                            sev[v] = elements[v][jidx * element_stride];
-                        }
-                        if (sccd::detail::shares_vertex<NXE, NXE>(ev, sev)) {
-                            continue;
-                        }
-
-                        visit(j, jidx);
-                    }
+                    scan_self_cell<NXE, SORTED, false, T, I>(aabbs,
+                                                             fi,
+                                                             idx,
+                                                             elements,
+                                                             element_stride,
+                                                             ev,
+                                                             cellidx,
+                                                             cell_key,
+                                                             cellptr[cell],
+                                                             cellptr[cell + 1],
+                                                             aminx,
+                                                             aminy,
+                                                             aminz,
+                                                             amaxx,
+                                                             amaxy,
+                                                             amaxz,
+                                                             amax2,
+                                                             visit);
                 }
             }
         }
