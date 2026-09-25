@@ -517,3 +517,51 @@ can defeat. Neither the parallel binning nor the device port has been thought
 through. What the probe establishes is that the idea is complete and that the
 cost objection recorded here twice does not hold; it does not establish a
 speed-up on a real scene.
+
+## The per-row search earns its place, and the own-row search never did
+
+Two questions about the edge-edge walk, both settled by measurement rather than
+argument: what the per-row binary search buys, and whether the walk can be held
+to the querying box's own footprint.
+
+**The footprint bound is incomplete, and the loss is large.** Holding the shipped
+kernel to `c0 = c0b` on later rows drops pairs on 10 of 13 self cases in
+`sccd_broadphase_cell2d_test`: 3,698 of 23,756 on "many cells", 882 of 6,971 on
+a heavy-tailed spread, 7,460 of 113,500 on "dense". Two overlapping boxes can be
+incomparable -- one binned a column to the right and a row below the other -- so
+each footprint covers one of the other's coordinates and misses the other.
+`tikz/incomparable.tex` draws the case to scale.
+
+**The search removes about 25 column visits for every one it leaves.**
+Instrumenting the kernel with counters and running six real cloth-ball cases on
+an M1:
+
+```
+boxes=1,388,250  rows/box=1.99  multirow=80.2%  searches=0.99/box
+cols_skipped=103,667,394  cols_visited=4,288,912  ratio=24.2  cells_read=5,568,886
+```
+
+A cloth-ball edge box spans almost exactly two rows, so nearly every box runs one
+search, and each jumps 75 columns to leave 3.
+
+**In time, removing it costs 3x to 7x.** One Grace at 72 threads, mode 2,
+edge-edge queries only, `broad_ms` summed over the cases; `old` is the guard
+inside the inner loop, `new` is the own cell read first, `nosearch` is `new` with
+the per-row search replaced by a scan from column 0.
+
+| scene | strategy | cases | old | new | nosearch | new/old | new/nosearch |
+|---|---|---|---|---|---|---|---|
+| cloth-ball | Cell2DMin | 86 | 822.1 ms | 782.8 ms | 2,336.3 ms | 1.050x | 2.98x |
+| cloth-ball | Cell2DMinSort | 86 | 601.8 ms | 603.9 ms | 1,166.7 ms | 0.997x | 1.93x |
+| rod-twist | Cell2DMin | 218 | 1,474.6 ms | 1,359.0 ms | 9,368.8 ms | 1.085x | 6.89x |
+| rod-twist | Cell2DMinSort | 218 | 1,296.3 ms | 1,158.0 ms | 4,832.1 ms | 1.119x | 4.17x |
+
+Per frame, the maxima move the same way: cloth-ball Cell2DMin 16.500 ms, 15.496
+ms and 46.432 ms; rod-twist Cell2DMin 11.007 ms, 10.416 ms and 61.180 ms.
+
+**The own-row search, by contrast, could never fire.** The row's prefix maximum
+at column `c0b` includes the querying box's own maximum on that axis, so the
+search there can never return a later column than the box's own cell. Asserting
+that inside the kernel over the whole test suite found no case where it did, so
+the own row now starts at `c0b + 1` and pays no search. That, with the own-cell
+guard hoisted out of the inner loop, is the `new` column above.
