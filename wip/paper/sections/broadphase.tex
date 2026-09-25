@@ -326,8 +326,8 @@ match. A second bound per cell does the same on the other axis.
     the next column. A skipped span costs one binary search and not a test per
     cell.
     \textbf{(c)} $d$ covers cells $3$, $4$, $9$, $10$, $15$ and $16$, reads the
-    first four and finds $e$. Its third row is
-    skipped whole, cells $15$ and $16$ included although $d$ covers them: the
+    first four and finds $e$. Its third row is skipped whole, the empty cells
+    $15$ and $16$ included although $d$ covers them: the
     only box binned in that row is $f$, which ends well to the left of where $d$
     begins, so one search puts the row past $d$'s own maximum column and it is
     never entered. Past its own row the walk also reaches left of its own
