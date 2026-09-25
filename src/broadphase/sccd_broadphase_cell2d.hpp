@@ -1465,6 +1465,7 @@ namespace sccd {
                                           const ptrdiff_t element_stride,
                                           const I (&ev)[NXE],
                                           const I* const SCCD_RESTRICT cellidx,
+                                          T** const SCCD_RESTRICT cellbox,
                                           const T* const SCCD_RESTRICT cell_key,
                                           const ptrdiff_t begin,
                                           const ptrdiff_t end,
@@ -1480,47 +1481,58 @@ namespace sccd {
             (void)cell_key;
             (void)amax2;
 
-            for (ptrdiff_t k = begin; k < end; ++k) {
+            for (ptrdiff_t base = begin; base < end; base += SCCD_AABB_DISJOINT_CHUNK_SIZE) {
                 if constexpr (SORTED) {
-                    // Sorted ascending, so nothing after this one begins any
-                    // earlier either.
-                    if (cell_key[k] > amax2) {
+                    // Sorted ascending, so once a chunk starts past this box
+                    // every later chunk does too.
+                    if (cell_key[base] > amax2) {
                         break;
                     }
                 }
 
-                const ptrdiff_t j = (ptrdiff_t)cellidx[k];
-                if constexpr (OWN) {
-                    if (j <= fi) {
+                const int lanes = (int)sccd::min<ptrdiff_t>(SCCD_AABB_DISJOINT_CHUNK_SIZE, end - base);
+                uint32_t bits = sccd::vaabb_overlap_one_to_many_bits<T>(aminx,
+                                                                       aminy,
+                                                                       aminz,
+                                                                       amaxx,
+                                                                       amaxy,
+                                                                       amaxz,
+                                                                       cellbox[0] + base,
+                                                                       cellbox[1] + base,
+                                                                       cellbox[2] + base,
+                                                                       cellbox[3] + base,
+                                                                       cellbox[4] + base,
+                                                                       cellbox[5] + base,
+                                                                       lanes);
+
+                while (bits) {
+                    const ptrdiff_t k = base + sccd::ctz32(bits);
+                    bits &= bits - 1;
+
+                    if constexpr (SORTED) {
+                        if (cell_key[k] > amax2) {
+                            break;
+                        }
+                    }
+
+                    const ptrdiff_t j = (ptrdiff_t)cellidx[k];
+                    if constexpr (OWN) {
+                        if (j <= fi) {
+                            continue;
+                        }
+                    }
+
+                    const I jidx = idx[j];
+                    I sev[NXE];
+                    for (int v = 0; v < NXE; ++v) {
+                        sev[v] = elements[v][jidx * element_stride];
+                    }
+                    if (sccd::detail::shares_vertex<NXE, NXE>(ev, sev)) {
                         continue;
                     }
-                }
 
-                if (sccd::disjoint<T>(aminx,
-                                      aminy,
-                                      aminz,
-                                      amaxx,
-                                      amaxy,
-                                      amaxz,
-                                      aabbs[0][j],
-                                      aabbs[1][j],
-                                      aabbs[2][j],
-                                      aabbs[3][j],
-                                      aabbs[4][j],
-                                      aabbs[5][j])) {
-                    continue;
+                    visit(j, jidx);
                 }
-
-                const I jidx = idx[j];
-                I sev[NXE];
-                for (int v = 0; v < NXE; ++v) {
-                    sev[v] = elements[v][jidx * element_stride];
-                }
-                if (sccd::detail::shares_vertex<NXE, NXE>(ev, sev)) {
-                    continue;
-                }
-
-                visit(j, jidx);
             }
         }
 
@@ -1558,6 +1570,7 @@ namespace sccd {
                                                          const Cell2DGrid<T>& grid,
                                                          const ptrdiff_t* const SCCD_RESTRICT cellptr,
                                                          const I* const SCCD_RESTRICT cellidx,
+                                                         T** const SCCD_RESTRICT cellbox,
                                                          const T* const SCCD_RESTRICT row_prefix,
                                                          const T* const SCCD_RESTRICT cell_hi1,
                                                          const T* const SCCD_RESTRICT cell_key,
@@ -1588,6 +1601,7 @@ namespace sccd {
                                                     element_stride,
                                                     ev,
                                                     cellidx,
+                                                    cellbox,
                                                     cell_key,
                                                     cellptr[own],
                                                     cellptr[own + 1],
@@ -1631,6 +1645,7 @@ namespace sccd {
                                                              element_stride,
                                                              ev,
                                                              cellidx,
+                                                             cellbox,
                                                              cell_key,
                                                              cellptr[cell],
                                                              cellptr[cell + 1],
@@ -1665,6 +1680,7 @@ namespace sccd {
                                        const Cell2DGrid<T>& grid,
                                        const ptrdiff_t* const SCCD_RESTRICT cellptr,
                                        const I* const SCCD_RESTRICT cellidx,
+                                       T** const SCCD_RESTRICT cellbox,
                                        const T* const SCCD_RESTRICT row_prefix,
                                        const T* const SCCD_RESTRICT cell_hi1,
                                        const T* const SCCD_RESTRICT cell_key,
@@ -1685,7 +1701,7 @@ namespace sccd {
 
                 ptrdiff_t count = 0;
                 detail::for_each_forward_self_partner<nxe, sorted, T, I>(
-                    aabbs, fi, idx, elements, element_stride, ev, grid, cellptr, cellidx, row_prefix,
+                    aabbs, fi, idx, elements, element_stride, ev, grid, cellptr, cellidx, cellbox, row_prefix,
                     cell_hi1, cell_key, cell_hi2, [&](const ptrdiff_t, const I) { ++count; });
                 ccdptr[fi + 1] = count;
             }
@@ -1705,6 +1721,7 @@ namespace sccd {
                                       const Cell2DGrid<T>& grid,
                                       const ptrdiff_t* const SCCD_RESTRICT cellptr,
                                       const I* const SCCD_RESTRICT cellidx,
+                                      T** const SCCD_RESTRICT cellbox,
                                       const T* const SCCD_RESTRICT row_prefix,
                                       const T* const SCCD_RESTRICT cell_hi1,
                                       const T* const SCCD_RESTRICT cell_key,
@@ -1722,7 +1739,7 @@ namespace sccd {
 
                 ptrdiff_t at = ccdptr[fi];
                 detail::for_each_forward_self_partner<nxe, sorted, T, I>(
-                    aabbs, fi, idx, elements, element_stride, ev, grid, cellptr, cellidx, row_prefix,
+                    aabbs, fi, idx, elements, element_stride, ev, grid, cellptr, cellidx, cellbox, row_prefix,
                     cell_hi1, cell_key, cell_hi2, [&](const ptrdiff_t, const I jidx) {
                         first_out[at] = sccd::min<I>(idxi, jidx);
                         second_out[at] = sccd::max<I>(idxi, jidx);
