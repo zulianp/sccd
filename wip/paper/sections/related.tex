@@ -32,7 +32,12 @@ the simulation. Published heuristics tie the cell to the average edge length and
 the average displacement, which is a reasonable prior and not a guarantee.
 \Cref{sec:bp:cell} takes a different route: it derives the cell from the swept
 boxes themselves and caps the cell count relative to the element count, so no
-value is left for a user to choose.
+value is left for a user to choose. For one list against itself these methods
+also have to suppress the pairs a box meets in more than one cell, whether by a
+rule on the cell or by a pass over the output. \Cref{sec:bp:self} instead gives a
+box one cell and reads forward from it, the arrangement linked-cell neighbour
+search uses~\citep{allen2017liquids}, which needs the cells to carry an order
+and a bound rather than the pairs to carry a test.
 
 \emph{Hierarchies} of bounding volumes, KD-trees and interval
 trees~\citep{serpa2019kdtree,serpa2020broadmark,zomorodian2000boxes} prune

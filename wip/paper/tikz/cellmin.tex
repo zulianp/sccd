@@ -1,0 +1,109 @@
+% The edge-edge binning: (a) why the cell order has to be total, (b) the bounds
+% that keep the forward walk near the box's own footprint.
+%
+% No prose inside the drawing. What the panels mean belongs in the caption,
+% where it can be read at caption size and does not compete with the marks.
+%
+% Grids are drawn line by line rather than with TikZ's `grid`, which places its
+% lines at multiples of the step measured from the origin and not from the
+% corner of the rectangle given to it.
+\begin{tikzpicture}[
+  font=\scriptsize,
+  >={Stealth[length=1.6mm]},
+  lbl/.style={font=\scriptsize, text=sccdInk, inner sep=1.5pt},
+  tiny/.style={font=\tiny, text=sccdInk, inner sep=1pt},
+  ttl/.style={font=\scriptsize\bfseries, text=sccdInk, inner sep=0pt},
+  slot/.style={draw=sccdInk!45, line width=0.3pt, minimum width=5.5mm,
+               minimum height=3.4mm, inner sep=0pt, font=\tiny, text=sccdInk},
+]
+
+% ====================== (a) the order has to be total ========================
+% A 3x3 grid of 0.75, numbered row-major. The teal box is binned in cell 3, the
+% plum box in cell 1 -- one column right and one row below -- so neither one's
+% cell falls in the other's footprint.
+\begin{scope}
+  \node[ttl, anchor=south west] at (0,2.42) {(a) a partial order loses pairs};
+
+  \fill[sccdTeal!14] (0,0.75) rectangle (1.50,2.25);
+  \fill[sccdPlum!14] (0.75,0) rectangle (2.25,1.50);
+
+  \foreach \x in {0,0.75,1.50,2.25}
+    \draw[draw=sccdInk!30, line width=0.3pt] (\x,0) -- (\x,2.25);
+  \foreach \y in {0,0.75,1.50,2.25}
+    \draw[draw=sccdInk!30, line width=0.3pt] (0,\y) -- (2.25,\y);
+  \draw[draw=sccdInk!45, line width=0.4pt] (0,0) rectangle (2.25,2.25);
+
+  \fill[sccdAmber!55] (0.90,1.12) rectangle (1.12,1.35);
+  \draw[draw=sccdTeal, line width=0.9pt] (0.38,1.12) rectangle (1.12,1.86);
+  \draw[draw=sccdPlum, line width=0.9pt] (0.90,0.60) rectangle (1.64,1.35);
+  \fill[sccdTeal] (0.38,1.12) circle (1.6pt);
+  \fill[sccdPlum] (0.90,0.60) circle (1.6pt);
+
+  % Numbering last, so no box can hide a cell's number.
+  \foreach \c/\cx/\cy in {0/0.04/0.04, 1/0.79/0.04, 2/1.54/0.04,
+                          3/0.04/0.79, 4/0.79/0.79, 5/1.54/0.79,
+                          6/0.04/1.54, 7/0.79/1.54, 8/1.54/1.54}
+    \node[tiny, text=sccdInk!60, anchor=south west, fill=white,
+          inner sep=0.5pt] at (\cx,\cy) {\c};
+
+  \node[lbl, text=sccdTeal, anchor=east] at (0.34,1.98) {first};
+  \node[lbl, text=sccdPlum, anchor=west] at (1.68,0.72) {second};
+
+  % --- key in one column, so no label can run into the next ---
+  \fill[sccdTeal!14] (0.00,-0.38) rectangle ++(0.22,0.16);
+  \draw[draw=sccdInk!30, line width=0.3pt] (0.00,-0.38) rectangle ++(0.22,0.16);
+  \fill[sccdPlum!14] (0.26,-0.38) rectangle ++(0.22,0.16);
+  \draw[draw=sccdInk!30, line width=0.3pt] (0.26,-0.38) rectangle ++(0.22,0.16);
+  \node[lbl, anchor=west] at (0.52,-0.30) {the footprint each box would read};
+  \fill[sccdAmber!55] (0.00,-0.60) rectangle ++(0.22,0.16);
+  \node[lbl, anchor=west] at (0.26,-0.52) {overlap of the two boxes};
+  \fill[sccdInk] (0.11,-0.74) circle (1.6pt);
+  \node[lbl, anchor=west] at (0.26,-0.74) {the corner each is binned at};
+\end{scope}
+
+% ========================= (b) the bounded walk ==============================
+% A 6x4 grid of 0.55. The box's minimum is in column 1 row 1, its maximum in
+% column 2 row 2, so the walk covers rows 1-2 and stops after column 2. On row 2
+% the running maximum starts the scan at column 0; on row 1 it starts at the
+% box's own column.
+\begin{scope}[xshift=56mm]
+  \node[ttl, anchor=south west] at (0,2.42) {(b) the walk, and what bounds it};
+
+  \fill[sccdTeal!14] (0.55,0.55) rectangle (1.65,1.10);
+  \fill[sccdTeal!14] (0.00,1.10) rectangle (1.65,1.65);
+  \fill[sccdInk!6]   (1.65,0.55) rectangle (3.30,1.65);
+
+  \foreach \x in {0,0.55,1.10,1.65,2.20,2.75,3.30}
+    \draw[draw=sccdInk!30, line width=0.3pt] (\x,0) -- (\x,2.20);
+  \foreach \y in {0,0.55,1.10,1.65,2.20}
+    \draw[draw=sccdInk!30, line width=0.3pt] (0,\y) -- (3.30,\y);
+  \draw[draw=sccdInk!45, line width=0.4pt] (0,0) rectangle (3.30,2.20);
+
+  \draw[draw=sccdTeal, line width=0.9pt] (0.72,0.72) rectangle (1.52,1.52);
+  \fill[sccdTeal] (0.72,0.72) circle (1.6pt);
+  \node[lbl, text=sccdTeal, anchor=south] at (1.12,1.56) {query};
+
+  % Read, then dropped on the bound the cell carries for the other axis.
+  \draw[draw=sccdInk!50, line width=0.9pt] (0.14,1.24) -- (0.41,1.51);
+  \draw[draw=sccdInk!50, line width=0.9pt] (0.41,1.24) -- (0.14,1.51);
+
+  % The running maximum along row 2, column-aligned with the grid above it. The
+  % first slot carries the heavier border: it is where the search starts.
+  \foreach \i/\v in {0/$\mu_0$, 1/$\mu_1$, 2/$\mu_2$, 3/$\mu_3$, 4/$\mu_4$, 5/$\mu_5$}
+    \node[slot, anchor=south west] at ({\i*0.55},-0.52) {\v};
+  \draw[draw=sccdInk, line width=1.0pt] (0,-0.52) rectangle (0.55,-0.18);
+
+  % --- key in one column, so no label can run into the next ---
+  \fill[sccdTeal!14] (0.00,-0.94) rectangle ++(0.22,0.16);
+  \draw[draw=sccdInk!30, line width=0.3pt] (0.00,-0.94) rectangle ++(0.22,0.16);
+  \node[lbl, anchor=west] at (0.26,-0.86) {the cells the walk reads};
+  \fill[sccdInk!6] (0.00,-1.16) rectangle ++(0.22,0.16);
+  \draw[draw=sccdInk!30, line width=0.3pt] (0.00,-1.16) rectangle ++(0.22,0.16);
+  \node[lbl, anchor=west] at (0.26,-1.08) {past the box's own maximum corner};
+  \draw[draw=sccdInk!50, line width=0.9pt] (0.02,-1.38) -- (0.20,-1.22);
+  \draw[draw=sccdInk!50, line width=0.9pt] (0.20,-1.38) -- (0.02,-1.22);
+  \node[lbl, anchor=west] at (0.26,-1.30) {read, then dropped on the cell's other bound};
+  \draw[draw=sccdInk, line width=1.0pt] (0.00,-1.60) rectangle ++(0.22,0.16);
+  \node[lbl, anchor=west] at (0.26,-1.52) {where the running maximum starts the row};
+\end{scope}
+\end{tikzpicture}

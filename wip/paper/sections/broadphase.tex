@@ -9,10 +9,12 @@ conservative, because a pair it discards is never examined again. On the scenes
 in our benchmark it is also the larger share of the host runtime, so it must be
 fast.
 
-Two algorithms serve it here, and they are not alternatives in the usual sense.
-They emit the same pairs, so nothing about the answer depends on which one runs.
-The interesting question is therefore purely economic, and its answer turns out
-not to be a property of the geometry at all.
+Three algorithms serve it here, and they are not alternatives in the usual
+sense. They emit the same pairs, so nothing about the answer depends on which one
+runs. The interesting question is therefore purely economic, and its answer turns
+out not to be a property of the geometry at all. Two of them take a pair of
+lists; the third (\cref{sec:bp:self}) takes one list against itself, which is what
+edge-edge asks for.
 
 \subsection{Swept boxes, and the shape of the output}
 \label{sec:bp:common}
@@ -237,16 +239,116 @@ spacing, so it is $O(1)$ in the mean and larger for the few boxes that are
 larger: a box pays for its own size and for no other box's.
 \Cref{sec:results:scaling} measures the exponents both achieve in practice.
 
+\subsection{The edge-edge query}
+\label{sec:bp:self}
+
+Edge-edge is one list against itself, and that admits a cheaper binning. A box
+enters the \emph{single} cell holding its minimum corner rather than every cell
+its extent touches, so the cell array holds one entry per box, a partner is met
+at most once, and the duplicate rule of \cref{alg:cell} is not needed. Reading
+only the cells that come after a box's own is how linked-cell neighbour search
+avoids handling a pair twice, a cell visiting half its
+neighbours~\citep{allen2017liquids}. It is sound there because a particle is a
+point binned by its centre in a cell at least the interaction radius wide, and
+extended boxes binned at a corner are neither.
+
+The obvious reading of "after" fails. If a box reads the cells of its own
+footprint, its columns crossed with its rows, the pair is found only when one
+box's cell lies in the other's footprint, and \cref{fig:cellmin}(a) shows an
+overlapping pair for which neither does. Componentwise order on cells is
+\emph{partial}, and the incomparable pairs are exactly the ones lost.
+
+Row-major linear index $L(c_{0},c_{1}) = c_{1}n_{0} + c_{0}$ is \emph{total}, and
+over it the walk is complete. For an overlapping pair $j$'s minimum does not pass
+$i$'s maximum on either grid axis, so $L(\operatorname{cell}(j.\min)) \le
+L(\operatorname{cell}(i.\max))$: the row term settles it when the rows differ and
+the column does when they agree. Whichever box has the smaller $L$ therefore
+holds the other in its range, and equal $L$ means one cell, where the index
+decides --- the only index test in \cref{alg:cellmin}.
+
+Read literally that range is whole rows, which is what the bounds are for. Each
+cell carries the largest upper bound of the boxes in it and each row a prefix
+maximum of those, so a binary search gives the first column holding anything that
+reaches back to the querying box and the columns before it are skipped at once
+(\cref{fig:cellmin}(b)). That is the running maximum of \cref{sec:bp:sweep}
+applied per row of cells, and it is what lets the binning stand without a bound
+on how many cells a box may span; a grid that stores a box only at its lower-left
+cell otherwise caps the box at $k$ cells and widens every query window by $k$ to
+match. A second bound per cell does the same on the other axis.
+
+\begin{algorithm}[htbp]
+\caption{Edge-edge cell list, one pass (count or fill)}
+\label{alg:cellmin}
+\begin{algorithmic}[1]
+\Function{SelfCellList}{$A$}
+  \State grid and cell size as in \cref{alg:cell}; bin each $A_{i}$ into
+         $\operatorname{cell}(A_{i}.\min)$ alone
+  \State $u_{c} \gets \max\{A_{j}.\max_{a_{1}} : j \in c\}$;\quad
+         $\mu_{c} \gets \max_{c' \le c \text{ in row}(c)} \max\{A_{j}.\max_{a_{0}} : j \in c'\}$
+    \Comment{per cell, and its running maximum along the row}
+  \ForAll{$i$ \textbf{in parallel}}
+    \State $(c_{0}^{b},c_{1}^{b}) \gets \operatorname{cell}(A_{i}.\min)$;\quad
+           $(c_{0}^{e},c_{1}^{e}) \gets \operatorname{cell}(A_{i}.\max)$
+    \For{$c_{1} \gets c_{1}^{b}$ \textbf{to} $c_{1}^{e}$}
+      \State $c_{0} \gets$ \Call{LowerBound}{$\mu$ on row $c_{1}$, $A_{i}.\min_{a_{0}}$}
+        \Comment{columns before it reach nothing}
+      \State \textbf{if} $c_{1} = c_{1}^{b}$ \textbf{then} $c_{0} \gets \max(c_{0}, c_{0}^{b})$
+      \For{$c_{0}$ \textbf{to} $c_{0}^{e}$, cell $c$, and $j$ listed in $c$}
+        \If{$u_{c} < A_{i}.\min_{a_{1}}$} \textbf{continue} \Comment{whole cell}
+        \EndIf
+        \If{$c = \operatorname{cell}(A_{i}.\min)$ \textbf{and} $j \le i$} \textbf{continue}
+          \Comment{one cell, so the index decides}
+        \EndIf
+        \If{$A_{i}$ and $A_{j}$ are disjoint in 3D, or share a vertex} \textbf{continue} \EndIf
+        \State count, or emit the pair
+      \EndFor
+    \EndFor
+  \EndFor
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\begin{figure}[htbp]
+  \centering
+  \input{tikz/cellmin}
+  \caption{The edge-edge binning, schematically and not to scale.
+    \textbf{(a)} Each box occupies the one cell holding its minimum corner, and
+    the cells are numbered in row-major order. Reading a box's own footprint ---
+    its columns crossed with its rows, shaded --- finds a pair only when one
+    box's cell falls inside the other's footprint. Here neither does: the second
+    box is binned one column to the right of the first and one row below it, so
+    the first reads cells $3,4,6,7$ and the second $1,2,4,5$, and neither set
+    holds the other's cell. Reading forward in the numbering does find the pair,
+    because the second box is binned in the lower-numbered cell and the range it
+    reads, cells $1$ to $5$, contains the first box's cell $3$.
+    \textbf{(b)} The walk spans the rows the box covers and, in each, the columns
+    up to the one holding its own maximum corner. A partner's minimum cannot lie
+    past that. The row of slots beneath is the running maximum along the row of
+    the largest upper bound each cell holds; a binary search on it gives the
+    first column that reaches back to the box, and the columns before it are
+    skipped without being read. A second bound per cell does the same on the
+    other axis, ruling out the crossed cell.}
+  \label{fig:cellmin}
+\end{figure}
+
+Cost follows the same two terms as \cref{alg:cell}, with the binning reduced to
+one incidence per box and the query to whatever the bounds leave;
+\cref{sec:results:bp} measures both. Ordering each cell's entries on the axis the
+grid does not use would make the scan inside a cell monotone as well --- a grid
+and sweep-and-prune hybrid of the kind \citet{serpa2020broadmark} evaluates. It
+culls where cells are densely occupied and pays an ordering pass everywhere, and
+on our scenes the two roughly cancel, so the cells are left unordered.
+
 \subsection{Which one to run}
 \label{sec:bp:choose}
 
-The choice between the two is not a question of accuracy. That much we can state
+The choice among them is not a question of accuracy. That much we can state
 exactly, with no measurement.
 
 \begin{proposition}[Agreement]
 \label{prop:agree}
-On the same box set, \cref{alg:sweep} and \cref{alg:cell} emit the same set of
-candidate pairs.
+On the same box set, \cref{alg:sweep}, \cref{alg:cell} and, for one list against
+itself, \cref{alg:cellmin} emit the same set of candidate pairs.
 \end{proposition}
 
 \begin{proof}
@@ -266,7 +368,14 @@ In \cref{alg:cell} let $o$ be the componentwise minimum corner of the two
 boxes' overlap on the two grid axes. Since $o$ lies in both boxes, both are
 binned into $\operatorname{cell}(o)$, so the pair is examined there; and line 9
 emits it only from $\operatorname{cell}(o)$, which is one cell. So it is
-emitted exactly once, from a cell that does examine it. \end{proof}
+emitted exactly once, from a cell that does examine it.
+
+In \cref{alg:cellmin} each box lies in one cell, so a pair is examined at most
+once from each side, and the guard on line 10 keeps the side with the smaller
+$L$. It is examined there by the argument of \cref{sec:bp:self}:
+$L(\operatorname{cell}(j.\min))$ lies in the range that box walks, and the two
+bounds skip only cells whose contents cannot reach the querying box.
+\end{proof}
 
 \Cref{prop:agree} makes the two interchangeable. We also check it empirically,
 the two reporting identical candidate counts over $25{,}538$ case-and-mode
