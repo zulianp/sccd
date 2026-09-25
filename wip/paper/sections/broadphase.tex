@@ -281,7 +281,7 @@ match. A second bound per cell does the same on the other axis.
 \caption{Edge-edge cell list, one pass (count or fill)}
 \label{alg:cellmin}
 \begin{algorithmic}[1]
-\Function{SelfCellList}{$A$}
+\Function{EdgeToEdgeBroadPhase}{$A$}
   \State grid and cell size as in \cref{alg:cell}; bin each $A_{i}$ into
          $\operatorname{cell}(A_{i}.\min)$ alone
   \State $u_{c} \gets \max\{A_{j}.\max_{a_{1}} : j \in c\}$
