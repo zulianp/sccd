@@ -102,11 +102,15 @@
   \fill[sccdInk!6] (3.10,0) rectangle (3.72,1.86);
   \scenegrid
 
-  \foreach \c in {0,1,2,3,4} {
+  % The running maximum starts the second row at column 3 and puts the third row
+  % past column 4 altogether, so it skips three cells on one and five on the
+  % other. Both are marked, or the reader is left to wonder why one row shows
+  % what the other does not.
+  \foreach \c/\y in {0/0.81, 1/0.81, 2/0.81, 0/1.43, 1/1.43, 2/1.43, 3/1.43, 4/1.43} {
     \draw[draw=sccdInk!45, line width=0.7pt]
-      ({\c*0.62+0.19},1.43) -- ({\c*0.62+0.43},1.67);
+      ({\c*0.62+0.19},\y) -- ({\c*0.62+0.43},{\y+0.24});
     \draw[draw=sccdInk!45, line width=0.7pt]
-      ({\c*0.62+0.43},1.43) -- ({\c*0.62+0.19},1.67);}
+      ({\c*0.62+0.43},\y) -- ({\c*0.62+0.19},{\y+0.24});}
   \sceneidle
 
   \draw[found] (2.40,1.10) rectangle (3.10,1.70);

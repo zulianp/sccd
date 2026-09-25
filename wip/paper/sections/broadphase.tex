@@ -323,10 +323,12 @@ match. A second bound per cell does the same on the other axis.
     corner lies, and finds both $b$ and $c$. On the second row the running
     maximum starts the scan at the second column: cell $6$ is empty, so nothing
     there can reach back to $a$, and it is skipped without being read.
-    \textbf{(c)} $d$ walks cells $3$ to $16$ and finds $e$. Its third row is
-    skipped whole: the only box binned there is $f$, which ends well to the left
-    of where $d$ begins, so the running maximum returns a column past $d$'s own
-    and the row is never entered.
+    \textbf{(c)} $d$ walks cells $3$ to $16$ and finds $e$. Past its own row the
+    walk is free to look left, because a box binned in a lower column can still
+    reach right, and it is the running maximum that says none here does: on the
+    second row it starts the scan at column $3$, and on the third it returns a
+    column past $d$'s own maximum, so that row is never entered at all. The only
+    box binned in it is $f$, which ends well to the left of where $d$ begins.
     \textbf{(d)} $f$ walks cells $12$ to $19$ and finds $g$, again skipping one
     empty cell on its second row. $b$, $c$, $e$ and $g$ walk too, and emit
     nothing: each of their partners sits in a lower cell and has already
