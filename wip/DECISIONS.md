@@ -478,7 +478,13 @@ cell width of one:
 
 They overlap on both axes. A's footprint is columns 0-1, rows 1-2 and does not
 contain B's cell (1,0); B's footprint is columns 1-2, rows 0-1 and does not
-contain A's cell (0,1). Neither reads the other.
+contain A's cell (0,1). Neither reads the other, so no index test is reached --
+the inner loop never yields the other index at all. The probe runs this case on
+its own, before the random one, for that reason. Deleting its
+`if (same && j < i) continue;` outright leaves the miss count at 4,488 and moves
+only the emission count, from 22,462 to 27,458: the pairs are collected into a
+set keyed on the unordered pair, so a filter that drops one direction of a
+double emission cannot remove anything from the answer.
 
 The reason is order-theoretic and worth keeping. "Read only forward" is sound
 exactly when the keys are **totally** ordered, which is why sweep and prune gets

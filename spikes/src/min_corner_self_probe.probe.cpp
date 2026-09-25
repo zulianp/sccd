@@ -31,7 +31,42 @@
 
 struct Box { double lo[2], hi[2]; };
 
+// The failure in two boxes, with the arithmetic written out, so it does not
+// depend on a random draw or on any index test. At a cell width of 1:
+//
+//   A = [0.5, 1.5] x [1.5, 2.5]   min corner (0.5, 1.5) -> cell (0, 1)
+//   B = [1.2, 2.2] x [0.8, 1.8]   min corner (1.2, 0.8) -> cell (1, 0)
+//
+// They overlap: x on [1.2, 1.5], y on [1.5, 1.8]. But B sits one cell to the
+// LEFT of A and one cell ABOVE it, so neither box's footprint contains the
+// other's bin cell and neither ever reads the other. No index test is reached,
+// because the inner loop never yields the other index in the first place.
+static int two_box_counterexample() {
+    const double w = 1.0;
+    const double alo[2] = {0.5, 1.5}, ahi[2] = {1.5, 2.5};
+    const double blo[2] = {1.2, 0.8}, bhi[2] = {2.2, 1.8};
+    auto c = [&](double v) { return (int)(v / w); };
+
+    const bool hit = !(alo[0] > bhi[0] || blo[0] > ahi[0] ||
+                       alo[1] > bhi[1] || blo[1] > ahi[1]);
+    // Does A's footprint contain B's bin cell, or B's contain A's?
+    const bool a_reads_b = c(blo[0]) >= c(alo[0]) && c(blo[0]) <= c(ahi[0]) &&
+                           c(blo[1]) >= c(alo[1]) && c(blo[1]) <= c(ahi[1]);
+    const bool b_reads_a = c(alo[0]) >= c(blo[0]) && c(alo[0]) <= c(bhi[0]) &&
+                           c(alo[1]) >= c(blo[1]) && c(alo[1]) <= c(bhi[1]);
+
+    printf("two-box counterexample: overlap=%s  A reads B=%s  B reads A=%s\n",
+           hit ? "yes" : "no", a_reads_b ? "yes" : "no", b_reads_a ? "yes" : "no");
+    printf("  A bin cell (%d,%d), footprint cols %d-%d rows %d-%d\n",
+           c(alo[0]), c(alo[1]), c(alo[0]), c(ahi[0]), c(alo[1]), c(ahi[1]));
+    printf("  B bin cell (%d,%d), footprint cols %d-%d rows %d-%d\n",
+           c(blo[0]), c(blo[1]), c(blo[0]), c(bhi[0]), c(blo[1]), c(bhi[1]));
+    return (hit && !a_reads_b && !b_reads_a) ? 1 : 0;
+}
+
 int main(int argc, char** argv) {
+    const int lost_deterministically = two_box_counterexample();
+    printf("\n");
     const int n = argc > 1 ? atoi(argv[1]) : 4000;
     const double span = 100.0;
     const double size = argc > 2 ? atof(argv[2]) : 6.0;
@@ -116,5 +151,5 @@ int main(int argc, char** argv) {
                b[j].lo[0], b[j].hi[0], b[j].lo[1], b[j].hi[1],
                cell(b[j].lo[0], 0), cell(b[j].lo[1], 1));
     }
-    return missed.empty() ? 0 : 1;
+    return (missed.empty() && !lost_deterministically) ? 0 : 1;
 }
