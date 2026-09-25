@@ -83,8 +83,8 @@
  * not one workload -- and a verdict reached on frame one should not bind frame
  * ten thousand.
  *
- * `SCCD_BROADPHASE=sweep`, `=cell2d` or `=cell2dmin` forces one and skips the
- * race entirely, and `broadphase_stats` is still exposed for a caller who wants
+ * `SCCD_BROADPHASE=sweep`, `=cell2d`, `=cell2dmin` or `=cell2dminsort` forces one
+ * and skips the race entirely, and `broadphase_stats` is still exposed for a caller who wants
  * to look at the geometry itself.
  *
  * ## The third strategy is asked for, not raced
@@ -95,12 +95,15 @@
  * above stays between the sweep and `cell2d`, because a strategy under
  * evaluation has to be measured *against* the shipped pair rather than mixed
  * into them -- a third probe would also lengthen the warm-up every caller pays.
- * It is reached by naming it, which is what the benchmark does.
+ * It is reached by naming it, which is what the benchmark does. `cell2dminsort`
+ * is the same thing with each cell ordered on the axis the grid does not use, so
+ * a cell can be ruled out by its bound there and the scan inside one can stop
+ * early -- the question it answers is whether that ordering pays for itself.
  */
 
 namespace sccd {
 
-    enum class BroadPhaseStrategy : int { Auto = 0, Sweep = 1, Cell2D = 2, Cell2DMin = 3 };
+    enum class BroadPhaseStrategy : int { Auto = 0, Sweep = 1, Cell2D = 2, Cell2DMin = 3, Cell2DMinSort = 4 };
 
     /**
      * \brief Cheap shape and density statistics for the AABB set.
@@ -162,6 +165,7 @@ namespace sccd {
         if (std::strcmp(v, "sweep") == 0) return BroadPhaseStrategy::Sweep;
         if (std::strcmp(v, "cell2d") == 0) return BroadPhaseStrategy::Cell2D;
         if (std::strcmp(v, "cell2dmin") == 0) return BroadPhaseStrategy::Cell2DMin;
+        if (std::strcmp(v, "cell2dminsort") == 0) return BroadPhaseStrategy::Cell2DMinSort;
         return BroadPhaseStrategy::Auto;
     }
 
@@ -279,6 +283,7 @@ namespace sccd {
             case BroadPhaseStrategy::Sweep: return "sweep";
             case BroadPhaseStrategy::Cell2D: return "cell2d";
             case BroadPhaseStrategy::Cell2DMin: return "cell2dmin";
+            case BroadPhaseStrategy::Cell2DMinSort: return "cell2dminsort";
             case BroadPhaseStrategy::Auto: return "auto";
         }
         return "?";
