@@ -1218,11 +1218,12 @@ namespace sccd {
     /**
      * \brief Self-overlap count over a minimum-corner binning, CRS offsets out.
      *
-     * \p cell_key and \p cell_hi2 come from cell2dmin_sort_cells and are null
-     * when the cells were left unordered; \p sorted says which, and picks the
-     * instantiation rather than being tested per candidate.
+     * \tparam sorted The cells were ordered by cell2dmin_sort_cells, and
+     * \p cell_key and \p cell_hi2 hold what it produced. False leaves them
+     * unread, and null is the right thing to pass. It is a template parameter and
+     * not an argument so that neither variant carries a branch the other needs.
      */
-    template <int nxe, typename T, typename I>
+    template <int nxe, bool sorted, typename T, typename I>
     bool cell2dmin_count_self_overlaps(const ptrdiff_t element_count,
                                        T** const SCCD_RESTRICT aabbs,
                                        I* const SCCD_RESTRICT idx,
@@ -1235,7 +1236,6 @@ namespace sccd {
                                        const T* const SCCD_RESTRICT cell_hi1,
                                        const T* const SCCD_RESTRICT cell_key,
                                        const T* const SCCD_RESTRICT cell_hi2,
-                                       const bool sorted,
                                        ptrdiff_t* const SCCD_RESTRICT ccdptr) {
         ccdptr[0] = 0;
 
@@ -1251,16 +1251,9 @@ namespace sccd {
                 }
 
                 ptrdiff_t count = 0;
-                const auto tally = [&](const ptrdiff_t, const I) { ++count; };
-                if (sorted) {
-                    detail::for_each_forward_self_partner<nxe, true, T, I>(
-                        aabbs, fi, idx, elements, element_stride, ev, grid, cellptr, cellidx,
-                        row_prefix, cell_hi1, cell_key, cell_hi2, tally);
-                } else {
-                    detail::for_each_forward_self_partner<nxe, false, T, I>(
-                        aabbs, fi, idx, elements, element_stride, ev, grid, cellptr, cellidx,
-                        row_prefix, cell_hi1, nullptr, nullptr, tally);
-                }
+                detail::for_each_forward_self_partner<nxe, sorted, T, I>(
+                    aabbs, fi, idx, elements, element_stride, ev, grid, cellptr, cellidx, row_prefix,
+                    cell_hi1, cell_key, cell_hi2, [&](const ptrdiff_t, const I) { ++count; });
                 ccdptr[fi + 1] = count;
             }
         });
@@ -1270,7 +1263,7 @@ namespace sccd {
     }
 
     /** \brief Write those pairs, as (min, max) to match the sweep. */
-    template <int nxe, typename T, typename I>
+    template <int nxe, bool sorted, typename T, typename I>
     void cell2dmin_fill_self_overlaps(const ptrdiff_t element_count,
                                       T** const SCCD_RESTRICT aabbs,
                                       I* const SCCD_RESTRICT idx,
@@ -1283,7 +1276,6 @@ namespace sccd {
                                       const T* const SCCD_RESTRICT cell_hi1,
                                       const T* const SCCD_RESTRICT cell_key,
                                       const T* const SCCD_RESTRICT cell_hi2,
-                                      const bool sorted,
                                       const ptrdiff_t* const SCCD_RESTRICT ccdptr,
                                       I* const SCCD_RESTRICT first_out,
                                       I* const SCCD_RESTRICT second_out) {
@@ -1296,20 +1288,13 @@ namespace sccd {
                 }
 
                 ptrdiff_t at = ccdptr[fi];
-                const auto emit = [&](const ptrdiff_t, const I jidx) {
-                    first_out[at] = sccd::min<I>(idxi, jidx);
-                    second_out[at] = sccd::max<I>(idxi, jidx);
-                    ++at;
-                };
-                if (sorted) {
-                    detail::for_each_forward_self_partner<nxe, true, T, I>(
-                        aabbs, fi, idx, elements, element_stride, ev, grid, cellptr, cellidx,
-                        row_prefix, cell_hi1, cell_key, cell_hi2, emit);
-                } else {
-                    detail::for_each_forward_self_partner<nxe, false, T, I>(
-                        aabbs, fi, idx, elements, element_stride, ev, grid, cellptr, cellidx,
-                        row_prefix, cell_hi1, nullptr, nullptr, emit);
-                }
+                detail::for_each_forward_self_partner<nxe, sorted, T, I>(
+                    aabbs, fi, idx, elements, element_stride, ev, grid, cellptr, cellidx, row_prefix,
+                    cell_hi1, cell_key, cell_hi2, [&](const ptrdiff_t, const I jidx) {
+                        first_out[at] = sccd::min<I>(idxi, jidx);
+                        second_out[at] = sccd::max<I>(idxi, jidx);
+                        ++at;
+                    });
             }
         });
     }

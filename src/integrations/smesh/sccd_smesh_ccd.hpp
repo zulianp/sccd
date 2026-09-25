@@ -729,43 +729,51 @@ namespace sccd {
             return SCCD_SUCCESS;
         }
 
-        /** \brief The edge-edge step over the minimum-corner binning. */
+        /**
+         * \brief The edge-edge step over the minimum-corner binning.
+         *
+         * \tparam sorted Whether the cells were ordered on the third axis. The
+         * one branch that picks it is in the caller, so neither instantiation
+         * carries a test the other needs.
+         */
+        template <bool sorted>
         int cell2dmin_ee_step_host_(const ptrdiff_t n_edges) {
-            sccd::cell2dmin_count_self_overlaps<2, scalar_t, smesh::idx_t>(n_edges,
-                                                                           eaabb_->data(),
-                                                                           eidx_->data(),
-                                                                           1,
-                                                                           edges_->data(),
-                                                                           e_grid_,
-                                                                           e_cellptr_.data(),
-                                                                           e_cellidx_.data(),
-                                                                           e_row_prefix_.data(),
-                                                                           e_cell_hi1_.data(),
-                                                                           e_cell_key_.data(),
-                                                                           e_cell_hi2_.data(),
-                                                                           use_cell2d_min_sorted_,
-                                                                           ccdptr_->data());
+            const scalar_t* const key = sorted ? e_cell_key_.data() : nullptr;
+            const scalar_t* const hi2 = sorted ? e_cell_hi2_.data() : nullptr;
+
+            sccd::cell2dmin_count_self_overlaps<2, sorted, scalar_t, smesh::idx_t>(n_edges,
+                                                                                   eaabb_->data(),
+                                                                                   eidx_->data(),
+                                                                                   1,
+                                                                                   edges_->data(),
+                                                                                   e_grid_,
+                                                                                   e_cellptr_.data(),
+                                                                                   e_cellidx_.data(),
+                                                                                   e_row_prefix_.data(),
+                                                                                   e_cell_hi1_.data(),
+                                                                                   key,
+                                                                                   hi2,
+                                                                                   ccdptr_->data());
 
             const ptrdiff_t n_pairs = ccdptr_->data()[n_edges];
             e0_overlap_ = smesh::create_buffer<smesh::idx_t>(n_pairs, execution_space_);
             e1_overlap_ = smesh::create_buffer<smesh::idx_t>(n_pairs, execution_space_);
 
-            sccd::cell2dmin_fill_self_overlaps<2, scalar_t, smesh::idx_t>(n_edges,
-                                                                          eaabb_->data(),
-                                                                          eidx_->data(),
-                                                                          1,
-                                                                          edges_->data(),
-                                                                          e_grid_,
-                                                                          e_cellptr_.data(),
-                                                                          e_cellidx_.data(),
-                                                                          e_row_prefix_.data(),
-                                                                          e_cell_hi1_.data(),
-                                                                          e_cell_key_.data(),
-                                                                          e_cell_hi2_.data(),
-                                                                          use_cell2d_min_sorted_,
-                                                                          ccdptr_->data(),
-                                                                          e0_overlap_->data(),
-                                                                          e1_overlap_->data());
+            sccd::cell2dmin_fill_self_overlaps<2, sorted, scalar_t, smesh::idx_t>(n_edges,
+                                                                                  eaabb_->data(),
+                                                                                  eidx_->data(),
+                                                                                  1,
+                                                                                  edges_->data(),
+                                                                                  e_grid_,
+                                                                                  e_cellptr_.data(),
+                                                                                  e_cellidx_.data(),
+                                                                                  e_row_prefix_.data(),
+                                                                                  e_cell_hi1_.data(),
+                                                                                  key,
+                                                                                  hi2,
+                                                                                  ccdptr_->data(),
+                                                                                  e0_overlap_->data(),
+                                                                                  e1_overlap_->data());
             return SCCD_SUCCESS;
         }
 
@@ -884,7 +892,8 @@ namespace sccd {
 
             if (use_cell2d_min_) {
                 SMESH_TRACE_SCOPE("cell2dmin e2e");
-                return cell2dmin_ee_step_host_(n_edges);
+                return use_cell2d_min_sorted_ ? cell2dmin_ee_step_host_<true>(n_edges)
+                                              : cell2dmin_ee_step_host_<false>(n_edges);
             }
 
             if (use_cell2d_) {
