@@ -213,6 +213,8 @@ namespace sccd {
         std::vector<ptrdiff_t> f_cellptr_;
         std::vector<ptrdiff_t> f_cursor_;
         std::vector<smesh::idx_t> f_cellidx_;
+        std::vector<scalar_t> f_cellbox_data_[6];
+        scalar_t* f_cellbox_[6]{};
 
         sccd::Cell2DGrid<scalar_t> e_grid_;
         sccd::Cell2DPartition e_part_;
@@ -665,6 +667,12 @@ namespace sccd {
                     // The face-vertex query walks the faces, so the faces are what
                     // the cell array holds and the vertices never enter one.
                     bin_host_(n_faces, faabb_->data(), f_grid_, f_part_, f_cellptr_, f_cellidx_, f_cursor_);
+                    for (int d = 0; d < 6; ++d) {
+                        f_cellbox_data_[d].resize((size_t)f_cellptr_[f_grid_.ncells()]);
+                        f_cellbox_[d] = f_cellbox_data_[d].data();
+                    }
+                    sccd::cell2dseg_pack_boxes<scalar_t, smesh::idx_t>(
+                        f_grid_, faabb_->data(), f_cellptr_.data(), f_cellidx_.data(), f_cellbox_);
                 } else {
                     bin_host_(n_nodes, vaabb_->data(), v_grid_, v_part_, v_cellptr_, v_cellidx_, v_cursor_);
                 }
@@ -807,13 +815,13 @@ namespace sccd {
                                                                           points_t0_->data(),
                                                                           points_t1_->data(),
                                                                           vidx_->data(),
-                                                                          faabb_->data(),
                                                                           fidx_->data(),
                                                                           1,
                                                                           faces_->data(),
                                                                           f_grid_,
                                                                           f_cellptr_.data(),
                                                                           f_cellidx_.data(),
+                                                                          f_cellbox_,
                                                                           ccdptr_->data());
 
             const ptrdiff_t n_pairs = ccdptr_->data()[n_nodes];
@@ -824,13 +832,13 @@ namespace sccd {
                                                                           points_t0_->data(),
                                                                           points_t1_->data(),
                                                                           vidx_->data(),
-                                                                          faabb_->data(),
                                                                           fidx_->data(),
                                                                           1,
                                                                           faces_->data(),
                                                                           f_grid_,
                                                                           f_cellptr_.data(),
                                                                           f_cellidx_.data(),
+                                                                          f_cellbox_,
                                                                           ccdptr_->data(),
                                                                           f_overlap_->data(),
                                                                           v_overlap_->data());
