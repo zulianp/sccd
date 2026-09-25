@@ -95,6 +95,9 @@ namespace sccd {
         }
 
         ptrdiff_t cell_of(const int c0, const int c1) const { return (ptrdiff_t)c1 * n0 + c0; }
+
+        /** \brief The axis the grid does not use, which the cell test culls on. */
+        int axis2() const { return 3 - axis0 - axis1; }
     };
 
     namespace detail {
@@ -1039,6 +1042,56 @@ namespace sccd {
         });
     }
 
+    /**
+     * \brief Order each cell's entries on the axis the grid does not use.
+     *
+     * The grid culls on two axes and the cell test on the third, so inside a cell
+     * the entries are in no useful order and every one of them is tested. Sorting
+     * them by their minimum on that third axis makes the scan monotone: once an
+     * entry begins past the querying box's maximum, so does every entry after it,
+     * and the scan stops. \p cell_key holds those minima in the sorted order, one
+     * per entry, so the test reads a contiguous array rather than chasing the
+     * index into the box arrays.
+     *
+     * \p cell_hi2 is the largest maximum on the same axis, per cell, which rules
+     * out a whole cell before its entries are touched at all.
+     *
+     * Cells are independent, so this is one parallel pass over them. The
+     * comparison breaks ties on the box index, which makes the order total and
+     * the result the same on every run whatever the sort does with equal keys.
+     */
+    template <typename T, typename I>
+    static void cell2dmin_sort_cells(T** const SCCD_RESTRICT aabb,
+                                     const Cell2DGrid<T>& grid,
+                                     const ptrdiff_t* const SCCD_RESTRICT cellptr,
+                                     I* const SCCD_RESTRICT cellidx,
+                                     T* const SCCD_RESTRICT cell_key,
+                                     T* const SCCD_RESTRICT cell_hi2) {
+        const int d2 = grid.axis2();
+        const T* const SCCD_RESTRICT lo2 = aabb[d2];
+        const T* const SCCD_RESTRICT hi2 = aabb[3 + d2];
+        const T floor = std::numeric_limits<T>::lowest();
+
+        sccd::parallel_for_br(0, grid.ncells(), [&](const ptrdiff_t begin, const ptrdiff_t end) {
+            for (ptrdiff_t c = begin; c < end; ++c) {
+                const ptrdiff_t from = cellptr[c];
+                const ptrdiff_t to = cellptr[c + 1];
+
+                std::sort(cellidx + from, cellidx + to, [&](const I a, const I b) {
+                    return lo2[a] != lo2[b] ? lo2[a] < lo2[b] : a < b;
+                });
+
+                T top = floor;
+                for (ptrdiff_t k = from; k < to; ++k) {
+                    const ptrdiff_t j = (ptrdiff_t)cellidx[k];
+                    cell_key[k] = lo2[j];
+                    top = sccd::max<T>(top, hi2[j]);
+                }
+                cell_hi2[c] = top;
+            }
+        });
+    }
+
     namespace detail {
 
         /**
@@ -1055,8 +1108,16 @@ namespace sccd {
          * by binary search on the row's prefix maximum, up to the column of the
          * box's own maximum corner. A partner cannot begin past that column
          * without beginning past the box itself.
+         *
+         * \tparam SORTED The cells are ordered on the axis the grid does not use,
+         * by cell2dmin_sort_cells. Then a whole cell can be ruled out by its
+         * largest maximum on that axis, and the scan inside one stops at the first
+         * entry that begins past this box -- every entry after it begins later
+         * still. Without it the cell is scanned whole and the ordinary box test
+         * does the culling. Both are compiled, so neither carries the other's
+         * branches.
          */
-        template <int NXE, typename T, typename I, typename Visit>
+        template <int NXE, bool SORTED, typename T, typename I, typename Visit>
         static inline void for_each_forward_self_partner(T** const SCCD_RESTRICT aabbs,
                                                          const ptrdiff_t fi,
                                                          I* const SCCD_RESTRICT idx,
@@ -1068,12 +1129,19 @@ namespace sccd {
                                                          const I* const SCCD_RESTRICT cellidx,
                                                          const T* const SCCD_RESTRICT row_prefix,
                                                          const T* const SCCD_RESTRICT cell_hi1,
+                                                         const T* const SCCD_RESTRICT cell_key,
+                                                         const T* const SCCD_RESTRICT cell_hi2,
                                                          Visit&& visit) {
             const T aminx = aabbs[0][fi], aminy = aabbs[1][fi], aminz = aabbs[2][fi];
             const T amaxx = aabbs[3][fi], amaxy = aabbs[4][fi], amaxz = aabbs[5][fi];
 
             const T amin0 = aabbs[grid.axis0][fi];
             const T amin1 = aabbs[grid.axis1][fi];
+            T amin2 = 0, amax2 = 0;
+            if constexpr (SORTED) {
+                amin2 = aabbs[grid.axis2()][fi];
+                amax2 = aabbs[3 + grid.axis2()][fi];
+            }
 
             const int c0b = grid.clamp0(amin0), c0e = grid.clamp0(aabbs[3 + grid.axis0][fi]);
             const int c1b = grid.clamp1(amin1), c1e = grid.clamp1(aabbs[3 + grid.axis1][fi]);
@@ -1092,11 +1160,24 @@ namespace sccd {
                     if (cell_hi1[cell] < amin1) {
                         continue;
                     }
+                    if constexpr (SORTED) {
+                        if (cell_hi2[cell] < amin2) {
+                            continue;
+                        }
+                    }
 
                     const ptrdiff_t begin = cellptr[cell];
                     const ptrdiff_t end = cellptr[cell + 1];
 
                     for (ptrdiff_t k = begin; k < end; ++k) {
+                        if constexpr (SORTED) {
+                            // Sorted ascending, so nothing after this one begins
+                            // any earlier either.
+                            if (cell_key[k] > amax2) {
+                                break;
+                            }
+                        }
+
                         const ptrdiff_t j = (ptrdiff_t)cellidx[k];
                         if (cell == own && j <= fi) {
                             continue;
@@ -1134,7 +1215,13 @@ namespace sccd {
 
     }  // namespace detail
 
-    /** \brief Self-overlap count over a minimum-corner binning, CRS offsets out. */
+    /**
+     * \brief Self-overlap count over a minimum-corner binning, CRS offsets out.
+     *
+     * \p cell_key and \p cell_hi2 come from cell2dmin_sort_cells and are null
+     * when the cells were left unordered; \p sorted says which, and picks the
+     * instantiation rather than being tested per candidate.
+     */
     template <int nxe, typename T, typename I>
     bool cell2dmin_count_self_overlaps(const ptrdiff_t element_count,
                                        T** const SCCD_RESTRICT aabbs,
@@ -1146,6 +1233,9 @@ namespace sccd {
                                        const I* const SCCD_RESTRICT cellidx,
                                        const T* const SCCD_RESTRICT row_prefix,
                                        const T* const SCCD_RESTRICT cell_hi1,
+                                       const T* const SCCD_RESTRICT cell_key,
+                                       const T* const SCCD_RESTRICT cell_hi2,
+                                       const bool sorted,
                                        ptrdiff_t* const SCCD_RESTRICT ccdptr) {
         ccdptr[0] = 0;
 
@@ -1161,9 +1251,16 @@ namespace sccd {
                 }
 
                 ptrdiff_t count = 0;
-                detail::for_each_forward_self_partner<nxe, T, I>(
-                    aabbs, fi, idx, elements, element_stride, ev, grid, cellptr, cellidx, row_prefix,
-                    cell_hi1, [&](const ptrdiff_t, const I) { ++count; });
+                const auto tally = [&](const ptrdiff_t, const I) { ++count; };
+                if (sorted) {
+                    detail::for_each_forward_self_partner<nxe, true, T, I>(
+                        aabbs, fi, idx, elements, element_stride, ev, grid, cellptr, cellidx,
+                        row_prefix, cell_hi1, cell_key, cell_hi2, tally);
+                } else {
+                    detail::for_each_forward_self_partner<nxe, false, T, I>(
+                        aabbs, fi, idx, elements, element_stride, ev, grid, cellptr, cellidx,
+                        row_prefix, cell_hi1, nullptr, nullptr, tally);
+                }
                 ccdptr[fi + 1] = count;
             }
         });
@@ -1184,6 +1281,9 @@ namespace sccd {
                                       const I* const SCCD_RESTRICT cellidx,
                                       const T* const SCCD_RESTRICT row_prefix,
                                       const T* const SCCD_RESTRICT cell_hi1,
+                                      const T* const SCCD_RESTRICT cell_key,
+                                      const T* const SCCD_RESTRICT cell_hi2,
+                                      const bool sorted,
                                       const ptrdiff_t* const SCCD_RESTRICT ccdptr,
                                       I* const SCCD_RESTRICT first_out,
                                       I* const SCCD_RESTRICT second_out) {
@@ -1196,13 +1296,20 @@ namespace sccd {
                 }
 
                 ptrdiff_t at = ccdptr[fi];
-                detail::for_each_forward_self_partner<nxe, T, I>(
-                    aabbs, fi, idx, elements, element_stride, ev, grid, cellptr, cellidx, row_prefix,
-                    cell_hi1, [&](const ptrdiff_t, const I jidx) {
-                        first_out[at] = sccd::min<I>(idxi, jidx);
-                        second_out[at] = sccd::max<I>(idxi, jidx);
-                        ++at;
-                    });
+                const auto emit = [&](const ptrdiff_t, const I jidx) {
+                    first_out[at] = sccd::min<I>(idxi, jidx);
+                    second_out[at] = sccd::max<I>(idxi, jidx);
+                    ++at;
+                };
+                if (sorted) {
+                    detail::for_each_forward_self_partner<nxe, true, T, I>(
+                        aabbs, fi, idx, elements, element_stride, ev, grid, cellptr, cellidx,
+                        row_prefix, cell_hi1, cell_key, cell_hi2, emit);
+                } else {
+                    detail::for_each_forward_self_partner<nxe, false, T, I>(
+                        aabbs, fi, idx, elements, element_stride, ev, grid, cellptr, cellidx,
+                        row_prefix, cell_hi1, nullptr, nullptr, emit);
+                }
             }
         });
     }

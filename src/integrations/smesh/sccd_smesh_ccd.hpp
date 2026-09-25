@@ -182,6 +182,7 @@ namespace sccd {
         // and only the edge binning and its query differ.
         bool use_cell2d_{false};
         bool use_cell2d_min_{false};
+        bool use_cell2d_min_sorted_{false};
 
         // Broad-phase strategy race. The tuner decides; these carry the pending
         // measurement from the steps back to the next prep, which is where it is
@@ -220,6 +221,11 @@ namespace sccd {
         std::vector<scalar_t> e_row_prefix_;
         std::vector<scalar_t> e_cell_hi1_;
 
+        // The ordering on the third axis, when it is asked for: one key per cell
+        // entry and one bound per cell.
+        std::vector<scalar_t> e_cell_key_;
+        std::vector<scalar_t> e_cell_hi2_;
+
         /** \brief Size the grid, bin one list by minimum corner, and take its bounds. */
         static void bin_min_host_(const ptrdiff_t n,
                                   scalar_t** const SCCD_RESTRICT aabb,
@@ -244,6 +250,19 @@ namespace sccd {
             row_prefix.resize((size_t)grid.ncells());
             cell_hi1.resize((size_t)grid.ncells());
             sccd::cell2dmin_bounds<scalar_t>(n, aabb, grid, part, row_prefix.data(), cell_hi1.data());
+        }
+
+        /** \brief Order the cells on the third axis and take their bound there. */
+        static void sort_cells_host_(scalar_t** const SCCD_RESTRICT aabb,
+                                     const sccd::Cell2DGrid<scalar_t>& grid,
+                                     const std::vector<ptrdiff_t>& cellptr,
+                                     std::vector<smesh::idx_t>& cellidx,
+                                     std::vector<scalar_t>& cell_key,
+                                     std::vector<scalar_t>& cell_hi2) {
+            cell_key.resize(cellidx.size());
+            cell_hi2.resize((size_t)grid.ncells());
+            sccd::cell2dmin_sort_cells<scalar_t, smesh::idx_t>(
+                aabb, grid, cellptr.data(), cellidx.data(), cell_key.data(), cell_hi2.data());
         }
 
 #if defined(SCCD_ENABLE_CUDA)
@@ -547,7 +566,9 @@ namespace sccd {
             }
 
             const sccd::BroadPhaseStrategy chosen = tuner_.next();
-            use_cell2d_min_ = (chosen == sccd::BroadPhaseStrategy::Cell2DMin);
+            use_cell2d_min_sorted_ = (chosen == sccd::BroadPhaseStrategy::Cell2DMinSort);
+            use_cell2d_min_ =
+                (chosen == sccd::BroadPhaseStrategy::Cell2DMin) || use_cell2d_min_sorted_;
             use_cell2d_ = (chosen == sccd::BroadPhaseStrategy::Cell2D) || use_cell2d_min_;
             timed_strategy_ = chosen;
 
@@ -635,6 +656,10 @@ namespace sccd {
                 if (use_cell2d_min_) {
                     bin_min_host_(n_edges, eaabb_->data(), e_grid_, e_part_, e_cellptr_, e_cellidx_,
                                   e_cursor_, e_row_prefix_, e_cell_hi1_);
+                    if (use_cell2d_min_sorted_) {
+                        sort_cells_host_(eaabb_->data(), e_grid_, e_cellptr_, e_cellidx_,
+                                         e_cell_key_, e_cell_hi2_);
+                    }
                 } else {
                     bin_host_(n_edges, eaabb_->data(), e_grid_, e_part_, e_cellptr_, e_cellidx_, e_cursor_);
                 }
@@ -716,6 +741,9 @@ namespace sccd {
                                                                            e_cellidx_.data(),
                                                                            e_row_prefix_.data(),
                                                                            e_cell_hi1_.data(),
+                                                                           e_cell_key_.data(),
+                                                                           e_cell_hi2_.data(),
+                                                                           use_cell2d_min_sorted_,
                                                                            ccdptr_->data());
 
             const ptrdiff_t n_pairs = ccdptr_->data()[n_edges];
@@ -732,6 +760,9 @@ namespace sccd {
                                                                           e_cellidx_.data(),
                                                                           e_row_prefix_.data(),
                                                                           e_cell_hi1_.data(),
+                                                                          e_cell_key_.data(),
+                                                                          e_cell_hi2_.data(),
+                                                                          use_cell2d_min_sorted_,
                                                                           ccdptr_->data(),
                                                                           e0_overlap_->data(),
                                                                           e1_overlap_->data());
@@ -1051,7 +1082,8 @@ namespace sccd {
                 // Saying so beats running the extent-binned one under its name,
                 // which would put a timing against a label that did not produce
                 // it.
-                SMESH_ERROR("sccd: SCCD_BROADPHASE=cell2dmin has no device implementation yet\n");
+                SMESH_ERROR("sccd: SCCD_BROADPHASE=%s has no device implementation yet\n",
+                            sccd::broadphase_strategy_name(timed_strategy_));
                 return SCCD_FAILURE;
             }
 

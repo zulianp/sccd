@@ -269,7 +269,7 @@ namespace {
     // The same list against itself over a minimum-corner binning: one cell per
     // box, a forward walk in linear cell order, and the per-cell bounds pruning
     // it. It must return the sweep's pair set exactly, like the cell list does.
-    PairSet cell2dmin_self_pairs(Boxes& e) {
+    PairSet cell2dmin_self_pairs(Boxes& e, const bool sorted = false) {
         sccd::Cell2DGrid<scalar_t> grid;
         sccd::cell2d_setup<scalar_t>(e.n, e.ptr, grid);
 
@@ -286,6 +286,16 @@ namespace {
         std::vector<scalar_t> row_prefix(grid.ncells()), cell_hi1(grid.ncells());
         sccd::cell2dmin_bounds<scalar_t>(e.n, e.ptr, grid, part, row_prefix.data(), cell_hi1.data());
 
+        std::vector<scalar_t> cell_key, cell_hi2;
+        if (sorted) {
+            cell_key.assign((size_t)cellptr[grid.ncells()], 0);
+            cell_hi2.assign((size_t)grid.ncells(), 0);
+            sccd::cell2dmin_sort_cells<scalar_t, idx_t>(
+                e.ptr, grid, cellptr.data(), cellidx.data(), cell_key.data(), cell_hi2.data());
+        }
+        const scalar_t* const key = sorted ? cell_key.data() : nullptr;
+        const scalar_t* const hi2 = sorted ? cell_hi2.data() : nullptr;
+
         std::vector<ptrdiff_t> ccdptr(e.n + 1, 0);
         const bool any = sccd::cell2dmin_count_self_overlaps<2, scalar_t, idx_t>(e.n,
                                                                                  e.ptr,
@@ -297,6 +307,9 @@ namespace {
                                                                                  cellidx.data(),
                                                                                  row_prefix.data(),
                                                                                  cell_hi1.data(),
+                                                                                 key,
+                                                                                 hi2,
+                                                                                 sorted,
                                                                                  ccdptr.data());
         PairSet out;
         if (!any) return out;
@@ -312,6 +325,9 @@ namespace {
                                                                cellidx.data(),
                                                                row_prefix.data(),
                                                                cell_hi1.data(),
+                                                               key,
+                                                               hi2,
+                                                               sorted,
                                                                ccdptr.data(),
                                                                a.data(),
                                                                b.data());
@@ -508,8 +524,11 @@ namespace {
         e_c.bind();
         e_m.bind();
 
+        Boxes e_s = e;
+        e_s.bind();
         const PairSet cell = cell2d_self_pairs(e_c);
         const PairSet mincorner = cell2dmin_self_pairs(e_m);
+        const PairSet minsorted = cell2dmin_self_pairs(e_s, true);
 
         int bad = 0;
         for (int axis = 0; axis < 3; ++axis) {
@@ -521,10 +540,10 @@ namespace {
             std::set_difference(cell.begin(), cell.end(), sweep.begin(), sweep.end(),
                                 std::back_inserter(only_cell));
 
-            const bool ok = (cell == sweep) && (mincorner == sweep);
-            std::printf("%-24s axis=%d boxes=%-6ld planes=%-3d sweep=%-8zu cell=%-8zu mincorner=%-8zu  %s\n",
+            const bool ok = (cell == sweep) && (mincorner == sweep) && (minsorted == sweep);
+            std::printf("%-24s axis=%d boxes=%-6ld planes=%-3d sweep=%-8zu cell=%-8zu mincorner=%-8zu sorted=%-8zu  %s\n",
                         name, axis, (long)n, planes, sweep.size(), cell.size(), mincorner.size(),
-                        ok ? "ok" : "MISMATCH");
+                        minsorted.size(), ok ? "ok" : "MISMATCH");
             if (!only_cell.empty()) {
                 std::printf("    the sweep MISSED %zu pairs the cell list found -- "
                             "a missed pair is a collision the narrow phase never sees\n",
@@ -536,25 +555,30 @@ namespace {
     }
 
     int run_self_boxes(const char* name, Boxes& e, const ptrdiff_t n) {
-        Boxes e_c = e, e_m = e;
+        Boxes e_c = e, e_m = e, e_s = e;
         e_c.bind();
         e_m.bind();
+        e_s.bind();
 
         const PairSet cell = cell2d_self_pairs(e_c);
         const PairSet mincorner = cell2dmin_self_pairs(e_m);
+        const PairSet minsorted = cell2dmin_self_pairs(e_s, true);
         const PairSet sweep = sweep_self_pairs(e);
 
-        const bool ok = (cell == sweep) && (mincorner == sweep);
-        std::printf("%-26s edges=%-6ld sweep=%-8zu cell=%-8zu mincorner=%-8zu  %s\n",
+        const bool ok = (cell == sweep) && (mincorner == sweep) && (minsorted == sweep);
+        std::printf("%-26s edges=%-6ld sweep=%-8zu cell=%-8zu mincorner=%-8zu sorted=%-8zu  %s\n",
                     name,
                     (long)n,
                     sweep.size(),
                     cell.size(),
                     mincorner.size(),
+                    minsorted.size(),
                     ok ? "ok" : "MISMATCH");
         if (!ok) {
-            const PairSet& bad = (cell == sweep) ? mincorner : cell;
-            const char* which = (cell == sweep) ? "mincorner" : "cell list";
+            const PairSet& bad =
+                (cell != sweep) ? cell : ((mincorner != sweep) ? mincorner : minsorted);
+            const char* which =
+                (cell != sweep) ? "cell list" : ((mincorner != sweep) ? "mincorner" : "sorted");
             std::vector<std::pair<idx_t, idx_t>> only_sweep, only_bad;
             std::set_difference(
                 sweep.begin(), sweep.end(), bad.begin(), bad.end(), std::back_inserter(only_sweep));
