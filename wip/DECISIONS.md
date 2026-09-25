@@ -630,3 +630,61 @@ would.
 predicate than box-against-box, so it hands the narrow phase fewer pairs while
 staying conservative, and the narrow phase is the expensive side. The counters
 above measure the broad phase's own work only.
+
+### Measured, after the query was made to pay what a box query pays
+
+The first run of `Cell2DSeg` lost everywhere, and the cause was the inner loop.
+The slab test divided by each component of the step per candidate face, and the
+cell's boxes were gathered through `cellidx`, which no SIMD kernel can see as
+lanes. Hoisting the reciprocals to the vertex, packing each cell's boxes into
+cell order so the query runs the sweep's 32-at-a-time kernel, and putting the
+segment's own hull in front as an exact pre-pass turned the query around: the
+face-vertex query went from `0.56x`-`0.99x` to `1.09x`-`2.19x` against the box
+query. Output is unchanged, and no scene misses a collision.
+
+Counting the structure build, which is where this design pays for itself, the
+result is scene-dependent. One Grace at 72 threads, mode 2, face-vertex rows
+only, paired by case:
+
+| scene | broad (with binning) | narrow | total | pairs |
+|---|---|---|---|---|
+| armadillo-rollers | 165.0 -> 171.2 ms (0.964x) | 1.061x | **0.984x** | 23.3% fewer |
+| cloth-ball | 565.9 -> 361.8 ms (1.564x) | 0.988x | **1.391x** | 16.9% fewer |
+| cloth-funnel | 91.9 -> 104.9 ms (0.876x) | 0.838x | **0.869x** | 16.5% fewer |
+| n-body-simulation | 2645.7 -> 2157.8 ms (1.226x) | 1.159x | **1.203x** | 25.8% fewer |
+| rod-twist | 206.5 -> 298.2 ms (0.692x) | 1.050x | **0.798x** | 1.6% fewer |
+| all five | 5331.8 -> 4568.7 ms | | **1.167x** | |
+
+The split is by how much query there is to save. Binning the faces and packing
+their boxes costs 15 to 111 ms more per scene than binning the vertices, and the
+query returns 2 to 558 ms of it:
+
+| scene | extra preparation | query saved | net |
+|---|---|---|---|
+| cloth-ball | +59.5 ms | -263.6 ms | **-202.3 ms** |
+| n-body-simulation | +70.5 ms | -558.4 ms | **-666.9 ms** |
+| armadillo-rollers | +44.6 ms | -38.4 ms | +3.5 ms |
+| cloth-funnel | +15.3 ms | -2.3 ms | +17.2 ms |
+| rod-twist | +110.7 ms | -19.0 ms | +85.4 ms |
+
+So it wins on the two scenes whose face-vertex query is large and loses on the
+three where the preparation is most of the cost. The aggregate favours it, and
+the aggregate is carried by n-body-simulation.
+
+The narrow phase does not repay the pair reduction. cloth-ball sheds 16.9% of
+pairs for `0.988x`, cloth-funnel 16.5% for `0.838x`. A tighter broad phase
+removes pairs that are far apart, which are the ones the narrow phase rejects in
+its first box test; the expensive pairs are near-contacts and the segment filter
+keeps every one. cloth-funnel being slower suggests the pair order also matters,
+since the pairs now arrive grouped by vertex where they used to arrive grouped by
+face.
+
+**The obvious next move** is to fold the packing into `cell2d_fill`, which
+already scatters one value per cell entry and could scatter the six box
+coordinates in the same pass. That removes a whole gather over the cell array
+from the preparation, and it is the larger half of the penalty on rod-twist.
+
+**Second, the packing is not specific to this query.** The shipped `cell2d`
+face-vertex and edge-edge queries gather through `cellidx` too, so they cannot
+vectorise their inner loops either. If the packed layout pays here it should be
+tried under them.
