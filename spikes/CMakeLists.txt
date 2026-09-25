@@ -35,6 +35,19 @@ if(SCCD_ENABLE_CUDA)
   endif()
 endif()
 
+# Standalone probes: single translation units that answer one question and print
+# the answer. They link nothing -- not even sccd -- so a probe stays runnable
+# whatever the library does to its own interfaces, which is what makes the
+# measurement in wip/DECISIONS.md reproducible years later. The suffix is
+# .probe.cpp and not .exe.cpp so this glob cannot pick up a demoted test.
+file(GLOB SCCD_SPIKE_PROBES CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.probe.cpp")
+foreach(_probe IN LISTS SCCD_SPIKE_PROBES)
+  get_filename_component(_probe_name "${_probe}" NAME)
+  string(REPLACE ".probe.cpp" "" _probe_name "${_probe_name}")
+  add_executable(${_probe_name} "${_probe}")
+endforeach()
+
 # Header-only spikes are compiled by a translation unit that does nothing but
 # include them. Without this they would never be compiled at all, and a header
 # nobody compiles is a header that quietly stops building.

@@ -460,10 +460,12 @@ box read only its own footprint -- its min cell up to its max cell. Each box is
 then in one cell, so a partner is met at most once and the minimum-corner
 duplicate test disappears. It also halves the cell array.
 
-It is not conservative. Measured against brute force on 4,000 random boxes at
-the shipped cell size, it finds 22,462 of 26,950 pairs and **misses 4,488**, and
-the same probe at a fifth of the box size misses 159 of 793. Box size does not
-rescue it.
+It is not conservative. `spikes/src/min_corner_self_probe.probe.cpp` implements
+it beside a brute-force reference and reports what it lost; build with
+`-DSCCD_ENABLE_SPIKES=ON` and run `min_corner_self_probe [boxes] [box extent]`.
+On 4,000 random boxes at the shipped cell size it finds 22,462 of 26,950 pairs
+and **misses 4,488**, and at a fifth of the box size it misses 159 of 793. Box
+size does not rescue it.
 
 The misses have an exact characterisation, confirmed on both runs: they are
 precisely the pairs whose minimum-corner cells are **incomparable** -- one box
