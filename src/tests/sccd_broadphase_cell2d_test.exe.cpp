@@ -535,6 +535,161 @@ namespace {
         return 1;
     }
 
+
+    // ---------------------------------------------------------------------
+    // Face-vertex with the vertex as the segment it really is.
+    // ---------------------------------------------------------------------
+
+    // Vertex trajectories, and the boxes that are their hulls. The kernel reads
+    // the endpoints and the reference reads the same ones, so the two describe
+    // one geometry.
+    struct Moving {
+        std::vector<scalar_t> p0[3], p1[3];
+        scalar_t* p0_ptr[3];
+        scalar_t* p1_ptr[3];
+
+        void bind() {
+            for (int d = 0; d < 3; ++d) {
+                p0_ptr[d] = p0[d].data();
+                p1_ptr[d] = p1[d].data();
+            }
+        }
+    };
+
+    Moving make_moving(std::mt19937& rng, Boxes& v, const double spread, const double travel) {
+        std::uniform_real_distribution<double> pos(0.0, spread);
+        std::uniform_real_distribution<double> step(-travel, travel);
+
+        Moving m;
+        for (int d = 0; d < 3; ++d) {
+            m.p0[d].resize(v.n);
+            m.p1[d].resize(v.n);
+        }
+        for (ptrdiff_t i = 0; i < v.n; ++i) {
+            for (int d = 0; d < 3; ++d) {
+                const scalar_t a = (scalar_t)pos(rng);
+                const scalar_t b = a + (scalar_t)step(rng);
+                m.p0[d][i] = a;
+                m.p1[d][i] = b;
+                v.data[d][i] = std::min(a, b);
+                v.data[3 + d][i] = std::max(a, b);
+            }
+        }
+        m.bind();
+        v.bind();
+        return m;
+    }
+
+    // Every (face, vertex) whose segment meets the face box, minus the faces the
+    // vertex belongs to. The predicate the kernel must reproduce exactly.
+    template <int nxe>
+    PairSet brute_segment_pairs(const Boxes& f, const Boxes& v, const Moving& m) {
+        PairSet out;
+        for (ptrdiff_t i = 0; i < v.n; ++i) {
+            scalar_t p0[3], d[3];
+            for (int a = 0; a < 3; ++a) {
+                p0[a] = m.p0[a][i];
+                d[a] = m.p1[a][i] - p0[a];
+            }
+            for (ptrdiff_t j = 0; j < f.n; ++j) {
+                const scalar_t bmin[3] = {f.data[0][j], f.data[1][j], f.data[2][j]};
+                const scalar_t bmax[3] = {f.data[3][j], f.data[4][j], f.data[5][j]};
+                scalar_t t = 0;
+                if (!sccd::detail::segment_box_entry<scalar_t>(p0, d, bmin, bmax, t)) continue;
+                bool share = false;
+                for (int a = 0; a < nxe; ++a) {
+                    if (f.elem[a][j] == v.idx[i]) { share = true; break; }
+                }
+                if (share) continue;
+                out.insert({f.idx[j], v.idx[i]});
+            }
+        }
+        return out;
+    }
+
+    template <int nxe>
+    PairSet cell2dseg_pairs(Boxes& f, Boxes& v, Moving& m, ptrdiff_t* emitted = nullptr) {
+        sccd::Cell2DGrid<scalar_t> grid;
+        sccd::cell2d_setup<scalar_t>(f.n, f.ptr, grid);
+
+        sccd::Cell2DPartition part;
+        sccd::cell2d_partition<scalar_t>(f.n, f.ptr, grid, part);
+
+        std::vector<ptrdiff_t> cellptr(grid.ncells() + 1);
+        sccd::cell2d_count<scalar_t>(f.n, f.ptr, grid, part, cellptr.data());
+        std::vector<idx_t> cellidx(cellptr[grid.ncells()]);
+        std::vector<ptrdiff_t> cursor(grid.ncells());
+        sccd::cell2d_fill<scalar_t, idx_t>(f.n, f.ptr, grid, part, cellptr.data(), cellidx.data(), cursor.data());
+
+        std::vector<ptrdiff_t> ccdptr(v.n + 1, 0);
+        const bool any = sccd::cell2dseg_count_vf_overlaps<nxe, scalar_t, idx_t>(
+            v.n, m.p0_ptr, m.p1_ptr, v.idx.data(), f.ptr, f.idx.data(), 1, f.elem_ptr,
+            grid, cellptr.data(), cellidx.data(), ccdptr.data());
+
+        PairSet out;
+        if (emitted) *emitted = 0;
+        if (!any) return out;
+
+        std::vector<idx_t> a(ccdptr[v.n]), b(ccdptr[v.n]);
+        sccd::cell2dseg_fill_vf_overlaps<nxe, scalar_t, idx_t>(
+            v.n, m.p0_ptr, m.p1_ptr, v.idx.data(), f.ptr, f.idx.data(), 1, f.elem_ptr,
+            grid, cellptr.data(), cellidx.data(), ccdptr.data(), a.data(), b.data());
+        for (size_t k = 0; k < a.size(); ++k) out.insert({a[k], b[k]});
+        if (emitted) *emitted = (ptrdiff_t)a.size();
+        return out;
+    }
+
+    // The segment query against brute force, and against the box query it would
+    // replace: it must be a subset of the boxes' answer, since a segment meeting
+    // a box implies the segment's own box meeting it.
+    template <int nxe>
+    int run_segment_case(const char* name, const ptrdiff_t n_faces, const ptrdiff_t n_verts,
+                         const double spread, const double face_size, const double travel) {
+        std::mt19937 rng(9001);
+        Boxes f = make_boxes(rng, n_faces, nxe, spread, face_size);
+        Boxes v = make_boxes(rng, n_verts, 1, spread, 0.0);
+        Moving m = make_moving(rng, v, spread, travel);
+
+        Boxes f_q = f, v_q = v;
+        f_q.bind();
+        v_q.bind();
+
+        ptrdiff_t emitted = 0;
+        const PairSet got = cell2dseg_pairs<nxe>(f_q, v_q, m, &emitted);
+        const PairSet want = brute_segment_pairs<nxe>(f, v, m);
+
+        Boxes f_b = f, v_b = v;
+        f_b.bind();
+        v_b.bind();
+        const PairSet boxes = cell2d_pairs<nxe, 1>(f_b, v_b);
+
+        std::vector<std::pair<idx_t, idx_t>> extra;
+        std::set_difference(got.begin(), got.end(), boxes.begin(), boxes.end(),
+                            std::back_inserter(extra));
+
+        const bool dup = emitted != (ptrdiff_t)got.size();
+        const bool ok = (got == want) && extra.empty() && !dup;
+        std::printf("%-26s faces=%-6ld verts=%-6ld travel=%-5.1f boxes=%-8zu segment=%-8zu "
+                    "tighter=%5.1f%%  %s\n",
+                    name, (long)n_faces, (long)n_verts, travel, boxes.size(), got.size(),
+                    boxes.size() ? 100.0 * (1.0 - (double)got.size() / boxes.size()) : 0.0,
+                    ok ? "ok" : "MISMATCH");
+        if (dup) {
+            std::printf("    emitted %ld entries for %zu distinct pairs -- %ld DUPLICATE\n",
+                        (long)emitted, got.size(), (long)(emitted - (ptrdiff_t)got.size()));
+        }
+        if (got != want) {
+            std::vector<std::pair<idx_t, idx_t>> missed;
+            std::set_difference(want.begin(), want.end(), got.begin(), got.end(),
+                                std::back_inserter(missed));
+            std::printf("    MISSED %zu pairs brute force found\n", missed.size());
+        }
+        if (!extra.empty()) {
+            std::printf("    emitted %zu pairs the box query does not -- not a subset\n", extra.size());
+        }
+        return ok ? 0 : 1;
+    }
+
     int run_flat_self_case(const char* name, const ptrdiff_t n, const int planes) {
         std::mt19937 rng(4242);
         Boxes e = make_flat_boxes(rng, n, 2, planes);
@@ -851,6 +1006,16 @@ int main() {
     bad |= run_spread_self_case("spread: heavy tail", 3000, 100.0, 0.5, 20.0, 300);
     bad |= run_spread_self_case("spread: dense and mixed", 900, 4.0, 0.5, 4.0, 40);
     bad |= run_spread_case("spread: faces vs verts", 900, 2000, 60.0, 1.0, 30.0, 12);
+
+    // Face-vertex queried with the vertex trajectory. The travel is what decides
+    // whether the segment is worth anything: at rest it is its own box, and at
+    // several cells it is a diagonal through a rectangle it barely touches.
+    bad |= run_segment_case<3>("segment: short travel", 3000, 4000, 100.0, 2.0, 0.5);
+    bad |= run_segment_case<3>("segment: one cell", 3000, 4000, 100.0, 2.0, 2.0);
+    bad |= run_segment_case<3>("segment: far travel", 2000, 3000, 100.0, 2.0, 20.0);
+    bad |= run_segment_case<3>("segment: crossing", 1500, 2000, 100.0, 2.0, 100.0);
+    bad |= run_segment_case<4>("segment: quads", 2000, 3000, 100.0, 2.0, 10.0);
+    bad |= run_segment_case<3>("segment: dense", 800, 1200, 4.0, 1.0, 4.0);
     bad |= run_spread_case("spread: wide queries", 700, 1800, 40.0, 0.5, 25.0, 120);
 
     std::printf("%s\n", bad ? "FAIL" : "OK: cell list and sweep agree on every case");

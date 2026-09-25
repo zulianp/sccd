@@ -183,6 +183,7 @@ namespace sccd {
         bool use_cell2d_{false};
         bool use_cell2d_min_{false};
         bool use_cell2d_min_sorted_{false};
+        bool use_cell2d_seg_{false};
 
         // Broad-phase strategy race. The tuner decides; these carry the pending
         // measurement from the steps back to the next prep, which is where it is
@@ -206,6 +207,12 @@ namespace sccd {
         std::vector<ptrdiff_t> v_cellptr_;
         std::vector<ptrdiff_t> v_cursor_;
         std::vector<smesh::idx_t> v_cellidx_;
+
+        sccd::Cell2DGrid<scalar_t> f_grid_;
+        sccd::Cell2DPartition f_part_;
+        std::vector<ptrdiff_t> f_cellptr_;
+        std::vector<ptrdiff_t> f_cursor_;
+        std::vector<smesh::idx_t> f_cellidx_;
 
         sccd::Cell2DGrid<scalar_t> e_grid_;
         sccd::Cell2DPartition e_part_;
@@ -567,9 +574,11 @@ namespace sccd {
 
             const sccd::BroadPhaseStrategy chosen = tuner_.next();
             use_cell2d_min_sorted_ = (chosen == sccd::BroadPhaseStrategy::Cell2DMinSort);
+            use_cell2d_seg_ = (chosen == sccd::BroadPhaseStrategy::Cell2DSeg);
             use_cell2d_min_ =
                 (chosen == sccd::BroadPhaseStrategy::Cell2DMin) || use_cell2d_min_sorted_;
-            use_cell2d_ = (chosen == sccd::BroadPhaseStrategy::Cell2D) || use_cell2d_min_;
+            use_cell2d_ =
+                (chosen == sccd::BroadPhaseStrategy::Cell2D) || use_cell2d_min_ || use_cell2d_seg_;
             timed_strategy_ = chosen;
 
             if (getenv("SCCD_BROADPHASE_VERBOSE")) {
@@ -652,7 +661,13 @@ namespace sccd {
                 fill_identity_(fidx_->data(), n_faces);
                 fill_identity_(eidx_->data(), n_edges);
 
-                bin_host_(n_nodes, vaabb_->data(), v_grid_, v_part_, v_cellptr_, v_cellidx_, v_cursor_);
+                if (use_cell2d_seg_) {
+                    // The face-vertex query walks the faces, so the faces are what
+                    // the cell array holds and the vertices never enter one.
+                    bin_host_(n_faces, faabb_->data(), f_grid_, f_part_, f_cellptr_, f_cellidx_, f_cursor_);
+                } else {
+                    bin_host_(n_nodes, vaabb_->data(), v_grid_, v_part_, v_cellptr_, v_cellidx_, v_cursor_);
+                }
                 if (use_cell2d_min_) {
                     bin_min_host_(n_edges, eaabb_->data(), e_grid_, e_part_, e_cellptr_, e_cellidx_,
                                   e_cursor_, e_row_prefix_, e_cell_hi1_);
@@ -777,6 +792,51 @@ namespace sccd {
             return SCCD_SUCCESS;
         }
 
+        /**
+         * \brief The face-vertex step with the vertex kept as a segment.
+         *
+         * The cell list holds the faces, and one vertex per thread walks the
+         * cells its trajectory crosses. The pair it emits is the same shape as
+         * the box query's, so nothing downstream changes; what changes is that a
+         * pair survives only when the segment meets the face box, which is a
+         * stricter condition than the two boxes meeting.
+         */
+        template <int nxe>
+        int cell2dseg_fv_step_host_(const ptrdiff_t n_nodes) {
+            sccd::cell2dseg_count_vf_overlaps<nxe, scalar_t, smesh::idx_t>(n_nodes,
+                                                                          points_t0_->data(),
+                                                                          points_t1_->data(),
+                                                                          vidx_->data(),
+                                                                          faabb_->data(),
+                                                                          fidx_->data(),
+                                                                          1,
+                                                                          faces_->data(),
+                                                                          f_grid_,
+                                                                          f_cellptr_.data(),
+                                                                          f_cellidx_.data(),
+                                                                          ccdptr_->data());
+
+            const ptrdiff_t n_pairs = ccdptr_->data()[n_nodes];
+            f_overlap_ = smesh::create_buffer<smesh::idx_t>(n_pairs, execution_space_);
+            v_overlap_ = smesh::create_buffer<smesh::idx_t>(n_pairs, execution_space_);
+
+            sccd::cell2dseg_fill_vf_overlaps<nxe, scalar_t, smesh::idx_t>(n_nodes,
+                                                                          points_t0_->data(),
+                                                                          points_t1_->data(),
+                                                                          vidx_->data(),
+                                                                          faabb_->data(),
+                                                                          fidx_->data(),
+                                                                          1,
+                                                                          faces_->data(),
+                                                                          f_grid_,
+                                                                          f_cellptr_.data(),
+                                                                          f_cellidx_.data(),
+                                                                          ccdptr_->data(),
+                                                                          f_overlap_->data(),
+                                                                          v_overlap_->data());
+            return SCCD_SUCCESS;
+        }
+
         int broad_phase_fv_step_host_() {
             SMESH_TRACE_SCOPE("Broad_phase: F2V");
 
@@ -788,9 +848,11 @@ namespace sccd {
             if (use_cell2d_) {
                 SMESH_TRACE_SCOPE("cell2d f2v");
                 if (element_type == smesh::TRISHELL3) {
-                    return cell2d_fv_step_host_<3>(n_faces);
+                    return use_cell2d_seg_ ? cell2dseg_fv_step_host_<3>(n_nodes)
+                                           : cell2d_fv_step_host_<3>(n_faces);
                 } else if (element_type == smesh::QUADSHELL4) {
-                    return cell2d_fv_step_host_<4>(n_faces);
+                    return use_cell2d_seg_ ? cell2dseg_fv_step_host_<4>(n_nodes)
+                                           : cell2d_fv_step_host_<4>(n_faces);
                 } else {
                     SMESH_ERROR("Unsupported CCD face element type: %s\n", smesh::type_to_string(element_type));
                     return SCCD_FAILURE;
@@ -1620,7 +1682,8 @@ namespace sccd {
             fidx_ = smesh::create_buffer<smesh::idx_t>(n_faces, execution_space_);
             eidx_ = smesh::create_buffer<smesh::idx_t>(n_edges, execution_space_);
             scratch_ = smesh::create_buffer<scalar_t>(std::max(n_nodes, std::max(n_faces, n_edges)), execution_space_);
-            ccdptr_ = smesh::create_buffer<ptrdiff_t>(std::max(n_faces, n_edges) + 1, execution_space_);
+            ccdptr_ = smesh::create_buffer<ptrdiff_t>(
+                std::max(n_nodes, std::max(n_faces, n_edges)) + 1, execution_space_);
             if (execution_space_ == smesh::EXECUTION_SPACE_HOST) {
                 sort_scratch_.reserve(std::max(n_nodes, std::max(n_faces, n_edges)));
             }
