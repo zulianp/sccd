@@ -20,7 +20,8 @@ every one of these was believed at the time on evidence that looked sufficient.
 - Withdrawn: "SCCD is 6x to 24x cheaper per collision pair than Additive CCD" —
   see section 9
 - Demoted: a centroid-binned cell list, at one level and at two — see below
-- Rejected: binning self pairs at the minimum corner — see below
+- Corrected: "binning self pairs at the minimum corner loses pairs" — it is
+  sound over a total order on cells; only the footprint walk fails — see below
 
 The full argument and the numbers behind each sit in
 [`ASSESSMENT.md`](ASSESSMENT.md).
@@ -451,55 +452,62 @@ count taken from the size distribution, which is what the polydisperse-particle
 literature does (Ogarko and Luding, *A fast multilevel algorithm for contact
 detection of arbitrarily polydisperse objects*). That was not built.
 
-## Binning self pairs at the minimum corner loses the incomparable ones
+## Binning self pairs at the minimum corner: sound, and it costs a grid width
 
-A tempting specialisation for the edge-edge broad phase, where one list is
-queried against itself: bin each box into the single cell holding its
-**minimum** corner rather than into every cell its extent touches, and have a
-box read only its own footprint -- its min cell up to its max cell. Each box is
-then in one cell, so a partner is met at most once and the minimum-corner
-duplicate test disappears. It also halves the cell array.
+A specialisation for the edge-edge broad phase, where one list is queried
+against itself: bin each box into the single cell holding its **minimum** corner
+rather than into every cell its extent touches, and read only cells that come
+after its own. Each box is then in one cell, so a partner is met at most once,
+the minimum-corner duplicate test disappears, and the cell array shrinks from one
+entry per covered cell to one per box.
 
-It is not conservative. `spikes/src/min_corner_self_probe.probe.cpp` implements
-it beside a brute-force reference and reports what it lost; build with
-`-DSCCD_ENABLE_SPIKES=ON` and run `min_corner_self_probe [boxes] [box extent]`.
-On 4,000 random boxes at the shipped cell size it finds 22,462 of 26,950 pairs
-and **misses 4,488**, and at a fifth of the box size it misses 159 of 793. Box
-size does not rescue it.
+**It is sound, and everything turns on what "after" means.** The first reading
+tried here -- read the cells of the box's own footprint, its columns crossed with
+its rows -- is not complete, and that was recorded here as a refutation of the
+whole idea. That was too strong, and the correction is the point of this entry.
 
-The misses have an exact characterisation, confirmed on both runs: they are
-precisely the pairs whose minimum-corner cells are **incomparable** -- one box
-ahead on the first axis and behind on the second. Every pair whose min cells are
-comparable is found, and every incomparable pair is lost. A concrete one, at a
-cell width of one:
+The footprint walk loses exactly the pairs whose minimum-corner cells are
+**incomparable**: one box ahead on the first axis and behind on the second. A
+concrete one, at a cell width of one:
 
     A = [0.5, 1.5] x [1.5, 2.5]   min cell (0, 1)
     B = [1.2, 2.2] x [0.8, 1.8]   min cell (1, 0)
 
-They overlap on both axes. A's footprint is columns 0-1, rows 1-2 and does not
-contain B's cell (1,0); B's footprint is columns 1-2, rows 0-1 and does not
-contain A's cell (0,1). Neither reads the other, so no index test is reached --
-the inner loop never yields the other index at all. The probe runs this case on
-its own, before the random one, for that reason. Deleting its
-`if (same && j < i) continue;` outright leaves the miss count at 4,488 and moves
-only the emission count, from 22,462 to 27,458: the pairs are collected into a
-set keyed on the unordered pair, so a filter that drops one direction of a
-double emission cannot remove anything from the answer.
+They overlap on both axes, B sits one cell left of A and one cell above it, and
+neither footprint contains the other's bin cell, so neither ever reads the other.
+No index test is involved -- the inner loop never yields the other index.
+Componentwise ordering on cells is only **partial**, and a forward walk needs a
+total one.
 
-The reason is order-theoretic and worth keeping. "Read only forward" is sound
-exactly when the keys are **totally** ordered, which is why sweep and prune gets
-its one-sided window for free: on one axis the minima sort, and starting the
-window at `i+1` yields each unordered pair once. Minimum corners in two
-dimensions are only **partially** ordered, and the incomparable pairs are the
-ones no forward walk can reach.
+**The row-major linear index is a total order, and over it the walk is
+complete.** Read the cells whose linear index lies between the box's own cell and
+the cell of its maximum corner. For overlapping `i` and `j`, `L(cell(j.min))` is
+never past `L(cell(i.max))`: if the rows differ then the row term settles it, and
+if they are equal then `j.min` not past `i.max` on the first axis settles the
+column. So whichever of the two has the smaller `L` holds the other inside its
+band. Equal `L` means the same cell, where the index breaks the tie -- which is
+the one place an index test is still needed, and the only one.
 
-Making it sound means letting a box read backwards far enough to catch a partner
-whose minimum lies behind its own, which is `ceil(max extent / cell width)` cells
-on each axis. That is bounded by one cell only when no box is wider than a cell
--- which is the centroid grid of the section above, already measured and demoted.
-On armadillo-rollers' edges the widest swept box is around eight cells, so the
-walk would grow from roughly `2x2` cells to `17x17`.
+`spikes/src/min_corner_self_probe.probe.cpp` runs both walks against brute force;
+build with `-DSCCD_ENABLE_SPIKES=ON` and run
+`min_corner_self_probe [boxes] [box extent]`. The band walk misses nothing on any
+shape tried, from a 5x5 grid to 204x200 and box extents from 1 to 40. The
+footprint walk misses 4,488 of 26,950 pairs on the default shape.
 
-What the idea does buy is real: one cell per box removes the multi-cell
-duplication outright. What it costs is completeness, and the shipped rule buys
-completeness unconditionally for two clamps per surviving pair.
+**What keeps it out of the shipped code is the cost.** "Forward" in a total order
+on cells means whole rows, so a box spanning `R` rows reads about `R` times the
+grid width rather than its own footprint. Candidates tested, band against the
+shipped full-extent binning on the same boxes:
+
+| boxes | grid | shipped | band |
+|---|---|---|---|
+| 4,000, extent 6 | 34x34 | 107,926 | 488,018 |
+| 4,000, extent 1 | 204x200 | 3,081 | 80,049 |
+| 1,000, extent 40 | 5x5 | 210,023 | 207,314 |
+
+The band is competitive only where the grid is narrow enough that a row costs
+little -- the last row, where it draws level. On a grid fine enough to be worth
+having it is four to twenty-six times worse, because each row the box spans drags
+in two hundred columns it has no geometric reason to read. The shipped rule buys
+its completeness from the geometry rather than from an ordering, and pays two
+clamps per surviving pair for it.
