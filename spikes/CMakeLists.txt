@@ -36,16 +36,21 @@ if(SCCD_ENABLE_CUDA)
 endif()
 
 # Standalone probes: single translation units that answer one question and print
-# the answer. They link nothing -- not even sccd -- so a probe stays runnable
-# whatever the library does to its own interfaces, which is what makes the
-# measurement in wip/DECISIONS.md reproducible years later. The suffix is
-# .probe.cpp and not .exe.cpp so this glob cannot pick up a demoted test.
+# the answer. The suffix is .probe.cpp and not .exe.cpp so this glob cannot pick
+# up a demoted test.
+#
+# They are given the library's headers and nothing else. A probe that reimplements
+# what it measures -- min_corner_self_probe does, deliberately, so the claim in
+# wip/DECISIONS.md survives any later change to the library -- simply includes
+# none of them. A probe that checks the shipped code against something, as
+# cellmin_scene_probe checks a figure, has to call it.
 file(GLOB SCCD_SPIKE_PROBES CONFIGURE_DEPENDS
      "${CMAKE_CURRENT_SOURCE_DIR}/src/*.probe.cpp")
 foreach(_probe IN LISTS SCCD_SPIKE_PROBES)
   get_filename_component(_probe_name "${_probe}" NAME)
   string(REPLACE ".probe.cpp" "" _probe_name "${_probe_name}")
   add_executable(${_probe_name} "${_probe}")
+  target_link_libraries(${_probe_name} PRIVATE sccd)
 endforeach()
 
 # Header-only spikes are compiled by a translation unit that does nothing but
