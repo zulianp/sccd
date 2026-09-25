@@ -207,6 +207,8 @@ namespace sccd {
         std::vector<ptrdiff_t> v_cellptr_;
         std::vector<ptrdiff_t> v_cursor_;
         std::vector<smesh::idx_t> v_cellidx_;
+        std::vector<scalar_t> v_cellbox_data_[6];
+        scalar_t* v_cellbox_[6]{};
 
         sccd::Cell2DGrid<scalar_t> f_grid_;
         sccd::Cell2DPartition f_part_;
@@ -221,6 +223,8 @@ namespace sccd {
         std::vector<ptrdiff_t> e_cellptr_;
         std::vector<ptrdiff_t> e_cursor_;
         std::vector<smesh::idx_t> e_cellidx_;
+        std::vector<scalar_t> e_cellbox_data_[6];
+        scalar_t* e_cellbox_[6]{};
 
         // The bounds the minimum-corner query prunes with, one pair of scalars
         // per cell. They cost 2 * ncells where the binning they replace saves
@@ -494,13 +498,16 @@ namespace sccd {
          * reallocates nothing. cell2d_count writes every entry of cellptr before
          * reading any, so the resize deliberately does not ask for zeros.
          */
+        template <bool pack = false>
         static void bin_host_(const ptrdiff_t n,
                               scalar_t** const SCCD_RESTRICT aabb,
                               sccd::Cell2DGrid<scalar_t>& grid,
                               sccd::Cell2DPartition& part,
                               std::vector<ptrdiff_t>& cellptr,
                               std::vector<smesh::idx_t>& cellidx,
-                              std::vector<ptrdiff_t>& cursor) {
+                              std::vector<ptrdiff_t>& cursor,
+                              std::vector<scalar_t>* const boxdata = nullptr,
+                              scalar_t** const cellbox = nullptr) {
             sccd::cell2d_setup<scalar_t>(n, aabb, grid);
             sccd::cell2d_partition<scalar_t>(n, aabb, grid, part);
 
@@ -509,8 +516,14 @@ namespace sccd {
 
             cellidx.resize((size_t)cellptr[grid.ncells()]);
             cursor.resize((size_t)grid.ncells());
-            sccd::cell2d_fill<scalar_t, smesh::idx_t>(
-                n, aabb, grid, part, cellptr.data(), cellidx.data(), cursor.data());
+            if constexpr (pack) {
+                for (int d = 0; d < 6; ++d) {
+                    boxdata[d].resize((size_t)cellptr[grid.ncells()]);
+                    cellbox[d] = boxdata[d].data();
+                }
+            }
+            sccd::cell2d_fill<scalar_t, smesh::idx_t, pack>(
+                n, aabb, grid, part, cellptr.data(), cellidx.data(), cursor.data(), cellbox);
         }
 
 #if defined(SCCD_ENABLE_CUDA)
@@ -666,15 +679,11 @@ namespace sccd {
                 if (use_cell2d_seg_) {
                     // The face-vertex query walks the faces, so the faces are what
                     // the cell array holds and the vertices never enter one.
-                    bin_host_(n_faces, faabb_->data(), f_grid_, f_part_, f_cellptr_, f_cellidx_, f_cursor_);
-                    for (int d = 0; d < 6; ++d) {
-                        f_cellbox_data_[d].resize((size_t)f_cellptr_[f_grid_.ncells()]);
-                        f_cellbox_[d] = f_cellbox_data_[d].data();
-                    }
-                    sccd::cell2dseg_pack_boxes<scalar_t, smesh::idx_t>(
-                        f_grid_, faabb_->data(), f_cellptr_.data(), f_cellidx_.data(), f_cellbox_);
+                    bin_host_<true>(n_faces, faabb_->data(), f_grid_, f_part_, f_cellptr_, f_cellidx_,
+                                    f_cursor_, f_cellbox_data_, f_cellbox_);
                 } else {
-                    bin_host_(n_nodes, vaabb_->data(), v_grid_, v_part_, v_cellptr_, v_cellidx_, v_cursor_);
+                    bin_host_<true>(n_nodes, vaabb_->data(), v_grid_, v_part_, v_cellptr_, v_cellidx_,
+                                    v_cursor_, v_cellbox_data_, v_cellbox_);
                 }
                 if (use_cell2d_min_) {
                     bin_min_host_(n_edges, eaabb_->data(), e_grid_, e_part_, e_cellptr_, e_cellidx_,
@@ -684,7 +693,8 @@ namespace sccd {
                                          e_cell_key_, e_cell_hi2_);
                     }
                 } else {
-                    bin_host_(n_edges, eaabb_->data(), e_grid_, e_part_, e_cellptr_, e_cellidx_, e_cursor_);
+                    bin_host_<true>(n_edges, eaabb_->data(), e_grid_, e_part_, e_cellptr_, e_cellidx_,
+                                    e_cursor_, e_cellbox_data_, e_cellbox_);
                 }
             } else {
                 SMESH_TRACE_SCOPE("Sorting AABBs (host)");
@@ -728,6 +738,7 @@ namespace sccd {
                                                                         v_grid_,
                                                                         v_cellptr_.data(),
                                                                         v_cellidx_.data(),
+                                                                        v_cellbox_,
                                                                         ccdptr_->data());
 
             const ptrdiff_t n_pairs = ccdptr_->data()[n_faces];
@@ -746,6 +757,7 @@ namespace sccd {
                                                                        v_grid_,
                                                                        v_cellptr_.data(),
                                                                        v_cellidx_.data(),
+                                                                       v_cellbox_,
                                                                        ccdptr_->data(),
                                                                        f_overlap_->data(),
                                                                        v_overlap_->data());
@@ -977,6 +989,7 @@ namespace sccd {
                                                                             e_grid_,
                                                                             e_cellptr_.data(),
                                                                             e_cellidx_.data(),
+                                                                            e_cellbox_,
                                                                             ccdptr_->data());
 
                 const ptrdiff_t n_pairs = ccdptr_->data()[n_edges];
@@ -991,6 +1004,7 @@ namespace sccd {
                                                                            e_grid_,
                                                                            e_cellptr_.data(),
                                                                            e_cellidx_.data(),
+                                                                           e_cellbox_,
                                                                            ccdptr_->data(),
                                                                            e0_overlap_->data(),
                                                                            e1_overlap_->data());

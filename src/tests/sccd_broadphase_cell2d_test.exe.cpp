@@ -168,8 +168,14 @@ namespace {
 
         std::vector<idx_t> cellidx(cellptr[grid.ncells()]);
         std::vector<ptrdiff_t> cursor(grid.ncells());
-        sccd::cell2d_fill<scalar_t, idx_t>(
-            second.n, second.ptr, grid, part, cellptr.data(), cellidx.data(), cursor.data());
+        std::vector<scalar_t> boxdata[6];
+        scalar_t* cellbox[6];
+        for (int d = 0; d < 6; ++d) {
+            boxdata[d].resize((size_t)cellptr[grid.ncells()]);
+            cellbox[d] = boxdata[d].data();
+        }
+        sccd::cell2d_fill<scalar_t, idx_t, true>(
+            second.n, second.ptr, grid, part, cellptr.data(), cellidx.data(), cursor.data(), cellbox);
 
         std::vector<ptrdiff_t> ccdptr(first.n + 1, 0);
         const bool any = sccd::cell2d_count_overlaps<first_nxe, second_nxe, scalar_t, idx_t>(first.n,
@@ -184,6 +190,7 @@ namespace {
                                                                             grid,
                                                                             cellptr.data(),
                                                                             cellidx.data(),
+                                                            cellbox,
                                                                             ccdptr.data());
         PairSet out;
         if (!any) return out;
@@ -201,6 +208,7 @@ namespace {
                                                           grid,
                                                           cellptr.data(),
                                                           cellidx.data(),
+                                                            cellbox,
                                                           ccdptr.data(),
                                                           a.data(),
                                                           b.data());
@@ -244,11 +252,19 @@ namespace {
         sccd::cell2d_count<scalar_t>(e.n, e.ptr, grid, part, cellptr.data());
         std::vector<idx_t> cellidx(cellptr[grid.ncells()]);
         std::vector<ptrdiff_t> cursor(grid.ncells());
-        sccd::cell2d_fill<scalar_t, idx_t>(e.n, e.ptr, grid, part, cellptr.data(), cellidx.data(), cursor.data());
+        std::vector<scalar_t> boxdata[6];
+        scalar_t* cellbox[6];
+        for (int d = 0; d < 6; ++d) {
+            boxdata[d].resize((size_t)cellptr[grid.ncells()]);
+            cellbox[d] = boxdata[d].data();
+        }
+        sccd::cell2d_fill<scalar_t, idx_t, true>(
+            e.n, e.ptr, grid, part, cellptr.data(), cellidx.data(), cursor.data(), cellbox);
 
         std::vector<ptrdiff_t> ccdptr(e.n + 1, 0);
         const bool any = sccd::cell2d_count_self_overlaps<2, scalar_t, idx_t>(
-            e.n, e.ptr, e.idx.data(), 1, e.elem_ptr, grid, cellptr.data(), cellidx.data(), ccdptr.data());
+            e.n, e.ptr, e.idx.data(), 1, e.elem_ptr, grid, cellptr.data(), cellidx.data(),
+                                                            cellbox, ccdptr.data());
         PairSet out;
         if (emitted) *emitted = 0;
         if (!any) return out;
@@ -262,6 +278,7 @@ namespace {
                                                             grid,
                                                             cellptr.data(),
                                                             cellidx.data(),
+                                                            cellbox,
                                                             ccdptr.data(),
                                                             a.data(),
                                                             b.data());
@@ -621,15 +638,14 @@ namespace {
         sccd::cell2d_count<scalar_t>(f.n, f.ptr, grid, part, cellptr.data());
         std::vector<idx_t> cellidx(cellptr[grid.ncells()]);
         std::vector<ptrdiff_t> cursor(grid.ncells());
-        sccd::cell2d_fill<scalar_t, idx_t>(f.n, f.ptr, grid, part, cellptr.data(), cellidx.data(), cursor.data());
-
         std::vector<scalar_t> boxdata[6];
         scalar_t* cellbox[6];
         for (int d = 0; d < 6; ++d) {
             boxdata[d].resize((size_t)cellptr[grid.ncells()]);
             cellbox[d] = boxdata[d].data();
         }
-        sccd::cell2dseg_pack_boxes<scalar_t, idx_t>(grid, f.ptr, cellptr.data(), cellidx.data(), cellbox);
+        sccd::cell2d_fill<scalar_t, idx_t, true>(
+            f.n, f.ptr, grid, part, cellptr.data(), cellidx.data(), cursor.data(), cellbox);
 
         std::vector<ptrdiff_t> ccdptr(v.n + 1, 0);
         const bool any = sccd::cell2dseg_count_vf_overlaps<nxe, scalar_t, idx_t>(
