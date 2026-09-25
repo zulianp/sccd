@@ -595,7 +595,9 @@ namespace {
                 const scalar_t bmin[3] = {f.data[0][j], f.data[1][j], f.data[2][j]};
                 const scalar_t bmax[3] = {f.data[3][j], f.data[4][j], f.data[5][j]};
                 scalar_t t = 0;
-                if (!sccd::detail::segment_box_entry<scalar_t>(p0, d, bmin, bmax, t)) continue;
+                scalar_t inv[3];
+                for (int a = 0; a < 3; ++a) inv[a] = d[a] == 0 ? 0 : scalar_t(1) / d[a];
+                if (!sccd::detail::segment_box_entry<scalar_t>(p0, d, inv, bmin, bmax, t)) continue;
                 bool share = false;
                 for (int a = 0; a < nxe; ++a) {
                     if (f.elem[a][j] == v.idx[i]) { share = true; break; }
@@ -621,10 +623,18 @@ namespace {
         std::vector<ptrdiff_t> cursor(grid.ncells());
         sccd::cell2d_fill<scalar_t, idx_t>(f.n, f.ptr, grid, part, cellptr.data(), cellidx.data(), cursor.data());
 
+        std::vector<scalar_t> boxdata[6];
+        scalar_t* cellbox[6];
+        for (int d = 0; d < 6; ++d) {
+            boxdata[d].resize((size_t)cellptr[grid.ncells()]);
+            cellbox[d] = boxdata[d].data();
+        }
+        sccd::cell2dseg_pack_boxes<scalar_t, idx_t>(grid, f.ptr, cellptr.data(), cellidx.data(), cellbox);
+
         std::vector<ptrdiff_t> ccdptr(v.n + 1, 0);
         const bool any = sccd::cell2dseg_count_vf_overlaps<nxe, scalar_t, idx_t>(
-            v.n, m.p0_ptr, m.p1_ptr, v.idx.data(), f.ptr, f.idx.data(), 1, f.elem_ptr,
-            grid, cellptr.data(), cellidx.data(), ccdptr.data());
+            v.n, m.p0_ptr, m.p1_ptr, v.idx.data(), f.idx.data(), 1, f.elem_ptr,
+            grid, cellptr.data(), cellidx.data(), cellbox, ccdptr.data());
 
         PairSet out;
         if (emitted) *emitted = 0;
@@ -632,8 +642,8 @@ namespace {
 
         std::vector<idx_t> a(ccdptr[v.n]), b(ccdptr[v.n]);
         sccd::cell2dseg_fill_vf_overlaps<nxe, scalar_t, idx_t>(
-            v.n, m.p0_ptr, m.p1_ptr, v.idx.data(), f.ptr, f.idx.data(), 1, f.elem_ptr,
-            grid, cellptr.data(), cellidx.data(), ccdptr.data(), a.data(), b.data());
+            v.n, m.p0_ptr, m.p1_ptr, v.idx.data(), f.idx.data(), 1, f.elem_ptr,
+            grid, cellptr.data(), cellidx.data(), cellbox, ccdptr.data(), a.data(), b.data());
         for (size_t k = 0; k < a.size(); ++k) out.insert({a[k], b[k]});
         if (emitted) *emitted = (ptrdiff_t)a.size();
         return out;

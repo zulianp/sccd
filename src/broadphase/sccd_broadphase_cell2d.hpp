@@ -834,10 +834,15 @@ namespace sccd {
          *
          * Separation is strict, as everywhere else here: a segment grazing a face
          * of the box is reported as meeting it.
+         *
+         * \param invd The reciprocals of \p d, which depend on the vertex and not
+         * on the box, so the caller computes them once per walk. The entry for a
+         * component of \p d that is zero is never read.
          */
         template <typename T>
         static inline bool segment_box_entry(const T (&p0)[3],
                                              const T (&d)[3],
+                                             const T (&invd)[3],
                                              const T (&bmin)[3],
                                              const T (&bmax)[3],
                                              T& tenter) {
@@ -849,7 +854,7 @@ namespace sccd {
                     }
                     continue;
                 }
-                const T inv = T(1) / d[a];
+                const T inv = invd[a];
                 T lo = (bmin[a] - p0[a]) * inv;
                 T hi = (bmax[a] - p0[a]) * inv;
                 if (lo > hi) {
@@ -882,19 +887,38 @@ namespace sccd {
          * point where the segment enters the face's box. That point lies on the
          * segment and inside the box, so its cell is both walked and binned, and
          * it is unique.
+         *
+         * Inside a cell the boxes are contiguous, so the segment's own box is
+         * tested against $32$ of them at a time by the same kernel the sweep uses
+         * and the survivors are visited by a bit scan. A box meeting the segment
+         * meets the segment's hull, so that filter is exact as a first pass, and
+         * the slab test that follows -- the part that makes this query tighter
+         * than a box query -- runs only on what it leaves. The reciprocals it
+         * needs depend on the vertex alone and are computed once per walk rather
+         * than once per face.
          */
         template <int S, typename T, typename I, typename Visit>
         static inline void for_each_segment_partner(const T (&p0)[3],
                                                     const T (&d)[3],
                                                     const I vidx,
-                                                    T** const SCCD_RESTRICT face_aabbs,
                                                     const I* const SCCD_RESTRICT face_idx,
                                                     I** const SCCD_RESTRICT face_elements,
                                                     const ptrdiff_t face_element_stride,
                                                     const Cell2DGrid<T>& grid,
                                                     const ptrdiff_t* const SCCD_RESTRICT cellptr,
                                                     const I* const SCCD_RESTRICT cellidx,
+                                                    T** const SCCD_RESTRICT cellbox,
                                                     Visit&& visit) {
+            // The segment's own hull, which is the box the broad phase would have
+            // given this vertex, and the reciprocals the slab test needs.
+            T bmin[3], bmax[3], inv[3];
+            for (int a = 0; a < 3; ++a) {
+                const T end = p0[a] + d[a];
+                bmin[a] = sccd::min<T>(p0[a], end);
+                bmax[a] = sccd::max<T>(p0[a], end);
+                inv[a] = d[a] == T(0) ? T(0) : T(1) / d[a];
+            }
+
             const T q0 = p0[grid.axis0], q1 = p0[grid.axis1];
             const T e0 = q0 + d[grid.axis0], e1 = q1 + d[grid.axis1];
 
@@ -905,21 +929,21 @@ namespace sccd {
             const int s1 = c1end > c1 ? 1 : (c1end < c1 ? -1 : 0);
 
             // The parameter at which the segment leaves the current cell on each
-            // axis, and the parameter one whole cell costs. Held at infinity for
-            // an axis the walk never steps, so the comparison below picks the
-            // other one.
-            const T inf = std::numeric_limits<T>::max();
+            // axis, and the parameter one whole cell costs. Held at the largest
+            // finite value for an axis the walk never steps, so the comparison
+            // below picks the other one.
+            const T far = std::numeric_limits<T>::max();
             const T size0 = T(1) / grid.inv0, size1 = T(1) / grid.inv1;
-            T next0 = inf, next1 = inf, step0 = inf, step1 = inf;
+            T next0 = far, next1 = far, step0 = far, step1 = far;
             if (s0 != 0) {
                 const T edge = grid.min0 + (T)(s0 > 0 ? c0 + 1 : c0) * size0;
-                next0 = (edge - q0) / d[grid.axis0];
-                step0 = size0 / (d[grid.axis0] < T(0) ? -d[grid.axis0] : d[grid.axis0]);
+                next0 = (edge - q0) * inv[grid.axis0];
+                step0 = size0 * (inv[grid.axis0] < T(0) ? -inv[grid.axis0] : inv[grid.axis0]);
             }
             if (s1 != 0) {
                 const T edge = grid.min1 + (T)(s1 > 0 ? c1 + 1 : c1) * size1;
-                next1 = (edge - q1) / d[grid.axis1];
-                step1 = size1 / (d[grid.axis1] < T(0) ? -d[grid.axis1] : d[grid.axis1]);
+                next1 = (edge - q1) * inv[grid.axis1];
+                step1 = size1 * (inv[grid.axis1] < T(0) ? -inv[grid.axis1] : inv[grid.axis1]);
             }
 
             for (;;) {
@@ -927,35 +951,56 @@ namespace sccd {
                 const ptrdiff_t begin = cellptr[cell];
                 const ptrdiff_t end = cellptr[cell + 1];
 
-                for (ptrdiff_t k = begin; k < end; ++k) {
-                    const ptrdiff_t j = (ptrdiff_t)cellidx[k];
+                for (ptrdiff_t base = begin; base < end; base += SCCD_AABB_DISJOINT_CHUNK_SIZE) {
+                    const int count =
+                        (int)sccd::min<ptrdiff_t>(SCCD_AABB_DISJOINT_CHUNK_SIZE, end - base);
+                    uint32_t m = sccd::vaabb_overlap_one_to_many_bits<T>(bmin[0],
+                                                                        bmin[1],
+                                                                        bmin[2],
+                                                                        bmax[0],
+                                                                        bmax[1],
+                                                                        bmax[2],
+                                                                        cellbox[0] + base,
+                                                                        cellbox[1] + base,
+                                                                        cellbox[2] + base,
+                                                                        cellbox[3] + base,
+                                                                        cellbox[4] + base,
+                                                                        cellbox[5] + base,
+                                                                        count);
 
-                    const T bmin[3] = {face_aabbs[0][j], face_aabbs[1][j], face_aabbs[2][j]};
-                    const T bmax[3] = {face_aabbs[3][j], face_aabbs[4][j], face_aabbs[5][j]};
-                    T tenter = 0;
-                    if (!segment_box_entry<T>(p0, d, bmin, bmax, tenter)) {
-                        continue;
-                    }
+                    while (m) {
+                        const int lane = sccd::ctz32(m);
+                        m &= m - 1;
+                        const ptrdiff_t k = base + lane;
 
-                    // Report only from the cell holding the point of entry.
-                    if (grid.clamp0(q0 + tenter * d[grid.axis0]) != c0 ||
-                        grid.clamp1(q1 + tenter * d[grid.axis1]) != c1) {
-                        continue;
-                    }
-
-                    const I jidx = face_idx[j];
-                    bool share = false;
-                    for (int v = 0; v < S; ++v) {
-                        if (face_elements[v][jidx * face_element_stride] == vidx) {
-                            share = true;
-                            break;
+                        const T fmin[3] = {cellbox[0][k], cellbox[1][k], cellbox[2][k]};
+                        const T fmax[3] = {cellbox[3][k], cellbox[4][k], cellbox[5][k]};
+                        T tenter = 0;
+                        if (!segment_box_entry<T>(p0, d, inv, fmin, fmax, tenter)) {
+                            continue;
                         }
-                    }
-                    if (share) {
-                        continue;
-                    }
 
-                    visit(j, jidx);
+                        // Report only from the cell holding the point of entry.
+                        if (grid.clamp0(q0 + tenter * d[grid.axis0]) != c0 ||
+                            grid.clamp1(q1 + tenter * d[grid.axis1]) != c1) {
+                            continue;
+                        }
+
+                        const ptrdiff_t j = (ptrdiff_t)cellidx[k];
+                        const I jidx = face_idx[j];
+                        bool share = false;
+                        for (int v = 0; v < S; ++v) {
+                            if (face_elements[v][jidx * face_element_stride] == vidx) {
+                                share = true;
+                                break;
+                            }
+                        }
+                        if (share) {
+                            continue;
+                        }
+
+                        visit(j, jidx);
+                    }
                 }
 
                 if (c0 == c0end && c1 == c1end) {
@@ -977,24 +1022,52 @@ namespace sccd {
     }  // namespace detail
 
     /**
+     * \brief Copy each cell's face boxes into cell order, so a cell scans contiguously.
+     *
+     * The cell array holds indices, so the query would gather six coordinates per
+     * face through \p cellidx and no SIMD kernel can see consecutive lanes. This
+     * lays the same six coordinates out in the order the cells hold them, which
+     * is what lets the query test $32$ boxes at a time. It costs one pass and six
+     * scalars per cell entry; the indices stay, because the pair still has to be
+     * reported by face index.
+     */
+    template <typename T, typename I>
+    static void cell2dseg_pack_boxes(const Cell2DGrid<T>& grid,
+                                     T** const SCCD_RESTRICT face_aabbs,
+                                     const ptrdiff_t* const SCCD_RESTRICT cellptr,
+                                     const I* const SCCD_RESTRICT cellidx,
+                                     T** const SCCD_RESTRICT cellbox) {
+        sccd::parallel_for_br(0, cellptr[grid.ncells()], [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+            for (int d = 0; d < 6; ++d) {
+                const T* const SCCD_RESTRICT src = face_aabbs[d];
+                T* const SCCD_RESTRICT dst = cellbox[d];
+                for (ptrdiff_t k = rbegin; k < rend; ++k) {
+                    dst[k] = src[(ptrdiff_t)cellidx[k]];
+                }
+            }
+        });
+    }
+
+    /**
      * \brief Count face-vertex candidates per vertex, then prefix-sum into CRS offsets.
      *
      * The cell list is over the faces, built by cell2d_partition, cell2d_count and
-     * cell2d_fill on the face boxes; \p points0 and \p points1 are the vertex
-     * coordinates at the two ends of the step, indexed as \p vertex_idx says.
+     * cell2d_fill on the face boxes and then packed by cell2dseg_pack_boxes;
+     * \p points0 and \p points1 are the vertex coordinates at the two ends of the
+     * step, indexed as \p vertex_idx says.
      */
     template <int nxe, typename T, typename I>
     bool cell2dseg_count_vf_overlaps(const ptrdiff_t vertex_count,
                                      T** const SCCD_RESTRICT points0,
                                      T** const SCCD_RESTRICT points1,
                                      I* const SCCD_RESTRICT vertex_idx,
-                                     T** const SCCD_RESTRICT face_aabbs,
                                      I* const SCCD_RESTRICT face_idx,
                                      const ptrdiff_t face_element_stride,
                                      I** const SCCD_RESTRICT face_elements,
                                      const Cell2DGrid<T>& grid,
                                      const ptrdiff_t* const SCCD_RESTRICT cellptr,
                                      const I* const SCCD_RESTRICT cellidx,
+                                     T** const SCCD_RESTRICT cellbox,
                                      ptrdiff_t* const SCCD_RESTRICT ccdptr) {
         ccdptr[0] = 0;
 
@@ -1011,13 +1084,13 @@ namespace sccd {
                 detail::for_each_segment_partner<nxe, T, I>(p0,
                                                             d,
                                                             vidx,
-                                                            face_aabbs,
                                                             face_idx,
                                                             face_elements,
                                                             face_element_stride,
                                                             grid,
                                                             cellptr,
                                                             cellidx,
+                                                            cellbox,
                                                             [&](const ptrdiff_t, const I) { ++count; });
                 ccdptr[vi + 1] = count;
             }
@@ -1033,13 +1106,13 @@ namespace sccd {
                                     T** const SCCD_RESTRICT points0,
                                     T** const SCCD_RESTRICT points1,
                                     I* const SCCD_RESTRICT vertex_idx,
-                                    T** const SCCD_RESTRICT face_aabbs,
                                     I* const SCCD_RESTRICT face_idx,
                                     const ptrdiff_t face_element_stride,
                                     I** const SCCD_RESTRICT face_elements,
                                     const Cell2DGrid<T>& grid,
                                     const ptrdiff_t* const SCCD_RESTRICT cellptr,
                                     const I* const SCCD_RESTRICT cellidx,
+                                    T** const SCCD_RESTRICT cellbox,
                                     const ptrdiff_t* const SCCD_RESTRICT ccdptr,
                                     I* const SCCD_RESTRICT face_out,
                                     I* const SCCD_RESTRICT vertex_out) {
@@ -1056,13 +1129,13 @@ namespace sccd {
                 detail::for_each_segment_partner<nxe, T, I>(p0,
                                                             d,
                                                             vidx,
-                                                            face_aabbs,
                                                             face_idx,
                                                             face_elements,
                                                             face_element_stride,
                                                             grid,
                                                             cellptr,
                                                             cellidx,
+                                                            cellbox,
                                                             [&](const ptrdiff_t, const I jidx) {
                                                                 face_out[at] = jidx;
                                                                 vertex_out[at] = vidx;
