@@ -254,8 +254,10 @@ extended boxes binned at a corner are neither.
 
 The obvious reading of "after" fails. If a box reads the cells of its own
 footprint, its columns crossed with its rows, the pair is found only when one
-box's cell lies in the other's footprint, and \cref{fig:cellmin}(a) shows an
-overlapping pair for which neither does. Componentwise order on cells is
+box's cell lies in the other's footprint --- and two boxes can overlap with
+neither doing so. Put one a column to the right of the other and a row below it:
+each footprint then runs up and to the right, away from where the other is
+binned, and neither box ever reads the other. Componentwise order on cells is
 \emph{partial}, and the incomparable pairs are exactly the ones lost.
 
 Row-major linear index $L(c_{0},c_{1}) = c_{1}n_{0} + c_{0}$ is \emph{total}, and
@@ -269,8 +271,7 @@ decides --- the only index test in \cref{alg:cellmin}.
 Read literally that range is whole rows, which is what the bounds are for. Each
 cell carries the largest upper bound of the boxes in it and each row a prefix
 maximum of those, so a binary search gives the first column holding anything that
-reaches back to the querying box and the columns before it are skipped at once
-(\cref{fig:cellmin}(b)). That is the running maximum of \cref{sec:bp:sweep}
+reaches back to the querying box and the columns before it are skipped at once. That is the running maximum of \cref{sec:bp:sweep}
 applied per row of cells, and it is what lets the binning stand without a bound
 on how many cells a box may span; a grid that stores a box only at its lower-left
 cell otherwise caps the box at $k$ cells and widens every query window by $k$ to
@@ -311,23 +312,25 @@ match. A second bound per cell does the same on the other axis.
 \begin{figure}[htbp]
   \centering
   \input{tikz/cellmin}
-  \caption{The edge-edge binning, schematically and not to scale.
-    \textbf{(a)} Each box occupies the one cell holding its minimum corner, and
-    the cells are numbered in row-major order. Reading a box's own footprint ---
-    its columns crossed with its rows, shaded --- finds a pair only when one
-    box's cell falls inside the other's footprint. Here neither does: the second
-    box is binned one column to the right of the first and one row below it, so
-    the first reads cells $3,4,6,7$ and the second $1,2,4,5$, and neither set
-    holds the other's cell. Reading forward in the numbering does find the pair,
-    because the second box is binned in the lower-numbered cell and the range it
-    reads, cells $1$ to $5$, contains the first box's cell $3$.
-    \textbf{(b)} The walk spans the rows the box covers and, in each, the columns
-    up to the one holding its own maximum corner. A partner's minimum cannot lie
-    past that. The row of slots beneath is the running maximum along the row of
-    the largest upper bound each cell holds; a binary search on it gives the
-    first column that reaches back to the box, and the columns before it are
-    skipped without being read. A second bound per cell does the same on the
-    other axis, ruling out the crossed cell.}
+  \caption{The edge-edge binning run through on one scene, schematically and not
+    to scale. \textbf{(a)} Seven swept boxes over a six-by-four grid, each binned
+    into the one cell holding its minimum corner --- $a$ into cell $0$, $b$ into
+    $1$, $d$ into $3$, $c$ into $7$, $e$ into $9$, $f$ into $12$ and $g$ into
+    $19$, the cells numbered row-major from the bottom left. Four pairs of these
+    boxes overlap, and each is emitted by whichever of the two sits in the lower
+    cell, so only three of the seven boxes emit anything.
+    \textbf{(b)} $a$ walks from its own cell $0$ to cell $7$, where its maximum
+    corner lies, and finds both $b$ and $c$. On the second row the running
+    maximum starts the scan at the second column: cell $6$ is empty, so nothing
+    there can reach back to $a$, and it is skipped without being read.
+    \textbf{(c)} $d$ walks cells $3$ to $16$ and finds $e$. Its third row is
+    skipped whole: the only box binned there is $f$, which ends well to the left
+    of where $d$ begins, so the running maximum returns a column past $d$'s own
+    and the row is never entered.
+    \textbf{(d)} $f$ walks cells $12$ to $19$ and finds $g$, again skipping one
+    empty cell on its second row. $b$, $c$, $e$ and $g$ walk too, and emit
+    nothing: each of their partners sits in a lower cell and has already
+    reported the pair.}
   \label{fig:cellmin}
 \end{figure}
 
