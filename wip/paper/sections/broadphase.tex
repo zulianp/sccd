@@ -284,24 +284,31 @@ match. A second bound per cell does the same on the other axis.
 \Function{SelfCellList}{$A$}
   \State grid and cell size as in \cref{alg:cell}; bin each $A_{i}$ into
          $\operatorname{cell}(A_{i}.\min)$ alone
-  \State $u_{c} \gets \max\{A_{j}.\max_{a_{1}} : j \in c\}$;\quad
-         $\mu_{c} \gets \max_{c' \le c \text{ in row}(c)} \max\{A_{j}.\max_{a_{0}} : j \in c'\}$
-    \Comment{per cell, and its running maximum along the row}
+  \State $u_{c} \gets \max\{A_{j}.\max_{a_{1}} : j \in c\}$
+    \Comment{$-\infty$ where $c$ is empty}
+  \State $\mu_{c} \gets \max\{A_{j}.\max_{a_{0}} : j \in c',\; c' \le c \text{ in } \operatorname{row}(c)\}$
+    \Comment{running maximum along each row}
   \ForAll{$i$ \textbf{in parallel}}
     \State $(c_{0}^{b},c_{1}^{b}) \gets \operatorname{cell}(A_{i}.\min)$;\quad
            $(c_{0}^{e},c_{1}^{e}) \gets \operatorname{cell}(A_{i}.\max)$
     \For{$c_{1} \gets c_{1}^{b}$ \textbf{to} $c_{1}^{e}$}
-      \State $c_{0} \gets$ \Call{LowerBound}{$\mu$ on row $c_{1}$, $A_{i}.\min_{a_{0}}$}
-        \Comment{columns before it reach nothing}
-      \State \textbf{if} $c_{1} = c_{1}^{b}$ \textbf{then} $c_{0} \gets \max(c_{0}, c_{0}^{b})$
-      \For{$c_{0}$ \textbf{to} $c_{0}^{e}$, cell $c$, and $j$ listed in $c$}
-        \If{$u_{c} < A_{i}.\min_{a_{1}}$} \textbf{continue} \Comment{whole cell}
+      \State $c_{0} \gets$ \Call{LowerBound}{$\mu$ on row $c_{1}$ up to $c_{0}^{e}$,
+             $A_{i}.\min_{a_{0}}$}
+        \Comment{earlier columns miss}
+      \If{$c_{1} = c_{1}^{b}$} $c_{0} \gets \max(c_{0}, c_{0}^{b})$
+        \Comment{its own row starts at its own column}
+      \EndIf
+      \For{$c_{0}$ \textbf{to} $c_{0}^{e}$, cell $c \gets (c_{0},c_{1})$}
+        \If{$u_{c} < A_{i}.\min_{a_{1}}$} \textbf{continue}
+          \Comment{the cell is not read}
         \EndIf
-        \If{$c = \operatorname{cell}(A_{i}.\min)$ \textbf{and} $j \le i$} \textbf{continue}
-          \Comment{one cell, so the index decides}
-        \EndIf
-        \If{$A_{i}$ and $A_{j}$ are disjoint in 3D, or share a vertex} \textbf{continue} \EndIf
-        \State count, or emit the pair
+        \ForAll{$j$ listed in $c$}
+          \If{$c = \operatorname{cell}(A_{i}.\min)$ \textbf{and} $j \le i$} \textbf{continue}
+            \Comment{the index decides}
+          \EndIf
+          \If{$A_{i}$ and $A_{j}$ are disjoint in 3D, or share a vertex} \textbf{continue} \EndIf
+          \State count, or emit the pair
+        \EndFor
       \EndFor
     \EndFor
   \EndFor
@@ -383,7 +390,7 @@ emits it only from $\operatorname{cell}(o)$, which is one cell. So it is
 emitted exactly once, from a cell that does examine it.
 
 In \cref{alg:cellmin} each box lies in one cell, so a pair is examined at most
-once from each side, and the guard on line 10 keeps the side with the smaller
+once from each side, and the guard on line 13 keeps the side with the smaller
 $L$. It is examined there by the argument of \cref{sec:bp:self}:
 $\operatorname{cell}(j.\min)$ lies among the rows and columns that box walks,
 and the two bounds skip only cells whose contents cannot reach the querying box.
