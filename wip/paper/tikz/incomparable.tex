@@ -1,0 +1,124 @@
+% Why the walk cannot be bounded by the querying box's own footprint: two
+% overlapping boxes whose minimum-corner cells are incomparable.
+%
+% Conventions as in tikz/cellmin.tex -- no prose inside the drawing, grids
+% drawn line by line, and the geometry is real: cells are 0.62 wide, five by
+% three, numbered row-major from the bottom left, and every cell index below
+% follows from the coordinates in \boxA and \boxB.
+\begin{tikzpicture}[
+  scale=1.65,
+  font=\scriptsize,
+  lbl/.style={font=\scriptsize, text=sccdInk, inner sep=1.5pt},
+  tiny/.style={font=\tiny, text=sccdInk, inner sep=1pt},
+  ttl/.style={font=\scriptsize\bfseries, text=sccdInk, inner sep=0pt},
+  idle/.style={draw=sccdInk!22, line width=0.5pt},
+  qbox/.style={draw=sccdTeal, line width=1.0pt},
+  pbox/.style={draw=sccdPlum, line width=1.0pt},
+  read/.style={fill=sccdTeal!14},
+  unread/.style={fill=sccdAmber!22},
+]
+
+% A: minimum corner in column 2, row 0.  B: column 1, row 1.
+\def\boxA{1.50/0.10/1.90/0.90}
+\def\boxB{0.80/0.70/2.20/1.00}
+
+\newcommand{\cellfill}[3]{%
+  \fill[#3] ({#1*0.62},{#2*0.62}) rectangle ({(#1+1)*0.62},{(#2+1)*0.62});}
+
+\newcommand{\scenegrid}{%
+  \foreach \x in {0,0.62,1.24,1.86,2.48,3.10}
+    \draw[draw=sccdInk!30, line width=0.3pt] (\x,0) -- (\x,1.86);
+  \foreach \y in {0,0.62,1.24,1.86}
+    \draw[draw=sccdInk!30, line width=0.3pt] (0,\y) -- (3.10,\y);
+  \draw[draw=sccdInk!45, line width=0.4pt] (0,0) rectangle (3.10,1.86);}
+
+\newcommand{\cellnumbers}{%
+  \foreach \r in {0,1,2}
+    \foreach \c in {0,1,2,3,4} {
+      \pgfmathtruncatemacro{\id}{\r*5+\c}
+      \node[tiny, text=sccdInk!45, anchor=south west, fill=white,
+            inner sep=0.5pt] at ({\c*0.62+0.03},{\r*0.62+0.03}) {\id};}}
+
+% The two boxes, with the minimum corner each is binned at.
+\newcommand{\thetwoboxes}{%
+  \foreach \xa/\ya/\xb/\yb in \boxA {
+    \draw[qbox] (\xa,\ya) rectangle (\xb,\yb);
+    \fill[sccdTeal] (\xa,\ya) circle (1.4pt);}
+  \foreach \xa/\ya/\xb/\yb in \boxB {
+    \draw[pbox] (\xa,\ya) rectangle (\xb,\yb);
+    \fill[sccdPlum] (\xa,\ya) circle (1.4pt);}}
+
+% ========================= (a) the two boxes =================================
+\begin{scope}
+  \node[ttl, anchor=south west] at (0,2.02) {(a) $A$ and $B$ overlap};
+
+  \scenegrid
+  % The overlap itself, so that the reader can see there is a pair to find.
+  \fill[sccdInk!12] (1.50,0.70) rectangle (1.90,0.90);
+  \thetwoboxes
+  \cellnumbers
+  \node[lbl, text=sccdTeal, anchor=north west] at (1.92,0.45) {$A$};
+  \node[lbl, text=sccdPlum, anchor=south west] at (2.22,1.00) {$B$};
+\end{scope}
+
+% ===================== (b) A reads its own footprint =========================
+% A is binned in cell 2 and its maximum corner in cell 8, so its footprint is
+% columns 2-3 crossed with rows 0-1: cells 2, 3, 7, 8. B is binned in cell 6,
+% one column to the left of that, and is never read.
+\begin{scope}[shift={(3.72,0)}]
+  \node[ttl, anchor=south west] at (0,2.02) {(b) $A$'s footprint misses $B$};
+
+  \cellfill{2}{0}{read}  \cellfill{3}{0}{read}
+  \cellfill{2}{1}{read}  \cellfill{3}{1}{read}
+  \cellfill{1}{1}{unread}
+  \scenegrid
+  \thetwoboxes
+  \cellnumbers
+  \node[lbl, text=sccdTeal, anchor=north west] at (1.92,0.45) {$A$};
+  \node[lbl, text=sccdPlum, anchor=south west] at (2.22,1.00) {$B$};
+\end{scope}
+
+% ===================== (c) B reads its own footprint =========================
+% B is binned in cell 6 and its maximum corner in cell 8, so its footprint is
+% columns 1-3 on row 1: cells 6, 7, 8. A is binned in cell 2, one row below,
+% and is never read.
+\begin{scope}[shift={(0,-2.60)}]
+  \node[ttl, anchor=south west] at (0,2.02) {(c) $B$'s footprint misses $A$};
+
+  \cellfill{1}{1}{read}  \cellfill{2}{1}{read}  \cellfill{3}{1}{read}
+  \cellfill{2}{0}{unread}
+  \scenegrid
+  \thetwoboxes
+  \cellnumbers
+  \node[lbl, text=sccdTeal, anchor=north west] at (1.92,0.45) {$A$};
+  \node[lbl, text=sccdPlum, anchor=south west] at (2.22,1.00) {$B$};
+\end{scope}
+
+% ===================== (d) the walk that does find it ========================
+% A holds the smaller linear index, so it reports the pair. Its own row starts
+% at its own cell; the row above starts where the row's prefix maximum says
+% something reaches back, which is column 1 -- left of A's own column.
+\begin{scope}[shift={(3.72,-2.60)}]
+  \node[ttl, anchor=south west] at (0,2.02) {(d) $A$ reads cells $2,3$ then $6,7,8$};
+
+  \cellfill{2}{0}{read}  \cellfill{3}{0}{read}
+  \cellfill{1}{1}{read}  \cellfill{2}{1}{read}  \cellfill{3}{1}{read}
+  \scenegrid
+  \thetwoboxes
+  \cellnumbers
+  \node[lbl, text=sccdTeal, anchor=north west] at (1.92,0.45) {$A$};
+  \node[lbl, text=sccdPlum, anchor=south west] at (2.22,1.00) {$B$};
+\end{scope}
+
+% ================================== key ======================================
+\begin{scope}[shift={(0,-3.30)}]
+  \fill[sccdInk] (0.11,0.22) circle (1.4pt);
+  \node[lbl, anchor=west] at (0.26,0.22) {the minimum corner a box is binned at};
+  \fill[read] (0.00,-0.08) rectangle ++(0.22,0.16);
+  \draw[draw=sccdInk!30, line width=0.3pt] (0.00,-0.08) rectangle ++(0.22,0.16);
+  \node[lbl, anchor=west] at (0.26,0.00) {the cells the query reads};
+  \fill[unread] (0.00,-0.38) rectangle ++(0.22,0.16);
+  \draw[draw=sccdInk!30, line width=0.3pt] (0.00,-0.38) rectangle ++(0.22,0.16);
+  \node[lbl, anchor=west] at (0.26,-0.30) {the partner's cell, left unread};
+\end{scope}
+\end{tikzpicture}
