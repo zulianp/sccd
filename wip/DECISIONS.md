@@ -688,3 +688,69 @@ from the preparation, and it is the larger half of the penalty on rod-twist.
 face-vertex and edge-edge queries gather through `cellidx` too, so they cannot
 vectorise their inner loops either. If the packed layout pays here it should be
 tried under them.
+
+## The cell list gets a layout its queries can vectorise
+
+Sweep and prune was the only broad phase here with a vectorised inner loop,
+because it sorts its boxes and its window is therefore contiguous. The cell list
+stores indices, so a query reached a box by gathering six coordinates through
+`cellidx` and no SIMD kernel could see consecutive lanes. `cell2d_pack_boxes`
+writes each cell's boxes out in cell order once per step, after which every query
+tests $32$ of them at a time with `vaabb_overlap_one_to_many_bits` and visits the
+survivors by a bit scan.
+
+**Fusing the packing into the scatter is slower, and by a lot.** Writing the box
+inside `cell2d_fill`, where the scatter already holds it and already knows where
+the entry lands, costs six scattered stores per entry, one per array. A separate
+pass costs six sequential stores and one gather load. Isolated on the face-vertex
+query, where only the packing differs (ms, prep + broad): armadillo-rollers
+$130.2 \to 165.5$, cloth-ball $391.8 \to 483.4$, cloth-funnel $111.3 \to 151.4$,
+n-body-simulation $1921.2 \to 2045.9$, rod-twist $270.7 \to 372.3$. The comment
+on `cell2d_pack_boxes` records it.
+
+**It pays according to how many entries the list holds per box.** One Grace at 72
+threads, mode 2, edge-edge, prep + broad, paired by case:
+
+| scene | Cell2DMin | Cell2DMinSort |
+|---|---|---|
+| armadillo-rollers | 1.059x | 1.024x |
+| cloth-ball | 1.498x | 1.332x |
+| cloth-funnel | 0.984x | 0.724x |
+| n-body-simulation | 1.028x | 1.333x |
+| puffer-ball | 1.165x | 1.650x |
+| rod-twist | 1.039x | 0.747x |
+| all scenes | **1.151x** | **1.522x** |
+
+The minimum-corner list holds one entry per box where the extent-binned list
+holds two to four, so packing it costs a quarter to a half as much for the same
+query. On the extent-binned `cell2d` the same change measures $1.041\times$ on
+edge-edge and $1.154\times$ on face-vertex with a genuine $0.783\times$ on
+rod-twist's face-vertex query, which is the case with the least query to repay
+the layout.
+
+## Sorting the cells wins only once the structure is counted with it
+
+The six-scene run reported `Cell2DMinSort` ahead of `Cell2DMin` on all six
+scenes, $1.098\times$ to $1.350\times$. That was `broad_ms` alone. Sorting each
+cell is a pass over the cell array and belongs to the broad phase like any other
+part of building its structure, and re-read with `prep_ms` included the same run
+says:
+
+| scene | broad only | prep + broad |
+|---|---|---|
+| armadillo-rollers | 1.243x | 0.991x |
+| cloth-ball | 1.292x | 1.121x |
+| cloth-funnel | 1.350x | 0.925x |
+| n-body-simulation | 1.098x | 0.850x |
+| puffer-ball | 1.203x | 1.170x |
+| rod-twist | 1.278x | 1.222x |
+| all scenes | 1.199x | **1.139x** |
+
+Still ahead in aggregate, but on three scenes behind, and the margin is a third
+of what the query-only figure claimed.
+
+With the packed layout under both, the sorted variant leads by $1.285\times$ in
+aggregate and wins two scenes of six -- puffer-ball $1.39\times$ and
+n-body-simulation $1.13\times$, which are the two most expensive, against
+cloth-ball, cloth-funnel and rod-twist going the other way. The aggregate is
+carried by puffer-ball.
