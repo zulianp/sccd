@@ -213,7 +213,7 @@ namespace {
     // invariant is what exposes a candidate window inconsistent with the overlap
     // predicate: the disagreement only appears when the degenerate axis is the
     // one being swept, which choose_axis will normally avoid.
-    PairSet sweep_self_pairs(Boxes& e, const int force_axis = -1) {
+    PairSet sweep_self_pairs(Boxes& e, const int force_axis = -1, ptrdiff_t* emitted = nullptr) {
         std::vector<scalar_t> scratch(e.n * 2);
         const int axis = force_axis >= 0 ? force_axis : sccd::choose_axis<scalar_t>(e.n, e.ptr);
         sccd::sort_along_axis(e.n, axis, e.ptr, e.idx.data(), scratch.data());
@@ -222,16 +222,18 @@ namespace {
         const bool any = sccd::count_self_overlaps<2, scalar_t, idx_t>(
             axis, e.n, e.ptr, e.idx.data(), 1, e.elem_ptr, ccdptr.data());
         PairSet out;
+        if (emitted) *emitted = 0;
         if (!any) return out;
 
         std::vector<idx_t> a(ccdptr[e.n]), b(ccdptr[e.n]);
         sccd::collect_self_overlaps<2, scalar_t, idx_t>(
             axis, e.n, e.ptr, e.idx.data(), 1, e.elem_ptr, ccdptr.data(), a.data(), b.data());
         for (size_t i = 0; i < a.size(); ++i) out.insert({a[i], b[i]});
+        if (emitted) *emitted = (ptrdiff_t)a.size();
         return out;
     }
 
-    PairSet cell2d_self_pairs(Boxes& e) {
+    PairSet cell2d_self_pairs(Boxes& e, ptrdiff_t* emitted = nullptr) {
         sccd::Cell2DGrid<scalar_t> grid;
         sccd::cell2d_setup<scalar_t>(e.n, e.ptr, grid);
 
@@ -248,6 +250,7 @@ namespace {
         const bool any = sccd::cell2d_count_self_overlaps<2, scalar_t, idx_t>(
             e.n, e.ptr, e.idx.data(), 1, e.elem_ptr, grid, cellptr.data(), cellidx.data(), ccdptr.data());
         PairSet out;
+        if (emitted) *emitted = 0;
         if (!any) return out;
 
         std::vector<idx_t> a(ccdptr[e.n]), b(ccdptr[e.n]);
@@ -263,6 +266,7 @@ namespace {
                                                             a.data(),
                                                             b.data());
         for (size_t i = 0; i < a.size(); ++i) out.insert({a[i], b[i]});
+        if (emitted) *emitted = (ptrdiff_t)a.size();
         return out;
     }
 
@@ -270,7 +274,7 @@ namespace {
     // box, a forward walk in linear cell order, and the per-cell bounds pruning
     // it. It must return the sweep's pair set exactly, like the cell list does.
     template <bool sorted = false>
-    PairSet cell2dmin_self_pairs(Boxes& e) {
+    PairSet cell2dmin_self_pairs(Boxes& e, ptrdiff_t* emitted = nullptr) {
         sccd::Cell2DGrid<scalar_t> grid;
         sccd::cell2d_setup<scalar_t>(e.n, e.ptr, grid);
 
@@ -312,6 +316,7 @@ namespace {
                                                                                  hi2,
                                                                                  ccdptr.data());
         PairSet out;
+        if (emitted) *emitted = 0;
         if (!any) return out;
 
         std::vector<idx_t> a(ccdptr[e.n]), b(ccdptr[e.n]);
@@ -331,6 +336,7 @@ namespace {
                                                                a.data(),
                                                                b.data());
         for (size_t i = 0; i < a.size(); ++i) out.insert({a[i], b[i]});
+        if (emitted) *emitted = (ptrdiff_t)a.size();
         return out;
     }
 
@@ -516,6 +522,19 @@ namespace {
         return bad;
     }
 
+    // Emitted entries against distinct pairs. PairSet is a std::set, so equality
+    // with the sweep proves no pair is missing and says nothing about a pair
+    // arriving twice; the count pass is what makes a duplicate visible. The
+    // edge-edge walk reads each cell once and each partner from one cell, so
+    // the two numbers must agree exactly.
+    int report_duplicates(const char* name, const char* which, const ptrdiff_t emitted,
+                          const PairSet& pairs) {
+        if (emitted == (ptrdiff_t)pairs.size()) return 0;
+        std::printf("    %s: %s emitted %ld entries for %zu distinct pairs -- %ld DUPLICATE\n",
+                    name, which, (long)emitted, pairs.size(), (long)(emitted - (ptrdiff_t)pairs.size()));
+        return 1;
+    }
+
     int run_flat_self_case(const char* name, const ptrdiff_t n, const int planes) {
         std::mt19937 rng(4242);
         Boxes e = make_flat_boxes(rng, n, 2, planes);
@@ -525,15 +544,22 @@ namespace {
 
         Boxes e_s = e;
         e_s.bind();
-        const PairSet cell = cell2d_self_pairs(e_c);
-        const PairSet mincorner = cell2dmin_self_pairs(e_m);
-        const PairSet minsorted = cell2dmin_self_pairs<true>(e_s);
+        ptrdiff_t n_cell = 0, n_min = 0, n_sort = 0;
+        const PairSet cell = cell2d_self_pairs(e_c, &n_cell);
+        const PairSet mincorner = cell2dmin_self_pairs(e_m, &n_min);
+        const PairSet minsorted = cell2dmin_self_pairs<true>(e_s, &n_sort);
 
         int bad = 0;
+        bad |= report_duplicates(name, "cell list", n_cell, cell);
+        bad |= report_duplicates(name, "mincorner", n_min, mincorner);
+        bad |= report_duplicates(name, "sorted", n_sort, minsorted);
+
         for (int axis = 0; axis < 3; ++axis) {
             Boxes e_axis = e;
             e_axis.bind();
-            const PairSet sweep = sweep_self_pairs(e_axis, axis);
+            ptrdiff_t n_sweep = 0;
+            const PairSet sweep = sweep_self_pairs(e_axis, axis, &n_sweep);
+            bad |= report_duplicates(name, "sweep", n_sweep, sweep);
 
             std::vector<std::pair<idx_t, idx_t>> only_cell;
             std::set_difference(cell.begin(), cell.end(), sweep.begin(), sweep.end(),
@@ -559,12 +585,19 @@ namespace {
         e_m.bind();
         e_s.bind();
 
-        const PairSet cell = cell2d_self_pairs(e_c);
-        const PairSet mincorner = cell2dmin_self_pairs(e_m);
-        const PairSet minsorted = cell2dmin_self_pairs<true>(e_s);
-        const PairSet sweep = sweep_self_pairs(e);
+        ptrdiff_t n_cell = 0, n_min = 0, n_sort = 0, n_sweep = 0;
+        const PairSet cell = cell2d_self_pairs(e_c, &n_cell);
+        const PairSet mincorner = cell2dmin_self_pairs(e_m, &n_min);
+        const PairSet minsorted = cell2dmin_self_pairs<true>(e_s, &n_sort);
+        const PairSet sweep = sweep_self_pairs(e, -1, &n_sweep);
 
-        const bool ok = (cell == sweep) && (mincorner == sweep) && (minsorted == sweep);
+        int dup = 0;
+        dup |= report_duplicates(name, "cell list", n_cell, cell);
+        dup |= report_duplicates(name, "mincorner", n_min, mincorner);
+        dup |= report_duplicates(name, "sorted", n_sort, minsorted);
+        dup |= report_duplicates(name, "sweep", n_sweep, sweep);
+
+        const bool ok = (cell == sweep) && (mincorner == sweep) && (minsorted == sweep) && !dup;
         std::printf("%-26s edges=%-6ld sweep=%-8zu cell=%-8zu mincorner=%-8zu sorted=%-8zu  %s\n",
                     name,
                     (long)n,
