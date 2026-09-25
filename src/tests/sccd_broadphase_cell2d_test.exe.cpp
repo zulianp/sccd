@@ -266,6 +266,59 @@ namespace {
         return out;
     }
 
+    // The same list against itself over a minimum-corner binning: one cell per
+    // box, a forward walk in linear cell order, and the per-cell bounds pruning
+    // it. It must return the sweep's pair set exactly, like the cell list does.
+    PairSet cell2dmin_self_pairs(Boxes& e) {
+        sccd::Cell2DGrid<scalar_t> grid;
+        sccd::cell2d_setup<scalar_t>(e.n, e.ptr, grid);
+
+        sccd::Cell2DPartition part;
+        sccd::cell2dmin_partition<scalar_t>(e.n, e.ptr, grid, part);
+
+        std::vector<ptrdiff_t> cellptr(grid.ncells() + 1);
+        sccd::cell2dmin_count<scalar_t>(e.n, e.ptr, grid, part, cellptr.data());
+        std::vector<idx_t> cellidx(cellptr[grid.ncells()]);
+        std::vector<ptrdiff_t> cursor(grid.ncells());
+        sccd::cell2dmin_fill<scalar_t, idx_t>(
+            e.n, e.ptr, grid, part, cellptr.data(), cellidx.data(), cursor.data());
+
+        std::vector<scalar_t> row_prefix(grid.ncells()), cell_hi1(grid.ncells());
+        sccd::cell2dmin_bounds<scalar_t>(e.n, e.ptr, grid, part, row_prefix.data(), cell_hi1.data());
+
+        std::vector<ptrdiff_t> ccdptr(e.n + 1, 0);
+        const bool any = sccd::cell2dmin_count_self_overlaps<2, scalar_t, idx_t>(e.n,
+                                                                                 e.ptr,
+                                                                                 e.idx.data(),
+                                                                                 1,
+                                                                                 e.elem_ptr,
+                                                                                 grid,
+                                                                                 cellptr.data(),
+                                                                                 cellidx.data(),
+                                                                                 row_prefix.data(),
+                                                                                 cell_hi1.data(),
+                                                                                 ccdptr.data());
+        PairSet out;
+        if (!any) return out;
+
+        std::vector<idx_t> a(ccdptr[e.n]), b(ccdptr[e.n]);
+        sccd::cell2dmin_fill_self_overlaps<2, scalar_t, idx_t>(e.n,
+                                                               e.ptr,
+                                                               e.idx.data(),
+                                                               1,
+                                                               e.elem_ptr,
+                                                               grid,
+                                                               cellptr.data(),
+                                                               cellidx.data(),
+                                                               row_prefix.data(),
+                                                               cell_hi1.data(),
+                                                               ccdptr.data(),
+                                                               a.data(),
+                                                               b.data());
+        for (size_t i = 0; i < a.size(); ++i) out.insert({a[i], b[i]});
+        return out;
+    }
+
     // Boxes that are flat on one axis and sit at a handful of repeated
     // coordinates, so that one box's xmax lands exactly on another's xmin.
     //
@@ -341,13 +394,54 @@ namespace {
         bin(serial_part, sptr, sidx);
         bin(parallel_part, pptr, pidx);
 
-        const bool ok = (sptr == pptr) && (sidx == pidx);
-        std::printf("%-24s boxes=%-7ld cells=%-8ld spans=%-9ld blocks=%-4d  %s\n",
+        // The minimum-corner binning and its bounds, through the same two paths.
+        // This is the only case large enough to cross the parallel threshold, so
+        // without it that path is never run.
+        sccd::Cell2DPartition min_parallel_part;
+        sccd::cell2dmin_partition<scalar_t>(b.n, b.ptr, grid, min_parallel_part);
+        const sccd::Cell2DPartition min_serial_part;
+
+        auto bin_min = [&](const sccd::Cell2DPartition& part,
+                           std::vector<ptrdiff_t>& cellptr,
+                           std::vector<idx_t>& cellidx,
+                           std::vector<scalar_t>& row_prefix,
+                           std::vector<scalar_t>& cell_hi1) {
+            cellptr.assign((size_t)grid.ncells() + 1, -1);
+            sccd::cell2dmin_count<scalar_t>(b.n, b.ptr, grid, part, cellptr.data());
+            cellidx.assign((size_t)cellptr[grid.ncells()], -1);
+            std::vector<ptrdiff_t> cursor((size_t)grid.ncells());
+            sccd::cell2dmin_fill<scalar_t, idx_t>(
+                b.n, b.ptr, grid, part, cellptr.data(), cellidx.data(), cursor.data());
+            row_prefix.assign((size_t)grid.ncells(), 0);
+            cell_hi1.assign((size_t)grid.ncells(), 0);
+            sccd::cell2dmin_bounds<scalar_t>(b.n, b.ptr, grid, part, row_prefix.data(), cell_hi1.data());
+        };
+
+        std::vector<ptrdiff_t> msptr, mpptr;
+        std::vector<idx_t> msidx, mpidx;
+        std::vector<scalar_t> mspre, mppre, mshi, mphi;
+        bin_min(min_serial_part, msptr, msidx, mspre, mshi);
+        bin_min(min_parallel_part, mpptr, mpidx, mppre, mphi);
+
+        const bool min_ok = (msptr == mpptr) && (msidx == mpidx) && (mspre == mppre) && (mshi == mphi);
+        // One entry per box, which is the whole point of that binning.
+        const bool min_entries_ok = msptr[grid.ncells()] == n;
+
+        const bool ok = (sptr == pptr) && (sidx == pidx) && min_ok && min_entries_ok;
+        std::printf("%-24s boxes=%-7ld cells=%-8ld spans=%-9ld mincorner=%-9ld blocks=%-4d  %s\n",
                     name, (long)n, (long)grid.ncells(), (long)sptr[grid.ncells()],
-                    parallel_part.nblocks, ok ? "ok" : "MISMATCH");
+                    (long)msptr[grid.ncells()], parallel_part.nblocks, ok ? "ok" : "MISMATCH");
         if (!ok) {
             if (sptr != pptr) std::printf("    cell offsets differ\n");
             if (sidx != pidx) std::printf("    cell contents differ\n");
+            if (msptr != mpptr) std::printf("    mincorner cell offsets differ\n");
+            if (msidx != mpidx) std::printf("    mincorner cell contents differ\n");
+            if (mspre != mppre) std::printf("    mincorner row prefix maxima differ\n");
+            if (mshi != mphi) std::printf("    mincorner per-cell bounds differ\n");
+            if (!min_entries_ok) {
+                std::printf("    mincorner binned %ld entries for %ld boxes, expected one each\n",
+                            (long)msptr[grid.ncells()], (long)n);
+            }
         }
         // A case that never crosses into the partitioned path proves nothing
         // about it, so say so rather than passing quietly.
@@ -410,10 +504,12 @@ namespace {
     int run_flat_self_case(const char* name, const ptrdiff_t n, const int planes) {
         std::mt19937 rng(4242);
         Boxes e = make_flat_boxes(rng, n, 2, planes);
-        Boxes e_c = e;
+        Boxes e_c = e, e_m = e;
         e_c.bind();
+        e_m.bind();
 
         const PairSet cell = cell2d_self_pairs(e_c);
+        const PairSet mincorner = cell2dmin_self_pairs(e_m);
 
         int bad = 0;
         for (int axis = 0; axis < 3; ++axis) {
@@ -425,9 +521,9 @@ namespace {
             std::set_difference(cell.begin(), cell.end(), sweep.begin(), sweep.end(),
                                 std::back_inserter(only_cell));
 
-            const bool ok = (cell == sweep);
-            std::printf("%-24s axis=%d boxes=%-6ld planes=%-3d sweep=%-8zu cell=%-8zu  %s\n",
-                        name, axis, (long)n, planes, sweep.size(), cell.size(),
+            const bool ok = (cell == sweep) && (mincorner == sweep);
+            std::printf("%-24s axis=%d boxes=%-6ld planes=%-3d sweep=%-8zu cell=%-8zu mincorner=%-8zu  %s\n",
+                        name, axis, (long)n, planes, sweep.size(), cell.size(), mincorner.size(),
                         ok ? "ok" : "MISMATCH");
             if (!only_cell.empty()) {
                 std::printf("    the sweep MISSED %zu pairs the cell list found -- "
@@ -440,28 +536,31 @@ namespace {
     }
 
     int run_self_boxes(const char* name, Boxes& e, const ptrdiff_t n) {
-        Boxes e_c = e;
+        Boxes e_c = e, e_m = e;
         e_c.bind();
+        e_m.bind();
 
         const PairSet cell = cell2d_self_pairs(e_c);
+        const PairSet mincorner = cell2dmin_self_pairs(e_m);
         const PairSet sweep = sweep_self_pairs(e);
 
-        const bool ok = (cell == sweep);
-        std::printf("%-26s edges=%-6ld sweep=%-8zu cell=%-8zu  %s\n",
+        const bool ok = (cell == sweep) && (mincorner == sweep);
+        std::printf("%-26s edges=%-6ld sweep=%-8zu cell=%-8zu mincorner=%-8zu  %s\n",
                     name,
                     (long)n,
                     sweep.size(),
                     cell.size(),
+                    mincorner.size(),
                     ok ? "ok" : "MISMATCH");
         if (!ok) {
-            std::vector<std::pair<idx_t, idx_t>> only_sweep, only_cell;
+            const PairSet& bad = (cell == sweep) ? mincorner : cell;
+            const char* which = (cell == sweep) ? "mincorner" : "cell list";
+            std::vector<std::pair<idx_t, idx_t>> only_sweep, only_bad;
             std::set_difference(
-                sweep.begin(), sweep.end(), cell.begin(), cell.end(), std::back_inserter(only_sweep));
+                sweep.begin(), sweep.end(), bad.begin(), bad.end(), std::back_inserter(only_sweep));
             std::set_difference(
-                cell.begin(), cell.end(), sweep.begin(), sweep.end(), std::back_inserter(only_cell));
-            std::printf("    missed by cell list: %zu   extra in cell list: %zu\n",
-                        only_sweep.size(),
-                        only_cell.size());
+                bad.begin(), bad.end(), sweep.begin(), sweep.end(), std::back_inserter(only_bad));
+            std::printf("    missed by %s: %zu   extra: %zu\n", which, only_sweep.size(), only_bad.size());
             for (size_t i = 0; i < only_sweep.size() && i < 5; ++i) {
                 std::printf("    missing (%d,%d)\n", only_sweep[i].first, only_sweep[i].second);
             }
