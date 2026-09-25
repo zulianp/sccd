@@ -317,6 +317,14 @@ namespace {
             sccd::cell2dmin_sort_cells<scalar_t, idx_t>(
                 e.ptr, grid, cellptr.data(), cellidx.data(), cell_key.data(), cell_hi2.data());
         }
+        std::vector<scalar_t> boxdata[6];
+        scalar_t* cellbox[6];
+        for (int d = 0; d < 6; ++d) {
+            boxdata[d].resize((size_t)cellptr[grid.ncells()]);
+            cellbox[d] = boxdata[d].data();
+        }
+        sccd::cell2d_pack_boxes<scalar_t, idx_t>(grid, e.ptr, cellptr.data(), cellidx.data(), cellbox);
+
         const scalar_t* const key = sorted ? cell_key.data() : nullptr;
         const scalar_t* const hi2 = sorted ? cell_hi2.data() : nullptr;
 
@@ -329,6 +337,7 @@ namespace {
                                                                                  grid,
                                                                                  cellptr.data(),
                                                                                  cellidx.data(),
+                                                                                 cellbox,
                                                                                  row_prefix.data(),
                                                                                  cell_hi1.data(),
                                                                                  key,
@@ -347,6 +356,7 @@ namespace {
                                                                grid,
                                                                cellptr.data(),
                                                                cellidx.data(),
+                                                               cellbox,
                                                                row_prefix.data(),
                                                                cell_hi1.data(),
                                                                key,

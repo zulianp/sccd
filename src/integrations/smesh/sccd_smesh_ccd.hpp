@@ -696,6 +696,13 @@ namespace sccd {
                         sort_cells_host_(eaabb_->data(), e_grid_, e_cellptr_, e_cellidx_,
                                          e_cell_key_, e_cell_hi2_);
                     }
+                    // After the sort, which permutes what each cell holds.
+                    for (int d = 0; d < 6; ++d) {
+                        e_cellbox_data_[d].resize((size_t)e_cellptr_[e_grid_.ncells()]);
+                        e_cellbox_[d] = e_cellbox_data_[d].data();
+                    }
+                    sccd::cell2d_pack_boxes<scalar_t, smesh::idx_t>(
+                        e_grid_, eaabb_->data(), e_cellptr_.data(), e_cellidx_.data(), e_cellbox_);
                 } else {
                     bin_host_<true>(n_edges, eaabb_->data(), e_grid_, e_part_, e_cellptr_, e_cellidx_,
                                     e_cursor_, e_cellbox_data_, e_cellbox_);
@@ -788,6 +795,7 @@ namespace sccd {
                                                                                    e_grid_,
                                                                                    e_cellptr_.data(),
                                                                                    e_cellidx_.data(),
+                                                                                   e_cellbox_,
                                                                                    e_row_prefix_.data(),
                                                                                    e_cell_hi1_.data(),
                                                                                    key,
@@ -806,6 +814,7 @@ namespace sccd {
                                                                                   e_grid_,
                                                                                   e_cellptr_.data(),
                                                                                   e_cellidx_.data(),
+                                                                                  e_cellbox_,
                                                                                   e_row_prefix_.data(),
                                                                                   e_cell_hi1_.data(),
                                                                                   key,
