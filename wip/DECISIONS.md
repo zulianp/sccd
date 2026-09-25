@@ -20,6 +20,7 @@ every one of these was believed at the time on evidence that looked sufficient.
 - Withdrawn: "SCCD is 6x to 24x cheaper per collision pair than Additive CCD" —
   see section 9
 - Demoted: a centroid-binned cell list, at one level and at two — see below
+- Rejected: binning self pairs at the minimum corner — see below
 
 The full argument and the numbers behind each sit in
 [`ASSESSMENT.md`](ASSESSMENT.md).
@@ -449,3 +450,48 @@ The structure that would work is a geometric ladder of levels with the level
 count taken from the size distribution, which is what the polydisperse-particle
 literature does (Ogarko and Luding, *A fast multilevel algorithm for contact
 detection of arbitrarily polydisperse objects*). That was not built.
+
+## Binning self pairs at the minimum corner loses the incomparable ones
+
+A tempting specialisation for the edge-edge broad phase, where one list is
+queried against itself: bin each box into the single cell holding its
+**minimum** corner rather than into every cell its extent touches, and have a
+box read only its own footprint -- its min cell up to its max cell. Each box is
+then in one cell, so a partner is met at most once and the minimum-corner
+duplicate test disappears. It also halves the cell array.
+
+It is not conservative. Measured against brute force on 4,000 random boxes at
+the shipped cell size, it finds 22,462 of 26,950 pairs and **misses 4,488**, and
+the same probe at a fifth of the box size misses 159 of 793. Box size does not
+rescue it.
+
+The misses have an exact characterisation, confirmed on both runs: they are
+precisely the pairs whose minimum-corner cells are **incomparable** -- one box
+ahead on the first axis and behind on the second. Every pair whose min cells are
+comparable is found, and every incomparable pair is lost. A concrete one, at a
+cell width of one:
+
+    A = [0.5, 1.5] x [1.5, 2.5]   min cell (0, 1)
+    B = [1.2, 2.2] x [0.8, 1.8]   min cell (1, 0)
+
+They overlap on both axes. A's footprint is columns 0-1, rows 1-2 and does not
+contain B's cell (1,0); B's footprint is columns 1-2, rows 0-1 and does not
+contain A's cell (0,1). Neither reads the other.
+
+The reason is order-theoretic and worth keeping. "Read only forward" is sound
+exactly when the keys are **totally** ordered, which is why sweep and prune gets
+its one-sided window for free: on one axis the minima sort, and starting the
+window at `i+1` yields each unordered pair once. Minimum corners in two
+dimensions are only **partially** ordered, and the incomparable pairs are the
+ones no forward walk can reach.
+
+Making it sound means letting a box read backwards far enough to catch a partner
+whose minimum lies behind its own, which is `ceil(max extent / cell width)` cells
+on each axis. That is bounded by one cell only when no box is wider than a cell
+-- which is the centroid grid of the section above, already measured and demoted.
+On armadillo-rollers' edges the widest swept box is around eight cells, so the
+walk would grow from roughly `2x2` cells to `17x17`.
+
+What the idea does buy is real: one cell per box removes the multi-cell
+duplication outright. What it costs is completeness, and the shipped rule buys
+completeness unconditionally for two clamps per surviving pair.
