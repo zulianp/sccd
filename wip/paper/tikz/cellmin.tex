@@ -23,9 +23,14 @@
   idle/.style={draw=sccdInk!22, line width=0.5pt},
   query/.style={draw=sccdTeal, line width=1.0pt},
   found/.style={draw=sccdPlum, line width=1.0pt},
-  skip/.style={fill=sccdMoss!30},
-  skipedge/.style={draw=sccdMoss!70, line width=0.5pt},
+  full/.style={fill=sccdTeal!14},
+  empty/.style={fill=sccdMoss!30},
+  beyond/.style={fill=sccdInk!6},
 ]
+
+% One cell, addressed by column and row.
+\newcommand{\cellfill}[3]{%
+  \fill[#3] ({#1*0.62},{#2*0.62}) rectangle ({(#1+1)*0.62},{(#2+1)*0.62});}
 
 % label / x0 / y0 / x1 / y1 -- the minimum corner is (x0,y0).
 \def\scenebox{%
@@ -73,12 +78,10 @@
 \begin{scope}[shift={(4.32,0)}]
   \node[ttl, anchor=south west] at (0,2.64) {(b) $a$ covers cells $0,1,6,7$};
 
-  \fill[sccdTeal!14] (0,0) rectangle (1.24,0.62);
-  \fill[sccdTeal!14] (0.62,0.62) rectangle (1.24,1.24);
-  \fill[sccdInk!6] (1.24,0) rectangle (3.72,1.24);
-  \fill[skip] (0,0.62) rectangle (0.62,1.24);
+  \cellfill{0}{0}{full}  \cellfill{1}{0}{full}  \cellfill{1}{1}{full}
+  \cellfill{0}{1}{empty}
+  \fill[beyond] (1.24,0) rectangle (3.72,1.24);
   \scenegrid
-  \draw[skipedge] (0,0.62) rectangle (0.62,1.24);
   \sceneidle
 
   \draw[found] (1.05,0.20) rectangle (1.65,0.75);
@@ -99,17 +102,13 @@
 \begin{scope}[shift={(0,-3.40)}]
   \node[ttl, anchor=south west] at (0,2.64) {(c) $d$ covers cells $3,4,9,10,15,16$};
 
-  \fill[sccdTeal!14] (1.86,0) rectangle (3.10,1.24);
-  \fill[sccdInk!6] (3.10,0) rectangle (3.72,1.86);
-
-  % Cells 15 and 16: the part of d's own extent on the third row. Both are
-  % empty, so the running maximum drops them without reading. The rest of that
-  % row, and the columns the second row also skips, lie outside d's own columns
-  % -- nothing in the drawing would lead a reader to expect those to be read, so
-  % marking them says nothing and crowds what it is here to show.
-  \fill[skip] (1.86,1.24) rectangle (3.10,1.86);
+  % Only 3 and 9 hold anything: d itself and e. Cells 4 and 10 are read and
+  % yield nothing, and 15 and 16 are stepped over by the running maximum.
+  \cellfill{3}{0}{full}  \cellfill{3}{1}{full}
+  \cellfill{4}{0}{empty} \cellfill{4}{1}{empty}
+  \cellfill{3}{2}{empty} \cellfill{4}{2}{empty}
+  \fill[beyond] (3.10,0) rectangle (3.72,1.86);
   \scenegrid
-  \draw[skipedge] (1.86,1.24) rectangle (3.10,1.86);
   \sceneidle
 
   \draw[found] (2.40,1.10) rectangle (3.10,1.70);
@@ -126,12 +125,10 @@
 \begin{scope}[shift={(4.32,-3.40)}]
   \node[ttl, anchor=south west] at (0,2.64) {(d) $f$ covers cells $12,13,18,19$};
 
-  \fill[sccdTeal!14] (0,1.24) rectangle (1.24,1.86);
-  \fill[sccdTeal!14] (0.62,1.86) rectangle (1.24,2.48);
-  \fill[sccdInk!6] (1.24,1.24) rectangle (3.72,2.48);
-  \fill[skip] (0,1.86) rectangle (0.62,2.48);
+  \cellfill{0}{2}{full}  \cellfill{1}{3}{full}
+  \cellfill{1}{2}{empty} \cellfill{0}{3}{empty}
+  \fill[beyond] (1.24,1.24) rectangle (3.72,2.48);
   \scenegrid
-  \draw[skipedge] (0,1.86) rectangle (0.62,2.48);
   \sceneidle
 
   \draw[found] (0.75,1.95) rectangle (1.45,2.40);
@@ -145,13 +142,13 @@
 \begin{scope}[shift={(0,-4.30)}]
   \fill[sccdInk] (0.11,0.22) circle (1.4pt);
   \node[lbl, anchor=west] at (0.26,0.22) {the minimum corner a box is binned at};
-  \fill[sccdTeal!14] (0.00,-0.08) rectangle ++(0.22,0.16);
+  \fill[full] (0.00,-0.08) rectangle ++(0.22,0.16);
   \draw[draw=sccdInk!30, line width=0.3pt] (0.00,-0.08) rectangle ++(0.22,0.16);
-  \node[lbl, anchor=west] at (0.26,0.00) {the cells the walk reads};
-  \fill[skip] (0.00,-0.38) rectangle ++(0.22,0.16);
-  \draw[skipedge] (0.00,-0.38) rectangle ++(0.22,0.16);
-  \node[lbl, anchor=west] at (0.26,-0.30) {empty cells the box covers};
-  \fill[sccdInk!6] (0.00,-0.68) rectangle ++(0.22,0.16);
+  \node[lbl, anchor=west] at (0.26,0.00) {a covered cell holding a box};
+  \fill[empty] (0.00,-0.38) rectangle ++(0.22,0.16);
+  \draw[draw=sccdInk!30, line width=0.3pt] (0.00,-0.38) rectangle ++(0.22,0.16);
+  \node[lbl, anchor=west] at (0.26,-0.30) {a covered cell that is empty};
+  \fill[beyond] (0.00,-0.68) rectangle ++(0.22,0.16);
   \draw[draw=sccdInk!30, line width=0.3pt] (0.00,-0.68) rectangle ++(0.22,0.16);
   \node[lbl, anchor=west] at (0.26,-0.60) {past the box's own maximum corner};
 \end{scope}

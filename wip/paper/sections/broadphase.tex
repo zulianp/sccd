@@ -321,13 +321,13 @@ match. A second bound per cell does the same on the other axis.
     boxes overlap, and each is emitted by whichever of the two sits in the lower
     cell, so only three of the seven boxes emit anything.
     \textbf{(b)} $a$ covers cells $0$, $1$, $6$ and $7$, the last holding its
-    maximum corner, reads $0$, $1$ and $7$ and finds both $b$ and $c$. Cell $6$
-    it never reads: the cell is empty, so the running maximum starts that row at
-    the next column. A skipped span costs one binary search and not a test per
-    cell.
-    \textbf{(c)} $d$ covers cells $3$, $4$, $9$, $10$, $15$ and $16$, reads the
-    first four and finds $e$. Its third row is skipped whole, the empty cells
-    $15$ and $16$ included although $d$ covers them: the
+    maximum corner, and finds $b$ and $c$ in $1$ and $7$. Cell $6$ is empty, so
+    the running maximum starts that row at the next column and the cell is never
+    read. A run of empty cells costs one binary search and not a test per cell.
+    \textbf{(c)} $d$ covers cells $3$, $4$, $9$, $10$, $15$ and $16$, of which
+    $3$ holds $d$ itself and $9$ holds $e$, the pair it emits. Cells $4$ and
+    $10$ are read and yield nothing. The third row is skipped whole, the empty
+    cells $15$ and $16$ included although $d$ covers them: the
     only box binned in that row is $f$, which ends well to the left of where $d$
     begins, so one search puts the row past $d$'s own maximum column and it is
     never entered. Past its own row the walk also reaches left of its own
@@ -335,8 +335,9 @@ match. A second bound per cell does the same on the other axis.
     reach back into $d$ and $d$ holds the lower cell, so that pair would be its
     to report; those cells are skipped by the same search and are left unmarked
     here, being too far from $d$ for the drawing to say anything about them.
-    \textbf{(d)} $f$ covers cells $12$, $13$, $18$ and $19$ and finds $g$, again
-    skipping one empty cell on its second row. $b$, $c$, $e$ and $g$ walk too, and emit
+    \textbf{(d)} $f$ covers cells $12$, $13$, $18$ and $19$, and finds $g$ in
+    $19$; of the two empty cells $13$ is read and $18$ the search steps over.
+    $b$, $c$, $e$ and $g$ walk too, and emit
     nothing: each of their partners sits in a lower cell and has already
     reported the pair.}
   \label{fig:cellmin}
