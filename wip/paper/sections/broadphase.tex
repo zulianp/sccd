@@ -320,11 +320,13 @@ match. A second bound per cell does the same on the other axis.
     $19$, the cells numbered row-major from the bottom left. Four pairs of these
     boxes overlap, and each is emitted by whichever of the two sits in the lower
     cell, so only three of the seven boxes emit anything.
-    \textbf{(b)} $a$ walks from its own cell $0$ to cell $7$, where its maximum
-    corner lies, and finds both $b$ and $c$. Cell $6$ it covers and never reads:
-    the cell is empty, so the running maximum starts that row at the next column.
-    A skipped span costs one binary search and not a test per cell.
-    \textbf{(c)} $d$ walks cells $3$ to $16$ and finds $e$. Its third row is
+    \textbf{(b)} $a$ covers cells $0$, $1$, $6$ and $7$, the last holding its
+    maximum corner, reads $0$, $1$ and $7$ and finds both $b$ and $c$. Cell $6$
+    it never reads: the cell is empty, so the running maximum starts that row at
+    the next column. A skipped span costs one binary search and not a test per
+    cell.
+    \textbf{(c)} $d$ covers cells $3$, $4$, $9$, $10$, $15$ and $16$, reads the
+    first four and finds $e$. Its third row is
     skipped whole, cells $15$ and $16$ included although $d$ covers them: the
     only box binned in that row is $f$, which ends well to the left of where $d$
     begins, so one search puts the row past $d$'s own maximum column and it is
@@ -333,8 +335,8 @@ match. A second bound per cell does the same on the other axis.
     reach back into $d$ and $d$ holds the lower cell, so that pair would be its
     to report; those cells are skipped by the same search and are left unmarked
     here, being too far from $d$ for the drawing to say anything about them.
-    \textbf{(d)} $f$ walks cells $12$ to $19$ and finds $g$, again skipping one
-    empty cell on its second row. $b$, $c$, $e$ and $g$ walk too, and emit
+    \textbf{(d)} $f$ covers cells $12$, $13$, $18$ and $19$ and finds $g$, again
+    skipping one empty cell on its second row. $b$, $c$, $e$ and $g$ walk too, and emit
     nothing: each of their partners sits in a lower cell and has already
     reported the pair.}
   \label{fig:cellmin}
@@ -382,8 +384,8 @@ emitted exactly once, from a cell that does examine it.
 In \cref{alg:cellmin} each box lies in one cell, so a pair is examined at most
 once from each side, and the guard on line 10 keeps the side with the smaller
 $L$. It is examined there by the argument of \cref{sec:bp:self}:
-$L(\operatorname{cell}(j.\min))$ lies in the range that box walks, and the two
-bounds skip only cells whose contents cannot reach the querying box.
+$\operatorname{cell}(j.\min)$ lies among the rows and columns that box walks,
+and the two bounds skip only cells whose contents cannot reach the querying box.
 \end{proof}
 
 \Cref{prop:agree} makes the two interchangeable. We also check it empirically,

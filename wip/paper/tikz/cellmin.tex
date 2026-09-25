@@ -67,11 +67,11 @@
 \end{scope}
 
 % ============================= (b) box a walks ===============================
-% a is binned in cell 0 and its maximum corner in cell 7, so it walks rows 0-1
-% up to column 1. On row 1 the running maximum starts the scan at column 1:
-% cell 6 is empty, so nothing there reaches back to a.
+% a is binned in cell 0 and its maximum corner in cell 7, so it covers cells 0,
+% 1, 6 and 7 -- rows 0-1 crossed with columns 0-1. On row 1 the running maximum
+% starts the scan at column 1: cell 6 is empty, so nothing there reaches back.
 \begin{scope}[shift={(4.32,0)}]
-  \node[ttl, anchor=south west] at (0,2.64) {(b) $a$ walks cells $0$ to $7$};
+  \node[ttl, anchor=south west] at (0,2.64) {(b) $a$ covers cells $0,1,6,7$};
 
   \fill[sccdTeal!14] (0,0) rectangle (1.24,0.62);
   \fill[sccdTeal!14] (0.62,0.62) rectangle (1.24,1.24);
@@ -92,12 +92,13 @@
 \end{scope}
 
 % ============================= (c) box d walks ===============================
-% d is binned in cell 3, its maximum corner in cell 16, so it walks rows 0-2 up
-% to column 4. Row 2 holds only f, whose maximum on the first axis is 0.90 and
-% so never reaches d: the running maximum returns a column past 4 and the whole
-% row is skipped without being read.
+% d is binned in cell 3 and its maximum corner in cell 16, so it covers cells 3,
+% 4, 9, 10, 15 and 16 -- rows 0-2 crossed with columns 3-4. Row 2 holds only f,
+% whose maximum on the first axis is 0.90 and so never reaches d: the running
+% maximum returns a column past 4 and the whole row is skipped without being
+% read.
 \begin{scope}[shift={(0,-3.40)}]
-  \node[ttl, anchor=south west] at (0,2.64) {(c) $d$ walks cells $3$ to $16$};
+  \node[ttl, anchor=south west] at (0,2.64) {(c) $d$ covers cells $3,4,9,10,15,16$};
 
   \fill[sccdTeal!14] (1.86,0) rectangle (3.10,1.24);
   \fill[sccdInk!6] (3.10,0) rectangle (3.72,1.86);
@@ -120,11 +121,11 @@
 \end{scope}
 
 % ============================= (d) box f walks ===============================
-% f is binned in cell 12 and its maximum corner in cell 19, so it walks rows 2-3
-% up to column 1. On row 3 the running maximum starts at column 1, cell 18 being
-% empty.
+% f is binned in cell 12 and its maximum corner in cell 19, so it covers cells
+% 12, 13, 18 and 19 -- rows 2-3 crossed with columns 0-1. On row 3 the running
+% maximum starts at column 1, cell 18 being empty.
 \begin{scope}[shift={(4.32,-3.40)}]
-  \node[ttl, anchor=south west] at (0,2.64) {(d) $f$ walks cells $12$ to $19$};
+  \node[ttl, anchor=south west] at (0,2.64) {(d) $f$ covers cells $12,13,18,19$};
 
   \fill[sccdTeal!14] (0,1.24) rectangle (1.24,1.86);
   \fill[sccdTeal!14] (0.62,1.86) rectangle (1.24,2.48);
