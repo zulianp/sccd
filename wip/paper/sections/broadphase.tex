@@ -291,27 +291,29 @@ match. A second bound per cell does the same on the other axis.
   \ForAll{$i$ \textbf{in parallel}}
     \State $(c_{0}^{b},c_{1}^{b}) \gets \operatorname{cell}(A_{i}.\min)$;\quad
            $(c_{0}^{e},c_{1}^{e}) \gets \operatorname{cell}(A_{i}.\max)$
+    \ForAll{$j$ listed in $(c_{0}^{b},c_{1}^{b})$ \textbf{with} $j > i$}
+      \State \Call{Test}{$i$, $j$} \Comment{its own cell, where the index decides}
+    \EndFor
     \For{$c_{1} \gets c_{1}^{b}$ \textbf{to} $c_{1}^{e}$}
-      \State $c_{0} \gets$ \Call{LowerBound}{$\mu$ on row $c_{1}$ up to $c_{0}^{e}$,
+      \If{$c_{1} = c_{1}^{b}$} $c_{0} \gets c_{0}^{b} + 1$
+        \Comment{its own cell is read above}
+      \Else{} $c_{0} \gets$ \Call{LowerBound}{$\mu$ on row $c_{1}$ up to $c_{0}^{e}$,
              $A_{i}.\min_{a_{0}}$}
-        \Comment{earlier columns miss}
-      \If{$c_{1} = c_{1}^{b}$} $c_{0} \gets \max(c_{0}, c_{0}^{b})$
-        \Comment{its own row starts at its own column}
       \EndIf
       \For{$c_{0}$ \textbf{to} $c_{0}^{e}$, cell $c \gets (c_{0},c_{1})$}
         \If{$u_{c} < A_{i}.\min_{a_{1}}$} \textbf{continue}
           \Comment{the cell is not read}
         \EndIf
-        \ForAll{$j$ listed in $c$}
-          \If{$c = \operatorname{cell}(A_{i}.\min)$ \textbf{and} $j \le i$} \textbf{continue}
-            \Comment{the index decides}
-          \EndIf
-          \If{$A_{i}$ and $A_{j}$ are disjoint in 3D, or share a vertex} \textbf{continue} \EndIf
-          \State count, or emit the pair
+        \ForAll{$j$ listed in $c$} \Call{Test}{$i$, $j$}
+          \Comment{$c$ is ahead of $i$'s cell, so no index test}
         \EndFor
       \EndFor
     \EndFor
   \EndFor
+\EndFunction
+\Function{Test}{$i$, $j$}
+  \If{$A_{i}$ and $A_{j}$ are disjoint in 3D, or share a vertex} \Return \EndIf
+  \State count, or emit the pair
 \EndFunction
 \end{algorithmic}
 \end{algorithm}
@@ -390,7 +392,7 @@ emits it only from $\operatorname{cell}(o)$, which is one cell. So it is
 emitted exactly once, from a cell that does examine it.
 
 In \cref{alg:cellmin} each box lies in one cell, so a pair is examined at most
-once from each side, and the guard on line 13 keeps the side with the smaller
+once from each side, and the guard on line 7 keeps the side with the smaller
 $L$. It is examined there by the argument of \cref{sec:bp:self}:
 $\operatorname{cell}(j.\min)$ lies among the rows and columns that box walks,
 and the two bounds skip only cells whose contents cannot reach the querying box.
