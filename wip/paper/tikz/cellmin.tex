@@ -29,7 +29,7 @@
 % label / x0 / y0 / x1 / y1 -- the minimum corner is (x0,y0).
 \def\scenebox{%
   a/0.35/0.30/1.10/1.00, b/1.05/0.20/1.65/0.75, c/0.80/0.85/1.50/1.50,
-  d/1.95/0.45/2.60/1.25, e/2.40/1.10/3.10/1.70, f/0.30/1.75/0.90/2.30,
+  d/1.95/0.45/2.60/1.55, e/2.40/1.10/3.10/1.70, f/0.30/1.75/0.90/2.30,
   g/0.75/1.95/1.45/2.40}
 
 % The grid, drawn line by line. #1 is unused; kept as a command for brevity.
@@ -78,8 +78,9 @@
   \scenegrid
   \sceneidle
 
-  \draw[draw=sccdInk!45, line width=0.7pt] (0.19,0.81) -- (0.43,1.05);
-  \draw[draw=sccdInk!45, line width=0.7pt] (0.43,0.81) -- (0.19,1.05);
+  \fill[sccdInk!10] (0,0.62) rectangle (0.62,1.24);
+  \draw[draw=sccdInk!40, line width=0.5pt] (0,0.62) rectangle (0.62,1.24);
+  \draw[<-, draw=sccdInk!55, line width=0.5pt] (0.08,0.93) -- (0.54,0.93);
 
   \draw[found] (1.05,0.20) rectangle (1.65,0.75);
   \draw[found] (0.80,0.85) rectangle (1.50,1.50);
@@ -102,19 +103,18 @@
   \fill[sccdInk!6] (3.10,0) rectangle (3.72,1.86);
   \scenegrid
 
-  % The running maximum starts the second row at column 3 and puts the third row
-  % past column 4 altogether, so it skips three cells on one and five on the
-  % other. Both are marked, or the reader is left to wonder why one row shows
-  % what the other does not.
-  \foreach \c/\y in {0/0.81, 1/0.81, 2/0.81, 0/1.43, 1/1.43, 2/1.43, 3/1.43, 4/1.43} {
-    \draw[draw=sccdInk!45, line width=0.7pt]
-      ({\c*0.62+0.19},\y) -- ({\c*0.62+0.43},{\y+0.24});
-    \draw[draw=sccdInk!45, line width=0.7pt]
-      ({\c*0.62+0.43},\y) -- ({\c*0.62+0.19},{\y+0.24});}
+  % Cells 15 and 16: the part of d's own extent on the third row, which the
+  % running maximum drops without reading. The rest of that row, and the columns
+  % the second row also skips, lie outside d's own columns -- nothing in the
+  % drawing would lead a reader to expect those to be read, so marking them says
+  % nothing and crowds what it is here to show.
+  \fill[sccdInk!10] (1.86,1.24) rectangle (3.10,1.86);
+  \draw[draw=sccdInk!40, line width=0.5pt] (1.86,1.24) rectangle (3.10,1.86);
+  \draw[<-, draw=sccdInk!55, line width=0.5pt] (1.94,1.55) -- (3.02,1.55);
   \sceneidle
 
   \draw[found] (2.40,1.10) rectangle (3.10,1.70);
-  \draw[query] (1.95,0.45) rectangle (2.60,1.25);
+  \draw[query] (1.95,0.45) rectangle (2.60,1.55);
   \fill[sccdTeal] (1.95,0.45) circle (1.4pt);
   \node[lbl, text=sccdPlum, anchor=south west] at (3.12,1.70) {$e$};
   \node[lbl, text=sccdTeal, anchor=north east] at (1.93,0.43) {$d$};
@@ -133,8 +133,9 @@
   \scenegrid
   \sceneidle
 
-  \draw[draw=sccdInk!45, line width=0.7pt] (0.19,2.05) -- (0.43,2.29);
-  \draw[draw=sccdInk!45, line width=0.7pt] (0.43,2.05) -- (0.19,2.29);
+  \fill[sccdInk!10] (0,1.86) rectangle (0.62,2.48);
+  \draw[draw=sccdInk!40, line width=0.5pt] (0,1.86) rectangle (0.62,2.48);
+  \draw[<-, draw=sccdInk!55, line width=0.5pt] (0.08,2.17) -- (0.54,2.17);
 
   \draw[found] (0.75,1.95) rectangle (1.45,2.40);
   \draw[query] (0.30,1.75) rectangle (0.90,2.30);
@@ -150,9 +151,10 @@
   \fill[sccdTeal!14] (0.00,-0.08) rectangle ++(0.22,0.16);
   \draw[draw=sccdInk!30, line width=0.3pt] (0.00,-0.08) rectangle ++(0.22,0.16);
   \node[lbl, anchor=west] at (0.26,0.00) {the cells the walk reads};
-  \draw[draw=sccdInk!45, line width=0.7pt] (0.02,-0.38) -- (0.20,-0.22);
-  \draw[draw=sccdInk!45, line width=0.7pt] (0.20,-0.38) -- (0.02,-0.22);
-  \node[lbl, anchor=west] at (0.26,-0.30) {skipped by the running maximum, unread};
+  \fill[sccdInk!10] (0.00,-0.38) rectangle ++(0.22,0.16);
+  \draw[draw=sccdInk!40, line width=0.5pt] (0.00,-0.38) rectangle ++(0.22,0.16);
+  \draw[<-, draw=sccdInk!55, line width=0.5pt] (0.03,-0.30) -- (0.19,-0.30);
+  \node[lbl, anchor=west] at (0.26,-0.30) {covered by the box, never read};
   \fill[sccdInk!6] (0.00,-0.68) rectangle ++(0.22,0.16);
   \draw[draw=sccdInk!30, line width=0.3pt] (0.00,-0.68) rectangle ++(0.22,0.16);
   \node[lbl, anchor=west] at (0.26,-0.60) {past the box's own maximum corner};

@@ -312,23 +312,27 @@ match. A second bound per cell does the same on the other axis.
 \begin{figure}[htbp]
   \centering
   \input{tikz/cellmin}
-  \caption{The edge-edge binning run through on one scene, schematically and not
-    to scale. \textbf{(a)} Seven swept boxes over a six-by-four grid, each binned
+  \caption{The edge-edge binning run through on one scene, drawn to scale: every
+    cell index, walk range and skipped span below follows from the coordinates
+    shown. \textbf{(a)} Seven swept boxes over a six-by-four grid, each binned
     into the one cell holding its minimum corner --- $a$ into cell $0$, $b$ into
     $1$, $d$ into $3$, $c$ into $7$, $e$ into $9$, $f$ into $12$ and $g$ into
     $19$, the cells numbered row-major from the bottom left. Four pairs of these
     boxes overlap, and each is emitted by whichever of the two sits in the lower
     cell, so only three of the seven boxes emit anything.
     \textbf{(b)} $a$ walks from its own cell $0$ to cell $7$, where its maximum
-    corner lies, and finds both $b$ and $c$. On the second row the running
-    maximum starts the scan at the second column: cell $6$ is empty, so nothing
-    there can reach back to $a$, and it is skipped without being read.
-    \textbf{(c)} $d$ walks cells $3$ to $16$ and finds $e$. Past its own row the
-    walk is free to look left, because a box binned in a lower column can still
-    reach right, and it is the running maximum that says none here does: on the
-    second row it starts the scan at column $3$, and on the third it returns a
-    column past $d$'s own maximum, so that row is never entered at all. The only
-    box binned in it is $f$, which ends well to the left of where $d$ begins.
+    corner lies, and finds both $b$ and $c$. Cell $6$ it covers and never reads:
+    the cell is empty, so the running maximum starts that row at the next column.
+    A skipped span costs one binary search and not a test per cell.
+    \textbf{(c)} $d$ walks cells $3$ to $16$ and finds $e$. Its third row is
+    skipped whole, cells $15$ and $16$ included although $d$ covers them: the
+    only box binned in that row is $f$, which ends well to the left of where $d$
+    begins, so one search puts the row past $d$'s own maximum column and it is
+    never entered. Past its own row the walk also reaches left of its own
+    columns, because a box binned in a lower column can still be wide enough to
+    reach back into $d$ and $d$ holds the lower cell, so that pair would be its
+    to report; those cells are skipped by the same search and are left unmarked
+    here, being too far from $d$ for the drawing to say anything about them.
     \textbf{(d)} $f$ walks cells $12$ to $19$ and finds $g$, again skipping one
     empty cell on its second row. $b$, $c$, $e$ and $g$ walk too, and emit
     nothing: each of their partners sits in a lower cell and has already
