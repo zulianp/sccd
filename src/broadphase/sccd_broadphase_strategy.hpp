@@ -83,8 +83,8 @@
  * not one workload -- and a verdict reached on frame one should not bind frame
  * ten thousand.
  *
- * `SCCD_BROADPHASE=sweep`, `=cell2d`, `=cell2dmin` or `=cell2dminsort` forces one
- * and skips the race entirely, and `broadphase_stats` is still exposed for a caller who wants
+ * `SCCD_BROADPHASE=sweep`, `=cell2d`, `=cell2dmin`, `=cell2dminsort` or
+ * `=cell2dseg` forces one and skips the race entirely, and `broadphase_stats` is still exposed for a caller who wants
  * to look at the geometry itself.
  *
  * ## The third strategy is asked for, not raced
@@ -96,6 +96,11 @@
  * evaluation has to be measured *against* the shipped pair rather than mixed
  * into them -- a third probe would also lengthen the warm-up every caller pays.
  * It is reached by naming it, which is what the benchmark does. `cell2dminsort`
+ * `cell2dseg` changes the face-vertex query instead: the cell list holds the
+ * faces, and each vertex queries it with the segment its trajectory is, walking
+ * only the cells that segment crosses and testing the segment against a face box
+ * rather than two boxes against each other. Its edge-edge query is `cell2d`'s.
+ * `cell2dminsort`
  * is the same thing with each cell ordered on the axis the grid does not use, so
  * a cell can be ruled out by its bound there and the scan inside one can stop
  * early -- the question it answers is whether that ordering pays for itself.
@@ -103,7 +108,14 @@
 
 namespace sccd {
 
-    enum class BroadPhaseStrategy : int { Auto = 0, Sweep = 1, Cell2D = 2, Cell2DMin = 3, Cell2DMinSort = 4 };
+    enum class BroadPhaseStrategy : int {
+        Auto = 0,
+        Sweep = 1,
+        Cell2D = 2,
+        Cell2DMin = 3,
+        Cell2DMinSort = 4,
+        Cell2DSeg = 5
+    };
 
     /**
      * \brief Cheap shape and density statistics for the AABB set.
@@ -166,6 +178,7 @@ namespace sccd {
         if (std::strcmp(v, "cell2d") == 0) return BroadPhaseStrategy::Cell2D;
         if (std::strcmp(v, "cell2dmin") == 0) return BroadPhaseStrategy::Cell2DMin;
         if (std::strcmp(v, "cell2dminsort") == 0) return BroadPhaseStrategy::Cell2DMinSort;
+        if (std::strcmp(v, "cell2dseg") == 0) return BroadPhaseStrategy::Cell2DSeg;
         return BroadPhaseStrategy::Auto;
     }
 
@@ -284,6 +297,7 @@ namespace sccd {
             case BroadPhaseStrategy::Cell2D: return "cell2d";
             case BroadPhaseStrategy::Cell2DMin: return "cell2dmin";
             case BroadPhaseStrategy::Cell2DMinSort: return "cell2dminsort";
+            case BroadPhaseStrategy::Cell2DSeg: return "cell2dseg";
             case BroadPhaseStrategy::Auto: return "auto";
         }
         return "?";

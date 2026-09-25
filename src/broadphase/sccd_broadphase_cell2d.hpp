@@ -816,6 +816,263 @@ namespace sccd {
     }
 
     // ---------------------------------------------------------------------
+    // The face-vertex query, with the vertex as the segment it really is.
+    // ---------------------------------------------------------------------
+
+    namespace detail {
+
+        /**
+         * \brief Where a vertex's trajectory first meets a box, as a parameter on
+         * $[0,1]$.
+         *
+         * A vertex moves affinely over the step, so its swept volume is the
+         * segment from \p p0 to \p p0 + \p d and the slab test gives the
+         * parametric interval inside the box directly. A box would have to be the
+         * hull of the two endpoints, which for a diagonal move is most of a
+         * rectangle the segment only crosses, so this rejects strictly more than
+         * the box test and never less.
+         *
+         * Separation is strict, as everywhere else here: a segment grazing a face
+         * of the box is reported as meeting it.
+         */
+        template <typename T>
+        static inline bool segment_box_entry(const T (&p0)[3],
+                                             const T (&d)[3],
+                                             const T (&bmin)[3],
+                                             const T (&bmax)[3],
+                                             T& tenter) {
+            T t0 = 0, t1 = 1;
+            for (int a = 0; a < 3; ++a) {
+                if (d[a] == T(0)) {
+                    if (p0[a] < bmin[a] || p0[a] > bmax[a]) {
+                        return false;
+                    }
+                    continue;
+                }
+                const T inv = T(1) / d[a];
+                T lo = (bmin[a] - p0[a]) * inv;
+                T hi = (bmax[a] - p0[a]) * inv;
+                if (lo > hi) {
+                    const T swap = lo;
+                    lo = hi;
+                    hi = swap;
+                }
+                if (lo > t0) t0 = lo;
+                if (hi < t1) t1 = hi;
+                if (t0 > t1) {
+                    return false;
+                }
+            }
+            tenter = t0;
+            return true;
+        }
+
+        /**
+         * \brief Walk the cells a vertex's segment crosses, reporting each face once.
+         *
+         * The faces are binned by extent, so a face whose box holds a point of the
+         * segment is in that point's cell, and the walk visiting every cell the
+         * segment crosses therefore reaches it. The walk itself is the classical
+         * grid traversal: from the cell of one endpoint, step whichever axis the
+         * segment crosses first, which touches $1 + d_{0} + d_{1}$ cells where the
+         * segment's own box covers $(d_{0}+1)(d_{1}+1)$.
+         *
+         * A face can be met in several cells, so a pair needs an owner, and the
+         * analogue of the overlap corner of \ref for_each_unique_partner is the
+         * point where the segment enters the face's box. That point lies on the
+         * segment and inside the box, so its cell is both walked and binned, and
+         * it is unique.
+         */
+        template <int S, typename T, typename I, typename Visit>
+        static inline void for_each_segment_partner(const T (&p0)[3],
+                                                    const T (&d)[3],
+                                                    const I vidx,
+                                                    T** const SCCD_RESTRICT face_aabbs,
+                                                    const I* const SCCD_RESTRICT face_idx,
+                                                    I** const SCCD_RESTRICT face_elements,
+                                                    const ptrdiff_t face_element_stride,
+                                                    const Cell2DGrid<T>& grid,
+                                                    const ptrdiff_t* const SCCD_RESTRICT cellptr,
+                                                    const I* const SCCD_RESTRICT cellidx,
+                                                    Visit&& visit) {
+            const T q0 = p0[grid.axis0], q1 = p0[grid.axis1];
+            const T e0 = q0 + d[grid.axis0], e1 = q1 + d[grid.axis1];
+
+            int c0 = grid.clamp0(q0), c1 = grid.clamp1(q1);
+            const int c0end = grid.clamp0(e0), c1end = grid.clamp1(e1);
+
+            const int s0 = c0end > c0 ? 1 : (c0end < c0 ? -1 : 0);
+            const int s1 = c1end > c1 ? 1 : (c1end < c1 ? -1 : 0);
+
+            // The parameter at which the segment leaves the current cell on each
+            // axis, and the parameter one whole cell costs. Held at infinity for
+            // an axis the walk never steps, so the comparison below picks the
+            // other one.
+            const T inf = std::numeric_limits<T>::max();
+            const T size0 = T(1) / grid.inv0, size1 = T(1) / grid.inv1;
+            T next0 = inf, next1 = inf, step0 = inf, step1 = inf;
+            if (s0 != 0) {
+                const T edge = grid.min0 + (T)(s0 > 0 ? c0 + 1 : c0) * size0;
+                next0 = (edge - q0) / d[grid.axis0];
+                step0 = size0 / (d[grid.axis0] < T(0) ? -d[grid.axis0] : d[grid.axis0]);
+            }
+            if (s1 != 0) {
+                const T edge = grid.min1 + (T)(s1 > 0 ? c1 + 1 : c1) * size1;
+                next1 = (edge - q1) / d[grid.axis1];
+                step1 = size1 / (d[grid.axis1] < T(0) ? -d[grid.axis1] : d[grid.axis1]);
+            }
+
+            for (;;) {
+                const ptrdiff_t cell = grid.cell_of(c0, c1);
+                const ptrdiff_t begin = cellptr[cell];
+                const ptrdiff_t end = cellptr[cell + 1];
+
+                for (ptrdiff_t k = begin; k < end; ++k) {
+                    const ptrdiff_t j = (ptrdiff_t)cellidx[k];
+
+                    const T bmin[3] = {face_aabbs[0][j], face_aabbs[1][j], face_aabbs[2][j]};
+                    const T bmax[3] = {face_aabbs[3][j], face_aabbs[4][j], face_aabbs[5][j]};
+                    T tenter = 0;
+                    if (!segment_box_entry<T>(p0, d, bmin, bmax, tenter)) {
+                        continue;
+                    }
+
+                    // Report only from the cell holding the point of entry.
+                    if (grid.clamp0(q0 + tenter * d[grid.axis0]) != c0 ||
+                        grid.clamp1(q1 + tenter * d[grid.axis1]) != c1) {
+                        continue;
+                    }
+
+                    const I jidx = face_idx[j];
+                    bool share = false;
+                    for (int v = 0; v < S; ++v) {
+                        if (face_elements[v][jidx * face_element_stride] == vidx) {
+                            share = true;
+                            break;
+                        }
+                    }
+                    if (share) {
+                        continue;
+                    }
+
+                    visit(j, jidx);
+                }
+
+                if (c0 == c0end && c1 == c1end) {
+                    break;
+                }
+                // An axis that has arrived stays put, which keeps the walk inside
+                // the segment's own cells and makes the loop terminate in
+                // |c0end - c0| + |c1end - c1| steps.
+                if (c1 == c1end || (c0 != c0end && next0 <= next1)) {
+                    c0 += s0;
+                    next0 += step0;
+                } else {
+                    c1 += s1;
+                    next1 += step1;
+                }
+            }
+        }
+
+    }  // namespace detail
+
+    /**
+     * \brief Count face-vertex candidates per vertex, then prefix-sum into CRS offsets.
+     *
+     * The cell list is over the faces, built by cell2d_partition, cell2d_count and
+     * cell2d_fill on the face boxes; \p points0 and \p points1 are the vertex
+     * coordinates at the two ends of the step, indexed as \p vertex_idx says.
+     */
+    template <int nxe, typename T, typename I>
+    bool cell2dseg_count_vf_overlaps(const ptrdiff_t vertex_count,
+                                     T** const SCCD_RESTRICT points0,
+                                     T** const SCCD_RESTRICT points1,
+                                     I* const SCCD_RESTRICT vertex_idx,
+                                     T** const SCCD_RESTRICT face_aabbs,
+                                     I* const SCCD_RESTRICT face_idx,
+                                     const ptrdiff_t face_element_stride,
+                                     I** const SCCD_RESTRICT face_elements,
+                                     const Cell2DGrid<T>& grid,
+                                     const ptrdiff_t* const SCCD_RESTRICT cellptr,
+                                     const I* const SCCD_RESTRICT cellidx,
+                                     ptrdiff_t* const SCCD_RESTRICT ccdptr) {
+        ccdptr[0] = 0;
+
+        sccd::parallel_for_br(0, vertex_count, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+            for (ptrdiff_t vi = rbegin; vi < rend; ++vi) {
+                const I vidx = vertex_idx[vi];
+                T p0[3], d[3];
+                for (int a = 0; a < 3; ++a) {
+                    p0[a] = points0[a][vidx];
+                    d[a] = points1[a][vidx] - p0[a];
+                }
+
+                ptrdiff_t count = 0;
+                detail::for_each_segment_partner<nxe, T, I>(p0,
+                                                            d,
+                                                            vidx,
+                                                            face_aabbs,
+                                                            face_idx,
+                                                            face_elements,
+                                                            face_element_stride,
+                                                            grid,
+                                                            cellptr,
+                                                            cellidx,
+                                                            [&](const ptrdiff_t, const I) { ++count; });
+                ccdptr[vi + 1] = count;
+            }
+        });
+
+        sccd::parallel_cum_sum_br(ccdptr, ccdptr + vertex_count + 1);
+        return ccdptr[vertex_count] > 0;
+    }
+
+    /** \brief Write the pairs counted by cell2dseg_count_vf_overlaps into the CRS arrays. */
+    template <int nxe, typename T, typename I>
+    void cell2dseg_fill_vf_overlaps(const ptrdiff_t vertex_count,
+                                    T** const SCCD_RESTRICT points0,
+                                    T** const SCCD_RESTRICT points1,
+                                    I* const SCCD_RESTRICT vertex_idx,
+                                    T** const SCCD_RESTRICT face_aabbs,
+                                    I* const SCCD_RESTRICT face_idx,
+                                    const ptrdiff_t face_element_stride,
+                                    I** const SCCD_RESTRICT face_elements,
+                                    const Cell2DGrid<T>& grid,
+                                    const ptrdiff_t* const SCCD_RESTRICT cellptr,
+                                    const I* const SCCD_RESTRICT cellidx,
+                                    const ptrdiff_t* const SCCD_RESTRICT ccdptr,
+                                    I* const SCCD_RESTRICT face_out,
+                                    I* const SCCD_RESTRICT vertex_out) {
+        sccd::parallel_for_br(0, vertex_count, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+            for (ptrdiff_t vi = rbegin; vi < rend; ++vi) {
+                const I vidx = vertex_idx[vi];
+                T p0[3], d[3];
+                for (int a = 0; a < 3; ++a) {
+                    p0[a] = points0[a][vidx];
+                    d[a] = points1[a][vidx] - p0[a];
+                }
+
+                ptrdiff_t at = ccdptr[vi];
+                detail::for_each_segment_partner<nxe, T, I>(p0,
+                                                            d,
+                                                            vidx,
+                                                            face_aabbs,
+                                                            face_idx,
+                                                            face_elements,
+                                                            face_element_stride,
+                                                            grid,
+                                                            cellptr,
+                                                            cellidx,
+                                                            [&](const ptrdiff_t, const I jidx) {
+                                                                face_out[at] = jidx;
+                                                                vertex_out[at] = vidx;
+                                                                ++at;
+                                                            });
+            }
+        });
+    }
+
+    // ---------------------------------------------------------------------
     // The self query over a minimum-corner binning. See the \file block.
     // ---------------------------------------------------------------------
 
