@@ -37,7 +37,7 @@ import matplotlib  # noqa: E402
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
-SWEEP = REPO / "benchmark" / "results" / "sweep-gh200-bp.csv"
+SWEEP = REPO / "benchmark" / "assessment" / "broadphase-cell2dmin.csv"
 COMPARE = REPO / "benchmark" / "competitors" / "results"
 PROF = REPO / "benchmark" / "results" / "profile"
 OUT = PAPER / "figures"
@@ -238,9 +238,9 @@ def per_frame():
 # Colour carries the processor and intensity the strategy: the cell list at full
 # strength, the sweep at the same hue lightened.
 SWEEP_TINT = 0.45
-SERIES_BP = (("cell list, CPU", HOST, ("cell2d",), 0.0),
+SERIES_BP = (("cell list, CPU", HOST, ("cell2dmin",), 0.0),
              ("sweep, CPU", HOST, ("sweep",), SWEEP_TINT),
-             ("cell list, GPU", DEV, ("cell2d",), 0.0),
+             ("cell list, GPU", DEV, ("cell2dmin",), 0.0),
              ("sweep, GPU", DEV, ("sweep",), SWEEP_TINT))
 
 

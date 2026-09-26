@@ -7,18 +7,18 @@
     \toprule
     scene & mode & cell2dmin BP prep & sweep BP prep & cell2dmin BP queries & sweep BP queries & faster \\
     \midrule
-    armadillo-rollers & Tight (GPU) & 256 & 987 & 1199 & 2504 & cell2dmin 2.09x \\
-    armadillo-rollers & Tight & 763 & 1167 & 1380 & 2244 & cell2dmin 1.63x \\
-    cloth-ball & Tight (GPU) & 62 & 244 & 649 & 862 & cell2dmin 1.33x \\
-    cloth-ball & Tight & 120 & 193 & 569 & 1292 & cell2dmin 2.27x \\
-    cloth-funnel & Tight (GPU) & 203 & 630 & 1562 & 1660 & cell2dmin 1.06x \\
-    cloth-funnel & Tight & 630 & 818 & 879 & 1668 & cell2dmin 1.90x \\
-    n-body & Tight (GPU) & 202 & 648 & 3893 & 6075 & cell2dmin 1.56x \\
-    n-body & Tight & 219 & 417 & 3152 & 11223 & cell2dmin 3.56x \\
-    puffer-ball & Tight (GPU) & 4189 & 7566 & 21042 & 69259 & cell2dmin 3.29x \\
-    puffer-ball & Tight & 4298 & 5161 & 24807 & 420458 & cell2dmin 16.95x \\
-    rod-twist & Tight (GPU) & 3093 & 12360 & 8812 & 21166 & cell2dmin 2.40x \\
-    rod-twist & Tight & 5994 & 10018 & 16143 & 23905 & cell2dmin 1.48x \\
+    armadillo-rollers & GPU & 256 & 987 & 1199 & 2504 & cell2dmin 2.09x \\
+    armadillo-rollers & CPU & 763 & 1167 & 1380 & 2244 & cell2dmin 1.63x \\
+    cloth-ball & GPU & 62 & 244 & 649 & 862 & cell2dmin 1.33x \\
+    cloth-ball & CPU & 120 & 193 & 569 & 1292 & cell2dmin 2.27x \\
+    cloth-funnel & GPU & 203 & 630 & 1562 & 1660 & cell2dmin 1.06x \\
+    cloth-funnel & CPU & 630 & 818 & 879 & 1668 & cell2dmin 1.90x \\
+    n-body & GPU & 202 & 648 & 3893 & 6075 & cell2dmin 1.56x \\
+    n-body & CPU & 219 & 417 & 3152 & 11223 & cell2dmin 3.56x \\
+    puffer-ball & GPU & 4189 & 7566 & 21042 & 69259 & cell2dmin 3.29x \\
+    puffer-ball & CPU & 4298 & 5161 & 24807 & 420458 & cell2dmin 16.95x \\
+    rod-twist & GPU & 3093 & 12360 & 8812 & 21166 & cell2dmin 2.40x \\
+    rod-twist & CPU & 5994 & 10018 & 16143 & 23905 & cell2dmin 1.48x \\
     \bottomrule
   \end{tabular}}
   \par\smallskip\footnotesize `faster` names the winning strategy and by how much on the whole broad phase. A margin inside the run-to-run spread is a tie.

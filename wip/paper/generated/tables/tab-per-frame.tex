@@ -3,24 +3,24 @@
   \caption{Mean time for one simulation step: the scene total, median over repeats, divided by the number of frames. A step runs both query types, so this is the cost of the vertex-face and edge-edge work of that frame together. \emph{BP full} is the whole broad phase, the acceleration structure plus the queries over it; \emph{BP prep} is the structure alone and \emph{BP queries} the queries alone. The narrow phase is named by the answer it is asked for: \emph{NP EToI} returns one earliest time of impact for the step, so every query prunes against the running minimum, and \emph{NP per-pair} returns one per candidate with no shared bound. BP full here includes building the swept boxes.}
   \label{tab:per-frame}
   \fittable{%
-\begin{tabular}{lrlrrr}
+  \begin{tabular}{lrlrrr}
     \toprule
     scene & frames & mode & BP full (ms) & NP EToI (ms) & total ms \\
     \midrule
-    armadillo-rollers & 396 & GPU & 8.13 & 3.97 & 12.10 \\
-    armadillo-rollers & 396 & CPU & 6.59 & 1.83 & 8.42 \\
-    cloth-ball & 43 & GPU & 24.56 & 4.27 & 28.83 \\
-    cloth-ball & 43 & CPU & 40.29 & 14.51 & 54.80 \\
-    cloth-funnel & 372 & GPU & 8.40 & 2.07 & 10.46 \\
-    cloth-funnel & 372 & CPU & 4.72 & 0.86 & 5.57 \\
-    n-body & 74 & GPU & 93.56 & 6.41 & 99.97 \\
-    n-body & 74 & CPU & 156.26 & 77.78 & 234.04 \\
-    puffer-ball & 120 & GPU & 223.83 & 11.65 & 235.47 \\
-    puffer-ball & 120 & CPU & 649.63 & 176.34 & 825.98 \\
-    rod-twist & 2,556 & GPU & 8.34 & 6.46 & 14.80 \\
-    rod-twist & 2,556 & CPU & 16.81 & 12.73 & 29.54 \\
+    armadillo-rollers & 396 & GPU & 3.03 & 3.91 & 6.94 \\
+    armadillo-rollers & 396 & CPU & 3.48 & 1.74 & 5.22 \\
+    cloth-ball & 43 & GPU & 15.10 & 4.18 & 19.28 \\
+    cloth-ball & 43 & CPU & 13.23 & 14.39 & 27.62 \\
+    cloth-funnel & 372 & GPU & 4.20 & 2.10 & 6.30 \\
+    cloth-funnel & 372 & CPU & 2.36 & 1.18 & 3.55 \\
+    n-body & 74 & GPU & 52.61 & 6.43 & 59.04 \\
+    n-body & 74 & CPU & 42.60 & 76.48 & 119.08 \\
+    puffer-ball & 120 & GPU & 175.35 & 11.10 & 186.45 \\
+    puffer-ball & 120 & CPU & 206.72 & 175.38 & 382.10 \\
+    rod-twist & 2,556 & GPU & 3.45 & 6.48 & 9.93 \\
+    rod-twist & 2,556 & CPU & 6.32 & 12.41 & 18.72 \\
     \bottomrule
   \end{tabular}}
   \par\smallskip\footnotesize A mean rather than a median over steps: the scene total is what a run costs, and the mean is the only average that divides back into it.
-  \par\smallskip\footnotesize Source: \texttt{benchmark/results/sweep-gh200-bp.csv}
+  \par\smallskip\footnotesize Source: \texttt{benchmark/assessment/broadphase-cell2dmin.csv}
 \end{table}

@@ -12,7 +12,7 @@ neither.
 Regenerate with:
 
 ```sh
-python3 -m report benchmark/results/sweep-gh200-bp.csv /tmp/report \
+python3 -m report benchmark/assessment/broadphase-cell2dmin.csv /tmp/report \
         benchmark/results/oracle-gh200-all.csv \
         --modes=relaxed,device-relaxed --label="relaxed:CPU,device-relaxed:GPU" \
         --figure-prefix=relaxed- --embed=docs/BENCHMARKS_RELAXED.md --check
