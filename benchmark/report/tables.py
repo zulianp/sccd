@@ -424,12 +424,11 @@ def broadphase_table(per_strategy: dict[str, dict[tuple[str, str], SceneSummary]
     The broad-phase strategies over the same scenes.
 
     They return identical pair sets, so whichever is faster on a given geometry
-    is simply the right one. The host fixes that choice from this measurement and
-    the device races for it per scene, having no minimum-corner implementation to
-    choose between. The preparation is split out from the traversal because that
-    is where the strategies differ: the sweep builds its sorted intervals more
-    cheaply, the cell list traverses its grid more cheaply, and ordering a cell's
-    entries buys traversal at the cost of preparation.
+    is simply the right one, and both processors fix that choice from this
+    measurement rather than racing for it. The preparation is split out from the
+    traversal because that is where the strategies differ: the sweep builds its
+    sorted intervals more cheaply and the cell list traverses its grid more
+    cheaply.
 
     A strategy missing from a processor drops that processor's rows, so pass only
     strategies measured on both.
@@ -443,7 +442,7 @@ def broadphase_table(per_strategy: dict[str, dict[tuple[str, str], SceneSummary]
                  "The two columns per strategy are BP prep, building the sorted "
                  "intervals or the grid, and BP queries over it; BP full is the "
                  "two added, which is what the \\emph{faster} verdict ranks. "
-                 "Both strategies report identical "
+                 "Every strategy reports identical "
                  "candidate pairs, so the difference is entirely in how they "
                  "are found."),
         columns=([Column("scene", "l"), Column("mode", "l")]

@@ -110,12 +110,16 @@ def main(argv: list[str]) -> int:
     # A CSV may hold more than one broad-phase strategy. Summarising across them
     # would sum two runs of the same cases into one scene total, so a strategy is
     # chosen for the headline tables and the rest are compared against it in a
-    # table of their own. The cell list is preferred when present because it is
-    # what the shipped default probes first.
+    # table of their own. The choice follows what ships, so that the headline
+    # numbers are the ones a caller gets by setting nothing.
     strategies = data.broadphases(rows)
     primary = None
-    if strategies:
-        primary = "cell2d" if "cell2d" in strategies else strategies[0]
+    for preferred in ("cell2dmin", "cell2d"):
+        if preferred in strategies:
+            primary = preferred
+            break
+    if primary is None and strategies:
+        primary = strategies[0]
     scenes = data.by_scene(rows, primary)
     cases = data.by_case([r for r in rows
                           if primary is None
