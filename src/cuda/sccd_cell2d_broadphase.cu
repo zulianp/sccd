@@ -580,17 +580,27 @@ namespace sccd {
             }
 
             /**
-             * \brief Visit each partner of box \p fi exactly once, walking forward.
+             * \brief Walk forward over the cells, one warp to a box.
              *
-             * The host form is `for_each_forward_self_partner` in
-             * `src/broadphase/sccd_broadphase_cell2d.hpp` and the reasoning is
-             * written up there: one entry per box means a partner is met at most
-             * once, row-major linear index is a total order so a forward walk is
-             * complete over it, and the box's own cell is the only one where two
-             * boxes share an index and the index has to decide.
+             * The thread-per-box form of this walk diverges on everything it
+             * does: the number of rows a box spans, the columns its binary
+             * search leaves, and the number of entries in each cell all differ
+             * between neighbouring boxes, so the lanes of a warp spend most of
+             * their time masked off, and each lane reads a different part of the
+             * cell array. A warp to a box inverts that. Every lane computes the
+             * same walk -- the same rows, the same searches, redundantly and
+             * branch-free -- and the lanes split each cell's entries between
+             * them, which is the only loop left that can diverge and is also the
+             * one whose loads are then consecutive.
+             *
+             * \p combine is handed one candidate per lane per step, with the
+             * lanes that found nothing marked. It is a warp-wide operation
+             * because the count and the write offset are: every lane iterates
+             * the same number of times so that the ballot inside it is taken
+             * with the whole warp converged.
              */
-            template <int NXE, typename T, typename I, typename Visit>
-            static __device__ __forceinline__ void for_each_forward_self_partner(
+            template <int NXE, typename T, typename I, typename Combine>
+            static __device__ __forceinline__ void warp_forward_self_partner(
                 T** const SCCD_RESTRICT aabbs,
                 const ptrdiff_t fi,
                 I* const SCCD_RESTRICT idx,
@@ -602,7 +612,9 @@ namespace sccd {
                 const I* const SCCD_RESTRICT cellidx,
                 const T* const SCCD_RESTRICT row_prefix,
                 const T* const SCCD_RESTRICT cell_hi1,
-                Visit&& visit) {
+                Combine&& combine) {
+                const unsigned lane = threadIdx.x & (SCCD_WARP_SIZE - 1);
+
                 const T aminx = aabbs[0][fi], aminy = aabbs[1][fi], aminz = aabbs[2][fi];
                 const T amaxx = aabbs[3][fi], amaxy = aabbs[4][fi], amaxz = aabbs[5][fi];
 
@@ -615,37 +627,41 @@ namespace sccd {
                 const int c1e = cell1<T>(grid, aabbs[SCCD_DIM + grid.axis1][fi]);
                 const ptrdiff_t own = cell_of<T>(grid, c0b, c1b);
 
-                // A cell's entries, with OWN deciding whether the index still has
-                // to break a tie. Everything the walk reads after its own cell is
-                // ahead of it, so there the question does not arise.
                 const auto scan = [&](const ptrdiff_t cell, const bool is_own) {
-                    for (ptrdiff_t k = cellptr[cell]; k < cellptr[cell + 1]; ++k) {
-                        const ptrdiff_t j = (ptrdiff_t)cellidx[k];
-                        if (is_own && j <= fi) continue;
-                        if (disjoint<T>(aminx, aminy, aminz, amaxx, amaxy, amaxz,
-                                        aabbs[0][j], aabbs[1][j], aabbs[2][j],
-                                        aabbs[3][j], aabbs[4][j], aabbs[5][j])) {
-                            continue;
+                    const ptrdiff_t begin = cellptr[cell];
+                    const ptrdiff_t end = cellptr[cell + 1];
+                    // Every lane runs the same trip count, so the warp is
+                    // converged where combine takes its ballot.
+                    for (ptrdiff_t base = begin; base < end; base += SCCD_WARP_SIZE) {
+                        const ptrdiff_t k = base + (ptrdiff_t)lane;
+                        bool keep = false;
+                        ptrdiff_t j = 0;
+                        I jidx = 0;
+                        if (k < end) {
+                            j = (ptrdiff_t)cellidx[k];
+                            if (!(is_own && j <= fi) &&
+                                !disjoint<T>(aminx, aminy, aminz, amaxx, amaxy, amaxz,
+                                             aabbs[0][j], aabbs[1][j], aabbs[2][j],
+                                             aabbs[3][j], aabbs[4][j], aabbs[5][j])) {
+                                jidx = idx[j];
+                                I sev[NXE];
+                                load_ev<NXE, I>(elements, jidx, element_stride, sev);
+                                keep = !shares_vertex<NXE, NXE>(ev, sev);
+                            }
                         }
-                        const I jidx = idx[j];
-                        I sev[NXE];
-                        load_ev<NXE, I>(elements, jidx, element_stride, sev);
-                        if (shares_vertex<NXE, NXE>(ev, sev)) continue;
-                        visit(j, jidx);
+                        combine(keep, jidx);
                     }
                 };
 
-                // Its own cell first. Both bounds hold this box's own maximum, so
-                // neither can rule the cell out and neither is worth reading.
+                // Its own cell first, where the index decides which of two boxes
+                // sharing it reports the pair. Both bounds hold this box's own
+                // maximum, so neither can rule the cell out.
                 scan(own, true);
 
                 for (int c1 = c1b; c1 <= c1e; ++c1) {
                     const ptrdiff_t row = (ptrdiff_t)c1 * grid.n0;
                     int c0;
                     if (c1 == c1b) {
-                        // This box's own maximum is in its row's prefix at column
-                        // c0b, so a search here can never return a later column
-                        // than the cell just read.
                         c0 = c0b + 1;
                     } else {
                         c0 = lower_bound_row<T>(row_prefix + row, c0e + 1, amin0);
@@ -670,18 +686,24 @@ namespace sccd {
                                                   const T* const SCCD_RESTRICT row_prefix,
                                                   const T* const SCCD_RESTRICT cell_hi1,
                                                   ptrdiff_t* const SCCD_RESTRICT ccdptr) {
-                const ptrdiff_t fi = (ptrdiff_t)blockIdx.x * blockDim.x + threadIdx.x;
-                if (fi == 0) ccdptr[0] = 0;
+                const ptrdiff_t tid = (ptrdiff_t)blockIdx.x * blockDim.x + threadIdx.x;
+                const ptrdiff_t fi = tid / SCCD_WARP_SIZE;
+                if (tid == 0) ccdptr[0] = 0;
+                // Uniform over the warp, so the whole warp leaves together and
+                // the ballots below are taken converged.
                 if (fi >= element_count) return;
 
                 I ev[nxe];
                 load_ev<nxe, I>(elements, idx[fi], element_stride, ev);
 
                 ptrdiff_t count = 0;
-                for_each_forward_self_partner<nxe, T, I>(
+                warp_forward_self_partner<nxe, T, I>(
                     aabbs, fi, idx, elements, element_stride, ev, grid, cellptr, cellidx,
-                    row_prefix, cell_hi1, [&](const ptrdiff_t, const I) { ++count; });
-                ccdptr[fi + 1] = count;
+                    row_prefix, cell_hi1, [&](const bool keep, const I) {
+                        count += __popc(__ballot_sync(0xffffffffu, keep));
+                    });
+                // Every lane accumulated the same total, so one writes it.
+                if ((threadIdx.x & (SCCD_WARP_SIZE - 1)) == 0) ccdptr[fi + 1] = count;
             }
 
             template <int nxe, typename T, typename I>
@@ -698,20 +720,30 @@ namespace sccd {
                                                     const ptrdiff_t* const SCCD_RESTRICT ccdptr,
                                                     I* const SCCD_RESTRICT first_out,
                                                     I* const SCCD_RESTRICT second_out) {
-                const ptrdiff_t fi = (ptrdiff_t)blockIdx.x * blockDim.x + threadIdx.x;
+                const ptrdiff_t tid = (ptrdiff_t)blockIdx.x * blockDim.x + threadIdx.x;
+                const ptrdiff_t fi = tid / SCCD_WARP_SIZE;
                 if (fi >= element_count) return;
+
+                const unsigned lane = threadIdx.x & (SCCD_WARP_SIZE - 1);
+                const unsigned below = (1u << lane) - 1u;
 
                 const I idxi = idx[fi];
                 I ev[nxe];
                 load_ev<nxe, I>(elements, idxi, element_stride, ev);
 
+                // `at` stays the same on every lane: each step advances it by the
+                // whole warp's count, and a lane writes at its rank within that.
                 ptrdiff_t at = ccdptr[fi];
-                for_each_forward_self_partner<nxe, T, I>(
+                warp_forward_self_partner<nxe, T, I>(
                     aabbs, fi, idx, elements, element_stride, ev, grid, cellptr, cellidx,
-                    row_prefix, cell_hi1, [&](const ptrdiff_t, const I jidx) {
-                        first_out[at] = idxi < jidx ? idxi : jidx;
-                        second_out[at] = idxi < jidx ? jidx : idxi;
-                        ++at;
+                    row_prefix, cell_hi1, [&](const bool keep, const I jidx) {
+                        const unsigned mask = __ballot_sync(0xffffffffu, keep);
+                        if (keep) {
+                            const ptrdiff_t w = at + (ptrdiff_t)__popc(mask & below);
+                            first_out[w] = idxi < jidx ? idxi : jidx;
+                            second_out[w] = idxi < jidx ? jidx : idxi;
+                        }
+                        at += (ptrdiff_t)__popc(mask);
                     });
             }
 
@@ -1118,7 +1150,8 @@ namespace sccd {
                 return;
             }
             dim3 block(SCCD_C2D_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
-            dim3 gridsz((element_count + block.x - 1) / block.x);
+            // One warp to a box, so the launch is sized in warps.
+            dim3 gridsz((element_count * SCCD_WARP_SIZE + block.x - 1) / block.x);
             detail::min_count_self_kernel<nxe, T, I><<<gridsz, block>>>(
                 element_count, aabbs, idx, element_stride, elements, grid, cellptr, cellidx,
                 row_prefix, cell_hi1, ccdptr);
@@ -1142,7 +1175,7 @@ namespace sccd {
                                              I* const SCCD_RESTRICT second_out) {
             if (element_count <= 0) return;
             dim3 block(SCCD_C2D_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
-            dim3 gridsz((element_count + block.x - 1) / block.x);
+            dim3 gridsz((element_count * SCCD_WARP_SIZE + block.x - 1) / block.x);
             detail::min_collect_self_kernel<nxe, T, I><<<gridsz, block>>>(
                 element_count, aabbs, idx, element_stride, elements, grid, cellptr, cellidx,
                 row_prefix, cell_hi1, ccdptr, first_out, second_out);
