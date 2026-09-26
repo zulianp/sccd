@@ -479,6 +479,68 @@ def broadphase_table(per_strategy: dict[str, dict[tuple[str, str], SceneSummary]
     return table
 
 
+def broadphase_variant_table(per_strategy: dict[str, dict[tuple[str, str], SceneSummary]],
+                             source: str) -> Table:
+    """
+    The edge-edge queries against each other, on the host.
+
+    A separate question from `broadphase_table`, which asks whether to sort or to
+    bin and answers it for both processors. This one takes binning as settled and
+    asks which query to run over the cells: every cell a box touches, or the one
+    cell its minimum corner is in, with or without each cell ordered on the axis
+    the grid does not use. Only the host is asked, because that is where all of
+    them exist.
+
+    One column per strategy, the whole broad phase rather than its two halves,
+    because the halves trade against each other -- ordering a cell is
+    preparation bought back in traversal -- and the sum is what a caller pays.
+    """
+    names = [n for n in ("sweep", "cell2d", "cell2dmin", "cell2dminsort") if n in per_strategy]
+    table = Table(
+        label="tab:bpvariant",
+        caption=("Edge-edge queries over the same cases on the host, as "
+                 "whole-scene totals in milliseconds, median over repeats. " + TAGS +
+                 "Every column is BP full, the acceleration structure and the "
+                 "queries over it added, because ordering a cell's entries is "
+                 "preparation bought back in traversal and only the sum is "
+                 "comparable. All of them report identical candidate pairs."),
+        columns=([Column("scene", "l")]
+                 + [Column(f"{n} BP full ms", tex_header=f"{n} BP full") for n in names]
+                 + [Column("fastest", "l")]),
+        source=source,
+        notes=("`fastest` names the winning strategy and by how much against the "
+               "slowest. A margin inside the run-to-run spread is a tie."),
+    )
+    keys = sorted({k for s in per_strategy.values() for k in s if not k[1].startswith("device-")})
+    totals = {n: 0.0 for n in names}
+    for scene, mode in keys:
+        broad, spreads = {}, {}
+        for n in names:
+            s_ = per_strategy[n].get((scene, mode))
+            structure = s_.totals["prep_ms"] if s_ else Stat()
+            traversal = s_.totals["broad_ms"] if s_ else Stat()
+            whole = Stat()
+            for i in range(min(structure.n, traversal.n)):
+                whole.add(structure.values[i] + traversal.values[i])
+            broad[n] = whole
+            spreads[n] = whole.spread if whole.n else 0.0
+        if not all(broad[n].n for n in names):
+            continue
+        ranked = sorted(names, key=lambda n: broad[n].median)
+        best, worst = ranked[0], ranked[-1]
+        for n in names:
+            totals[n] += broad[n].median
+        gap = broad[worst].median / broad[best].median if broad[best].median else 0.0
+        noise = 1.0 + max(spreads[best], spreads[worst])
+        verdict = f"{best} {gap:.2f}x" if gap > noise else "tie"
+        table.add(SCENE_LABEL.get(scene, scene),
+                  *[f"{broad[n].median:.0f}" for n in names], verdict)
+    if any(totals.values()):
+        best = min(names, key=lambda n: totals[n])
+        gap = max(totals.values()) / totals[best] if totals[best] else 0.0
+        table.add("all scenes", *[f"{totals[n]:.0f}" for n in names], f"{best} {gap:.2f}x")
+    return table
+
 def processor_table(summaries: dict[tuple[str, str], SceneSummary],
                     mode: str, source: str) -> Table:
     """

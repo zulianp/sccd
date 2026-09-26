@@ -173,8 +173,11 @@ def main(argv: list[str]) -> int:
         if (any(m == "device-" + pick for _, m in scenes)):
             built.append(tables.processor_table(scenes, pick, source))
     if len(strategies) > 1:
-        built.append(tables.broadphase_table(
-            {n: data.by_scene(rows, n) for n in strategies}, source))
+        per_strategy = {n: data.by_scene(rows, n) for n in strategies}
+        built.append(tables.broadphase_table(per_strategy, source))
+        # The cell-list variants are a separate question, and a host-only one.
+        if len(strategies) > 2:
+            built.append(tables.broadphase_variant_table(per_strategy, source))
     oracle_rows = oracle_rows_early
     if oracle_rows:
         oracle_source = _repo_relative(oracle_csv)
