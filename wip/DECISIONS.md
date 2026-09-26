@@ -708,25 +708,33 @@ $130.2 \to 165.5$, cloth-ball $391.8 \to 483.4$, cloth-funnel $111.3 \to 151.4$,
 n-body-simulation $1921.2 \to 2045.9$, rod-twist $270.7 \to 372.3$. The comment
 on `cell2d_pack_boxes` records it.
 
-**It pays according to how many entries the list holds per box.** One Grace at 72
-threads, mode 2, edge-edge, prep + broad, paired by case:
+**It pays according to how many entries the list holds per box.** One Grace at
+72 threads, mode 2, whole broad phase, every figure a median over three repeats
+of the case, from `benchmark/assessment/bp-packing.csv`:
 
-| scene | Cell2DMin | Cell2DMinSort |
-|---|---|---|
-| armadillo-rollers | 1.059x | 1.024x |
-| cloth-ball | 1.498x | 1.332x |
-| cloth-funnel | 0.984x | 0.724x |
-| n-body-simulation | 1.028x | 1.333x |
-| puffer-ball | 1.165x | 1.650x |
-| rod-twist | 1.039x | 0.747x |
-| all scenes | **1.151x** | **1.522x** |
+| scene | Cell2DMin ee | Cell2DMin vf | Cell2D ee | Cell2D vf |
+|---|---|---|---|---|
+| armadillo-rollers | 1.007x | 1.069x | 1.018x | 0.925x |
+| cloth-ball | 1.292x | 1.461x | 1.197x | 1.254x |
+| cloth-funnel | 1.011x | 0.949x | 0.960x | 0.879x |
+| n-body-simulation | 1.252x | 1.296x | 0.995x | 1.209x |
+| puffer-ball | 1.335x | -- | 0.992x | -- |
+| rod-twist | 0.837x | 0.836x | 1.122x | 0.792x |
+| all scenes | **1.310x** | **1.265x** | **0.998x** | **1.151x** |
 
-The minimum-corner list holds one entry per box where the extent-binned list
-holds two to four, so packing it costs a quarter to a half as much for the same
-query. On the extent-binned `cell2d` the same change measures $1.041\times$ on
-edge-edge and $1.154\times$ on face-vertex with a genuine $0.783\times$ on
-rod-twist's face-vertex query, which is the case with the least query to repay
-the layout.
+It earns its place under the shipped default and nowhere else: `Cell2DMin` gains
+$1.31\times$ on edge-edge and $1.27\times$ on face-vertex, while the
+extent-binned `cell2d` is level on edge-edge. The minimum-corner list holds one
+entry per box where extent binning holds two to four, so the layout costs a
+quarter to a half as much for the same query. rod-twist loses on three of the
+four columns, and it is the scene with the least query per entry.
+
+**Every earlier figure in this section was a single sample.** The scripts that
+produced them indexed rows by case, and with more than one repeat that keeps
+whichever repeat came last rather than the median. Two runs of the same binary
+disagreed by $1.5\times$ on puffer-ball, which is how it surfaced. The table
+above is a median of three; `benchmark/assessment/bp-packing-report.py` is the
+corrected analysis and says so in its header.
 
 ## Sorting the cells wins only once the structure is counted with it
 
@@ -749,8 +757,203 @@ says:
 Still ahead in aggregate, but on three scenes behind, and the margin is a third
 of what the query-only figure claimed.
 
-With the packed layout under both, the sorted variant leads by $1.285\times$ in
-aggregate and wins two scenes of six -- puffer-ball $1.39\times$ and
-n-body-simulation $1.13\times$, which are the two most expensive, against
-cloth-ball, cloth-funnel and rod-twist going the other way. The aggregate is
-carried by puffer-ball.
+Measured again through the report pipeline, which takes the median over repeats,
+the sorted variant loses outright. Over the six scenes `cell2dmin` costs
+$16.8\,\mathrm{s}$ against `cell2dminsort`'s $20.0$, and edge-edge alone
+$9.4\,\mathrm{s}$ against $11.9$. `tab:bpvariant` reports it and the host runs
+`cell2dmin`. The per-case comparisons that had put the sorted variant ahead were
+single samples, as above.
+
+
+## Face-vertex: binning the faces and querying with the vertex segment
+
+The vertex side of a face-vertex query is the one primitive whose swept volume is
+not a box but a segment: vertices move affinely, so a vertex over a step is the
+line from its position at $t=0$ to its position at $t=1$. The proposal is to
+build the cell list over the faces and query it with that segment, walking only
+the cells the line crosses.
+
+**It is complete.** A face-vertex contact needs the vertex to lie inside the
+moving triangle at some $t$, so its position at that $t$ lies in the face's swept
+box, so the segment meets the face's swept box, so some cell the segment crosses
+holds that face -- provided the faces are binned by extent, into every cell their
+projected box touches. The filter is also strictly tighter than the shipped one:
+segment-meets-box implies box-meets-box and not the reverse.
+
+**The duplicate rule has to change.** A face met along the segment may be met in
+several cells, so the overlap-corner rule of `alg:cell` does not apply. The
+analogue is: compute the parameter at which the segment enters the face's box and
+emit only from the cell holding the segment at that parameter. Same shape, still
+$O(1)$, still stateless.
+
+**Measured on the shipped data, the gain is small.** Instrumenting the host cell
+list to count both designs on the same frames (six to eight steps per scene, M1):
+
+| scene | vertex box cells | segment cells | box/seg | face box cells |
+|---|---|---|---|---|
+| cloth-ball | 2.06 | 1.86 | 1.11x | 3.95 |
+| armadillo-rollers | 1.46 | 1.41 | 1.03x | 4.25 |
+| cloth-funnel | 1.35 | 1.30 | 1.04x | 5.05 |
+
+A vertex crosses barely more than one cell, because the grid is sized to the mean
+box extent and a step moves a vertex less than that: only 25% to 65% of vertices
+leave their own cell at all. The segment is therefore hardly tighter than the box
+it replaces.
+
+Cell *visits* look dramatic and are misleading. Today a face box is walked over a
+grid sized by vertex displacement, so it covers 8.4 cells on cloth-ball and 26.4
+on armadillo-rollers, against 1.9 and 1.4 for a segment on the face grid -- 8x to
+38x fewer visits. Occupancy cancels almost all of it, because a face-sized cell
+holds around forty faces where a displacement-sized cell holds one vertex. On
+candidates actually examined, which is the work:
+
+| scene | today | faces binned, vertex box query | faces binned, vertex segment query |
+|---|---|---|---|
+| cloth-ball | 27,108,652 | 26,456,011 (1.02x) | 23,220,596 (1.17x) |
+| armadillo-rollers | 2,375,127 | 2,128,810 (1.12x) | 2,059,618 (1.15x) |
+| cloth-funnel | 2,008,912 | 2,027,987 (0.99x) | 1,887,937 (1.06x) |
+
+So 6% to 17% fewer candidate tests, against a cell array that grows from 2.1
+entries per vertex to about 4.3 entries per face over twice as many faces -- four
+times the binning work and memory. On these scenes the build cost plausibly eats
+the query gain.
+
+**Where it would win.** The whole argument turns on displacement against cell
+size. A step that moves a vertex several cells makes its box quadratically worse
+than its segment, $(d_{0}+1)(d_{1}+1)$ cells against $1 + d_{0} + d_{1}$, and the
+gain grows without bound. Our scenes do not do this; a solver taking larger steps
+would.
+
+**The measurement not yet made** is the one most likely to matter: the pairs
+*emitted*, not the candidates examined. Segment-against-box is a strictly tighter
+predicate than box-against-box, so it hands the narrow phase fewer pairs while
+staying conservative, and the narrow phase is the expensive side. The counters
+above measure the broad phase's own work only.
+
+### Measured, after the query was made to pay what a box query pays
+
+The first run of `Cell2DSeg` lost everywhere, and the cause was the inner loop.
+The slab test divided by each component of the step per candidate face, and the
+cell's boxes were gathered through `cellidx`, which no SIMD kernel can see as
+lanes. Hoisting the reciprocals to the vertex, packing each cell's boxes into
+cell order so the query runs the sweep's 32-at-a-time kernel, and putting the
+segment's own hull in front as an exact pre-pass turned the query around: the
+face-vertex query went from `0.56x`-`0.99x` to `1.09x`-`2.19x` against the box
+query. Output is unchanged, and no scene misses a collision.
+
+Counting the structure build, which is where this design pays for itself, the
+result is scene-dependent. One Grace at 72 threads, mode 2, face-vertex rows
+only, paired by case:
+
+| scene | broad (with binning) | narrow | total | pairs |
+|---|---|---|---|---|
+| armadillo-rollers | 165.0 -> 171.2 ms (0.964x) | 1.061x | **0.984x** | 23.3% fewer |
+| cloth-ball | 565.9 -> 361.8 ms (1.564x) | 0.988x | **1.391x** | 16.9% fewer |
+| cloth-funnel | 91.9 -> 104.9 ms (0.876x) | 0.838x | **0.869x** | 16.5% fewer |
+| n-body-simulation | 2645.7 -> 2157.8 ms (1.226x) | 1.159x | **1.203x** | 25.8% fewer |
+| rod-twist | 206.5 -> 298.2 ms (0.692x) | 1.050x | **0.798x** | 1.6% fewer |
+| all five | 5331.8 -> 4568.7 ms | | **1.167x** | |
+
+The split is by how much query there is to save. Binning the faces and packing
+their boxes costs 15 to 111 ms more per scene than binning the vertices, and the
+query returns 2 to 558 ms of it:
+
+| scene | extra preparation | query saved | net |
+|---|---|---|---|
+| cloth-ball | +59.5 ms | -263.6 ms | **-202.3 ms** |
+| n-body-simulation | +70.5 ms | -558.4 ms | **-666.9 ms** |
+| armadillo-rollers | +44.6 ms | -38.4 ms | +3.5 ms |
+| cloth-funnel | +15.3 ms | -2.3 ms | +17.2 ms |
+| rod-twist | +110.7 ms | -19.0 ms | +85.4 ms |
+
+So it wins on the two scenes whose face-vertex query is large and loses on the
+three where the preparation is most of the cost. The aggregate favours it, and
+the aggregate is carried by n-body-simulation.
+
+The narrow phase does not repay the pair reduction. cloth-ball sheds 16.9% of
+pairs for `0.988x`, cloth-funnel 16.5% for `0.838x`. A tighter broad phase
+removes pairs that are far apart, which are the ones the narrow phase rejects in
+its first box test; the expensive pairs are near-contacts and the segment filter
+keeps every one. cloth-funnel being slower suggests the pair order also matters,
+since the pairs now arrive grouped by vertex where they used to arrive grouped by
+face.
+
+**The obvious next move** is to fold the packing into `cell2d_fill`, which
+already scatters one value per cell entry and could scatter the six box
+coordinates in the same pass. That removes a whole gather over the cell array
+from the preparation, and it is the larger half of the penalty on rod-twist.
+
+**Second, the packing is not specific to this query.** The shipped `cell2d`
+face-vertex and edge-edge queries gather through `cellidx` too, so they cannot
+vectorise their inner loops either. If the packed layout pays here it should be
+tried under them.
+
+## The cell list gets a layout its queries can vectorise
+
+Sweep and prune was the only broad phase here with a vectorised inner loop,
+because it sorts its boxes and its window is therefore contiguous. The cell list
+stores indices, so a query reached a box by gathering six coordinates through
+`cellidx` and no SIMD kernel could see consecutive lanes. `cell2d_pack_boxes`
+writes each cell's boxes out in cell order once per step, after which every query
+tests $32$ of them at a time with `vaabb_overlap_one_to_many_bits` and visits the
+survivors by a bit scan.
+
+**Fusing the packing into the scatter is slower, and by a lot.** Writing the box
+inside `cell2d_fill`, where the scatter already holds it and already knows where
+the entry lands, costs six scattered stores per entry, one per array. A separate
+pass costs six sequential stores and one gather load. Isolated on the face-vertex
+query, where only the packing differs (ms, prep + broad): armadillo-rollers
+$130.2 \to 165.5$, cloth-ball $391.8 \to 483.4$, cloth-funnel $111.3 \to 151.4$,
+n-body-simulation $1921.2 \to 2045.9$, rod-twist $270.7 \to 372.3$. The comment
+on `cell2d_pack_boxes` records it.
+
+**It pays according to how many entries the list holds per box.** One Grace at
+72 threads, mode 2, whole broad phase, every figure a median over three repeats
+of the case, from `benchmark/assessment/bp-packing.csv`:
+
+| scene | Cell2DMin ee | Cell2DMin vf | Cell2D ee | Cell2D vf |
+|---|---|---|---|---|
+| armadillo-rollers | 1.007x | 1.069x | 1.018x | 0.925x |
+| cloth-ball | 1.292x | 1.461x | 1.197x | 1.254x |
+| cloth-funnel | 1.011x | 0.949x | 0.960x | 0.879x |
+| n-body-simulation | 1.252x | 1.296x | 0.995x | 1.209x |
+| puffer-ball | 1.335x | -- | 0.992x | -- |
+| rod-twist | 0.837x | 0.836x | 1.122x | 0.792x |
+| all scenes | **1.310x** | **1.265x** | **0.998x** | **1.151x** |
+
+It earns its place under the shipped default and nowhere else: `Cell2DMin` gains
+$1.31\times$ on edge-edge and $1.27\times$ on face-vertex, while the
+extent-binned `cell2d` is level on edge-edge. The minimum-corner list holds one
+entry per box where extent binning holds two to four, so the layout costs a
+quarter to a half as much for the same query. rod-twist loses on three of the
+four columns, and it is the scene with the least query per entry.
+
+**Every earlier figure in this section was a single sample.** The scripts that
+produced them indexed rows by case, and with more than one repeat that keeps
+whichever repeat came last rather than the median. Two runs of the same binary
+disagreed by $1.5\times$ on puffer-ball, which is how it surfaced. The table
+above is a median of three; `benchmark/assessment/bp-packing-report.py` is the
+corrected analysis and says so in its header.
+
+## Sorting the cells wins only once the structure is counted with it
+
+The six-scene run reported `Cell2DMinSort` ahead of `Cell2DMin` on all six
+scenes, $1.098\times$ to $1.350\times$. That was `broad_ms` alone. Sorting each
+cell is a pass over the cell array and belongs to the broad phase like any other
+part of building its structure, and re-read with `prep_ms` included the same run
+says:
+
+| scene | broad only | prep + broad |
+|---|---|---|
+| armadillo-rollers | 1.243x | 0.991x |
+| cloth-ball | 1.292x | 1.121x |
+| cloth-funnel | 1.350x | 0.925x |
+| n-body-simulation | 1.098x | 0.850x |
+| puffer-ball | 1.203x | 1.170x |
+| rod-twist | 1.278x | 1.222x |
+| all scenes | 1.199x | **1.139x** |
+
+Still ahead in aggregate on that reading, but on three scenes behind, and the
+margin is a third of what the query-only figure claimed. Both columns are single
+samples per case and neither is to be trusted; the medians are in
+`tab:bpvariant`, and they say the sorted variant loses outright.
