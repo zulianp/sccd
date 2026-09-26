@@ -4,7 +4,7 @@
 set -euo pipefail
 PY="${PY:-./.venv/bin/python}"
 export PYTHONPATH=benchmark
-SC="benchmark/results/scaling/host-cell2d-mode2.txt benchmark/results/scaling/host-sweep-mode2.txt benchmark/results/scaling/device-mode2.txt"
+SC="benchmark/results/scaling/host-cell2dmin-mode2.txt benchmark/results/scaling/host-sweep-mode2.txt benchmark/results/scaling/device-cell2dmin-mode2.txt"
 
 echo "== docs/BENCHMARKS.md =="
 $PY -m report benchmark/results/sweep-gh200-bp.csv /tmp/report-tight \

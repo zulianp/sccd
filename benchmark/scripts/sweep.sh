@@ -33,7 +33,7 @@ set -euo pipefail
 #   --scenes "..."   scenes to sweep         (default the three verified ones)
 #   --spaces "..."   host and/or device      (default host)
 #   --broadphases ".."  sweep, cell2d, cell2dmin, cell2dminsort, cell2dseg and/or
-#                       auto (default cell2d)
+#                       auto (default cell2dmin, which is what ships)
 #   --modes "..."    narrow-phase modes      (default "0 2")
 #   --time HH:MM:SS  per-job limit           (default 00:29:00)
 #   --threads N      OMP threads per job     (default 72, one Grace)
@@ -66,7 +66,7 @@ MODES="0 2"
 # Broad-phase strategies to sample. "auto" races them per scene, which is what
 # a caller gets by default; naming them explicitly is what makes the two
 # comparable, because a raced run reports whichever won and not which ran.
-BROADPHASES="cell2d"
+BROADPHASES="cell2dmin"
 TIME_LIMIT="00:29:00"
 # One Grace, not one node. A GH200 node carries four Grace-Hopper modules, so
 # `nproc` reports 288 and a job that trusts it measures four processors while

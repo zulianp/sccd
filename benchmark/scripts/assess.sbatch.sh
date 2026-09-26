@@ -209,9 +209,10 @@ for rep in $(seq 1 "$ASSESS_REPEATS"); do
                 SCCD_NARROWPHASE_MODE="$mode"
         done
 
-        # Broad phase. Both ship today, selected by broadphase_strategy.hpp; this
-        # is the evidence for keeping both, or for dropping one.
-        for bp in sweep cell2d; do
+        # Broad phase. cell2dmin is what ships on both processors; the sweep is
+        # measured beside it because that comparison is the evidence for the
+        # choice, and it is the only place the paper reports anything else.
+        for bp in sweep cell2dmin; do
             run_bench grace "$scene" broadphase "$bp" "$rep" \
                 SCCD_BROADPHASE="$bp" SCCD_NARROWPHASE_MODE=2
         done
