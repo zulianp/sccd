@@ -38,6 +38,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
 SWEEP = REPO / "benchmark" / "assessment" / "broadphase-cell2dmin.csv"
+# The strategy the library runs by default, and the one every figure that is
+# not explicitly comparing strategies should draw. Named once: it was hard-coded
+# in four places, and changing three of them left one figure silently empty.
+SHIPPED_BP = "cell2dmin"
 COMPARE = REPO / "benchmark" / "competitors" / "results"
 PROF = REPO / "benchmark" / "results" / "profile"
 OUT = PAPER / "figures"
@@ -188,7 +192,7 @@ def per_frame():
     acc = collections.defaultdict(lambda: collections.defaultdict(
         lambda: collections.defaultdict(float)))
     for r in sweep_rows():
-        if r["mode"] not in (HOST, DEV) or (r.get("broadphase") or "cell2d") != "cell2d":
+        if r["mode"] not in (HOST, DEV) or (r.get("broadphase") or SHIPPED_BP) != SHIPPED_BP:
             continue
         fr = frame_of(r["case"])
         if fr is None:
@@ -201,6 +205,7 @@ def per_frame():
 
     fig, axes = scene_grid()
     for i, (ax, scene) in enumerate(zip(axes, SCENES)):
+        drawn = 0
         for mode, lab in ((HOST, "CPU"), (DEV, "GPU")):
             d = acc[scene][mode]
             if not d:
@@ -208,6 +213,14 @@ def per_frame():
             xs = sorted(d)
             ax.plot(xs, [d[x] for x in xs], lw=0.7,
                     color=style.MODE_COLOR[mode], label=lab)
+            drawn += 1
+        # An empty panel is a figure that compiles, publishes and says nothing.
+        # This one shipped blank when the broad-phase filter above stopped
+        # matching any row, so it is checked here rather than by eye.
+        if not drawn:
+            raise SystemExit(
+                f"per-frame: {scene} drew no series; no row of {SWEEP.name} "
+                f"has broadphase={SHIPPED_BP!r} on {HOST} or {DEV}")
         log_y(ax)
         ax.set_title(LABEL.get(scene, scene), fontsize=7)
         if i >= 3:
@@ -238,9 +251,9 @@ def per_frame():
 # Colour carries the processor and intensity the strategy: the cell list at full
 # strength, the sweep at the same hue lightened.
 SWEEP_TINT = 0.45
-SERIES_BP = (("cell list, CPU", HOST, ("cell2dmin",), 0.0),
+SERIES_BP = (("cell list, CPU", HOST, (SHIPPED_BP,), 0.0),
              ("sweep, CPU", HOST, ("sweep",), SWEEP_TINT),
-             ("cell list, GPU", DEV, ("cell2dmin",), 0.0),
+             ("cell list, GPU", DEV, (SHIPPED_BP,), 0.0),
              ("sweep, GPU", DEV, ("sweep",), SWEEP_TINT))
 
 
@@ -261,7 +274,7 @@ def broad_per_frame():
         if fr is None:
             continue
         try:
-            acc[r["dataset"]][(r["mode"], r.get("broadphase") or "cell2d")][fr] += (
+            acc[r["dataset"]][(r["mode"], r.get("broadphase") or SHIPPED_BP)][fr] += (
                 float(r["prep_ms"]) + float(r["broad_ms"]))
         except ValueError:
             continue
@@ -325,6 +338,10 @@ def compare_rows():
 
 # Our two strategies and theirs. Colour separates the library, intensity the
 # strategy, matching broad-per-frame.
+# Not SHIPPED_BP: this figure plots one recorded comparison run against
+# Scalable CCD, and that run was taken with the extent-binned cell list. The
+# series has to name what the data holds, not what the library now defaults
+# to; moving it to cell2dmin needs the comparison re-run, not a relabel.
 SERIES_VS = (("cell list (ours)", "device-tight", "cell2d", DEV, 0.0),
              ("sweep (ours)", "device-tight", "sweep", DEV, SWEEP_TINT),
              ("Scalable CCD", "scalable-ccd-device", None, "relaxed", 0.0))
