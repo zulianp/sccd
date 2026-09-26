@@ -1,26 +1,26 @@
 \begin{table}[htbp]
   \centering
-  \caption{Broad-phase strategies over the same cases, as whole-scene totals in milliseconds, median over repeats. \emph{BP full} is the whole broad phase, the acceleration structure plus the queries over it; \emph{BP prep} is the structure alone and \emph{BP queries} the queries alone. The narrow phase is named by the answer it is asked for: \emph{NP EToI} returns one earliest time of impact for the step, so every query prunes against the running minimum, and \emph{NP per-pair} returns one per candidate with no shared bound. The two columns per strategy are BP prep, building the sorted intervals or the grid, and BP queries over it; BP full is the two added, which is what the \emph{faster} verdict ranks. Both strategies report identical candidate pairs, so the difference is entirely in how they are found.}
+  \caption{Broad-phase strategies over the same cases, as whole-scene totals in milliseconds, median over repeats. \emph{BP full} is the whole broad phase, the acceleration structure plus the queries over it; \emph{BP prep} is the structure alone and \emph{BP queries} the queries alone. The narrow phase is named by the answer it is asked for: \emph{NP EToI} returns one earliest time of impact for the step, so every query prunes against the running minimum, and \emph{NP per-pair} returns one per candidate with no shared bound. The two columns per strategy are BP prep, building the sorted intervals or the grid, and BP queries over it; BP full is the two added, which is what the \emph{faster} verdict ranks. Every strategy reports identical candidate pairs, so the difference is entirely in how they are found.}
   \label{tab:broadphase}
   \fittable{%
-\begin{tabular}{llrrrrl}
+  \begin{tabular}{llrrrrl}
     \toprule
-    scene & mode & cell2d BP prep & sweep BP prep & cell2d BP queries & sweep BP queries & faster \\
+    scene & mode & cell2dmin BP prep & sweep BP prep & cell2dmin BP queries & sweep BP queries & faster \\
     \midrule
-    armadillo-rollers & GPU & 310 & 1302 & 3219 & 2847 & sweep 1.13x \\
-    armadillo-rollers & CPU & 955 & 3152 & 2606 & 4333 & cell2d 1.66x \\
-    cloth-ball & GPU & 88 & 239 & 1061 & 881 & tie \\
-    cloth-ball & CPU & 169 & 507 & 1728 & 1659 & tie \\
-    cloth-funnel & GPU & 335 & 730 & 3124 & 1769 & sweep 1.77x \\
-    cloth-funnel & CPU & 889 & 1717 & 1754 & 2639 & cell2d 1.50x \\
-    n-body & GPU & 242 & 723 & 6941 & 6345 & tie \\
-    n-body & CPU & 422 & 1652 & 11563 & 12740 & cell2d 1.10x \\
-    puffer-ball & GPU & 3342 & 11480 & 26792 & 75322 & cell2d 2.81x \\
-    puffer-ball & CPU & 2920 & 10101 & 78001 & 448796 & cell2d 5.75x \\
-    rod-twist & GPU & 3938 & 14144 & 21318 & 23482 & cell2d 1.10x \\
-    rod-twist & CPU & 12138 & 29135 & 43015 & 44219 & tie \\
+    armadillo-rollers & Tight (GPU) & 256 & 987 & 1199 & 2504 & cell2dmin 2.09x \\
+    armadillo-rollers & Tight & 763 & 1167 & 1380 & 2244 & cell2dmin 1.63x \\
+    cloth-ball & Tight (GPU) & 62 & 244 & 649 & 862 & cell2dmin 1.33x \\
+    cloth-ball & Tight & 120 & 193 & 569 & 1292 & cell2dmin 2.27x \\
+    cloth-funnel & Tight (GPU) & 203 & 630 & 1562 & 1660 & cell2dmin 1.06x \\
+    cloth-funnel & Tight & 630 & 818 & 879 & 1668 & cell2dmin 1.90x \\
+    n-body & Tight (GPU) & 202 & 648 & 3893 & 6075 & cell2dmin 1.56x \\
+    n-body & Tight & 219 & 417 & 3152 & 11223 & cell2dmin 3.56x \\
+    puffer-ball & Tight (GPU) & 4189 & 7566 & 21042 & 69259 & cell2dmin 3.29x \\
+    puffer-ball & Tight & 4298 & 5161 & 24807 & 420458 & cell2dmin 16.95x \\
+    rod-twist & Tight (GPU) & 3093 & 12360 & 8812 & 21166 & cell2dmin 2.40x \\
+    rod-twist & Tight & 5994 & 10018 & 16143 & 23905 & cell2dmin 1.48x \\
     \bottomrule
   \end{tabular}}
-  \par\smallskip\footnotesize \texttt{faster} names the winning strategy and by how much on the whole broad phase. A margin inside the run-to-run spread is a tie.
-  \par\smallskip\footnotesize Source: \texttt{benchmark/results/sweep-gh200-bp.csv}
+  \par\smallskip\footnotesize `faster` names the winning strategy and by how much on the whole broad phase. A margin inside the run-to-run spread is a tie.
+  \par\smallskip\footnotesize Source: \texttt{benchmark/assessment/broadphase-cell2dmin.csv}
 \end{table}

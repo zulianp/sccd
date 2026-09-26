@@ -290,26 +290,25 @@ is drawn dashed to remain visible.
 \Cref{fig:bp} contrasts the two algorithms on the geometry that separates them,
 and \cref{tab:broadphase} measures them over the whole benchmark.
 
-\textbf{The cell list wins or ties on every scene of the host, and the device
-splits.} On the host it leads puffer-ball by $5.75\times$, armadillo-rollers by
-$1.66\times$, cloth-funnel by $1.50\times$ and n-body by $1.10\times$, with
-cloth-ball and rod-twist coming out ties, their margins inside the repeat spread
-of \cref{sec:results:setup}. On the device the verdict is scene by scene: the
-cell list leads puffer-ball by $2.81\times$ and rod-twist by $1.10\times$, the
-sweep leads cloth-funnel by $1.77\times$ and armadillo-rollers by $1.13\times$,
-and cloth-ball and n-body are ties. The largest margin is the largest scene:
-$78.0\,\mathrm{s}$ against $448.8\,\mathrm{s}$ on the host over puffer-ball's
-$240$ cases, and $26.8$ against $75.3$ on the device.
+\textbf{The cell list wins every scene of both processors.} On the host it leads
+puffer-ball by $16.95\times$, n-body by $3.56\times$, cloth-ball by $2.27\times$,
+cloth-funnel by $1.90\times$, armadillo-rollers by $1.63\times$ and rod-twist by
+$1.48\times$; on the device, puffer-ball by $3.29\times$, rod-twist by
+$2.40\times$, armadillo-rollers by $2.09\times$, n-body by $1.56\times$,
+cloth-ball by $1.33\times$ and cloth-funnel by $1.06\times$, the last inside the
+repeat spread of \cref{sec:results:setup}. The largest margin is the largest
+scene: $29.1\,\mathrm{s}$ against $425.6\,\mathrm{s}$ on the host over
+puffer-ball's $240$ cases, and $25.2$ against $76.8$ on the device.
 
-Summed over the whole benchmark the host choice is not close and the device
-choice is carried by one scene. The cell list costs $138.7\,\mathrm{s}$ against
-the sweep's $513.2$ on the host, a factor of $3.70$; on the device it costs
-$62.5\,\mathrm{s}$ against $111.0$, a factor of $1.78$ of which puffer-ball
-alone supplies $48.5\,\mathrm{s}$. Take puffer-ball out and the device totals
-are $35.7\,\mathrm{s}$ against $35.7$: the same to three figures. What
-\cref{sec:bp:cell} predicts -- that binning suits a device better than sorting,
-being the count, prefix sum and scatter the rest of the pipeline is already
-built from -- shows only where the scene is large enough to pay for the grid.
+Summed over the whole benchmark neither choice is close. The cell list costs
+$59.0\,\mathrm{s}$ against the sweep's $478.6$ on the host, a factor of $8.12$;
+on the device it costs $45.2\,\mathrm{s}$ against $124.0$, a factor of $2.74$.
+Neither total rests on one scene: take puffer-ball out, which supplies most of
+the host's margin, and the host is still $29.8\,\mathrm{s}$ against $52.9$ and
+the device $19.9$ against $47.1$. What \cref{sec:bp:cell} predicts -- that
+binning suits a device better than sorting, being the count, prefix sum and
+scatter the rest of the pipeline is already built from -- holds on every scene
+of it.
 
 \begin{figure}[htbp]
   \centering
@@ -339,21 +338,21 @@ frames and summing milliseconds disagree on the device, and the disagreement is
 the result: a strategy chosen per frame and a strategy chosen per benchmark are
 not the same choice.
 
-The BP prep columns say where the difference comes from, and it is not where BP
-queries alone would suggest. The sweep builds its sorted intervals at two to
-four times the cost of the grid on the host, $29.1\,\mathrm{s}$ against $12.1$
-on rod-twist and $10.1$ against $2.9$ on puffer-ball, because a sort is
-$O(n\log n)$ where binning is linear, and the device keeps that ratio at
-$14.1\,\mathrm{s}$ against $3.9$ and $11.5$ against $3.3$. What differs between
-the processors is BP queries: on the host the grid's queries are cheaper too on
-five scenes, while on the device the sorted intervals are queried faster on four
-of the six, enough to overturn the structure's advantage everywhere except
-puffer-ball and rod-twist.
+The BP prep columns say where part of the difference comes from. The sweep
+builds its sorted intervals at $1.2$ to $1.9$ times the cost of the grid on the
+host and $1.8$ to $4.0$ times on the device, because a sort is $O(n\log n)$
+where binning is linear, and the gap is the wider one on the device because a
+sort is the shape a GPU likes least. The rest is BP queries, and there the
+margin is one-sided on both: the grid is queried faster on all six scenes of
+each processor, by $1.5$ to $17.0$ times on the host and $1.1$ to $3.3$ on the
+device. The one-entry binning of \cref{alg:cellmin} is what makes the query side
+so lopsided on the host, and it gives a little of the structure's advantage back,
+since it builds two bounds the extent binning does not.
 
 \textbf{Both processors fix their choice.} The two algorithms emit identical
 pairs (\cref{prop:agree}), so the cost of choosing wrongly is bounded by the
 ratio between them, and \cref{tab:broadphase} shows that ratio reaching
-$5.75\times$ within one benchmark. That is wide enough to be worth settling, and
+$16.95\times$ within one benchmark. That is wide enough to be worth settling, and
 \cref{tab:bpvariant} settles it: the edge-edge query of \cref{alg:cellmin} leads
 on every scene of both processors, by $3.67\times$ over the extent-binned cell
 list on the host and $1.46\times$ on the device. \Cref{sec:bp:choose} reports the
