@@ -65,9 +65,9 @@
  * ## So: the host default is measured, and the device races
  *
  * Four heuristics are refuted above. What settles the host is a measurement
- * rather than a statistic: over the six benchmark scenes, with edge-edge
- * preparation and query counted together, `cell2dminsort` leads the rest, and
- * `Auto` resolves to it on the host without probing anything. A scene where it
+ * rather than a statistic: over the six benchmark scenes, with preparation and
+ * query counted together, `cell2dmin` leads the rest, and `Auto` resolves to it
+ * on the host without probing anything. A scene where it
  * loses a little is an accepted cost; the quantity being optimised is the total
  * over the benchmark, not the number of scenes won.
  *
@@ -89,11 +89,13 @@
  * `SCCD_BROADPHASE=sweep`, `=cell2d`, `=cell2dmin`, `=cell2dminsort` or
  * `=cell2dseg` names one and skips both the default and the race.
  *
- * `cell2dmin` is the cell list with a different edge-edge query: one entry per
- * box at its minimum corner, walked forward in linear cell order with the cell
- * bounds pruning it. `cell2dminsort` adds an ordering of each cell on the axis
- * the grid does not use, so a cell can be ruled out by its bound there and the
- * scan inside one can stop early. Both take `cell2d`'s face-vertex query.
+ * `cell2dmin` is the cell list with a different edge-edge query, and the host
+ * default: one entry per box at its minimum corner, walked forward in linear
+ * cell order with the cell bounds pruning it. `cell2dminsort` adds an ordering
+ * of each cell on the axis the grid does not use, so a cell can be ruled out by
+ * its bound there and the scan inside one can stop early; it buys traversal at
+ * the cost of preparation and over the benchmark does not repay it. Both take
+ * `cell2d`'s face-vertex query.
  *
  * `cell2dseg` changes the face-vertex query instead: the cell list holds the
  * faces, and each vertex queries it with the segment its trajectory is, walking

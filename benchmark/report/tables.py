@@ -69,8 +69,18 @@ def render_tex(table: Table) -> str:
     lines = [
         r"\begin{table}[htbp]",
         r"  \centering",
-        f"  \\caption{{{_tex_escape(table.caption)}}}",
+        # The caption and the notes are authored prose and carry their own
+        # markup -- \emph, \cref -- so they go through as written. Only the
+        # cells and the headers, which are data, are escaped.
+        f"  \\caption{{{table.caption}}}",
         f"  \\label{{{table.label}}}",
+    ]
+    # A table wider than four columns does not fit the column at full size, so
+    # it goes through \fittable, which scales it down only when it has to.
+    wide = len(table.columns) > 4
+    if wide:
+        lines.append(r"  \fittable{%")
+    lines += [
         f"  \\begin{{tabular}}{{{spec}}}",
         r"    \toprule",
         "    " + " & ".join(c.tex() for c in table.columns) + r" \\",
@@ -78,9 +88,9 @@ def render_tex(table: Table) -> str:
     ]
     for row in table.rows:
         lines.append("    " + " & ".join(_tex_escape(c) for c in row) + r" \\")
-    lines += [r"    \bottomrule", r"  \end{tabular}"]
+    lines += [r"    \bottomrule", r"  \end{tabular}" + ("}" if wide else "")]
     if table.notes:
-        lines.append(f"  \\par\\smallskip\\footnotesize {_tex_escape(table.notes)}")
+        lines.append(f"  \\par\\smallskip\\footnotesize {table.notes}")
     if table.source:
         lines.append(f"  \\par\\smallskip\\footnotesize Source: "
                      f"\\texttt{{{_tex_escape(table.source)}}}")
@@ -499,7 +509,7 @@ def broadphase_variant_table(per_strategy: dict[str, dict[tuple[str, str], Scene
     table = Table(
         label="tab:bpvariant",
         caption=("Edge-edge queries over the same cases on the host, as "
-                 "whole-scene totals in milliseconds, median over repeats. " + TAGS +
+                 "whole-scene totals in milliseconds, median over repeats. "
                  "Every column is BP full, the acceleration structure and the "
                  "queries over it added, because ordering a cell's entries is "
                  "preparation bought back in traversal and only the sum is "
