@@ -129,13 +129,21 @@ def results_grid(case_series: dict, out_dir: Path) -> Figure:
     # caller pays nor the thing the broad-phase study is about. Named columns
     # are summed per repeat before the median, so the box is over whole broad
     # phases and not over a median of one part added to a median of another.
+    # Error is not a row here. Its distribution is the subject of its own
+    # figure, on a log axis with the sign of the deviation made explicit, and
+    # here it came out indistinguishable across all six scenes and both
+    # processors -- a third of the figure spent saying that a quantity does not
+    # vary, next to two rows whose whole point is that theirs do.
     rows = [(("prep_ms", "broad_ms"), "BP full (ms)"),
-            (("narrow_ms",), "NP EToI (ms)"),
-            (("toi_max_early",), "error")]
+            (("narrow_ms",), "NP EToI (ms)")]
 
+    # sharey by row, which is what the hidden y labels below already imply.
+    # Without it each panel carries its own scale and a box at the same height
+    # means a different time in the panel beside it, which is the one reading a
+    # grid like this invites.
     fig, axes = plt.subplots(len(rows), len(scenes), squeeze=False,
-                             figsize=(FULL_WIDTH_IN, 1.35 * len(rows) + 0.9),
-                             sharex="col")
+                             figsize=(FULL_WIDTH_IN, 1.55 * len(rows) + 0.9),
+                             sharex="col", sharey="row")
 
     for c, scene in enumerate(scenes):
         axes[0][c].set_title(SCENE_LABEL.get(scene, scene), fontsize=7, pad=3)
@@ -212,13 +220,13 @@ def results_grid(case_series: dict, out_dir: Path) -> Figure:
 
     return Figure(
         _stem("results-grid"), "fig:results",
-        "Per-case distributions for every mode over the six scenes (columns). "
-        "Rows are broad-phase time, narrow-phase time, and error against "
-        "the exact root. $*$ marks a parallel CPU mode, $\\dagger$ a GPU one. "
-        "Each box spans the first to "
-        "the third quartile with the median inside it, the whiskers reach the "
-        "furthest case within 1.5 interquartile ranges, and cases beyond that "
-        "are drawn individually. All axes are logarithmic.",
+        "Per-case distributions for every mode over the six scenes (columns), "
+        "broad-phase time above and narrow-phase time below. Each row shares one "
+        "logarithmic scale, so a box is comparable across scenes as well as "
+        "within one. $*$ marks a parallel CPU mode, $\\dagger$ a GPU one. Each "
+        "box spans the first to the third quartile with the median inside it, "
+        "the whiskers reach the furthest case within 1.5 interquartile ranges, "
+        "and cases beyond that are drawn individually.",
         FULL_WIDTH_IN)
 
 
