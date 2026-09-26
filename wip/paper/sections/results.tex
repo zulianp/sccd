@@ -213,13 +213,12 @@ part that scales worst with thread count, which is what
 \cref{sec:results:threads} measures.
 
 The distributions behind the medians are in \cref{fig:grid}, one column per
-quantity and one row per scene. Broad-phase time is tight around its median.
-Narrow-phase time is skewed by a long upper tail, which is the per-case form of
-the heavy-tailed difficulty of \cref{tab:difficulty}. \Cref{fig:toierr} shows
-the error distribution on a logarithmic axis. That distribution is one-sided by
-construction, since every value is how far \emph{before} the true root the
-answer falls. The host and device curves coincide closely enough that the device
-is drawn dashed to remain visible.
+scene and a shared scale along each row, so a box can be read against its
+neighbours as well as against the pair beside it. Broad-phase time is tight
+around its median; narrow-phase time is skewed by a long upper tail, which is
+the per-case form of the heavy-tailed difficulty of \cref{tab:difficulty}.
+\Cref{fig:toierr} gives the error distribution, one-sided by construction since
+every value is how far \emph{before} the true root the answer falls.
 
 \begin{figure}[htbp]
   \centering
@@ -244,10 +243,11 @@ is drawn dashed to remain visible.
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\linewidth]{figures/results-grid.pdf}
-  \caption{Per-case distributions over the six scenes: BP full and NP EToI for
-    one case, and error against the exact root. Each box spans the first
-    to the third quartile with the median inside, whiskers reach the furthest case
-    within $1.5$ interquartile ranges, and cases beyond are drawn individually.}
+  \caption{Per-case distributions over the six scenes, BP full above and NP
+    EToI below. Each row shares one logarithmic scale, so a box is comparable
+    across scenes as well as within one. Each box spans the first to the third
+    quartile with the median inside, whiskers reach the furthest case within
+    $1.5$ interquartile ranges, and cases beyond are drawn individually.}
   \label{fig:grid}
 \end{figure}
 
