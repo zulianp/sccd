@@ -957,3 +957,46 @@ Still ahead in aggregate on that reading, but on three scenes behind, and the
 margin is a third of what the query-only figure claimed. Both columns are single
 samples per case and neither is to be trusted; the medians are in
 `tab:bpvariant`, and they say the sorted variant loses outright.
+
+## The minimum-corner walk on the device: correct, and a wash
+
+`cell2dmin` is the host default, and the device refused it, so the two
+processors could not run the same strategy. The port is
+`cell2dmin_setup_and_count`, `cell2dmin_fill`, `cell2dmin_bounds` and the two
+self-overlap entry points in `src/cuda/sccd_cell2d_broadphase.cu`.
+
+**It is correct.** On GH200 over four scenes it emits exactly the edge-edge pair
+counts the extent-binned device kernel does -- 5,692,480 on armadillo-rollers,
+259,683,882 on cloth-ball, 3,636,886 on cloth-funnel and 54,083,436 on rod-twist
+-- with no missed collisions, and the host kernel agrees with both.
+
+**It does not pay there.** Edge-edge, prep + broad, median over repeats,
+against the extent-binned cell list on the same processor:
+
+| scene | host | device |
+|---|---|---|
+| armadillo-rollers | 1.803x | 1.523x |
+| cloth-ball | 2.521x | 0.963x |
+| cloth-funnel | 1.775x | 0.673x |
+| rod-twist | 1.487x | 1.710x |
+| all four | **2.174x** | **0.996x** |
+
+The host gains a factor of two and the device nothing. So the device default
+stays the race between the sweep and the extent-binned cell list, and
+`SCCD_BROADPHASE=cell2dmin` reaches the new kernel by name. Deciding per
+processor is the rule, and here the two processors genuinely differ.
+
+**One diagnosis tried and refuted.** `min_row_prefix_kernel` runs one thread per
+row, so its parallelism is the square root of the work -- a few hundred threads
+for a pass over millions of cells, which looked like the whole explanation.
+Replacing it with `cub::DeviceScan::InclusiveScanByKey` over every cell, keyed
+by row through a transform iterator, moved the four scenes to 1.523x, 0.963x,
+0.673x and 1.710x: noise in both directions. The scan was reverted and the
+kernel carries the measurement in its comment.
+
+What is left to try is the shape of the walk itself rather than the passes
+around it. Each thread walks a different number of cells and runs its own binary
+search, so a warp diverges on both, and the row prefix it searches is a
+different region of memory per thread. The extent-binned query walks a small
+rectangle instead, which diverges less and reads more locally. Fewer candidates
+does not pay for scattered access on a GPU the way it pays on a host.
