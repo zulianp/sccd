@@ -62,26 +62,20 @@
  *    (cloth-ball, where the sweep is 1.36x faster) and the middle one
  *    (armadillo-rollers, 1.59x). See `wip/ASSESSMENT.md`.
  *
- * ## So: the host default is measured, and the device races
+ * ## So: the default is measured, and nothing is raced
  *
- * Four heuristics are refuted above. What settles the host is a measurement
- * rather than a statistic: over the six benchmark scenes, with preparation and
- * query counted together, `cell2dmin` leads the rest, and `Auto` resolves to it
- * on the host without probing anything. A scene where it
- * loses a little is an accepted cost; the quantity being optimised is the total
- * over the benchmark, not the number of scenes won.
+ * Four heuristics are refuted above. What settles it is a measurement rather
+ * than a statistic: over the six benchmark scenes, with preparation and query
+ * counted together, `cell2dmin` leads the rest on both processors and on every
+ * scene -- by $1.46\times$ over the extent-binned cell list on the device and
+ * $3.67\times$ on the host, and by far more over the sweep. `Auto` resolves to
+ * it and probes nothing.
  *
- * The device has no minimum-corner implementation, so there `Auto` still races.
- * The sweep and `cell2d` produce **identical pair sets**, so they can simply be
- * raced: run one on a step, the other on the next, then keep the winner. A broad
- * phase runs every step of a simulation, so the cost is two probe steps out of
- * thousands, and unlike a heuristic it cannot be wrong about a scene nobody
- * tested. `BroadPhaseAutoTuner` does that, and re-probes periodically, because a
- * simulation's geometry changes -- cloth that starts flat and ends crumpled is
- * not one workload.
- *
- * `BroadPhaseAutoTuner::set_default` is how a caller that has measured its own
- * processor fixes the answer, and `broadphase_stats` is still exposed for a
+ * `BroadPhaseAutoTuner::set_default` is how that is fixed, and the race it also
+ * offers is what a caller falls back on without it: the sweep and `cell2d`
+ * return identical pair sets, so they can simply be run on consecutive steps and
+ * the faster kept, which costs two probe steps out of thousands and cannot be
+ * wrong about a scene nobody tested. `broadphase_stats` is still exposed for a
  * caller who wants to look at the geometry itself.
  *
  * ## The five strategies
