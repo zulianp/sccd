@@ -411,14 +411,18 @@ def write_tables(tables: list[Table], out_dir: Path, stem: str = "tables") -> di
 def broadphase_table(per_strategy: dict[str, dict[tuple[str, str], SceneSummary]],
                      source: str) -> Table:
     """
-    The two broad-phase strategies over the same scenes.
+    The broad-phase strategies over the same scenes.
 
     They return identical pair sets, so whichever is faster on a given geometry
-    is simply the right one -- which is what the shipped default races for, per
-    scene, rather than fixing a winner. This table is that race run offline over
-    the whole benchmark, with the preparation split out from the traversal
-    because that is where the two differ: the sweep builds its sorted intervals
-    more cheaply, the cell list traverses its grid more cheaply.
+    is simply the right one. The host fixes that choice from this measurement and
+    the device races for it per scene, having no minimum-corner implementation to
+    choose between. The preparation is split out from the traversal because that
+    is where the strategies differ: the sweep builds its sorted intervals more
+    cheaply, the cell list traverses its grid more cheaply, and ordering a cell's
+    entries buys traversal at the cost of preparation.
+
+    A strategy missing from a processor drops that processor's rows, so pass only
+    strategies measured on both.
     """
     names = sorted(per_strategy)
     table = Table(
