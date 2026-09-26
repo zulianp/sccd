@@ -958,7 +958,7 @@ margin is a third of what the query-only figure claimed. Both columns are single
 samples per case and neither is to be trusted; the medians are in
 `tab:bpvariant`, and they say the sorted variant loses outright.
 
-## The minimum-corner walk on the device: correct, and a wash
+## The minimum-corner walk on the device
 
 `cell2dmin` is the host default, and the device refused it, so the two
 processors could not run the same strategy. The port is
@@ -970,33 +970,35 @@ counts the extent-binned device kernel does -- 5,692,480 on armadillo-rollers,
 259,683,882 on cloth-ball, 3,636,886 on cloth-funnel and 54,083,436 on rod-twist
 -- with no missed collisions, and the host kernel agrees with both.
 
-**It does not pay there.** Edge-edge, prep + broad, median over repeats,
-against the extent-binned cell list on the same processor:
+**A thread to a box does not pay there; a warp to a box does.** Edge-edge,
+prep + broad, median over repeats, against the extent-binned cell list on the
+same processor:
 
-| scene | host | device |
-|---|---|---|
-| armadillo-rollers | 1.803x | 1.523x |
-| cloth-ball | 2.521x | 0.963x |
-| cloth-funnel | 1.775x | 0.673x |
-| rod-twist | 1.487x | 1.710x |
-| all four | **2.174x** | **0.996x** |
+| scene | host | device, thread per box | device, warp per box |
+|---|---|---|---|
+| armadillo-rollers | 1.436x | 1.523x | **6.243x** |
+| cloth-ball | 2.589x | 0.963x | **2.798x** |
+| cloth-funnel | 1.702x | 0.673x | **3.464x** |
+| rod-twist | 1.557x | 1.710x | **2.706x** |
+| all four | **2.205x** | 0.996x | **3.086x** |
 
-The host gains a factor of two and the device nothing. So the device default
-stays the race between the sweep and the extent-binned cell list, and
-`SCCD_BROADPHASE=cell2dmin` reaches the new kernel by name. Deciding per
-processor is the rule, and here the two processors genuinely differ.
+The thread-per-box form diverges on everything: the number of rows a box spans,
+where its binary search lands, and how many entries each cell holds all differ
+between neighbouring boxes, so the lanes of a warp are mostly masked off and
+each lane reads a different part of the cell array. A warp to a box inverts it.
+Every lane computes the same walk, redundantly and branch-free, and the lanes
+split each cell's entries between them -- the only loop left that can diverge,
+and the one whose loads are then consecutive. Redundant arithmetic on 32 lanes
+buys regular control flow and coalesced reads, which is the right trade on a GPU
+and the wrong one on a host: the two kernels differ in shape now rather than
+being transliterations of each other.
 
-**One diagnosis tried and refuted.** `min_row_prefix_kernel` runs one thread per
-row, so its parallelism is the square root of the work -- a few hundred threads
-for a pass over millions of cells, which looked like the whole explanation.
-Replacing it with `cub::DeviceScan::InclusiveScanByKey` over every cell, keyed
-by row through a transform iterator, moved the four scenes to 1.523x, 0.963x,
-0.673x and 1.710x: noise in both directions. The scan was reverted and the
-kernel carries the measurement in its comment.
+Two details carry the correctness. The early return is on `fi = tid / 32`, which
+is uniform over the warp, so a warp leaves together and the ballots are taken
+converged; a per-lane return would break them. And the entry loop strides a
+shared trip count rather than starting each lane at `begin + lane`, so every
+lane reaches the ballot even when a cell's entry count is not a multiple of 32.
+Counting reduces with a ballot popcount and collecting writes at each lane's
+rank within the ballot, so neither pass needs an atomic.
 
-What is left to try is the shape of the walk itself rather than the passes
-around it. Each thread walks a different number of cells and runs its own binary
-search, so a warp diverges on both, and the row prefix it searches is a
-different region of memory per thread. The extent-binned query walks a small
-rectangle instead, which diverges less and reads more locally. Fewer candidates
-does not pay for scattered access on a GPU the way it pays on a host.
+It was the walk itself, and the warp-per-box form above is the answer.
