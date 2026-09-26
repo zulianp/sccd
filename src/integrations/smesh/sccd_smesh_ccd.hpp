@@ -336,6 +336,8 @@ namespace sccd {
         DeviceArray<ptrdiff_t> e_cursor_d_;
         DeviceArray<int> e_ranges_d_;
         DeviceArray<smesh::idx_t> e_cellidx_d_;
+        DeviceArray<scalar_t> e_row_prefix_d_;
+        DeviceArray<scalar_t> e_cell_hi1_d_;
 #endif
 
 
@@ -565,6 +567,35 @@ namespace sccd {
                             "(grid %dx%d)\n",
                             (long)rejected, (long)spans, (long)n, grid.n0, grid.n1);
             }
+        }
+
+        /**
+         * \brief The edge-edge binning on the device: one entry per box.
+         *
+         * No span count to read back and no range array to agree on, because a
+         * box lands in exactly one cell and both passes compute it the same way.
+         * The two bounds the forward walk prunes with are built here too, since
+         * they are a property of the binning rather than of a query.
+         */
+        void bin_min_device_(const ptrdiff_t n,
+                             scalar_t** const SCCD_RESTRICT aabb,
+                             sccd::device::Cell2DGridD<scalar_t>& grid,
+                             DeviceArray<ptrdiff_t>& cellptr,
+                             DeviceArray<smesh::idx_t>& cellidx,
+                             DeviceArray<ptrdiff_t>& cursor,
+                             DeviceArray<scalar_t>& row_prefix,
+                             DeviceArray<scalar_t>& cell_hi1) {
+            sccd::device::cell2dmin_setup_and_count<scalar_t, smesh::idx_t>(
+                n, aabb, grid, cellptr.get());
+
+            const ptrdiff_t ncells = grid.ncells();
+            sccd::device::cell2dmin_fill<scalar_t, smesh::idx_t>(
+                n, aabb, grid, cellptr.get(), cellidx.reserve(n > 0 ? n : 1), cursor.get());
+
+            sccd::device::cell2dmin_bounds<scalar_t, smesh::idx_t>(
+                grid, aabb, cellptr.get(), cellidx.get(),
+                row_prefix.reserve(ncells > 0 ? ncells : 1),
+                cell_hi1.reserve(ncells > 0 ? ncells : 1));
         }
 #endif
 
@@ -1191,9 +1222,10 @@ namespace sccd {
 
             choose_strategy_(n_nodes);
 
-            if (use_cell2d_min_) {
-                // The minimum-corner edge-edge query is a host kernel so far.
-                // Saying so beats running the extent-binned one under its name,
+            if (use_cell2d_min_sorted_) {
+                // Ordering each cell is a host kernel so far, and it loses to
+                // the unordered walk on every scene of the benchmark anyway.
+                // Saying so beats running the unordered one under its name,
                 // which would put a timing against a label that did not produce
                 // it.
                 SMESH_ERROR("sccd: SCCD_BROADPHASE=%s has no device implementation yet\n",
@@ -1214,8 +1246,13 @@ namespace sccd {
 
                 bin_device_(n_nodes, vaabb_->data(), v_grid_d_, v_cellptr_d_, v_cellidx_d_,
                             v_cursor_d_, v_ranges_d_);
-                bin_device_(n_edges, eaabb_->data(), e_grid_d_, e_cellptr_d_, e_cellidx_d_,
-                            e_cursor_d_, e_ranges_d_);
+                if (use_cell2d_min_) {
+                    bin_min_device_(n_edges, eaabb_->data(), e_grid_d_, e_cellptr_d_,
+                                    e_cellidx_d_, e_cursor_d_, e_row_prefix_d_, e_cell_hi1_d_);
+                } else {
+                    bin_device_(n_edges, eaabb_->data(), e_grid_d_, e_cellptr_d_, e_cellidx_d_,
+                                e_cursor_d_, e_ranges_d_);
+                }
             } else {
                 SMESH_TRACE_SCOPE("Sorting AABBs (device)");
 
@@ -1427,7 +1464,13 @@ namespace sccd {
 
             const ptrdiff_t n_edges = e0_->size();
 
-            if (use_cell2d_) {
+            if (use_cell2d_min_) {
+                SMESH_TRACE_SCOPE("cell2dmin count_self_overlaps");
+                sccd::device::cell2dmin_count_self_overlaps<2, scalar_t, smesh::idx_t>(
+                    n_edges, eaabb_->data(), eidx_->data(), 1, edges_->data(), e_grid_d_,
+                    e_cellptr_d_.get(), e_cellidx_d_.get(), e_row_prefix_d_.get(),
+                    e_cell_hi1_d_.get(), ccdptr_->data());
+            } else if (use_cell2d_) {
                 SMESH_TRACE_SCOPE("cell2d count_self_overlaps");
                 sccd::device::cell2d_count_self_overlaps<2, scalar_t, smesh::idx_t>(n_edges,
                                                                                     eaabb_->data(),
@@ -1457,7 +1500,14 @@ namespace sccd {
             }
 
             if (n_edge_overlaps > 0) {
-                if (use_cell2d_) {
+                if (use_cell2d_min_) {
+                    SMESH_TRACE_SCOPE("cell2dmin collect_self_overlaps");
+                    sccd::device::cell2dmin_collect_self_overlaps<2, scalar_t, smesh::idx_t>(
+                        n_edges, eaabb_->data(), eidx_->data(), 1, edges_->data(), e_grid_d_,
+                        e_cellptr_d_.get(), e_cellidx_d_.get(), e_row_prefix_d_.get(),
+                        e_cell_hi1_d_.get(), ccdptr_->data(), e0_overlap_->data(),
+                        e1_overlap_->data());
+                } else if (use_cell2d_) {
                     SMESH_TRACE_SCOPE("cell2d collect_self_overlaps");
                     sccd::device::cell2d_collect_self_overlaps<2, scalar_t, smesh::idx_t>(n_edges,
                                                                                           eaabb_->data(),
@@ -1745,6 +1795,11 @@ namespace sccd {
                 e_cellptr_d_.reserve(4 * n_edges + 2);
                 e_cursor_d_.reserve(4 * n_edges + 2);
                 e_ranges_d_.reserve(4 * n_edges + 4);
+                // The minimum-corner binning holds one entry per box and two
+                // bounds per cell, and the grid is capped at four cells per box.
+                e_cellidx_d_.reserve(n_edges > 0 ? n_edges : 1);
+                e_row_prefix_d_.reserve(4 * n_edges + 1);
+                e_cell_hi1_d_.reserve(4 * n_edges + 1);
             }
 #endif
         }

@@ -152,6 +152,78 @@ namespace sccd {
                                           I* const SCCD_RESTRICT first_out,
                                           I* const SCCD_RESTRICT second_out);
 
+
+        /**
+         * \brief Size the grid and bin \p n boxes by their minimum corner alone.
+         *
+         * The edge-edge form of the cell list: a box enters the one cell holding
+         * its minimum corner, so the cell array holds exactly \p n entries and the
+         * caller needs no span count to size it. No \p ranges array either --
+         * the cell a box lands in is one clamp of one coordinate pair, a pure
+         * function of the box and the grid, so the counting and the scatter
+         * cannot disagree about it the way two nested loops could.
+         */
+        template <typename T, typename I>
+        void cell2dmin_setup_and_count(const ptrdiff_t n,
+                                       T** const SCCD_RESTRICT aabbs,
+                                       Cell2DGridD<T>& grid,
+                                       ptrdiff_t* const SCCD_RESTRICT cellptr);
+
+        /** \brief Scatter each box index into the cell its minimum corner is in. */
+        template <typename T, typename I>
+        void cell2dmin_fill(const ptrdiff_t n,
+                            T** const SCCD_RESTRICT aabbs,
+                            const Cell2DGridD<T>& grid,
+                            const ptrdiff_t* const SCCD_RESTRICT cellptr,
+                            I* const SCCD_RESTRICT cellidx,
+                            ptrdiff_t* const SCCD_RESTRICT cursor);
+
+        /**
+         * \brief The two bounds the forward walk prunes with.
+         *
+         * \p cell_hi1 is the largest upper bound on the second grid axis of the
+         * boxes in a cell, and \p row_prefix the running maximum along each row of
+         * the largest upper bound on the first. Both have `ncells` entries. The
+         * prefix is what lets a query skip a run of columns in one binary search
+         * rather than a test per cell, and it is why the binning needs no bound
+         * on how many cells a box may span.
+         */
+        template <typename T, typename I>
+        void cell2dmin_bounds(const Cell2DGridD<T>& grid,
+                              T** const SCCD_RESTRICT aabbs,
+                              const ptrdiff_t* const SCCD_RESTRICT cellptr,
+                              const I* const SCCD_RESTRICT cellidx,
+                              T* const SCCD_RESTRICT row_prefix,
+                              T* const SCCD_RESTRICT cell_hi1);
+
+        template <int nxe, typename T, typename I>
+        void cell2dmin_count_self_overlaps(const ptrdiff_t element_count,
+                                           T** const SCCD_RESTRICT aabbs,
+                                           I* const SCCD_RESTRICT idx,
+                                           const ptrdiff_t element_stride,
+                                           I** const SCCD_RESTRICT elements,
+                                           const Cell2DGridD<T>& grid,
+                                           const ptrdiff_t* const SCCD_RESTRICT cellptr,
+                                           const I* const SCCD_RESTRICT cellidx,
+                                           const T* const SCCD_RESTRICT row_prefix,
+                                           const T* const SCCD_RESTRICT cell_hi1,
+                                           ptrdiff_t* const SCCD_RESTRICT ccdptr);
+
+        template <int nxe, typename T, typename I>
+        void cell2dmin_collect_self_overlaps(const ptrdiff_t element_count,
+                                             T** const SCCD_RESTRICT aabbs,
+                                             I* const SCCD_RESTRICT idx,
+                                             const ptrdiff_t element_stride,
+                                             I** const SCCD_RESTRICT elements,
+                                             const Cell2DGridD<T>& grid,
+                                             const ptrdiff_t* const SCCD_RESTRICT cellptr,
+                                             const I* const SCCD_RESTRICT cellidx,
+                                             const T* const SCCD_RESTRICT row_prefix,
+                                             const T* const SCCD_RESTRICT cell_hi1,
+                                             const ptrdiff_t* const SCCD_RESTRICT ccdptr,
+                                             I* const SCCD_RESTRICT first_out,
+                                             I* const SCCD_RESTRICT second_out);
+
     }  // namespace device
 }  // namespace sccd
 
