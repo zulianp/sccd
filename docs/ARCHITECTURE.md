@@ -40,7 +40,7 @@ cells rather than selectivity.
 step, the other on the next, keep the faster, re-probe periodically. Five
 attempts to predict the winner from geometry all failed (anisotropy, expected
 sweep window, estimated pair density, mesh size, and a fixed default), and they
-are documented there so they are not retried. `SCCD_BROADPHASE=sweep|cell2d`
+are documented there so they are not retried. `SCCD_BROADPHASE=sweep|cell2d|cell2dmin|cell2dminsort|cell2dseg`
 forces one.
 
 Both handle triangles and quads, on host and device.
