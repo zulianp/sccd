@@ -2,24 +2,23 @@
   \centering
   \caption{Broad- and narrow-phase throughput in candidate pairs per second, median over repeats. A rate, so it is directly comparable between scenes of very different size: a rate, so it is neither a whole-scene total nor a per-step figure. \emph{BP full} is the whole broad phase, the acceleration structure plus the queries over it; \emph{BP prep} is the structure alone and \emph{BP queries} the queries alone. The narrow phase is named by the answer it is asked for: \emph{NP EToI} returns one earliest time of impact for the step, so every query prunes against the running minimum, and \emph{NP per-pair} returns one per candidate with no shared bound. }
   \label{tab:throughput}
-  \fittable{%
-\begin{tabular}{llrr}
+  \begin{tabular}{llrr}
     \toprule
     scene & mode & BP full (Mpair/s) & NP EToI (Mpair/s) \\
     \midrule
-    armadillo-rollers & GPU & 26.5 & 54.3 \\
-    armadillo-rollers & CPU & 32.7 & 117.8 \\
-    cloth-ball & GPU & 165.1 & 954.4 \\
-    cloth-ball & CPU & 101.3 & 280.8 \\
-    cloth-funnel & GPU & 8.1 & 32.8 \\
-    cloth-funnel & CPU & 14.4 & 79.1 \\
-    n-body & GPU & 324.7 & 4750.8 \\
-    n-body & CPU & 194.9 & 391.6 \\
-    puffer-ball & GPU & 273.5 & 5241.7 \\
-    puffer-ball & CPU & 93.9 & 346.2 \\
-    rod-twist & GPU & 181.7 & 234.5 \\
-    rod-twist & CPU & 90.0 & 119.1 \\
+    armadillo-rollers & Tight (GPU) & 71.1 & 55.0 \\
+    armadillo-rollers & Tight & 61.8 & 123.9 \\
+    cloth-ball & Tight (GPU) & 269.8 & 974.9 \\
+    cloth-ball & Tight & 307.9 & 283.1 \\
+    cloth-funnel & Tight (GPU) & 16.1 & 32.2 \\
+    cloth-funnel & Tight & 28.7 & 57.2 \\
+    n-body & Tight (GPU) & 578.9 & 4735.3 \\
+    n-body & Tight & 715.0 & 398.2 \\
+    puffer-ball & Tight (GPU) & 348.2 & 5501.6 \\
+    puffer-ball & Tight & 295.4 & 348.1 \\
+    rod-twist & Tight (GPU) & 439.5 & 233.7 \\
+    rod-twist & Tight & 239.9 & 122.1 \\
     \bottomrule
-  \end{tabular}}
-  \par\smallskip\footnotesize Source: \texttt{benchmark/results/sweep-gh200-bp.csv}
+  \end{tabular}
+  \par\smallskip\footnotesize Source: \texttt{benchmark/assessment/broadphase-cell2dmin.csv}
 \end{table}

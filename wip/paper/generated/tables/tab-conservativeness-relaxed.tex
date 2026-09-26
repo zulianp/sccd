@@ -3,7 +3,7 @@
   \caption{Conservativeness against the dataset's exact roots, as counts over the whole scene summed across its cases. \emph{late} counts queries whose reported time of impact falls after the true one; it must be zero, because a late time of impact lets a simulation step through the contact, which is the failure the search exists to prevent. False positives cost work only and are reported for information. \emph{queries} is how many carry ground-truth data at all, no-collision cases included; \emph{toi compared} is how many times of impact were actually placed beside an exact root, which is what the claim rests on. One row per scene: the two processors agree except on false positives, where the host's count is given first and the device's in parentheses.}
   \label{tab:conservativeness-relaxed}
   \fittable{%
-\begin{tabular}{lrrrrr}
+  \begin{tabular}{lrrrrr}
     \toprule
     scene & queries & toi compared & late & false pos. & false neg. \\
     \midrule
@@ -16,5 +16,5 @@
     \bottomrule
   \end{tabular}}
   \par\smallskip\footnotesize Measured against the exact roots shipped with the dataset, not against TightInclusion: TightInclusion's own answer is itself a lower bound on the truth, so comparing against it over-reports lateness.
-  \par\smallskip\footnotesize Source: \texttt{benchmark/results/sweep-gh200-bp.csv}
+  \par\smallskip\footnotesize Source: \texttt{benchmark/assessment/broadphase-cell2dmin.csv}
 \end{table}

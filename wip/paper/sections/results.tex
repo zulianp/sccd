@@ -165,19 +165,20 @@ the contact is at the very start of the step.
 \Cref{tab:processor} puts the two processors side by side as whole-scene totals,
 and the split follows \cref{sec:parallel:why} mechanically. The broad phase is
 count, prefix sum and scatter, with no sequential window walk, and it runs at
-$0.56\times$ to $2.90\times$ of host speed: a modest range, ahead on the three
-largest scenes and behind on the three smallest. The narrow phase is a divergent
-depth-first search, and it spans a far wider range, $0.41\times$ to
-$15.14\times$: behind the host where the candidate lists are smallest, and ahead
-by an order of magnitude on n-body and puffer-ball, where tens of millions of
-candidates keep every lane busy. The device's advantage is therefore the narrow
-phase, and the broad phase is what limits it.
+$0.56\times$ to $1.83\times$ of host speed: a narrow range, and one that now
+straddles parity, because the edge-edge walk of \cref{alg:cellmin} gains more on
+the host than on the device. The narrow phase is a divergent depth-first search,
+and it spans a far wider range, $0.44\times$ to $15.80\times$: behind the host
+where the candidate lists are smallest, and ahead by an order of magnitude on
+n-body and puffer-ball, where tens of millions of candidates keep every lane
+busy. The device's advantage is therefore the narrow phase, and the broad phase
+is what limits it.
 
 End to end the two effects cancel to different degrees. The device wins
-puffer-ball by $3.51\times$, n-body by $2.34\times$, rod-twist by $2.00\times$
-and cloth-ball by $1.90\times$; the host wins armadillo-rollers at $0.70\times$
-and cloth-funnel at $0.53\times$, where a device broad phase behind at
-$0.56\times$ and a narrow phase behind at $0.41\times$ both point the same way.
+puffer-ball by $2.05\times$, n-body by $2.02\times$, rod-twist by $1.89\times$
+and cloth-ball by $1.43\times$; the host wins armadillo-rollers at $0.75\times$
+and cloth-funnel at $0.56\times$, where a device broad phase behind at
+$0.56\times$ and a narrow phase behind at $0.56\times$ both point the same way.
 Cloth-funnel is the smallest scene in the benchmark by candidate pairs and
 puffer-ball the largest, and the device wins the larger one, so problem size is
 not a rule for choosing a processor on its own. \Cref{sec:results:scaling} shows
@@ -200,7 +201,7 @@ $43$-step scene with a $2{,}556$-step one.
 Those three tables aggregate over a scene, which hides the shape of the cost
 through it. \Cref{fig:perframe} plots the per-step cost against frame index
 instead, and it shows two things no aggregate can. On cloth-funnel the device is behind for most of the trajectory, so its
-$0.53\times$ is a standing gap and not a few expensive frames. On rod-twist the cost climbs steadily on both processors
+$0.56\times$ is a standing gap and not a few expensive frames. On rod-twist the cost climbs steadily on both processors
 as the rod winds up, so on either processor the median understates the end of
 the simulation.
 

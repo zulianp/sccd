@@ -3,18 +3,18 @@
   \caption{Host against device for the same mode and the same cases. Every time is a whole-scene total in milliseconds, summed over every case of the scene. \emph{BP full} is the whole broad phase, the acceleration structure plus the queries over it; \emph{BP prep} is the structure alone and \emph{BP queries} the queries alone. The narrow phase is named by the answer it is asked for: \emph{NP EToI} returns one earliest time of impact for the step, so every query prunes against the running minimum, and \emph{NP per-pair} returns one per candidate with no shared bound. \emph{total} is BP full + NP EToI, median over repeats. A ratio above one means the GPU is faster.}
   \label{tab:processor-relaxed}
   \fittable{%
-\begin{tabular}{lrrrrr}
+  \begin{tabular}{lrrrrr}
     \toprule
     scene & CPU ms & GPU ms & total$\times$ & BP full$\times$ & NP EToI$\times$ \\
     \midrule
-    armadillo-rollers & 3,315 & 4,595 & 0.72x & 0.82x & 0.49x \\
-    cloth-ball & 2,715 & 1,202 & 2.26x & 1.69x & 5.61x \\
-    cloth-funnel & 1,957 & 3,796 & 0.52x & 0.55x & 0.33x \\
-    n-body & 20,484 & 7,504 & 2.73x & 1.65x & 18.90x \\
-    puffer-ball & 110,719 & 29,144 & 3.80x & 2.77x & 40.53x \\
-    rod-twist & 78,021 & 30,585 & 2.55x & 2.00x & 3.88x \\
+    armadillo-rollers & 2,054 & 2,493 & 0.82x & 1.17x & 0.50x \\
+    cloth-ball & 1,592 & 815 & 1.95x & 0.91x & 5.93x \\
+    cloth-funnel & 1,078 & 2,186 & 0.49x & 0.56x & 0.32x \\
+    n-body & 12,210 & 4,438 & 2.75x & 0.81x & 19.12x \\
+    puffer-ball & 57,502 & 22,196 & 2.59x & 1.17x & 43.35x \\
+    rod-twist & 51,831 & 17,613 & 2.94x & 1.88x & 3.98x \\
     \bottomrule
   \end{tabular}}
   \par\smallskip\footnotesize A ratio is the host median over the device median, so 2.0 means the device takes half the time. Ratios below 1.0 are the cases where the host wins and are the ones worth reading.
-  \par\smallskip\footnotesize Source: \texttt{benchmark/results/sweep-gh200-bp.csv}
+  \par\smallskip\footnotesize Source: \texttt{benchmark/assessment/broadphase-cell2dmin.csv}
 \end{table}

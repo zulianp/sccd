@@ -3,24 +3,24 @@
   \caption{Wall-clock time per scene and narrow-phase mode, as a whole-scene total in milliseconds summed over every case in the scene, given as median / slowest over independent repeats. \emph{BP full} is the whole broad phase, the acceleration structure plus the queries over it; \emph{BP prep} is the structure alone and \emph{BP queries} the queries alone. The narrow phase is named by the answer it is asked for: \emph{NP EToI} returns one earliest time of impact for the step, so every query prunes against the running minimum, and \emph{NP per-pair} returns one per candidate with no shared bound. \emph{total} is BP full + NP EToI.}
   \label{tab:timing-relaxed}
   \fittable{%
-\begin{tabular}{llrrrrrrr}
+  \begin{tabular}{llrrrrrrr}
     \toprule
     scene & mode & cases & pairs & rep & BP full (ms) & NP EToI (ms) & NP per-pair (ms) & total (ms) \\
     \midrule
-    armadillo-rollers & GPU & 781 & 85,296,282 & 3 & 3249.7 / 3253.8 & 1353.0 / 1397.3 & 2461.2 / 2507.9 & 4602.7 / 4651.2 \\
-    armadillo-rollers & CPU & 781 & 85,296,282 & 3 & 2653.9 / 2830.6 & 661.3 / 675.7 & 2125.2 / 2182.5 & 3315.2 / 3506.3 \\
-    cloth-ball & GPU & 79 & 175,150,856 & 3 & 1023.9 / 1062.8 & 175.1 / 176.4 & 934.7 / 937.2 & 1199.0 / 1236.0 \\
-    cloth-ball & CPU & 79 & 175,150,856 & 3 & 1736.5 / 1738.1 & 981.9 / 984.6 & 1766.7 / 1770.2 & 2716.9 / 2720.0 \\
-    cloth-funnel & GPU & 577 & 25,192,698 & 3 & 3144.6 / 3146.1 & 669.1 / 675.8 & 702.1 / 704.7 & 3815.2 / 3820.4 \\
-    cloth-funnel & CPU & 577 & 25,192,698 & 3 & 1740.1 / 1776.3 & 221.4 / 233.2 & 357.0 / 374.9 & 1954.2 / 2009.5 \\
-    n-body & GPU & 146 & 2,253,766,609 & 3 & 7034.1 / 7100.5 & 469.5 / 474.6 & 4598.5 / 4676.8 & 7508.7 / 7570.0 \\
-    n-body & CPU & 146 & 2,253,766,609 & 3 & 11612.0 / 11616.5 & 8871.6 / 8889.1 & 16546.3 / 16562.8 & 20478.5 / 20483.6 \\
-    puffer-ball & GPU & 240 & 7,327,014,600 & 3 & 28357.7 / 28373.6 & 792.3 / 806.9 & 10438.3 / 10552.7 & 29150.1 / 29180.5 \\
-    puffer-ball & CPU & 240 & 7,327,014,600 & 3 & 78662.7 / 78979.6 & 32116.3 / 32125.6 & 34884.3 / 35236.7 & 110788.3 / 110910.7 \\
-    rod-twist & GPU & 4571 & 3,872,779,843 & 3 & 21562.4 / 21625.2 & 9022.6 / 9094.2 & 19676.9 / 19714.8 & 30584.0 / 30719.4 \\
-    rod-twist & CPU & 4571 & 3,872,779,843 & 3 & 43159.9 / 43660.7 & 34994.6 / 35202.6 & 62239.9 / 62497.5 & 78362.6 / 78655.2 \\
+    armadillo-rollers & Relaxed (GPU) & 781 & 85,296,282 & 2 & 1190.9 / 1191.3 & 1302.5 / 1316.6 & 2350.2 / 2356.3 & 2493.4 / 2507.8 \\
+    armadillo-rollers & Relaxed & 781 & 85,296,282 & 2 & 1397.7 / 1401.7 & 656.0 / 659.1 & 2058.1 / 2061.5 & 2053.8 / 2060.8 \\
+    cloth-ball & Relaxed (GPU) & 79 & 175,150,856 & 2 & 645.9 / 646.9 & 169.4 / 169.7 & 885.0 / 897.0 & 815.3 / 816.6 \\
+    cloth-ball & Relaxed & 79 & 175,150,856 & 2 & 587.3 / 590.4 & 1004.7 / 1006.2 & 1782.2 / 1782.8 & 1592.1 / 1596.6 \\
+    cloth-funnel & Relaxed (GPU) & 577 & 25,192,698 & 2 & 1552.7 / 1556.7 & 633.5 / 643.2 & 683.3 / 684.6 & 2186.2 / 2191.8 \\
+    cloth-funnel & Relaxed & 577 & 25,192,698 & 2 & 876.6 / 887.1 & 200.9 / 201.7 & 341.3 / 341.6 & 1077.5 / 1087.1 \\
+    n-body & Relaxed (GPU) & 146 & 2,253,766,609 & 2 & 3968.9 / 4003.2 & 469.5 / 469.6 & 4657.0 / 4679.5 & 4438.4 / 4472.8 \\
+    n-body & Relaxed & 146 & 2,253,766,609 & 2 & 3234.0 / 3234.4 & 8976.5 / 8983.4 & 16524.7 / 16527.8 & 12210.5 / 12217.0 \\
+    puffer-ball & Relaxed (GPU) & 240 & 7,327,014,600 & 2 & 21449.9 / 21486.4 & 746.1 / 749.0 & 9474.1 / 9703.1 & 22196.0 / 22235.3 \\
+    puffer-ball & Relaxed & 240 & 7,327,014,600 & 2 & 25156.0 / 25162.2 & 32346.4 / 32356.4 & 34484.1 / 34504.0 & 57502.4 / 57518.6 \\
+    rod-twist & Relaxed (GPU) & 4571 & 3,872,779,843 & 2 & 8682.3 / 8691.9 & 8931.2 / 8977.4 & 17789.2 / 17790.4 & 17613.5 / 17669.3 \\
+    rod-twist & Relaxed & 4571 & 3,872,779,843 & 2 & 16326.5 / 16458.9 & 35504.4 / 35524.0 & 62179.1 / 62194.7 & 51830.8 / 51943.7 \\
     \bottomrule
   \end{tabular}}
   \par\smallskip\footnotesize Each cell is the median over repeats and the slowest of them. A difference smaller than the gap between the two does not separate two modes and is not reported as a ratio anywhere in this document. Which mode is faster depends on the output mode as well as the scene, so the two are given side by side rather than one standing for the other.
-  \par\smallskip\footnotesize Source: \texttt{benchmark/results/sweep-gh200-bp.csv}
+  \par\smallskip\footnotesize Source: \texttt{benchmark/assessment/broadphase-cell2dmin.csv}
 \end{table}
