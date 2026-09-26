@@ -539,8 +539,13 @@ namespace sccd {
              *
              * One thread per row, walking the row. The parallelism is the number
              * of rows rather than of cells, which is the square root of the work,
-             * but the work itself is one pass over an array the query then reads
-             * many times.
+             * and that looks like the reason this walk gains less on the device
+             * than on the host. It is not: replacing this with a segmented scan
+             * by key over every cell, which makes the parallelism the cell count,
+             * moved the four measured scenes by 1.531x to 1.523x, 1.047x to
+             * 0.963x, 0.665x to 0.673x and 1.638x to 1.710x -- noise in both
+             * directions. The simple kernel is kept and the scan is not worth its
+             * two cub iterators.
              */
             template <typename T>
             __global__ void min_row_prefix_kernel(const int n0,
