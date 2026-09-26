@@ -71,7 +71,21 @@ TIME_LIMIT="00:29:00"
 # One Grace, not one node. A GH200 node carries four Grace-Hopper modules, so
 # `nproc` reports 288 and a job that trusts it measures four processors while
 # reporting one. Host numbers in this project are taken on a single Grace.
+#
+# The thread count alone does not achieve that. The node has four NUMA domains
+# of 72 CPUs -- 0-71, 72-143, 144-215, 216-287 -- and a job holding the node is
+# handed all of them: measured on a compute node, a task with
+# `--cpus-per-task=72` still reported an affinity list of `0-287`. Seventy-two
+# threads then scatter over four modules with their memory wherever first touch
+# landed, which is worse than either 288 threads or a bound 72 and is not
+# reproducible. BIND is what pins it, and the same binding has to be inside
+# every launch below.
 THREADS=72
+if command -v numactl > /dev/null 2>&1; then
+    BIND="numactl --cpunodebind=0 --membind=0"
+else
+    BIND="taskset -c 0-71"
+fi
 PARTITION="debug"
 ACCOUNT="c40"
 UENV="prgenv-gnu/24.11:v2"
@@ -403,7 +417,7 @@ run_chunk_body() {
                SCCD_BENCH_CASE_BEGIN="${begin}" \
                SCCD_BENCH_CASE_END="${end}" \
                SCCD_BENCH_MAX_CASES="${MAX_CASES_ENV}" \
-                   "${SCCD_BENCH}" "${DATA_DIR}" "${scene}" | tail -n +2 >> "${tmp}" ); then
+                   ${SCCD_BIND:-} "${SCCD_BENCH}" "${DATA_DIR}" "${scene}" | tail -n +2 >> "${tmp}" ); then
             printf 'error: %s mode %s exited non-zero; leaving the chunk unfinished\n' \
                    "${out}" "${mode}" >&2
             rm -f "${tmp}"
@@ -485,6 +499,8 @@ flush_pack() {
                              export SCCD_DB_TO_RAW='${SCCD_DB_TO_RAW}'; \
                              export MAX_CASES_ENV='${MAX_CASES_ENV}'; \
                              export OMP_NUM_THREADS='${THREADS}'; \
+                             export OMP_PROC_BIND=close OMP_PLACES=cores; \
+                             export SCCD_BIND='${BIND}'; \
                              ${body}"; then
                 printf 'ok %s\n' "${label}" > "${status_file}"
             else
@@ -525,6 +541,8 @@ for i in "${todo[@]:-}"; do
 
     if [[ "${LOCAL}" -eq 1 ]]; then
         printf '==> %s\n' "${label}"
+        export OMP_NUM_THREADS="${THREADS}" OMP_PROC_BIND=close OMP_PLACES=cores
+        export SCCD_BIND="${BIND}"
         if ! run_chunk_body "${scene}" "${space}" "${bp}" "${begin}" "${end}" "${out}"; then
             printf 'FAILED %s\n' "${label}" >&2
             failures=$((failures + 1))
