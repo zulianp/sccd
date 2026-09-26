@@ -1,0 +1,21 @@
+\begin{table}[htbp]
+  \centering
+  \caption{Edge-edge queries over the same cases on the host, as whole-scene totals in milliseconds, median over repeats. Every column is BP full, the acceleration structure and the queries over it added, because ordering a cell's entries is preparation bought back in traversal and only the sum is comparable. All of them report identical candidate pairs.}
+  \label{tab:bpvariant}
+  \fittable{%
+  \begin{tabular}{lrrrrl}
+    \toprule
+    scene & sweep BP full & cell2d BP full & cell2dmin BP full & cell2dminsort BP full & fastest \\
+    \midrule
+    armadillo-rollers & 519 & 353 & 267 & 238 & cell2dminsort 2.18x \\
+    cloth-ball & 1579 & 1457 & 702 & 793 & cell2dmin 2.25x \\
+    cloth-funnel & 347 & 268 & 176 & 184 & cell2dmin 1.97x \\
+    n-body & 8195 & 7377 & 2494 & 3428 & cell2dmin 3.29x \\
+    puffer-ball & 204448 & 34678 & 12469 & 14657 & cell2dmin 16.40x \\
+    rod-twist & 758 & 832 & 682 & 726 & tie \\
+    all scenes & 215846 & 44965 & 16790 & 20025 & cell2dmin 12.86x \\
+    \bottomrule
+  \end{tabular}}
+  \par\smallskip\footnotesize `fastest` names the winning strategy and by how much against the slowest. A margin inside the run-to-run spread is a tie.
+  \par\smallskip\footnotesize Source: \texttt{benchmark/assessment/bp-variants.csv}
+\end{table}

@@ -260,7 +260,7 @@ is drawn dashed to remain visible.
   \label{fig:toierr}
 \end{figure}
 
-\subsection{The two broad-phase strategies}
+\subsection{Choosing a broad phase}
 \label{sec:results:bp}
 
 \input{generated/tables/tab-broadphase}
@@ -350,16 +350,27 @@ five scenes, while on the device the sorted intervals are queried faster on four
 of the six, enough to overturn the structure's advantage everywhere except
 puffer-ball and rod-twist.
 
-\textbf{A fixed choice is defensible on this evidence, and we still do not make
-one.} Nothing here would be lost by always running the cell list. What the race
-protects against is the scene nobody measured: the two algorithms emit identical
-pairs (\cref{prop:agree}), so the cost of being wrong about which is faster is
-bounded by the ratio between them, and \cref{tab:broadphase} shows that ratio reaching $5.75\times$ within one
-benchmark. Two probe steps out of a simulation
-buy insurance against that at a cost we can measure and a reader can check. We
-report the six scenes as the weak evidence for a fixed choice that they are, and
-\cref{sec:bp:choose} reports the five predictors that failed to make the choice
-without measuring.
+\textbf{The host fixes its choice and the device races for it.} The two
+algorithms emit identical pairs (\cref{prop:agree}), so the cost of choosing
+wrongly is bounded by the ratio between them, and \cref{tab:broadphase} shows
+that ratio reaching $5.75\times$ within one benchmark. On the host the ratio is
+one-sided enough to settle, and \cref{tab:bpvariant} settles it. On the device
+the verdict changes sign from scene to scene, so two probe steps out of a
+simulation buy insurance against the scene nobody measured, at a cost we can
+measure and a reader can check. \Cref{sec:bp:choose} reports the five predictors
+that failed to make either choice without measuring.
+
+\input{generated/tables/tab-bpvariant}
+
+\textbf{Which edge-edge query to run is a separate question, and it has a clear
+answer.} \Cref{tab:bpvariant} puts the four host strategies over the same cases.
+Binning at the minimum corner and walking forward (\cref{alg:cellmin}) is the
+fastest on four scenes of six and ties rod-twist, and over the whole benchmark it
+costs $16.8\,\mathrm{s}$ against the full-extent cell list's $45.0$ and the
+sweep's $215.8$. Ordering each cell on the axis the grid does not use wins
+armadillo-rollers, the smallest margin in the table, and costs $20.0\,\mathrm{s}$
+overall: the traversal it buys is preparation it has already spent. The host
+therefore runs \cref{alg:cellmin} with its cells unordered.
 
 \subsection{Against other implementations}
 \label{sec:results:others}

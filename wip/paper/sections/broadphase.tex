@@ -465,9 +465,10 @@ sampled subset, puts the sweep ahead on two of three. A choice cannot be fixed
 from evidence that changes with the thread count.
 
 On the host the question is settled by measurement rather than by any statistic.
-Over the six scenes, counting the edge-edge preparation together with the query,
-\cref{alg:cellmin} with its cells ordered on the axis the grid does not use
-leads the rest, and that is what the host runs. A scene where it loses a little
+Over the six scenes, counting the preparation together with the query,
+\cref{alg:cellmin} leads the rest, and that is what the host runs. Ordering each
+cell on the axis the grid does not use buys traversal at the cost of
+preparation, and over the benchmark it does not repay it. A scene where it loses a little
 is an accepted cost: the quantity being optimised is the total over the
 benchmark, not the number of scenes won. \Cref{sec:results:bp} gives the
 figures.
