@@ -9,12 +9,12 @@ conservative, because a pair it discards is never examined again. On the scenes
 in our benchmark it is also the larger share of the host runtime, so it must be
 fast.
 
-Three algorithms serve it here, and they are not alternatives in the usual
-sense. They emit the same pairs, so nothing about the answer depends on which one
-runs. The interesting question is therefore purely economic, and its answer turns
-out not to be a property of the geometry at all. Two of them take a pair of
-lists; the third (\cref{sec:bp:self}) takes one list against itself, which is what
-edge-edge asks for.
+One algorithm serves it, over one acceleration structure: a uniform grid on two
+of the three axes. The two queries it answers are not the same shape, so they
+are described separately. Vertex-face asks one list against another and is
+answered by binning a box into every cell its extent touches
+(\cref{sec:bp:cell}); edge-edge asks one list against itself, which admits a
+cheaper binning and a different walk (\cref{sec:bp:self}).
 
 \subsection{Swept boxes, and the shape of the output}
 \label{sec:bp:common}
@@ -29,8 +29,9 @@ rounded box can never exclude a candidate the exact box would have kept.
 Two conventions shape everything downstream. The first concerns the overlap
 test, which rejects only on a \emph{strict} separation, $a_{\min} > b_{\max}$ on
 some axis. Boxes that merely touch are therefore reported as overlapping. This
-inclusivity is deliberate, and \cref{sec:bp:sweep} records what it cost to
-violate it.
+inclusivity is deliberate: a candidate window that rejects a pair of boxes
+merely touching drops the pairs a moving surface produces most often, which are
+the degenerate ones.
 
 The second is that all storage is structure-of-arrays and every output is built
 \emph{count-then-fill}. A first pass counts the pairs each primitive will
@@ -46,84 +47,11 @@ population count, and enumeration is a bit scan. A rejected candidate therefore
 never issues the indirect load of its element indices, which is the expensive
 part of a test that usually fails.
 
-\subsection{Sweep and prune}
-\label{sec:bp:sweep}
-
-\Cref{alg:sweep} is the classical algorithm with the parallel details that
-matter. The sort axis is the one on which box centres have the largest variance,
-computed in two streaming passes that visit all three axes per element instead
-of three passes per axis. The sort is over $(\text{key},\text{index})$ pairs and
-not over indices with an indirect comparator, because in the latter every
-comparison is a random load from the key array, and those loads dominate. Ties
-break on the index, which makes the order total, so a non-stable parallel sort
-still gives a deterministic result.
-
-\begin{algorithm}[htbp]
-\caption{Sweep and prune, one pass (count or fill)}
-\label{alg:sweep}
-\begin{algorithmic}[1]
-\Function{Sweep}{$A$: boxes of list 1, $B$: boxes of list 2}
-  \State $a \gets \arg\max_{d} \operatorname{Var}\bigl(\text{centres of } A \cup B\bigr)_{d}$
-  \State sort $A$ and $B$ by their minimum coordinate on axis $a$
-  \State $\mu_{j} \gets \max_{k \le j} B_{k}.\max_{a}$
-    \Comment{running maximum; monotone, so binary-searchable}
-  \ForAll{blocks of consecutive $i$ \textbf{in parallel}}
-    \State $j \gets$ \Call{LowerBound}{$\mu$, $A_{i}.\min_{a}$}
-      \Comment{window start for the first $i$ of this block}
-    \For{$i$ in the block}
-      \While{$A_{i}.\min_{a} > B_{j}.\max_{a}$} $j \gets j+1$ \EndWhile
-        \Comment{$j$ is monotone in $i$}
-      \State $e \gets \min\{k \ge j : B_{k}.\min_{a} > A_{i}.\max_{a}\}$
-      \For{chunks of $32$ boxes in $[j,e)$}
-        \State $m \gets$ \Call{OverlapMask}{$A_{i}$, chunk}
-          \Comment{one SIMD test, $32$ results}
-        \State $m \gets m \wedge \neg\,$\Call{SharesVertex}{$A_{i}$, chunk}
-        \State count \Call{Popcount}{$m$}, or emit the pairs $m$ selects
-      \EndFor
-    \EndFor
-  \EndFor
-\EndFunction
-\end{algorithmic}
-\end{algorithm}
-
-The window cursor $j$ is monotone in $i$ within a parallel block, so the total
-advance is linear in the block and not quadratic. The running maximum $\mu$
-lets a block start in the middle of the list without walking to it. Since $\mu$
-is monotone by construction, a binary search on it gives a valid window start
-directly. Self-overlap of a single list, which edge-edge needs, comes out of the
-same code by starting the window at $i+1$ in sorted order, and that yields each
-unordered pair exactly once for free. The whole costs $O(n\log n)$ for the sort
-plus $O\bigl(\sum_{i}|W_{i}|\bigr)$ for the window walk, where $|W_{i}|$ is the
-number of boxes overlapping box $i$ on the sort axis. That expectation is the
-$\lambda$ of \cref{sec:bp:choose}. The worst case is quadratic, and it occurs
-when every box overlaps on the chosen axis.
-
-One comparison in \cref{alg:sweep} deserves singling out, because getting it
-wrong is the one way this algorithm can violate \cref{def:conservative}. The
-comparison on line 8 must agree with the overlap predicate of
-\cref{sec:bp:common}, which rejects only on strict separation. Written the other
-way, so that the window advances while the two intervals are not \emph{strictly}
-overlapping, it steps past any pair of boxes that are degenerate on the sort
-axis and coincide there. Such a pair is never tested, which is a false negative,
-and \cref{def:conservative} forbids it.
-
-The two conventions are set in different places, and a benchmark will not reveal
-that they disagree. On all six scenes the two variants produce identical
-candidate counts, because a swept box degenerate on the axis of largest centre
-variance does not arise from a moving surface. On $2{,}000$ coincident flat
-boxes they differ completely: the cell list finds $64{,}922$ pairs and the
-strict variant finds none. A conservative filter agrees with an exact one on
-almost every realistic input, and the configurations that separate them are not
-the ones a benchmark supplies.
-
-\subsection{A two-dimensional cell list}
+\subsection{The vertex-face query}
 \label{sec:bp:cell}
 
-Sorting on one axis prunes on one axis, and a draped surface is not separated
-by any single direction. Measured on a refined cloth frame, the sweep walks
-about $2{,}100$ candidates for every pair it finds, and the axis choice does
-not rescue it. The two good axes give $2{,}882$ and $2{,}838$ candidates per
-pair, and the bad one $126{,}063$. \Cref{alg:cell} bins instead, and two of its
+Vertex-face takes two lists, the faces against the vertices, and
+\cref{alg:cell} answers it by binning one of them into a grid. Two of its
 choices are deliberate enough to state before the algorithm itself.
 
 The grid is over \emph{two} axes, not three. For a surface of $N$ elements of
@@ -163,7 +91,7 @@ proportional to that box's own size, which is what a heavy-tailed size
 distribution requires.
 
 \begin{algorithm}[htbp]
-\caption{Cell-list broad phase, one pass (count or fill)}
+\caption{The vertex-face query, one pass (count or fill)}
 \label{alg:cell}
 \begin{algorithmic}[1]
 \Function{CellList}{$A$, $B$}
@@ -242,10 +170,11 @@ larger: a box pays for its own size and for no other box's.
 \subsection{The edge-edge query}
 \label{sec:bp:self}
 
-Edge-edge is one list against itself, and that admits a cheaper binning. A box
-enters the \emph{single} cell holding its minimum corner rather than every cell
-its extent touches, so the cell array holds one entry per box, a partner is met
-at most once, and the duplicate rule of \cref{alg:cell} is not needed. Reading
+Edge-edge is one list against itself, and that admits a cheaper binning than
+\cref{sec:bp:cell} uses. A box enters the \emph{single} cell holding its
+minimum corner rather than every cell its extent touches, so the cell array
+holds one entry per box, a partner is met at most once, and the duplicate rule
+of \cref{alg:cell} is not needed. Reading
 only the cells that come after a box's own is how linked-cell neighbour search
 avoids handling a pair twice, a cell visiting half its
 neighbours~\citep{allen2017liquids}. It is sound there because a particle is a
@@ -297,14 +226,13 @@ decides --- the only index test in \cref{alg:cellmin}.
 Read literally that range is whole rows, which is what the bounds are for. Each
 cell carries the largest upper bound of the boxes in it and each row a prefix
 maximum of those, so a binary search gives the first column holding anything that
-reaches back to the querying box and the columns before it are skipped at once. That is the running maximum of \cref{sec:bp:sweep}
-applied per row of cells, and it is what lets the binning stand without a bound
-on how many cells a box may span; a grid that stores a box only at its lower-left
+reaches back to the querying box and the columns before it are skipped at once. That is a prefix maximum applied per row of cells, and it is what lets the
+binning stand without a bound on how many cells a box may span; a grid that stores a box only at its lower-left
 cell otherwise caps the box at $k$ cells and widens every query window by $k$ to
 match. A second bound per cell does the same on the other axis.
 
 \begin{algorithm}[htbp]
-\caption{Edge-edge cell list, one pass (count or fill)}
+\caption{The edge-edge query, one pass (count or fill)}
 \label{alg:cellmin}
 \begin{algorithmic}[1]
 \Function{EdgeToEdgeBroadPhase}{$A$}
@@ -379,115 +307,9 @@ match. A second bound per cell does the same on the other axis.
 \end{figure}
 
 Cost follows the same two terms as \cref{alg:cell}, with the binning reduced to
-one incidence per box and the query to whatever the bounds leave;
-\cref{sec:results:bp} measures both. Ordering each cell's entries on the axis the
+one incidence per box and the query to whatever the bounds leave. Ordering each
+cell's entries on the axis the
 grid does not use would make the scan inside a cell monotone as well --- a grid
 and sweep-and-prune hybrid of the kind \citet{serpa2020broadmark} evaluates. It
 culls where cells are densely occupied and pays an ordering pass everywhere, and
 on our scenes the two roughly cancel, so the cells are left unordered.
-
-\subsection{Which one to run}
-\label{sec:bp:choose}
-
-The choice among them is not a question of accuracy. That much we can state
-exactly, with no measurement.
-
-\begin{proposition}[Agreement]
-\label{prop:agree}
-On the same box set, \cref{alg:sweep}, \cref{alg:cell} and, for one list against
-itself, \cref{alg:cellmin} emit the same set of candidate pairs.
-\end{proposition}
-
-\begin{proof}
-A pair qualifies, in either algorithm, exactly when it passes the same two
-filters: the three-dimensional overlap predicate, which only compares stored
-floating-point bounds and is therefore exact and identical in both, and the
-shared-vertex test, which compares indices. So the two agree on which pairs
-qualify, and it remains to check that each is emitted once.
-
-In \cref{alg:sweep} the boxes carry a total order and the window for $i$ is
-scanned from $i+1$, so a qualifying pair $\{i,j\}$ is considered only at
-$\min(i,j)$. It is considered there: the window ends at the first $k$ with
-$B_{k}.\min_{a} > A_{i}.\max_{a}$, and a qualifying pair overlaps on every
-axis, so $B_{j}.\min_{a} \le A_{i}.\max_{a}$ and $j$ falls inside the window.
-
-In \cref{alg:cell} let $o$ be the componentwise minimum corner of the two
-boxes' overlap on the two grid axes. Since $o$ lies in both boxes, both are
-binned into $\operatorname{cell}(o)$, so the pair is examined there; and line 9
-emits it only from $\operatorname{cell}(o)$, which is one cell. So it is
-emitted exactly once, from a cell that does examine it.
-
-In \cref{alg:cellmin} each box lies in one cell, so a pair is examined at most
-once from each side, and the guard on line 7 keeps the side with the smaller
-$L$. It is examined there by the argument of \cref{sec:bp:self}:
-$\operatorname{cell}(j.\min)$ lies among the rows and columns that box walks,
-and the two bounds skip only cells whose contents cannot reach the querying box.
-\end{proof}
-
-\Cref{prop:agree} makes the two interchangeable. We also check it empirically,
-the two reporting identical candidate counts over $25{,}538$ case-and-mode
-combinations, because a proof about an algorithm is only as good as its
-correspondence to the code, and \cref{sec:bp:sweep} gives one occasion where
-that correspondence failed.
-
-What is left is cost, and the cost difference is large in both directions
-(\cref{sec:results:bp}). That invites a rule fixed in advance. We tried four
-predictors and one constant, and we report all five because each looked
-convincing before it was measured.
-
-\emph{Distribution anisotropy}, a measure of how far the boxes are from filling
-a volume, separated two synthetic families cleanly: it reads $1.00$ where the
-sweep won and $3.3$ where the cell list did. A sweep in which anisotropy is
-$1.00$ on every row and the winner flips anyway refutes it. It also
-misclassifies a real cloth frame, which measures $1.96$ and would be called
-``sweep'' by any fitted threshold, although the cell list is $4.2\times$ faster
-on it. \emph{The expected sweep window}, $\lambda = \sum_{i}\text{extent}_{i} /
-\text{span}$, does not separate the two either, reading $1198$ with the sweep
-winning and $940$ with it losing by $3.3\times$. The sweep walks its window over
-sorted contiguous memory behind a $32$-wide mask, so it absorbs a long window
-far better than a candidate count suggests.
-
-\emph{Estimated pair density}, derived from the same statistics, predicts
-$270$, $16{,}940$ and $1.158\times10^{6}$ against measured $264$, $16{,}992$ and
-$1.217\times10^{6}$ on uniform inputs. It then underestimates a real cloth by
-four orders of magnitude, since uniformity is the assumption a surface violates.
-\emph{Element count} is refuted in the wrong direction: across three real scenes
-the cell list wins the smallest and loses the two largest.
-
-\emph{A fixed choice} is the alternative to predicting at all, and it is
-defensible on synthetic box lists, where the cell list wins by
-$4$--$7\times$ and the worst case for choosing it is $1.8\,\mathrm{ms}$ against
-$1.3$. It is harder to defend on real scenes, where the evidence is not even
-self-consistent. The sweep of \cref{sec:results:bp}, at $288$ threads over every
-case, has the cell list winning the whole broad phase on five scenes of six. A
-separate run of the same code on the same machine, at $72$ threads over a
-sampled subset, puts the sweep ahead on two of three. A choice cannot be fixed
-from evidence that changes with the thread count.
-
-On the host the question is settled by measurement rather than by any statistic.
-Over the six scenes, counting the preparation together with the query,
-\cref{alg:cellmin} leads the rest, and that is what the host runs. Ordering each
-cell on the axis the grid does not use buys traversal at the cost of
-preparation, and over the benchmark it does not repay it. A scene where it loses a little
-is an accepted cost: the quantity being optimised is the total over the
-benchmark, not the number of scenes won. \Cref{sec:results:bp} gives the
-figures.
-
-The device has no minimum-corner implementation, and there \cref{prop:agree}
-removes the need for a heuristic. Since the two
-produce identical output, they can be \emph{raced}. One runs on a step, the other on the next, and the faster is
-kept until the next probe. Three details make the race fair and cheap. Each
-strategy runs once unmeasured first, because a strategy's first execution pays
-for allocating its own scratch. Measured cold, one step costs $1.195\,\mathrm{ms}$ against $0.152\,\mathrm{ms}$
-warm, an eightfold difference that is entirely allocation and would decide any
-close race. The cell list is probed first,
-because a caller that runs a single broad phase never completes the race and
-only ever sees the first probe, and the cell list's worst case is the smaller
-one. And the race is re-run every $64$ steps, because a cloth that starts flat
-and ends crumpled is not one workload and a verdict from frame one should not
-bind frame ten thousand.
-
-Racing costs two probe steps out of a simulation of thousands, and it answers
-from the geometry in front of it, so it holds on a scene nobody tested. A caller
-that has measured its own processor fixes the answer instead, which is what we
-do on both.

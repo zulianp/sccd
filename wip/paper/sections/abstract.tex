@@ -8,11 +8,10 @@ construction on both CPU and GPU, assessed against the certified reference
 implementation TightInclusion over $11{,}630{,}064$ checks against exactly
 known roots.
 
-The broad phase ships two interchangeable algorithms: sweep-and-prune, and a
-two-dimensional cell list with no sort and no user-chosen cell size. We prove
-that the two emit \emph{identical} candidate sets, so the choice is one of cost
-alone. Five cheap rules for making it are refuted by measurement, so the
-default races the two on consecutive steps and keeps the winner. The host
+The broad phase is a two-dimensional cell list with no sort and no user-chosen
+cell size, with a query per pair type: vertex-face bins each box into every cell
+it touches, and edge-edge, being one list against itself, binds each box to the
+one cell holding its minimum corner and walks forward from it. The host
 narrow phase packs SIMD lanes with boxes from \emph{different} queries, which
 an order-independence argument shows is legal. The device narrow phase pairs a
 small per-block stack with a double-buffered global queue, so a query needing

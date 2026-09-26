@@ -5,7 +5,7 @@
 spends that freedom twice, in opposite directions. On the host it fills vector
 lanes with work from unrelated queries (\cref{alg:host}); on the device it moves
 work \emph{out} of the block that generated it (\cref{alg:device}). The broad phase needs no equivalent treatment: its parallelism is already the
-outermost loop of \cref{alg:sweep,alg:cell}, and its count-then-fill output
+outermost loop of \cref{alg:cell,alg:cellmin}, and its count-then-fill output
 carries no contention. Both narrow-phase designs answer the same property of the problem,
 so we describe that property first.
 
@@ -462,7 +462,7 @@ predicted, and at its worst it is the largest of the three: $26.9\%$ of cycles o
 armadillo-rollers against $0.3\%$ on puffer-ball. The ordering follows case count
 and not problem size. Armadillo-rollers runs $781$ cases and puffer-ball $240$,
 and each case enters and leaves the parallel regions of
-\cref{alg:sweep,alg:cell} and the narrow phase afresh. A scene made of many
+\cref{alg:cell,alg:cellmin} and the narrow phase afresh. A scene made of many
 small steps therefore pays the runtime repeatedly, while a scene made of few
 large ones amortises it away. SCCD's own code accounts for the rest, between
 $45$ and $90\%$ of sampled cycles, depending on how much of the profile the

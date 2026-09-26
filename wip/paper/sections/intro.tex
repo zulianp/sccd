@@ -48,18 +48,15 @@ assess it against TightInclusion on a dataset whose roots are known exactly. The
 contribution is the parallel design, its measured performance and the accuracy
 assessment, and not an implementation of a known algorithm on new hardware.
 
-The first contribution is a broad phase with no tuning parameter, chosen by
-measurement. Two algorithms are given: sweep-and-prune over an axis chosen by
-centre variance, and a two-dimensional uniform cell list that removes the sort
-entirely and derives its cell size from the data itself. We prove that the two emit \emph{identical} candidate sets
-(\cref{prop:agree}). The only remaining question is therefore which of them is
-cheaper on the geometry at hand. We tried four cheap predictors of that
-answer, namely distribution anisotropy, the expected sweep window, estimated
-pair density and element count, and we also tried fixing the choice outright.
-All five are refuted by measurement (\cref{sec:bp:choose}). The shipped default
-races the two algorithms on consecutive steps and keeps the winner, which costs
-two probe steps out of a simulation and cannot be wrong about a scene nobody
-tested.
+The first contribution is a broad phase with no tuning parameter and no sort: a
+two-dimensional uniform cell list whose cell size comes from the data itself.
+Its two queries have different shapes and are built differently. Vertex-face
+bins a box into every cell its extent touches and attributes a pair to the cell
+holding the corner of the overlap (\cref{sec:bp:cell}). Edge-edge is one list
+against itself, which admits one entry per box at its minimum corner and a
+forward walk in row-major cell order, pruned by a prefix maximum per row of
+cells, so no bound on how many cells a box may span is needed
+(\cref{sec:bp:self}).
 
 The second is a host narrow phase that packs single-instruction,
 multiple-data (SIMD) lanes across queries. TightInclusion's search is a

@@ -77,11 +77,10 @@ of what the pipeline costs inside a solver.
 Three parts of the pipeline carry no measurement here, and each bounds a claim
 made earlier.
 
-The choice of broad-phase strategy is a host result. The device pipeline takes
-the sweep unconditionally. Both algorithms exist as device kernels, and
-\cref{prop:agree} applies to them equally. But the race of \cref{sec:bp:choose}
-and the comparison of \cref{sec:results:bp} were run on the host, so no device
-measurement bears on the choice between the two.
+Ordering each cell's entries on the axis the grid does not use is implemented
+on the host only. It is measured there and does not pay
+(\cref{sec:bp:self}), so the device carries no such kernel and the question is
+open on that processor.
 
 The quad path is described in \cref{sec:np:quad} and evaluated nowhere. Every
 scene in this benchmark is a triangle mesh, and the error constant of

@@ -49,10 +49,9 @@ exact ground truth, and find that several of them \emph{miss collisions}. The
 usual cause is a fixed-size candidate buffer that discards overflow silently.
 They conclude that sweeping along the most-varying axis is the most effective
 GPU strategy, and propose \emph{Sweep and Tiniest Queue}, which vectorises the
-sweep and balances work through a consumer queue. Our sweep shares that lineage;
-our cell list does not. \Cref{sec:results:bp} reports the two beating each other
-by up to $4\times$ on different scenes of the same benchmark, which is the
-argument for shipping both.
+sweep and balances work through a consumer queue. Our broad phase takes the
+other route: it bins rather than sorts, so it inherits neither the sort's cost
+nor its dependence on one axis separating the geometry.
 
 \subsection{Narrow phase}
 
