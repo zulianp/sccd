@@ -62,48 +62,45 @@
  *    (cloth-ball, where the sweep is 1.36x faster) and the middle one
  *    (armadillo-rollers, 1.59x). See `wip/ASSESSMENT.md`.
  *
- * ## So: Auto measures, it does not guess
+ * ## So: the host default is measured, and the device races
  *
- * Four heuristics are refuted above, and so is resolving `Auto` to a fixed
- * choice. Picking the cell list unconditionally is defensible on synthetic
- * box-list benchmarks, where it wins by 4-7x and the worst case for choosing it
- * is 1.8 ms on a broad phase costing 1.3 ms. On real scenes the argument does
- * not hold: the sweep wins two of three, by 1.36x on cloth-ball and 1.59x on
- * armadillo-rollers, which is 13 ms and 78 ms rather than 1.8 ms
- * (`wip/ASSESSMENT.md`).
+ * Four heuristics are refuted above. What settles the host is a measurement
+ * rather than a statistic: over the six benchmark scenes, with edge-edge
+ * preparation and query counted together, `cell2dminsort` leads the rest, and
+ * `Auto` resolves to it on the host without probing anything. A scene where it
+ * loses a little is an accepted cost; the quantity being optimised is the total
+ * over the benchmark, not the number of scenes won.
  *
- * Neither constant is right and no cheap statistic has separated the cases. But
- * the two produce **identical pair sets**, so they can simply be raced: run one
- * on a step, the other on the next, then keep the winner. A broad phase runs
- * every step of a simulation, so the cost is two probe steps out of thousands,
- * and unlike a heuristic it cannot be wrong about a scene nobody tested.
- *
- * `BroadPhaseAutoTuner` does that. It re-probes periodically, because a
+ * The device has no minimum-corner implementation, so there `Auto` still races.
+ * The sweep and `cell2d` produce **identical pair sets**, so they can simply be
+ * raced: run one on a step, the other on the next, then keep the winner. A broad
+ * phase runs every step of a simulation, so the cost is two probe steps out of
+ * thousands, and unlike a heuristic it cannot be wrong about a scene nobody
+ * tested. `BroadPhaseAutoTuner` does that, and re-probes periodically, because a
  * simulation's geometry changes -- cloth that starts flat and ends crumpled is
- * not one workload -- and a verdict reached on frame one should not bind frame
- * ten thousand.
+ * not one workload.
+ *
+ * `BroadPhaseAutoTuner::set_default` is how a caller that has measured its own
+ * processor fixes the answer, and `broadphase_stats` is still exposed for a
+ * caller who wants to look at the geometry itself.
+ *
+ * ## The five strategies
  *
  * `SCCD_BROADPHASE=sweep`, `=cell2d`, `=cell2dmin`, `=cell2dminsort` or
- * `=cell2dseg` forces one and skips the race entirely, and `broadphase_stats` is still exposed for a caller who wants
- * to look at the geometry itself.
- *
- * ## The third strategy is asked for, not raced
+ * `=cell2dseg` names one and skips both the default and the race.
  *
  * `cell2dmin` is the cell list with a different edge-edge query: one entry per
  * box at its minimum corner, walked forward in linear cell order with the cell
- * bounds pruning it. Its face-vertex query is the same as `cell2d`'s. The race
- * above stays between the sweep and `cell2d`, because a strategy under
- * evaluation has to be measured *against* the shipped pair rather than mixed
- * into them -- a third probe would also lengthen the warm-up every caller pays.
- * It is reached by naming it, which is what the benchmark does. `cell2dminsort`
+ * bounds pruning it. `cell2dminsort` adds an ordering of each cell on the axis
+ * the grid does not use, so a cell can be ruled out by its bound there and the
+ * scan inside one can stop early. Both take `cell2d`'s face-vertex query.
+ *
  * `cell2dseg` changes the face-vertex query instead: the cell list holds the
  * faces, and each vertex queries it with the segment its trajectory is, walking
  * only the cells that segment crosses and testing the segment against a face box
  * rather than two boxes against each other. Its edge-edge query is `cell2d`'s.
- * `cell2dminsort`
- * is the same thing with each cell ordered on the axis the grid does not use, so
- * a cell can be ruled out by its bound there and the scan inside one can stop
- * early -- the question it answers is whether that ordering pays for itself.
+ * It hands the narrow phase 2% to 26% fewer pairs, and pays for the larger cell
+ * array it has to build.
  */
 
 namespace sccd {
@@ -207,10 +204,19 @@ namespace sccd {
      */
     class BroadPhaseAutoTuner {
     public:
+        /**
+         * \brief Fix the strategy, so `next()` hands it out without racing.
+         *
+         * A caller that has measured which strategy wins on its processor sets it
+         * here. The race below stays for a caller that has not.
+         */
+        void set_default(const BroadPhaseStrategy s) { default_ = s; }
+
         /** \brief The strategy to use for the next broad phase. */
         BroadPhaseStrategy next() {
             const BroadPhaseStrategy forced = broadphase_strategy_setting();
             if (forced != BroadPhaseStrategy::Auto) return forced;
+            if (default_ != BroadPhaseStrategy::Auto) return default_;
 
             if (reprobe_now_) {
                 // Start a fresh race rather than defending the old verdict, so a
@@ -283,6 +289,7 @@ namespace sccd {
         // to follow a scene whose character changes over a run.
         static constexpr int kReprobeInterval = 64;
 
+        BroadPhaseStrategy default_ = BroadPhaseStrategy::Auto;
         double sweep_ms_ = -1.0;
         double cell2d_ms_ = -1.0;
         int steps_since_race_ = 0;

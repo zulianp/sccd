@@ -464,7 +464,16 @@ separate run of the same code on the same machine, at $72$ threads over a
 sampled subset, puts the sweep ahead on two of three. A choice cannot be fixed
 from evidence that changes with the thread count.
 
-\Cref{prop:agree} removes the need for a heuristic at all. Since the two
+On the host the question is settled by measurement rather than by any statistic.
+Over the six scenes, counting the edge-edge preparation together with the query,
+\cref{alg:cellmin} with its cells ordered on the axis the grid does not use
+leads the rest, and that is what the host runs. A scene where it loses a little
+is an accepted cost: the quantity being optimised is the total over the
+benchmark, not the number of scenes won. \Cref{sec:results:bp} gives the
+figures.
+
+The device has no minimum-corner implementation, and there \cref{prop:agree}
+removes the need for a heuristic. Since the two
 produce identical output, they can be \emph{raced}. One runs on a step, the other on the next, and the faster is
 kept until the next probe. Three details make the race fair and cheap. Each
 strategy runs once unmeasured first, because a strategy's first execution pays
@@ -478,4 +487,6 @@ and ends crumpled is not one workload and a verdict from frame one should not
 bind frame ten thousand.
 
 Racing costs two probe steps out of a simulation of thousands, and it answers
-from the geometry in front of it, so it holds on a scene nobody tested.
+from the geometry in front of it, so it holds on a scene nobody tested. A caller
+that has measured its own processor fixes the answer instead, which is what the
+host does.

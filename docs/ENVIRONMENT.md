@@ -9,7 +9,7 @@ supported configuration.
 | Variable | Values | Default | Effect |
 |---|---|---|---|
 | `SCCD_NARROWPHASE_MODE` | `0`, `2` | `0` | Narrow-phase kernel: `0` `Relaxed`, `2` `Tight`. Any other value warns and runs `0`. **Ignored for quads**, which have one root-finder variant. |
-| `SCCD_BROADPHASE` | `sweep`, `cell2d` | auto | Forces a broad phase instead of letting `BroadPhaseAutoTuner` race the two and keep the winner. Both produce identical pair sets, so this only changes speed. |
+| `SCCD_BROADPHASE` | `sweep`, `cell2d`, `cell2dmin`, `cell2dminsort`, `cell2dseg` | auto | Names the broad phase. Unset, the host runs `cell2dminsort`, the fastest over the benchmark, and the device races `sweep` against `cell2d` and keeps the winner. Every choice produces the same pair set except `cell2dseg`, which emits fewer face-vertex pairs and is equally conservative, so this only changes speed. |
 | `SCCD_USE_TI` | `0`, `1` | `0` | Calls TightInclusion directly. Requires a TightInclusion build. Oracle use only. |
 
 ### Getting TightInclusion's answer

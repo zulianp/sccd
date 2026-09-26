@@ -586,6 +586,14 @@ namespace sccd {
          * lost is the final one of a run.
          */
         void choose_strategy_(const ptrdiff_t n_nodes) {
+            // The host default, measured over the six benchmark scenes: the
+            // minimum-corner edge-edge walk with each cell ordered on the axis
+            // the grid does not use. The device keeps the race, because it has no
+            // minimum-corner implementation to choose.
+            tuner_.set_default(execution_space_ == smesh::EXECUTION_SPACE_HOST
+                                   ? sccd::BroadPhaseStrategy::Cell2DMinSort
+                                   : sccd::BroadPhaseStrategy::Auto);
+
             if (broad_phase_pending_) {
                 tuner_.record(timed_strategy_, broad_phase_pending_ms_);
                 broad_phase_pending_ = false;
