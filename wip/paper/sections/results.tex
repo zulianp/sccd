@@ -350,15 +350,15 @@ five scenes, while on the device the sorted intervals are queried faster on four
 of the six, enough to overturn the structure's advantage everywhere except
 puffer-ball and rod-twist.
 
-\textbf{The host fixes its choice and the device races for it.} The two
-algorithms emit identical pairs (\cref{prop:agree}), so the cost of choosing
-wrongly is bounded by the ratio between them, and \cref{tab:broadphase} shows
-that ratio reaching $5.75\times$ within one benchmark. On the host the ratio is
-one-sided enough to settle, and \cref{tab:bpvariant} settles it. On the device
-the verdict changes sign from scene to scene, so two probe steps out of a
-simulation buy insurance against the scene nobody measured, at a cost we can
-measure and a reader can check. \Cref{sec:bp:choose} reports the five predictors
-that failed to make either choice without measuring.
+\textbf{Both processors fix their choice.} The two algorithms emit identical
+pairs (\cref{prop:agree}), so the cost of choosing wrongly is bounded by the
+ratio between them, and \cref{tab:broadphase} shows that ratio reaching
+$5.75\times$ within one benchmark. That is wide enough to be worth settling, and
+\cref{tab:bpvariant} settles it: the edge-edge query of \cref{alg:cellmin} leads
+on every scene of both processors, by $3.67\times$ over the extent-binned cell
+list on the host and $1.46\times$ on the device. \Cref{sec:bp:choose} reports the
+five predictors that failed to make that choice without measuring, and the race
+a caller falls back on when it has not measured its own machine.
 
 \input{generated/tables/tab-bpvariant}
 
@@ -369,8 +369,18 @@ fastest on four scenes of six and ties rod-twist, and over the whole benchmark i
 costs $16.8\,\mathrm{s}$ against the full-extent cell list's $45.0$ and the
 sweep's $215.8$. Ordering each cell on the axis the grid does not use wins
 armadillo-rollers, the smallest margin in the table, and costs $20.0\,\mathrm{s}$
-overall: the traversal it buys is preparation it has already spent. The host
-therefore runs \cref{alg:cellmin} with its cells unordered.
+overall: the traversal it buys is preparation it has already spent. We therefore
+run \cref{alg:cellmin} with its cells unordered.
+
+The device agrees, once the walk is shaped for it. One thread to a box diverges
+on the rows it spans, on where its binary search lands and on how many entries
+each cell holds, and measured that way the walk gained nothing on the GPU. One
+warp to a box, every lane recomputing the same walk and the lanes splitting only
+each cell's entries between them, gives $6.82\times$, $2.15\times$,
+$3.34\times$, $2.01\times$, $1.30\times$ and $2.69\times$ over the six scenes
+against the extent-binned cell list, $1.46\times$ in total. Redundant arithmetic
+on $32$ lanes buys regular control flow and consecutive loads, which is the
+trade a GPU wants and the one a host does not.
 
 \subsection{Against other implementations}
 \label{sec:results:others}
