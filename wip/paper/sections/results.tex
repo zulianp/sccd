@@ -450,32 +450,34 @@ seventy-two Grace cores.
   \label{fig:strong}
 \end{figure}
 
-The narrow phase scales close to perfectly, reaching $56\times$ on cloth-funnel
-and $35\times$ on armadillo-rollers at seventy-two cores. That is what
-\cref{alg:host} is built for: lanes are filled from a per-block stack, blocks are
-independent, and the only shared state is an atomic minimum, written rarely. The
-broad phase's traversal reaches $23\times$ and $30\times$.
+The queries scale well on both scenes, reaching $32.0\times$ on cloth-funnel and
+$30.8\times$ on armadillo-rollers at seventy-two cores, and so does the narrow
+phase, at $17.0\times$ and $40.4\times$. That is what \cref{alg:host} is built
+for: lanes are filled from a per-block stack, blocks are independent, and the
+only shared state is an atomic minimum, written rarely. The spread between the
+two scenes is the narrow phase's own: cloth-funnel resolves the fewest candidate
+pairs in the benchmark, so there is less work per thread to hide the cost of
+distributing it.
 
 \textbf{Building the acceleration structure is what stops scaling.} It reaches
-$3.5\times$ on cloth-funnel and $5.5\times$ on armadillo-rollers at
-thirty-two cores and improves no further, where the two phases beside it are at
-$11$ and $17$. The consequence is the familiar one: a component that takes $5$ to
-$7\%$ of the single-core time takes $34$ to $40\%$ of it at seventy-two, and it
-holds the whole pipeline to about $21\times$.
+$4.0\times$ on cloth-funnel and $5.9\times$ on armadillo-rollers at thirty-two
+cores and no further --- $3.5\times$ and $5.0\times$ at seventy-two --- where
+the queries beside it are above $30$. The consequence is the familiar one: a
+component taking $8$ to $13\%$ of the single-core time takes $38$ to $48\%$ of
+it at seventy-two, and it holds the pipeline to $13.2\times$ and $24.0\times$.
 
 Three passes over every box account for the plateau, and all three are
 reductions or histograms whose parallel forms are ordinary: the centre-variance
-reduction that picks the sort axis, the extent and mean reduction that sizes the
-grid of \cref{sec:bp:cell}, and the counting histogram that fills it. Making
-them parallel is what took this curve from the $2.4\times$ an earlier version of
-this code reached to the figures above, and it left the traversal and the narrow
-phase untouched. What remains is a floor. At seventy-two cores the structure pass costs a few
-milliseconds per case whether the case carries $27{,}918$ candidate pairs or
-$388{,}206$, so the residue is a fixed cost per call.
+reduction that picks the two grid axes, the extent and mean reduction that sizes
+the grid of \cref{sec:bp:cell}, and the counting histogram that fills it. What
+remains once they are parallel is a floor: at seventy-two cores the structure
+pass costs about the same per case whatever that case carries, so the residue is
+a fixed cost per call rather than a share of the work.
 
-Both scenes are slower at seventy-two cores than at sixty-four, in every phase.
-That belongs to the node and not to any one phase, and it is why the figures
-above are quoted at the plateau.
+Between sixty-four and seventy-two cores the curves are flat --- the queries and
+the structure pass lose a few percent and the narrow phase gains a little on
+both scenes --- so nothing above turns on which of the two the figures are
+quoted at.
 
 \subsection{Trading accuracy for speed}
 \label{sec:results:relaxed}
