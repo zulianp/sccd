@@ -135,17 +135,12 @@ distribution requires.
   \label{fig:cell2d}
 \end{figure}
 
-Construction is count-then-fill, drawn in \cref{fig:cell2d}(a) and the same
-shape as the pair collection that follows it. One pass over the boxes counts the
-cells each one covers, a prefix sum over the cells turns those counts into the
-row pointer, and a second pass scatters each box index into each of its cells.
-Nothing is appended to a growing container, so the allocation is exact and known
-before a single index is written, and no thread needs a private buffer sized for
-a worst case it will not reach. The two passes share one function for deciding
-which cells a box covers, so they cannot disagree about it -- a disagreement
-there would corrupt the cell array silently rather than fail. The pair output is
-built the same way, which is why the whole broad phase allocates exactly twice
-and both sizes are counted rather than guessed.
+Construction is the count-then-fill of \cref{sec:bp:common}, over cells rather
+than pairs and drawn in \cref{fig:cell2d}(a). Its two passes share one function
+for deciding which cells a box covers, so they cannot disagree about it --- a
+disagreement there would corrupt the cell array silently rather than fail. The
+pair output is built the same way, so the whole broad phase allocates exactly
+twice and both sizes are counted rather than guessed.
 
 Duplicates are then settled without per-pair state. A box spans several cells,
 so a pair can be discovered in several of them, as in \cref{fig:cell2d}(b). The
@@ -157,9 +152,8 @@ both are binned in that cell, and the cell is unique. The rule costs two clamps
 per surviving pair and no state at all, which is why the same code runs
 unchanged on the device.
 
-Nothing on this path is sorted and nothing assumes an order. The query tests
-every entry of a touched cell and never breaks on a first miss, so the sort is
-removed and not merely moved. Binning costs
+Nothing on this path is sorted and nothing assumes an order: the query tests
+every entry of a touched cell and never breaks on a first miss. Binning costs
 $O\bigl(\sum_{i}\text{cells}(i)\bigr)$ and the query
 $O\bigl(\sum_{i}\sum_{c \ni i}\text{occupancy}(c)\bigr)$, with no logarithmic
 factor in either. Here $\text{cells}(i)$ is the footprint of box $i$ at the mean
@@ -224,12 +218,14 @@ holds the other in its range, and equal $L$ means one cell, where the index
 decides --- the only index test in \cref{alg:cellmin}.
 
 Read literally that range is whole rows, which is what the bounds are for. Each
-cell carries the largest upper bound of the boxes in it and each row a prefix
-maximum of those, so a binary search gives the first column holding anything that
-reaches back to the querying box and the columns before it are skipped at once. That is a prefix maximum applied per row of cells, and it is what lets the
-binning stand without a bound on how many cells a box may span; a grid that stores a box only at its lower-left
-cell otherwise caps the box at $k$ cells and widens every query window by $k$ to
-match. A second bound per cell does the same on the other axis.
+cell carries the largest upper bound of the boxes in it, and each row the prefix
+maximum of those along the row, so one binary search gives the first column
+holding anything that reaches back to the querying box and skips every column
+before it at once. A second bound per cell does the same on the other axis.
+
+That prefix is what lets the binning stand without a bound on how many cells a
+box may span. A grid that stores a box only at its lower-left cell otherwise has
+to cap the box at $k$ cells and widen every query window by $k$ to match.
 
 \begin{algorithm}[htbp]
 \caption{The edge-edge query, one pass (count or fill)}
@@ -308,8 +304,8 @@ match. A second bound per cell does the same on the other axis.
 
 Cost follows the same two terms as \cref{alg:cell}, with the binning reduced to
 one incidence per box and the query to whatever the bounds leave. Ordering each
-cell's entries on the axis the
-grid does not use would make the scan inside a cell monotone as well --- a grid
-and sweep-and-prune hybrid of the kind \citet{serpa2020broadmark} evaluates. It
-culls where cells are densely occupied and pays an ordering pass everywhere, and
-on our scenes the two roughly cancel, so the cells are left unordered.
+cell's entries on the axis the grid does not use would make the scan inside a
+cell monotone as well, as the grid hybrids \citet{serpa2020broadmark} evaluates
+do. It culls where cells are densely occupied and pays an ordering pass
+everywhere; over our benchmark the ordering costs more than it saves, so the
+cells are left unordered.

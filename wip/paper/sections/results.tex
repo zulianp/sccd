@@ -164,10 +164,10 @@ the contact is at the very start of the step.
 
 \Cref{tab:processor} puts the two processors side by side as whole-scene totals,
 and the split follows \cref{sec:parallel:why} mechanically. The broad phase is
-count, prefix sum and scatter, with no sequential window walk, and it runs at
-$0.56\times$ to $1.83\times$ of host speed: a narrow range, and one that now
-straddles parity, because the edge-edge walk of \cref{alg:cellmin} gains more on
-the host than on the device. The narrow phase is a divergent depth-first search,
+count, prefix sum and scatter, and it runs at $0.56\times$ to $1.83\times$ of
+host speed: a narrow range straddling parity, because the edge-edge walk of
+\cref{alg:cellmin} suits a host better than a device. The narrow phase is a
+divergent depth-first search,
 and it spans a far wider range, $0.44\times$ to $15.80\times$: behind the host
 where the candidate lists are smallest, and ahead by an order of magnitude on
 n-body and puffer-ball, where tens of millions of candidates keep every lane
@@ -185,10 +185,9 @@ not a rule for choosing a processor on its own. \Cref{sec:results:scaling} shows
 what does move with it.
 
 \Cref{tab:throughput} states the same comparison as a rate. Candidate pairs
-resolved per second is the throughput figure for this pipeline. It is what the broad phase produces and the narrow phase consumes; it is
-comparable between scenes that differ by three orders of magnitude in size; and
-it rewards an implementation for resolving the same pairs with less work, which
-is the direction this pipeline is designed to move in.
+resolved per second is what the broad phase produces and the narrow phase
+consumes, and it is comparable between scenes that differ by three orders of
+magnitude in size.
 
 \input{generated/tables/tab-throughput}
 
@@ -198,12 +197,12 @@ $43$-step scene with a $2{,}556$-step one.
 
 \input{generated/tables/tab-per-frame}
 
-Those three tables aggregate over a scene, which hides the shape of the cost
-through it. \Cref{fig:perframe} plots the per-step cost against frame index
-instead, and it shows two things no aggregate can. On cloth-funnel the device is behind for most of the trajectory, so its
-$0.56\times$ is a standing gap and not a few expensive frames. On rod-twist the cost climbs steadily on both processors
-as the rod winds up, so on either processor the median understates the end of
-the simulation.
+Those totals hide the shape of the cost through a scene. \Cref{fig:perframe}
+plots the per-step cost against frame index, and shows two things no aggregate
+can: on cloth-funnel the device is behind for most of the trajectory, so its
+$0.56\times$ is a standing gap rather than a few expensive frames, and on
+rod-twist the cost climbs steadily on both processors as the rod winds up, so
+the median understates the end of the simulation.
 
 \Cref{fig:breakdown} splits the same runs by phase. The two processors spend
 their time differently: the broad phase dominates on the host, taking $57$ to
