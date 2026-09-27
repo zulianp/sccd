@@ -4,7 +4,9 @@
 set -euo pipefail
 PY="${PY:-./.venv/bin/python}"
 export PYTHONPATH=benchmark
-SC="benchmark/results/scaling/host-cell2dmin-mode2.txt benchmark/results/scaling/host-sweep-mode2.txt benchmark/results/scaling/device-cell2dmin-mode2.txt"
+# The shipped broad phase on both processors, and nothing else: the paper
+# reports no other strategy outside the Scalable CCD comparison.
+SC="benchmark/results/scaling/host-cell2dmin-mode2.txt benchmark/results/scaling/device-cell2dmin-mode2.txt"
 
 echo "== docs/BENCHMARKS.md =="
 $PY -m report benchmark/results/sweep-gh200-bp.csv /tmp/report-tight \
