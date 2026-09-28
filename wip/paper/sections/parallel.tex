@@ -228,7 +228,8 @@ The device kernel runs one thread per query. \Cref{fig:gpu-workflow} gives its
 shape and \cref{alg:device} gives it in full. Three decisions determine its
 behaviour, and in each of them the straightforward alternative fails.
 
-\paragraph{The global queue is double-buffered.} A launch reads one buffer and
+\paragraph{The global queue.} The queue is double-buffered: a launch reads one
+buffer and
 writes the other, never both, so there is no producer--consumer handshake and
 nothing spins. A single shared buffer, in which writers spin on a
 compare-and-swap until a reader releases the slot, is invisible while the queue
@@ -236,7 +237,8 @@ is lightly used and \emph{hangs the kernel} once the queue is driven hard, the
 condition created by using it to balance load. Separating the buffers removes
 the interaction outright.
 
-\paragraph{The shared stack is deliberately small.} The per-block stack is where
+\paragraph{The shared stack.} The shared stack is deliberately small. The
+per-block stack is where
 a query's subtree lives, so a large one keeps a heavy query inside the block
 that seeded it. By \cref{tab:difficulty}, one block can work through a
 $19.7$-million-box query while its neighbours finish and idle. Spilling early
@@ -263,7 +265,7 @@ every block. \Cref{tab:stackcap} measures the effect.
   \end{tabular}
 \end{table}
 
-\paragraph{Overflow drops, and the host retries.} A box that does not fit in the
+\paragraph{Overflow handling.} A box that does not fit in the
 global queue is counted and discarded, which is safe since dropping a box can
 only leave the reported time of impact earlier than the truth, never later
 (\cref{sec:guarantee}). The host reads the deficit, grows the queue and re-runs
@@ -448,7 +450,7 @@ $10^{-8}$ of the root and most queries are settled by a single box. That is the
 same dependent chain the device stalls on, paid on a core with enough
 out-of-order capacity to hide most of it.
 
-\paragraph{Host costs the timings do not show.} \Cref{tab:symbols} attributes
+\paragraph{Host costs outside the timings.} \Cref{tab:symbols} attributes
 sampled host cycles to the object that spent them. On cloth-funnel $14.1\%$ of
 them are inside \texttt{libm}, and the symbol profile puts all of that in one
 call, the \texttt{pow} that raises $\delta$ to the third power in
