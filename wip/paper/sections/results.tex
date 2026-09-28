@@ -11,25 +11,21 @@ the slower of the two.
 \label{sec:results:setup}
 
 All measurements are taken on the CSCS Alps system, on nodes built from the
-\textsc{NVIDIA GH200} Grace Hopper superchip~\citep{nvidia2023gh200}. One node
-carries four such modules, each pairing a Grace host with a Hopper device over
-a cache-coherent NVLink-C2C link. Every measurement in this paper uses a
-\emph{single} module: the host figures are taken on its $72$ Grace cores and the
-device figures on its one Hopper, with both in the same allocation, so that a
-host and a device number quoted together describe one module and not a node.
+\textsc{NVIDIA GH200} Grace Hopper superchip~\citep{nvidia2023gh200}. A node
+carries four modules, each pairing a Grace host with a Hopper device over a
+cache-coherent NVLink-C2C link, and every measurement here uses a \emph{single}
+module, its $72$ Grace cores and its one Hopper in the same allocation, so that
+a host and a device number quoted together describe one module and not a node.
 Host threads are bound to that module with \texttt{numactl}, since an unbound
-run spreads across all four and measures a machine the device half does not
-share. \Cref{tab:hardware} states the two processors.
+run spreads across all four. \Cref{tab:hardware} states the two processors.
 
 \begin{table}[htbp]
   \centering
-  \caption{The two processors of one \textsc{GH200} module. Core, multiprocessor,
-    clock, cache and capacity figures are as reported by the operating system and
-    the CUDA device properties on the compute nodes used. Peak \textsc{fp64} is
-    derived from those clocks and the per-core and per-multiprocessor unit counts
-    of the two architectures~\citep{arm2022neoversev2,nvidia2022hopper}. The
-    bandwidth row is measured: the best of ten \textsc{stream} triad passes over
-    arrays of $200$ and $300$ million doubles respectively.}
+  \caption{The two processors of one \textsc{GH200} module, as reported by the
+    operating system and the CUDA device properties on the compute nodes used.
+    Peak \textsc{fp64} is derived from those clocks and the per-unit counts of
+    the two architectures~\citep{arm2022neoversev2,nvidia2022hopper}; the
+    bandwidth row is the best of ten \textsc{stream} triad passes.}
   \label{tab:hardware}
   \fittable{%
   \begin{tabular}{lll}
@@ -51,21 +47,15 @@ share. \Cref{tab:hardware} states the two processors.
   \end{tabular}}
 \end{table}
 
-The two peak \textsc{fp64} figures are the products of the unit counts and the
-clocks in \cref{tab:hardware}. A Neoverse V2 core issues four $128$-bit SVE2
-operations per cycle, giving eight double-precision lanes and $16$ flop per
-cycle with a fused multiply-add, so $72$ cores at $3.42$ GHz reach
-$3.9$ TFLOP/s. A Hopper multiprocessor carries $64$ double-precision units, so
-$132$ multiprocessors at $1.98$ GHz reach $33.5$ TFLOP/s. The device therefore
-offers $8.5\times$ the arithmetic and $8.7\times$ the memory bandwidth of the
-host it is paired with, which is the ratio against which
-\cref{sec:results:proc} should be read: a phase that does not reach it is
-limited by something other than the peak figures.
-
-The device memory system has a $6144$-bit interface at $2.619$ GHz, a
-theoretical $4023$ GB/s, of which the triad reaches $93\%$. Where
-\cref{sec:parallel:limits} reports a share of peak, the normalisation is Nsight
-Compute's own and not the ratio to this measurement.
+The peak \textsc{fp64} figures are the products of the unit counts and the clocks
+in \cref{tab:hardware}: four $128$-bit SVE2 operations per cycle on a Neoverse
+V2 core, and $64$ double-precision units on a Hopper multiprocessor. The device
+therefore offers $8.5\times$ the arithmetic and $8.7\times$ the memory bandwidth
+of the host, the ratio against which \cref{sec:results:proc} should be read: a
+phase that does not reach it is limited by something other than the peak
+figures. The measured triad reaches $93\%$ of the $4023$ GB/s the device's
+$6144$-bit interface implies at $2.619$ GHz, and where \supp{} reports a share
+of peak the normalisation is Nsight Compute's own.
 
 \subsection{Software}
 \label{sec:results:software}
@@ -77,15 +67,13 @@ distance tolerance of $3\times10^{-8}$. Host loops are scheduled with
 OpenMP~\citep{dagum1998openmp}; oneTBB~\citep{onetbb} is an alternative backend
 and is not used here. SCCD itself has no external dependencies.
 
-The three implementations it is measured against are used exactly as released,
-built with the same compiler and the same optimisation level:
-TightInclusion~\citep{wang2021tight} for the certified reference, Scalable
-CCD~\citep{belgrod2025toi} for the earliest-time-of-impact comparison, and the
-additive CCD of~\citet{li2021codim} for the per-pair comparison. Additive CCD is
-driven through oneTBB, which follows the CPU affinity mask, so its runs are
-bound to one module in the same way as ours. Mesh input passes through the
-\texttt{smesh} library, configured with double-precision coordinates so that the
-mesh path and the exact roots of the dataset describe the same geometry.
+The three implementations it is measured against,
+TightInclusion~\citep{wang2021tight}, Scalable CCD~\citep{belgrod2025toi} and
+additive CCD~\citep{li2021codim}, are used exactly as released and built with
+the same compiler and optimisation level; additive CCD is driven through oneTBB,
+which follows the CPU affinity mask, so its runs are bound to one module as ours
+are. Mesh input carries double-precision coordinates, so the mesh path and the
+exact roots of the dataset describe the same geometry.
 
 \subsection{Timing protocol and dataset}
 \label{sec:results:protocol}
@@ -103,34 +91,29 @@ bound to prune with. Unless a table names per-pair, its narrow-phase column is
 NP EToI. A figure or table that reports only part of a phase states which part
 in its caption.
 
-Device timings bracket every clock with a synchronisation before it starts and
-before it stops. A device phase ends with a kernel launch that returns long
-before the kernel completes, so an unsynchronised clock attributes the tail of a
-phase to whichever later call waits for it, lowering BP full and raising NP by
-the same amount. The competitor harness synchronises identically, so the two
-measure the same quantity. The first case of a scene is run once untimed to pay
-for allocation and first touch. Repeats are separate processes, since the driver
-measures each case once per run and run-to-run spread is visible only across
-processes; three repeats are reported throughout. Every table gives the
-\emph{median and the slowest repeat} as \texttt{median / max}. The median
-describes the expected run and the maximum the run that must be budgeted for.
+Device timings bracket every clock with a synchronisation, since a device phase
+ends with a kernel launch that returns before the kernel completes and an
+unsynchronised clock would charge the tail of a phase to whichever later call
+waits for it; the competitor harness synchronises identically. The first case of
+a scene is run once untimed to pay for allocation and first touch, and repeats
+are separate processes, since run-to-run spread is visible only across
+processes; three repeats are reported throughout, as \texttt{median / max}.
 
 Two sources of variance are distinguished. \emph{Between} job allocations this
-harness varies by about $40\%$. Every quantity compared against another is
-therefore measured inside a single allocation, and no number reported here is
-placed beside one from a different allocation. \emph{Within} an allocation, the
-spread across the three repeats of a whole broad phase ranges from $0.3\%$ to
-$3.4\%$, depending on the scene and the strategy. This second figure is the
-threshold for claiming a difference, and margins close to it are reported below
-as ties.
+harness varies by about $40\%$, so every quantity compared against another is
+measured inside a single allocation and no number reported here is placed beside
+one from a different allocation. \emph{Within} an allocation, the spread across
+three repeats of a whole broad phase ranges from $0.3\%$ to $3.4\%$. That second
+figure is the threshold for claiming a difference, and margins close to it are
+reported below as ties.
 
 The measurements run on the time-of-impact dataset of
-\citet{belgrod2025toi,nyuccd}. It holds six simulation scenes, three of them
-drawn from the University of North Carolina Dynamic Scene
-Benchmark~\citep{curtis2012unc}. Each frame is supplied both as a mesh pair and
-as a curated query set whose coordinates are exact dyadic rationals and whose
-roots were computed symbolically. \Cref{tab:dataset} gives the sizes. A
-\emph{case} is one query type on one frame, so a simulation step is two cases.
+\citet{belgrod2025toi,nyuccd}, six simulation scenes, three of them drawn from
+the University of North Carolina Dynamic Scene Benchmark~\citep{curtis2012unc}.
+Each frame is supplied both as a mesh pair and as a curated query set whose
+coordinates are exact dyadic rationals and whose roots were computed
+symbolically. \Cref{tab:dataset} gives the sizes; a \emph{case} is one query
+type on one frame, so a simulation step is two cases.
 
 \input{generated/tables/tab-dataset}
 
@@ -148,11 +131,10 @@ reported after the true one.
 \input{generated/tables/tab-conservativeness}
 
 The comparison is made against the exact roots of the dataset and not against
-TightInclusion, whose own answer is a conservative lower bound on the truth.
-Scoring lateness against the reference would count as a violation every case in
-which our search lands closer to the root than the reference does.
-
-False positives range from $1$ on cloth-ball to $1{,}245$ on rod-twist. By
+TightInclusion, whose own answer is a conservative lower bound on the truth:
+scoring lateness against the reference would count as a violation every case in
+which our search lands closer to the root than the reference does. False
+positives range from $1$ on cloth-ball to $1{,}245$ on rod-twist; by
 \cref{thm:conservative} they cost work and never safety, and we report them as
 the price of the guarantee.
 
@@ -170,14 +152,19 @@ bar reports what the same search costs on the other processor.
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=\linewidth]{figures/reference-speedup.pdf}
-  \caption{SCCD against TightInclusion, narrow phase only, as whole-scene
-    totals. Neither side runs a broad phase here: TightInclusion ships none that
-    we use, so both are handed the same curated query sets and asked for one
-    time of impact per pair. Each bar is one processor, stacked into its
-    vertex-face and edge-edge work, with the whole-scene total and the speedup
-    over TightInclusion above it. Query counts are in \cref{tab:dataset} and hit
-    agreement in \cref{tab:conservativeness}, so neither is repeated here.}
+  \includegraphics[width=\linewidth]{figures/reference-speedup.pdf}\\[2pt]
+  \includegraphics[width=\linewidth]{figures/competitors.pdf}
+  \caption{SCCD against the three implementations it is compared with, per
+    scene. \textbf{Above}, the narrow phase against TightInclusion as
+    whole-scene totals: neither side runs a broad phase, so both are handed the
+    same curated query sets and asked for one time of impact per pair, and each
+    bar is one processor stacked into its vertex-face and edge-edge work, with
+    the total and the speedup above it. \textbf{Below left}, the earliest time
+    of impact for a simulation step against Scalable CCD, as the mean cost of
+    one case on a logarithmic axis. \textbf{Below right}, one time of impact per
+    candidate pair against additive CCD, in nanoseconds per candidate. Query
+    counts are in \cref{tab:dataset} and hit agreement in
+    \cref{tab:conservativeness}.}
   \label{fig:reference}
 \end{figure}
 
@@ -190,24 +177,19 @@ and the device gains most, finishing in $24.3$. Cloth-funnel is the one scene on
 which the device does not help, its two bars standing level.
 
 On accuracy TightInclusion is a subject of the comparison and not the standard,
-since its answer is a lower bound as well. We therefore measure how close each
+since its answer is a lower bound as well, so we measure how close each
 implementation comes to the exact roots. We report \emph{earliness}, the
-distance before the true root at which each implementation lands, as a median
-over cases and as the worst case anywhere in the scene, over the six scenes and
-both query types: twelve scene-phases.
-
-This measurement is the empirical counterpart of \cref{prop:order}. On the host
+distance before the true root at which each lands, as a median over cases and as
+the worst case anywhere in the scene, over the six scenes and both query types:
+twelve scene-phases. This is the empirical counterpart of \cref{prop:order}. On
+the host
 both statistics are identical to TightInclusion's on all twelve scene-phases, to
 every printed digit, at between $2.1\times$ and $3.5\times$ its speed.
 
-The device agrees closely without agreeing exactly, and we quote the residue.
-Its median matches on eight of the twelve, and where it does not the gap is at
-most $0.65\%$: tighter than the reference on cloth-ball vertex-face, puffer-ball
-vertex-face and rod-twist edge-edge, by $0.10\%$, $0.44\%$ and $0.27\%$, and
-$0.65\%$ further before the root on rod-twist vertex-face. Its worst case
-matches on nine of the twelve, deviating by $-4.5\%$ on cloth-ball vertex-face,
-$+1.1\%$ on n-body edge-edge and $+0.2\%$ on puffer-ball vertex-face. Every
-deviation in either direction is smaller than the spread between repeats.
+The device agrees closely without agreeing exactly. Its median matches on eight
+of the twelve scene-phases and its worst case on nine, and every deviation is at
+most $0.65\%$ on the median and $4.5\%$ on the worst case, in both directions
+and smaller than the spread between repeats.
 
 The traversal order does not account for this, by \cref{prop:order}, and the
 comparison reports one time of impact per candidate pair, so no shared minimum
@@ -215,13 +197,11 @@ exists for threads to race over. The cause is that the device evaluates the same
 mathematics through a different and equally valid sequence of floating-point
 operations: vector fused multiply-adds for the corner values, and for
 $\delta^3$ in \cref{eq:err} a plain cube scaled to round upward. Both sequences
-stay within the certified bound, so both are conservative. A box whose
+stay within the certified bound, so both are conservative, and a box whose
 classification is decided in the last few units in the last place can
-nevertheless fall either way, which accounts for the device being tighter than
-the reference on some rows and looser on others. Where the device additionally
-discards work under queue pressure (\cref{sec:parallel:device}), the effect is
-one-sided and safe. Every earliness measured, on either processor, is at or
-before the exact root.
+nevertheless fall either way. Where the device additionally discards work under
+queue pressure (\cref{sec:parallel:device}), the effect is one-sided and safe.
+Every earliness measured, on either processor, is at or before the exact root.
 
 The worst cases are a property of the problem. On cloth-funnel and rod-twist the
 largest error approaches $1.0$ for the reference as well: a conservative search
@@ -256,69 +236,23 @@ another quantity, cloth-ball at $2.2$ million pairs giving $1.43\times$ where
 rod-twist at $847{,}250$ gives $1.89\times$, so problem size indicates the
 processor without settling it. \Cref{sec:results:scaling} varies it directly.
 
-\Cref{tab:throughput} states the same comparison as a rate. Candidate pairs
-resolved per second is the quantity the broad phase produces and the narrow
-phase consumes, and it is comparable between scenes that differ by three orders
-of magnitude in size.
+\Supp{} states the same comparison as a rate and per simulation step, and plots
+the per-step cost through each scene. Two observations there qualify the
+medians: on cloth-funnel the device is behind for most of the trajectory, so its
+$0.56\times$ is a standing gap and not a few expensive frames, and on rod-twist
+the cost climbs steadily on both processors as the rod winds up, so the median
+understates the end of the simulation.
 
-\input{generated/tables/tab-throughput}
-
-\Cref{tab:per-frame} divides those totals by the number of steps. The per-frame
-figure is the quantity a solver budgets against, and it compares a $43$-step
-scene with a $2{,}556$-step one.
-
-\Cref{fig:perframe} plots the per-step cost against frame index. On cloth-funnel
-the device is behind for most of the trajectory, so its $0.56\times$ is a
-standing gap and not a few expensive frames; on rod-twist the cost climbs
-steadily on both processors as the rod winds up, so the median understates the
-end of the simulation.
-
-\Cref{fig:breakdown} splits the same runs by phase. The two processors spend
-their time differently: the broad phase takes $57$ to $84\%$ of the host total
-on every scene, while on the device it takes $34$ to $64\%$ and the narrow phase
-claims the rest. Within the host's broad phase, the structure it builds is the
-part that scales worst with thread count, as \cref{sec:results:threads}
-measures.
-
-\Cref{fig:grid} gives the distributions behind the medians, one column per scene
-and a shared scale along each row, so a box can be read against its neighbours
-as well as against the pair beside it. Broad-phase time is tight around its
-median; narrow-phase time is skewed by a long upper tail, the per-case form of
-the heavy-tailed difficulty of \cref{tab:difficulty}. \Cref{fig:toierr} gives
+Splitting the same runs by phase, as \supp{} does, the broad phase takes $57$
+to $84\%$ of the host total on every scene and $34$ to $64\%$ on the device, and
+within the host's broad phase the structure it builds is the part that scales
+worst with thread count (\cref{sec:results:threads}). Behind those medians,
+broad-phase time is tight around its own median while narrow-phase time is
+skewed by a long upper tail, the per-case form of the heavy-tailed difficulty of
+\cref{tab:difficulty}; \supp{} gives the distributions. \Cref{fig:toierr} gives
 the earliness distribution, one-sided by construction since every value is the
 distance \emph{before} the true root at which the answer falls, with additive
-CCD on the same cases beneath it for comparison.
-
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=\linewidth]{figures/per-frame.pdf}
-  \caption{Per-frame cost of the whole pipeline, BP full plus NP EToI, in
-    milliseconds for one simulation step, both query types together, against
-    frame index. BP full is the acceleration structure and the queries over it;
-    NP EToI is the narrow phase asked for one earliest time of impact per step.}
-  \label{fig:perframe}
-\end{figure}
-
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=\linewidth]{figures/runtime-breakdown.pdf}
-  \caption{Whole-scene totals split into BP full and NP EToI, as a share of each
-    processor's total. The BP bar is shaded into BP prep, the structure it
-    builds, and BP queries over it. BP full dominates on the host, and within it
-    BP prep.}
-  \label{fig:breakdown}
-\end{figure}
-
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=\linewidth]{figures/results-grid.pdf}
-  \caption{Per-case distributions over the six scenes, BP full above and NP
-    EToI below. Each row shares one logarithmic scale, so a box is comparable
-    across scenes as well as within one. Each box spans the first to the third
-    quartile with the median inside, whiskers reach the furthest case within
-    $1.5$ interquartile ranges, and cases beyond are drawn individually.}
-  \label{fig:grid}
-\end{figure}
+CCD on the same cases beneath it.
 
 \begin{figure}[htbp]
   \centering
@@ -338,131 +272,63 @@ CCD on the same cases beneath it for comparison.
 \subsection{Against other implementations}
 \label{sec:results:others}
 
-\Cref{sec:results:ref} compares SCCD with the reference whose mathematics it
-inherits. Two other implementations answer neighbouring questions, and each is
-compared on the question it answers. Both are used exactly as released, built
-with the same compiler flags, and run on the same node over all six scenes and
-all $6{,}394$ cases, three repeats each.
+Two further implementations answer neighbouring questions, and each is compared
+on the question it answers: Scalable CCD~\citep{belgrod2025toi} returns one
+earliest time of impact for a simulation step, and additive
+CCD~\citep{li2021codim} returns one per pair. Both are used exactly as released,
+built with the same compiler flags, and run on the same node over all six scenes
+and all $6{,}394$ cases, three repeats each, over identical broad-phase
+candidates. The lower panels of \cref{fig:reference} summarise both comparisons per scene;
+\supp{} carries the per-scene tables with their accuracy columns.
 
-\textbf{Scalable CCD} returns one earliest time of impact for a simulation step,
-pruning every box against the running bound~\citep{belgrod2025toi}. Both
-libraries therefore run their earliest-time-of-impact path once per case from a
-bound of $1$, over identical broad-phase candidates, and \cref{tab:competitor-earliest}
-scores the step's answer against the step's earliest exact root.
+Against Scalable CCD, SCCD on the device is ahead end to end on every scene,
+from $4.23\times$ on cloth-funnel to $11.93\times$ on puffer-ball: $27.0$
+against $142.9\,\mathrm{s}$ over rod-twist's $4{,}571$ cases, and $23.3$ against
+$278.3\,\mathrm{s}$ over puffer-ball's $240$. Puffer-ball is also the scene on
+which our host path loses outright, at $458.6\,\mathrm{s}$, since its broad
+phase carries the scene on its own. The comparison is on the device throughout,
+because the narrow phase of Scalable CCD is CUDA and its host side is a broad
+phase with no pipeline behind it. Comparing the broad phases alone, ours costs
+$40.3\,\mathrm{s}$ over the benchmark against $312.6\,\mathrm{s}$.
 
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=\linewidth]{figures/competitors.pdf}
-  \caption{The two competitor comparisons per scene, on the question each
-    answers. Left: the earliest time of impact for a simulation step, as the
-    mean cost of one case. Right: one time of impact per candidate pair, as
-    nanoseconds per candidate. Both axes are logarithmic. The tables these
-    summarise, with their accuracy columns, are
-    \cref{tab:competitor-earliest,tab:competitor-pair} in
-    \cref{sec:appendix:competitors}.}
-  \label{fig:competitors}
-\end{figure}
+Its earliness columns report a defect on three scenes and not a difference in
+tightness: its answer lands after the true root on $269$ of armadillo-rollers'
+$394$ contact-carrying steps, $31$ of rod-twist's $2{,}481$ and $9$ of
+cloth-funnel's $363$. We traced this to a race in its subdivision buffer, whose
+overflow check tests that the buffer is full and then advances the tail as two
+separate operations; \supp{} gives the three observations that identify it. We
+report the library as published. Where it does stay conservative it remains the
+looser answer, against our device by $50.7\times$ on cloth-ball, $281\times$ on
+rod-twist and $2{,}844\times$ on puffer-ball.
 
-End to end SCCD on the device is ahead on every scene, from $4.23\times$ on
-cloth-funnel to $11.93\times$ on puffer-ball. The whole-scene totals state the
-cost in the terms a simulation pays: $27.0$ against $142.9\,\mathrm{s}$ over
-rod-twist's $4{,}571$ cases, and $23.3$ against $278.3\,\mathrm{s}$ over
-puffer-ball's $240$. Puffer-ball is also the scene on which our host path loses
-outright, at $458.6\,\mathrm{s}$, since its broad phase carries the scene on its
-own. The comparison is on the device throughout: the narrow phase of Scalable
-CCD is CUDA, so its host side is a broad phase with no pipeline behind it.
-
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=\linewidth]{figures/broad-vs-scalable.pdf}
-  \caption{Device BP full against Scalable CCD's, step by step, the
-    acceleration structure and the queries over it added, in milliseconds for
-    one step, both query types together. All three curves come from one
-    comparison run, so they are measured in one allocation. Both of our
-    strategies are drawn, since the choice between them accounts for part
-    of the difference.}
-  \label{fig:bpvs}
-\end{figure}
-
-\Cref{fig:bpvs} compares the broad phases through each simulation. Summed over
-the benchmark ours costs $40.3\,\mathrm{s}$ against $312.6\,\mathrm{s}$, and the
-margin is a standing one: on puffer-ball, the scene with the most candidate
-pairs, it is $21.9\,\mathrm{s}$ against $226.8$. Drawing both of our strategies
-separates what the implementation earns from what the choice of algorithm earns.
-On n-body the two differ: our sweep is the slower broad phase there,
-$7.5\,\mathrm{s}$ against Scalable CCD's $6.3$, while our cell list takes the
-scene at $4.5$. On cloth-funnel our two strategies are within $18\%$ of each
-other and both are far ahead, so the $5.4\times$ against Scalable CCD is
-attributable to the implementation.
-
-On three scenes the earliness columns report a defect and not a difference in
-tightness. On armadillo-rollers the answer of Scalable CCD lands after the true
-root on $269$ of the $394$ steps that carry a contact. Its median earliness is
-$-9.4\times10^{-3}$, so the median step is late, and its own \emph{tighter}
-entry reads \emph{late} because a ratio against a late answer would not measure
-tightness. Its worst answer misses by $1.000$, reporting no contact at all where
-one exists early. It is late on $31$ of rod-twist's $2{,}481$ steps and $9$ of
-cloth-funnel's $363$, and on none of cloth-ball's, n-body's or puffer-ball's.
-Where it does stay conservative it remains the looser answer, against our device
-by $50.7\times$ on cloth-ball, $281\times$ on rod-twist and $2{,}844\times$ on
-puffer-ball.
-
-The cause is a race in its subdivision buffer, whose overflow check tests that
-the buffer is full and then advances the tail as two separate operations, so
-that concurrent pushes can wrap the tail onto domains that have not been
-processed yet with no overflow flagged. Three observations identify it. Padding
-a query list with pairs that fail their first inclusion test, which changes
-nothing but the length of the list and hence the size the buffer is given, turns
-$0$ of $1{,}299$ contacts found at one step into all $1{,}299$. The answer
-differs between identical runs. A copy of the library whose overflow check is
-made race-free finds every one of the $54{,}664$ curated contacts of armadillo's
-first $400$ cases with nothing missed and nothing late. The comparison above
-reports the library as published; the patched copy is diagnosis only.
-
-The set of affected scenes supports that reading. The buffer is sized from the
-number of queries it is handed, so a short candidate list gives a small buffer:
-the three scenes it fails are the three with the fewest candidate pairs per step
-in \cref{tab:dataset}, and the three it answers correctly are those with
-millions.
-
-\textbf{Additive CCD} answers per pair, advancing conservatively until contact
-without isolating a root~\citep{li2021codim}. It is the narrow phase of a
-different trade, and \cref{tab:competitor-pair} puts the two on the same
-candidates and the same curated queries.
-
-It is the cheaper narrow phase on every scene, by $2.03\times$ per candidate on
+Additive CCD advances conservatively until contact without isolating a root, and
+is the cheaper narrow phase on every scene: by $2.03\times$ per candidate on
 cloth-funnel, between $3.37\times$ and $5.38\times$ on armadillo-rollers,
 cloth-ball, n-body and puffer-ball, and $11.91\times$ on rod-twist, against
-\textsc{Tight} on the host: $6.9$ against $82.4\,\mathrm{s}$ over the whole of
-rod-twist.
-
-The cost of that speed is the answer. Its median earliness runs from
-$8.6\times10^{-3}$ to $1.1\times10^{-1}$ where \textsc{Tight}'s runs from
-$3.0\times10^{-8}$ to $2.8\times10^{-4}$, which the \emph{tighter} column puts at
-$85\times$ further from the root on rod-twist, $2{,}600\times$ on puffer-ball and
-$2.1$ million$\times$ on n-body. Its worst case gives up almost the entire
-step on every scene, between $0.897$ and $0.996$. The same gap appears in the
-false positives, $444$ against $24$ on armadillo-rollers and $27{,}374$ against
-$536$ on puffer-ball. That last figure belongs beside \cref{sec:results:relaxed}:
-on the same scene our own \textsc{Relaxed} reports $27{,}380$, so additive CCD at
-its shipped $0.9$ rescaling sits about where the looser of our two acceptance
-tests does. Neither library misses a contact anywhere, and every earliness in
-\cref{tab:competitor-pair} is positive, so neither answers after a root, as
-\cref{thm:conservative} and the construction of the method each guarantee.
-A solver pays for the gap with a shortened step.
+\textsc{Tight} on the host. The cost of that speed is the answer. Its median
+earliness runs from $8.6\times10^{-3}$ to $1.1\times10^{-1}$ where
+\textsc{Tight}'s runs from $3.0\times10^{-8}$ to $2.8\times10^{-4}$, which
+\cref{fig:toierr} shows as a separation of between $1.6$ and $4.8$ decades, and
+its worst case gives up almost the entire step on every scene, between $0.897$
+and $0.996$. The same gap appears in the false positives, $444$ against $24$ on
+armadillo-rollers and $27{,}374$ against $536$ on puffer-ball; that last figure
+sits about where our own \textsc{Relaxed} lands on the same scene,
+$27{,}380$. Neither library misses a contact anywhere and neither answers after
+a root, as \cref{thm:conservative} and the construction of the method each
+guarantee. A solver pays for the gap with a shortened step.
 
 \subsection{Scaling with element count}
 \label{sec:results:scaling}
 
-\Cref{tab:scaling} refines one surface repeatedly, quadrupling the element count
-at each level from $92{,}230$ to $94.4$ million, over cloth-ball frames $0$ and
-$1$. Both processors run the shipped broad phase, so the one quantity the table
-varies is the processor. The two frames do not come into contact, which makes
-the broad phase the quantity the study measures.
+The refinement study reported in \supp{} refines one surface repeatedly,
+quadrupling the element count at each level from $92{,}230$ to $94.4$ million
+over cloth-ball frames $0$ and $1$. Both processors run the shipped broad phase,
+so the one quantity it varies is the processor, and the two frames do not come
+into contact, which makes the broad phase the quantity it measures.
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=0.78\linewidth]{figures/refine-scaling.pdf}
+  \includegraphics[width=0.62\linewidth]{figures/refine-scaling.pdf}
   \caption{Cost of one collision step against element count, log--log. Each
     series is one processor, and $p$ is the exponent fitted to the plotted
     quantity, BP full plus NP EToI.}
@@ -470,106 +336,66 @@ the broad phase the quantity the study measures.
 \end{figure}
 
 \Cref{fig:scaling} plots both processors on logarithmic axes; they cross near
-$6$ million elements and the device leads above that size. Taking the BP full
-column of \cref{tab:scaling}, the host is ahead through the middle of the range
+$6$ million elements and the device leads above that size. Taking the whole broad
+phase, the host is ahead through the middle of the range
 by at most $1.35\times$ ($55.7\,\mathrm{ms}$ against $75.4$ at $1.48$ million,
 $242.7$ against $297.5$ at $5.90$ million). Past the crossover the device pulls
 away: $1.87\times$ at $23.6$ million ($441.7$ against $823.9$) and $1.99\times$
 at $94.4$ million ($1828.3$ against $3644.3$). The fitted exponents agree, the
 device growing at $0.86$ in the element count against the host's $1.01$.
 
-The two columns divide differently by processor. At $94.4$ million elements the
-grid costs $840.2\,\mathrm{ms}$ on the host and $1009.4$ on the device, so the
-two build the structure at much the same rate, while the queries over it take
-$2804.1\,\mathrm{ms}$ on the host and $818.9$ on the device, a factor of $3.4$.
-The structure is therefore $55\%$ of the device's broad phase and $23\%$ of the
-host's. Binning is a counting sort whose histogram the device builds with atomics
-into a cell array of the order of the element count, and that is the half which
-does not gain from the machine.
+The two halves of the broad phase divide differently by processor. At $94.4$
+million elements the grid costs $840.2\,\mathrm{ms}$ on the host and $1009.4$ on
+the device, much the same rate, while the queries over it take
+$2804.1\,\mathrm{ms}$ against $818.9$, a factor of $3.4$; the structure is
+therefore $55\%$ of the device's broad phase and $23\%$ of the host's. Binning is
+a counting sort whose histogram the device builds with atomics into a cell array
+of the order of the element count, and that is the half which does not gain from
+the machine.
 
-The narrow-phase columns of \cref{tab:scaling} measure a different quantity.
-These two frames do not come into contact, so no root is ever isolated and the
-column prices the rejection test alone, over candidates that all fail it. That
-work is uniform, the shape a GPU handles best: across the six refinements the
-device stays between $1.6$ and $8.1\,\mathrm{ms}$ while the host climbs from
-$0.5$ to $132.6$, so the device ends $16.4\times$ ahead on the column where it
-started $3.2\times$ behind. The column is silent on the divergent case, where
-the search descends. \Cref{fig:percase} gives narrow-phase cost against problem
-size over cases that do collide.
-
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=0.78\linewidth]{figures/narrow-per-case.pdf}
-  \caption{Per-case narrow-phase time against the number of candidate pairs in
-    that case, over every case of every scene.}
-  \label{fig:percase}
-\end{figure}
+The narrow-phase column measures a different quantity, since no root is ever
+isolated on these two frames and it therefore prices the rejection test alone
+over candidates that all fail it. That work is uniform, the shape a GPU handles
+best: the device stays between $1.6$ and $8.1\,\mathrm{ms}$ across the six
+refinements while the host climbs from $0.5$ to $132.6$, ending $16.4\times$
+ahead on a column where it started $3.2\times$ behind. It is silent on the
+divergent case, for which \supp{} gives narrow-phase cost against problem
+size.
 
 \subsection{Scaling with thread count}
 \label{sec:results:threads}
 
-\Cref{sec:results:scaling} varies the problem and holds the machine fixed.
-\Cref{fig:strong} holds the problem fixed, running the same four cases at one to
-seventy-two Grace cores.
-
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=\linewidth]{figures/strong-scaling.pdf}
-  \caption{Strong scaling of the host pipeline, by phase, as whole-scene totals
-    against the perfect line. The narrow phase tracks it closely; the structure
-    the broad phase builds leaves it early and plateaus around thirty-two
-    cores.}
-  \label{fig:strong}
-\end{figure}
-
-The queries scale well on both scenes, reaching $32.0\times$ on cloth-funnel and
-$30.8\times$ on armadillo-rollers at seventy-two cores, as does the narrow
-phase, at $17.0\times$ and $40.4\times$. \Cref{alg:host} is designed for this:
-lanes are filled from a per-block stack, blocks are independent, and the only
-shared state is an atomic minimum, written rarely. The spread between the two
-scenes belongs to the narrow phase: cloth-funnel resolves the fewest candidate
-pairs in the benchmark, so less work per thread is available to hide the cost of
-distributing it.
-
-Building the acceleration structure limits the scaling. It reaches $4.0\times$
-on cloth-funnel and $5.9\times$ on armadillo-rollers at thirty-two cores and no
-further, $3.5\times$ and $5.0\times$ at seventy-two, where the queries beside it
-are above $30$. A component taking $8$ to $13\%$ of the single-core time
-therefore takes $38$ to $48\%$ of it at seventy-two cores, and it holds the
-pipeline to $13.2\times$ and $24.0\times$.
-
-Three passes over every box account for the plateau, and all three are
-reductions or histograms whose parallel forms are standard: the centre-variance
-reduction that picks the two grid axes, the extent and mean reduction that sizes
-the grid of \cref{sec:bp:cell}, and the counting histogram that fills it. What
-remains once they are parallel is a floor: at seventy-two cores the structure
-pass costs about the same per case whatever that case carries, so the residue is
-a fixed cost per call and not a share of the work.
-
-Between sixty-four and seventy-two cores the curves are flat, the queries and
-the structure pass losing a few percent and the narrow phase gaining a little on
-both scenes, so the figures above do not depend on which of the two thread
-counts they are quoted at.
+\Cref{sec:results:scaling} varies the problem and holds the machine fixed;
+holding the problem fixed and varying the thread count from one to seventy-two
+Grace cores separates the phases. The queries and the narrow phase both scale
+well, the queries reaching $32.0\times$ and the narrow phase $40.4\times$ at
+seventy-two cores, which is what \cref{alg:host} is designed for: lanes are
+filled from a per-block stack, blocks are independent, and the only shared state
+is an atomic minimum, written rarely. Building the acceleration structure limits
+the pipeline: it reaches $5.9\times$ at thirty-two cores and no further, so a
+component taking $8$ to $13\%$ of the single-core time takes $38$ to $48\%$ of
+it at seventy-two and holds the whole pipeline to between $13.2\times$ and
+$24.0\times$. Three reductions and histograms over every box account for the
+plateau, and what remains once they are parallel is a fixed cost per call rather
+than a share of the work. \Supp{} gives the curves and the per-phase figures.
 
 \subsection{Trading accuracy for speed}
 \label{sec:results:relaxed}
 
-\textsc{Relaxed} accepts a box sooner (\cref{sec:np:modes}). Against
-\textsc{Tight} on the same cases it is looser at the median earliness by
-$27\times$ on armadillo-rollers, $9.21\times10^{-5}$ against
-$3.41\times10^{-6}$, and it produces far more false positives. It is as
+\textsc{Relaxed} accepts a box sooner (\cref{sec:np:modes}). It is as
 conservative as \textsc{Tight}, with zero missed and zero late, since by
 \cref{thm:conservative} a looser acceptance test reports earlier and never
-later. The false-positive cost is substantial. On rod-twist it reports
-$244{,}973$ contacts that do not exist against \textsc{Tight}'s $1{,}245$, on
-$285{,}431$ queries carrying an exact root, which is better than four in five of
-the queries it answers. On puffer-ball the figure is $27{,}380$ against $558$. A
-solver pays for each of those with a shortened step, so on those two scenes
-\textsc{Relaxed} is both slower on the host and less useful. It earns its place
-on the device, and on scenes whose contact set is small.
+later, but it is looser at the median earliness by $27\times$ on
+armadillo-rollers, $9.21\times10^{-5}$ against $3.41\times10^{-6}$, and the
+false-positive cost is substantial: on rod-twist it reports $244{,}973$ contacts
+that do not exist against \textsc{Tight}'s $1{,}245$, on $285{,}431$ queries
+carrying an exact root, and on puffer-ball $27{,}380$ against $558$. A solver
+pays for each with a shortened step, so on those two scenes \textsc{Relaxed} is
+both slower on the host and less useful; it earns its place on the device and on
+scenes whose contact set is small.
 
-The speed it buys is uneven. Accepting a box sooner also hands the next query a
-looser shared bound, so the search prunes less, and on the host that can cost
-more than the earlier acceptance saves. The accuracy cost is unconditional while
-the speed gain is conditional, and each mode is therefore reported in its own
-table.
+The speed it buys is uneven, since accepting a box sooner also hands the next
+query a looser shared bound, so the search prunes less and on the host that can
+cost more than the earlier acceptance saves. The accuracy cost is unconditional
+while the speed gain is conditional, and each mode is therefore reported in its
+own table.

@@ -94,28 +94,26 @@ origin-containment test by something that merely resembles the certified bound.
 Two such substitutions occur in practice, and both are silent.
 
 The first is to pad by the caller's distance tolerance $\tau$ in place of
-$\epsilon$. In double precision $\epsilon$ is at most $6.7\times10^{-15}$, while
-a typical tolerance is $3\times10^{-8}$. The substitution therefore changes no
-answer on any realistic input, and no benchmark detects it, yet it leaves the
-search unsound for any caller who asks for a tolerance below the error bound,
-and that is the caller who most needs the guarantee to hold. Padding by
-$\max(\tau,\epsilon)$ removes the dependence on what the caller passes. The
-second substitution is to pad by the machine epsilon itself, which for a
-bilinear query is about $30\times$ too small.
+$\epsilon$. In double precision $\epsilon$ is at most $6.7\times10^{-15}$ against
+a typical tolerance of $3\times10^{-8}$, so the substitution changes no answer on
+any realistic input and no benchmark detects it, yet it leaves the search unsound
+for the caller who asks for a tolerance below the error bound, which is the
+caller who most needs the guarantee. Padding by $\max(\tau,\epsilon)$ removes the
+dependence on what the caller passes. The second substitution is to pad by the
+machine epsilon itself, which for a bilinear query is about $30\times$ too small.
 
-Condition (iii) admits a third failure, whose symptom is the most
-counter-intuitive of the three. A depth cap that \emph{drops} an exhausted box
-misses a vertex falling straight through a stationary triangle in \emph{double}
-precision, on a query the same search resolves in single precision. In double
-the box goes on subdividing until the cap fires, and the cap then discards it.
-Exhaustion has to accept.
+Condition (iii) admits a third failure, whose symptom is counter-intuitive: a
+depth cap that \emph{drops} an exhausted box misses a vertex falling straight
+through a stationary triangle in \emph{double} precision, on a query the same
+search resolves in single precision, because in double the box goes on
+subdividing until the cap fires and the cap then discards it. Exhaustion has to
+accept.
 
-Taken together, the three consequences make \cref{thm:conservative} usable as a
-checklist, reducing the conservativeness of an implementation to three local
-questions that are the same for whatever search is being examined: whether the
+Taken together the three consequences make \cref{thm:conservative} usable as a
+checklist, reducing conservativeness to three local questions: whether the
 rejection test pads by the certified bound or by something that merely resembles
 it; whether acceptance reports the box's $t$ lower bound; and whether a box is
 accepted, and not dropped, on depth, resolution or queue exhaustion. If all
-three hold, the kernel is conservative however loose or tight its acceptance
-test is, and any measured violation points at one of the three and not at the
+three hold the kernel is conservative however loose or tight its acceptance test
+is, and any measured violation points at one of the three and not at the
 algorithm.

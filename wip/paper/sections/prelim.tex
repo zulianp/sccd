@@ -148,12 +148,10 @@ the reference. The same two caps are compiled into the device kernels, so both
 processors stop in the same place.
 
 Together, \cref{eq:hull,eq:err,eq:tol} fix what an implementation of this family
-can promise. Following \citet{wang2021tight}, an implementation is \emph{exact}
-if it reports a collision if and only if one occurs, \emph{conservative}
-(\cref{def:conservative}) if it never misses one and never reports late, and
-\emph{approximate} otherwise. Exactness is not attainable at simulation speed,
-whereas conservativeness is, at the price of false positives, which
-\cref{sec:results} reports per scene as the cost they are.
+can promise. Exactness is not attainable at simulation speed, whereas
+conservativeness in the sense of \cref{def:conservative} is, at the price of
+false positives, which \cref{sec:results} reports per scene as the cost they
+are.
 
 Deciding a query costs far more than deciding whether it is worth asking, so the
 pipeline applies the cheaper test first. \Cref{sec:bp} describes that filter,

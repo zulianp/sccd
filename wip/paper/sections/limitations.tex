@@ -26,18 +26,15 @@ $4.6\times10^{-5}$. An accuracy claim tighter than that, made on the mesh path,
 measures the rounding and not the search.
 
 Deliberately inflicting that rounding shows the size of its effect. On the same
-$98{,}757$ armadillo-rollers edge-edge queries, \textsc{Tight} reports no missed
-collision and no late time of impact on the shipped double-precision geometry.
-Once the input is first rounded through single precision, it reports $4$ missed
-and $25{,}485$ late. A control settles where the fault lies: a host kernel
-bit-identical to TightInclusion, already computing in double, reports zero late
-on the shipped geometry and $4{,}543$ late under the same treatment. The cause
-is the input rounding and not either kernel. Single-precision-geometry runs are
-therefore reported separately and never gate the build, and the comparison is
+$98{,}757$ armadillo-rollers edge-edge queries, \textsc{Tight} reports nothing
+missed and nothing late on the shipped double-precision geometry, and $4$ missed
+and $25{,}485$ late once the input is first rounded through single precision. A
+control settles where the fault lies: a host kernel bit-identical to
+TightInclusion, already computing in double, reports $4{,}543$ late under the
+same treatment. The cause is the input rounding and not either kernel, which is
 the empirical form of the argument in \cref{sec:parallel:precision}.
-\textsc{Tight} is hurt about fourteen times more than \textsc{Relaxed} here
-\emph{because} it reports closer to the true root: a perturbed root crosses a
-tight answer far more often than it crosses a loose one.
+Single-precision-geometry runs are therefore reported separately and never gate
+the build.
 
 \subsection{What a measurement establishes}
 
@@ -64,13 +61,11 @@ defect surfacing in about two runs in five is invisible to a spot check and
 survives a benchmark that reports only agreement; separating it from noise takes
 a signed comparison against exact roots, run over every query and repeated.
 
-A last caveat concerns the timings, not the answers. The driver does more per
-case than the pipeline does: it loads the frame, classifies every candidate pair
-against the expected set, and compares every answer against an exact root. A
-case costs between $0.7$ and $3.3\,\mathrm{s}$ of wall clock across the six
-scenes, against measured work of a few tens of milliseconds. The timers exclude
-all of it, so the figures are sound as timings, although the harness remains no
-model of what the pipeline costs inside a solver.
+A last caveat concerns the timings. The driver does far more per case than the
+pipeline does, a case costing between $0.7$ and $3.3\,\mathrm{s}$ of wall clock
+against measured work of a few tens of milliseconds. The timers exclude all of
+it, so the figures are sound as timings, although the harness is no model of
+what the pipeline costs inside a solver.
 
 \subsection{What was not measured}
 
@@ -88,32 +83,20 @@ scene in this benchmark is a triangle mesh, and the error constant of
 for that path is correctness against a densely sampled reference root, and
 nothing about its speed or its accuracy at scale.
 
-Most consequentially, the closest prior work is cited and not measured against.
-\citet{belgrod2025toi} evaluate a GPU CCD pipeline on these six scenes against
-this ground truth, and theirs, not TightInclusion, is the state of the art in
-\emph{parallel} CCD. TightInclusion answers the question this paper puts first,
-which is whether the answer is right and how close it falls to the exact root,
-and it answers that as a certified reference running unmodified on the same
-hardware. The remaining question, whether this parallel design is faster than
-that parallel design, is left open. Settling it requires building that pipeline
-on \textsc{GH200}, matching the two on tolerance, depth cap and output mode so
-the searches do comparable work, and timing both inside one allocation. Until
-then the speedups of \cref{sec:results:ref} are margins over a host reference
-and not over prior parallel work.
+Most consequentially, our accuracy comparison is against TightInclusion, which
+answers the question this paper puts first, whether the answer is right and how
+close it falls to the exact root, as a certified reference running unmodified on
+the same hardware. The speedups of \cref{sec:results:ref} are therefore margins
+over a host reference and not over prior parallel work.
 
-The counter measurements of \cref{sec:parallel:limits} are narrower than the
-timings they explain. They cover all six scenes, but only one narrow-phase mode
-and only the earliest-impact kernel. The device figures are taken under a
-profiler that serialises launches, so they support statements about ratios and
-none about absolute time. The Grace rows are whole-process counters and not
-per-phase ones. The pipeline row comes from a build with the device path
-compiled out, so it is host work throughout. The narrow-phase row comes from the
-oracle, which also drives the device modes, so its instruction rate is a floor
-and not an estimate. These counters establish which resource each processor is
-short of, a coarser claim than a per-phase model would make.
+The counter measurements reported in \supp{} are narrower than the timings they
+explain: they cover one narrow-phase mode and one kernel, and the device figures
+are taken under a profiler that serialises launches, so they support statements
+about ratios and none about absolute time. They establish which resource each
+processor is short of, a coarser claim than a per-phase model would make, and
+the supplement states the remaining caveats.
 
-Beyond the pipeline itself, three things are absent. There is no
-minimum-separation CCD, which solvers in the barrier family generally want, and
-no multi-GPU execution. Nor is there any measurement inside a solver, so the
-end-to-end benefit of the speedups reported here is inferred and not
-established.
+Beyond the pipeline itself, there is no minimum-separation CCD, which solvers in
+the barrier family generally want, no multi-GPU execution, and no measurement
+inside a solver, so the end-to-end benefit of the speedups reported here is
+inferred and not established.

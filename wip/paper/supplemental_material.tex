@@ -1,0 +1,225 @@
+\input{preamble}
+
+% Cross-document references into the paper, so a \cref here that names a section
+% or an algorithm of the article resolves to the number the article gave it.
+% Needs main.aux present, which `make supplemental` guarantees by building the
+% article first.
+\usepackage{xr-hyper}
+\externaldocument{main}
+
+\headertitle{Supplemental material}
+\preprintmark{\textsc{Supplemental material}}
+
+\title{Supplemental material for\\
+       \emph{A Conservative Continuous Collision Detection Pipeline\\
+       for Triangle and Quad Meshes on CPU and GPU}}
+
+\author{%
+  Patrick Zulian
+  \and David Belgrod
+  \and Bolun Wang
+  \and Zachary Ferguson
+  \and Xin Zhao
+  \and Marco Attene
+  \and Daniele Panozzo
+  \and Teseo Schneider%
+}
+
+\date{\today}
+
+\begin{document}
+\maketitle
+
+This document holds the per-scene tables and the hardware-counter study that
+support the article. Section and algorithm numbers prefixed with the article's
+numbering refer to it. Nothing here is a separate experiment: every number comes
+from the runs the article reports, and the regeneration commands are the ones
+recorded in its availability section.
+
+\tableofcontents
+
+\input{sections/supp-counters}
+
+\section{Device stack capacity}
+\label{sec:supp:stackcap}
+
+The per-block shared stack of \cref{alg:device} is deliberately small, so that
+a heavy query spills early into the global queue and the next launch spreads it
+over every block. \Cref{tab:stackcap} measures the effect.
+
+\begin{table}[htbp]
+  \centering
+  \caption{Device narrow-phase time against per-block shared stack capacity,
+    \textsc{Tight}, summed over $16$ cases per scene on \textsc{GH200}. False positives and
+    false negatives are identical at every capacity, so this is a scheduling
+    result. At $64$ entries the stack is $3{,}584$ bytes per block
+    against $57{,}376$ at $1024$. The kernel is register-limited to two blocks
+    per multiprocessor at both capacities, so the smaller stack buys balance.}
+  \label{tab:stackcap}
+  \begin{tabular}{lrrr}
+    \toprule
+    scene & cap $1024$ & cap $256$ & cap $64$ \\
+    \midrule
+    cloth-funnel      & 4059.2 ms & 198.2 ms & \textbf{37.2 ms} \\
+    armadillo-rollers & 3133.7 ms & 277.2 ms & \textbf{75.8 ms} \\
+    cloth-ball        &  129.8 ms & 110.2 ms & \textbf{105.9 ms} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Per-scene cost}
+\label{sec:supp:cost}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{figures/runtime-breakdown.pdf}
+  \caption{Whole-scene totals split into BP full and NP EToI, as a share of each
+    processor's total. The BP bar is shaded into BP prep, the structure it
+    builds, and BP queries over it. BP full dominates on the host, and within it
+    BP prep.}
+  \label{fig:breakdown}
+\end{figure}
+
+\Cref{fig:breakdown} splits the whole-scene totals by phase,
+\cref{tab:per-frame} gives their per-step form,
+\cref{tab:throughput} states the same comparison as a rate, and
+\cref{tab:scaling} is the refinement study. \Cref{fig:perframe,fig:grid} give
+the distributions behind the medians, and \cref{fig:percase} narrow-phase cost
+against problem size.
+
+\input{generated/tables/tab-per-frame}
+
+\input{generated/tables/tab-throughput}
+
+\input{generated/tables/tab-scaling}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{figures/per-frame.pdf}
+  \caption{Per-frame cost of the whole pipeline, BP full plus NP EToI, in
+    milliseconds for one simulation step, both query types together, against
+    frame index. On cloth-funnel the device is behind for most of the
+    trajectory, so its deficit is a standing gap and not a few expensive frames;
+    on rod-twist the cost climbs steadily on both processors as the rod winds
+    up, so the median understates the end of the simulation.}
+  \label{fig:perframe}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{figures/results-grid.pdf}
+  \caption{Per-case distributions over the six scenes, BP full above and NP
+    EToI below. Each row shares one logarithmic scale, so a box is comparable
+    across scenes as well as within one. Each box spans the first to the third
+    quartile with the median inside, whiskers reach the furthest case within
+    $1.5$ interquartile ranges, and cases beyond are drawn individually.
+    Broad-phase time is tight around its median; narrow-phase time is skewed by
+    a long upper tail.}
+  \label{fig:grid}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.78\linewidth]{figures/narrow-per-case.pdf}
+  \caption{Per-case narrow-phase time against the number of candidate pairs in
+    that case, over every case of every scene.}
+  \label{fig:percase}
+\end{figure}
+
+\section{Scaling with thread count}
+\label{sec:supp:threads}
+
+\Cref{fig:strong} runs the same four cases at one to seventy-two Grace cores.
+The queries scale well on both scenes, reaching $32.0\times$ on cloth-funnel and
+$30.8\times$ on armadillo-rollers at seventy-two cores, as does the narrow
+phase, at $17.0\times$ and $40.4\times$. Building the acceleration structure
+limits the scaling: it reaches $4.0\times$ on cloth-funnel and $5.9\times$ on
+armadillo-rollers at thirty-two cores and no further, $3.5\times$ and
+$5.0\times$ at seventy-two, where the queries beside it are above $30$. A
+component taking $8$ to $13\%$ of the single-core time therefore takes $38$ to
+$48\%$ of it at seventy-two cores, and it holds the pipeline to $13.2\times$ and
+$24.0\times$.
+
+Three passes over every box account for the plateau, and all three are
+reductions or histograms whose parallel forms are standard: the centre-variance
+reduction that picks the two grid axes, the extent and mean reduction that sizes
+the grid, and the counting histogram that fills it. What remains once they are
+parallel is a floor: at seventy-two cores the structure pass costs about the
+same per case whatever that case carries, so the residue is a fixed cost per
+call and not a share of the work.
+
+Between sixty-four and seventy-two cores the curves are flat, the queries and
+the structure pass losing a few percent and the narrow phase gaining a little on
+both scenes, so the figures above do not depend on which of the two thread
+counts they are quoted at.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{figures/strong-scaling.pdf}
+  \caption{Strong scaling of the host pipeline, by phase, as whole-scene totals
+    against the perfect line. The narrow phase tracks it closely; the structure
+    the broad phase builds leaves it early and plateaus around thirty-two
+    cores.}
+  \label{fig:strong}
+\end{figure}
+
+\section{The competitor comparisons, per scene}
+\label{sec:supp:competitors}
+
+\Cref{tab:competitor-earliest,tab:competitor-pair} carry the per-scene numbers
+the article summarises. Beyond the cost columns they hold the accuracy columns:
+the earliness statistics, the count of steps answered after the root, and the
+false positives.
+
+\input{generated/tables/tab-competitor-earliest}
+
+\input{generated/tables/tab-competitor-pair}
+
+\Cref{fig:bpvs} compares the device broad phases step by step. Summed over the
+benchmark ours costs $40.3\,\mathrm{s}$ against $312.6\,\mathrm{s}$, and the
+margin is a standing one: on puffer-ball, the scene with the most candidate
+pairs, it is $21.9\,\mathrm{s}$ against $226.8$. Drawing both of our strategies
+separates what the implementation earns from what the choice of algorithm earns.
+On n-body the two differ: our sweep is the slower broad phase there,
+$7.5\,\mathrm{s}$ against Scalable CCD's $6.3$, while our cell list takes the
+scene at $4.5$. On cloth-funnel our two strategies are within $18\%$ of each
+other and both are far ahead, so the $5.4\times$ against Scalable CCD is
+attributable to the implementation.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{figures/broad-vs-scalable.pdf}
+  \caption{Device BP full against Scalable CCD's, step by step, the
+    acceleration structure and the queries over it added, in milliseconds for
+    one step, both query types together. All three curves come from one
+    comparison run, so they are measured in one allocation. Both of our
+    strategies are drawn, since the choice between them accounts for part
+    of the difference.}
+  \label{fig:bpvs}
+\end{figure}
+
+\section{The race in Scalable CCD's subdivision buffer}
+\label{sec:supp:race}
+
+The article reports that Scalable CCD answers after the true root on three
+scenes. The cause is a race in its subdivision buffer, whose overflow check
+tests that the buffer is full and then advances the tail as two separate
+operations, so that concurrent pushes can wrap the tail onto domains that have
+not been processed yet with no overflow flagged. Three observations identify it.
+Padding a query list with pairs that fail their first inclusion test, which
+changes nothing but the length of the list and hence the size the buffer is
+given, turns $0$ of $1{,}299$ contacts found at one step into all $1{,}299$. The
+answer differs between identical runs. A copy of the library whose overflow
+check is made race-free finds every one of the $54{,}664$ curated contacts of
+armadillo's first $400$ cases with nothing missed and nothing late. The article
+reports the library as published; the patched copy is diagnosis only.
+
+The set of affected scenes supports that reading. The buffer is sized from the
+number of queries it is handed, so a short candidate list gives a small buffer:
+the three scenes it fails are the three with the fewest candidate pairs per step,
+and the three it answers correctly are those with millions.
+
+\bibliographystyle{plainnat}
+\bibliography{refs}
+
+\end{document}

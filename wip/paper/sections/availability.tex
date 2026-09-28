@@ -18,25 +18,18 @@ oracle are opt-in CMake options; the oracle is a validation tool and not a
 performance option.
 
 Every table and figure in \cref{sec:results} is generated from a published
-measurement file by a published script. The table sources of this article come
-from the same code that produces the software's own benchmark reports, so each
-figure has a single origin. The regeneration command is recorded next to the
-tables, and a \verb|--check| mode re-derives the documents from the data and
-returns non-zero if they no longer match.
+measurement file by a published script, from the same code that produces the
+software's own benchmark reports, so each figure has a single origin. The
+regeneration command is recorded next to the tables, and a \verb|--check| mode
+re-derives the documents from the data and returns non-zero if they no longer
+match. The hardware counters reported in \supp{} are collected by
+\texttt{benchmark/scripts/profile.sbatch.sh} and their raw output is published
+under \texttt{benchmark/results/profile/}, so no counter is transcribed by hand.
 
-The counters of \cref{sec:parallel:limits} are collected by
-\texttt{benchmark/scripts/profile.sbatch.sh}, one job that runs Nsight Compute
-over the device search kernel and \texttt{perf stat} over the host. Their raw
-output is published under \texttt{benchmark/results/profile/}, and
-\cref{tab:counters} is generated from those files by a script in the article's
-own directory, so no counter in it is transcribed by hand. Profiling changes no
-result and gates nothing.
-
-The benchmark scenes, the curated query sets and the exact symbolic roots are the
-time-of-impact dataset of \citet{belgrod2025toi}, obtained from the NYU Faculty
-Digital Archive~\citep{nyuccd}. We are grateful to its authors for producing
-ground truth at this scale, without which none of the accuracy claims in this
-paper could be made. TightInclusion~\citep{wang2021tight}, as distributed in the
-IPC Toolkit~\citep{ipctoolkit}, is used exactly as released and is never
-modified. Fairness in the comparison of \cref{sec:results:ref} is bought by
-changing our harness to match its configuration, never the other way round.
+The benchmark scenes, the curated query sets and the exact symbolic roots are
+the time-of-impact dataset of \citet{belgrod2025toi}, obtained from the NYU
+Faculty Digital Archive~\citep{nyuccd}. TightInclusion~\citep{wang2021tight}, as
+distributed in the IPC Toolkit~\citep{ipctoolkit}, is used exactly as released
+and is never modified: fairness in the comparison of \cref{sec:results:ref} is
+bought by changing our harness to match its configuration, never the other way
+round.

@@ -1,39 +1,32 @@
 \section{Parallel implementation}
 \label{sec:parallel}
 
-\Cref{prop:order} establishes that the search may be explored in any order. The
-two narrow-phase implementations use that freedom in opposite directions: on the
-host, vector lanes are filled with work drawn from unrelated queries
+\Cref{prop:order} lets the search be explored in any order, and the two
+narrow-phase implementations use that freedom in opposite directions: on the
+host, vector lanes are filled with work from unrelated queries
 (\cref{alg:host}); on the device, work is moved \emph{out} of the block that
 generated it (\cref{alg:device}). The broad phase needs no equivalent treatment,
 since its parallelism is already the outermost loop of
 \cref{alg:cell,alg:cellmin} and its count-then-fill output carries no
-contention. Both narrow-phase designs respond to the same property of the
-problem.
-
-The cost of a CCD query is heavy-tailed. \Cref{tab:difficulty} counts, for one
-scene, how many boxes each query needed. Most queries are decided by a single
-box and a small number need millions. Any parallel design that pins a query to
-a fixed execution resource is therefore load-imbalanced by construction, and the
-imbalance is not a factor of two.
-
-The design responds to the host column. The device column sets the size of the
-tail a work list has to survive, the subject of \cref{sec:parallel:device}; it
-predates the redesign it motivated and it aggregates two code paths, so we draw
-no host-versus-device conclusion from it.
-\Cref{sec:results:proc} makes that comparison under controlled conditions.
+contention. Both narrow-phase designs answer the same property of the problem:
+CCD query cost is heavy-tailed. \Cref{tab:difficulty} counts, for one scene, the
+boxes each query needed; most are decided by a single box and a few need
+millions, so any design that pins a query to a fixed execution resource is
+load-imbalanced by construction, and not by a factor of two. The design responds
+to the host column; the device column sets the size of the tail a work list must
+survive (\cref{sec:parallel:device}), but it predates that redesign and
+aggregates two code paths, so it supports no host-versus-device conclusion,
+which \cref{sec:results:proc} makes under controlled conditions.
 
 \begin{table}[htbp]
   \centering
-  \caption{Boxes required per query on cloth-funnel, counted over all
-    $881{,}694$ queries of the scene, \textsc{Tight}. In the host column, which
-    motivates the design, most queries are settled by a single box, a handful
-    need tens of thousands, and the two populations are four orders of magnitude
-    apart. The device column indicates the size of the tail a work list has to
-    absorb; \cref{sec:results:proc} makes the like-for-like comparison. It was
-    measured before the redesign of \cref{sec:parallel:device}, and it
-    aggregates two device code paths, of which $274$ queries on one of them
-    account for $88\%$ of the boxes counted.}
+  \caption{Boxes required per query on cloth-funnel over all $881{,}694$ queries
+    of the scene, \textsc{Tight}. In the host column most queries are settled by
+    a single box and a handful need tens of thousands, four orders of magnitude
+    apart; the device column indicates the tail a work list has to absorb, with
+    \cref{sec:results:proc} making the like-for-like comparison. It was measured
+    before the redesign of \cref{sec:parallel:device} and aggregates two device
+    code paths, of which $274$ queries on one account for $88\%$ of the boxes.}
   \label{tab:difficulty}
   \begin{tabular}{lrr}
     \toprule
@@ -58,6 +51,7 @@ no host-versus-device conclusion from it.
 \caption{Host narrow phase. Lanes hold boxes from different queries, which
 \cref{prop:order} permits. $V$ is the vector width and $D$ the depth cap.}
 \label{alg:host}
+\footnotesize
 \begin{algorithmic}[1]
 \Function{HostNarrowPhase}{candidates $\Cand$}
   \ForAll{blocks $Q$ of $V$ consecutive queries \textbf{in parallel}}
@@ -107,65 +101,55 @@ no host-versus-device conclusion from it.
 \end{algorithmic}
 \end{algorithm}
 
-By \cref{tab:difficulty}, a per-query SIMD kernel would spend most of its lanes
-idle. The \textsc{Tight} host kernel of \cref{alg:host} therefore treats the
-\emph{box} as the unit of work and keeps a vector of $V$ lanes ($V=8$ on
-AVX-512 and AVX2, $4$ on NEON). Each lane holds a box that may belong to a
-different query, and a lane whose box is decided is refilled from a shared
-stack, reloading that lane's geometry only when the query changes.
-\Cref{prop:order} makes this legal: since the answer does not depend on the
-order in which the tree is walked, lanes need not agree about which query they
-are working on.
-
-Two design decisions follow from that and carry most of the performance.
+By \cref{tab:difficulty}, a per-query SIMD kernel would leave most lanes idle, so
+the \textsc{Tight} host kernel of \cref{alg:host} takes the \emph{box} as the
+unit of work across a vector of $V$ lanes ($V=8$ on AVX-512 and AVX2, $4$ on
+NEON). A lane holds a box that may belong to any query and is refilled from a
+shared stack once its box is decided, reloading geometry only on a query change;
+\cref{prop:order} makes this legal, since the answer is independent of the walk
+order. Two design decisions carry most of the performance.
 
 \emph{Each box stores the value of $\Fdiff$ at its eight corners.} A bisection
-splits a box at a mid-face, so the two children share that face and each
-inherits its outer face from the parent. A split therefore evaluates four
-mid-face corners, where a split without inheritance evaluates eight for each of
-two children, a fourfold reduction in the operation that dominates the kernel.
-The cost is $3\times8$ scalars carried per live box, which is cheap relative to
-what it saves.
+splits at a mid-face, so the children share that face and each inherits its
+outer face from the parent: a split evaluates four corners where one without
+inheritance evaluates eight per child, a fourfold reduction in the operation
+that dominates the kernel, for a cheap $3\times8$ scalars carried per live box.
 
-\emph{Geometry is replicated per lane.} Because lanes hold different queries,
-indexing the geometry by a lane's query would make every corner evaluation a
-gather. Copying the $30$ values a lane needs when it is refilled turns the inner
-loop into contiguous loads, and a refill is far cheaper than the $24$ corner
-evaluations it feeds.
+\emph{Geometry is replicated per lane.} Since lanes hold different queries,
+indexing geometry by a lane's query would make every corner evaluation a gather;
+copying the $30$ values a lane needs on refill gives contiguous loads, and a
+refill costs far less than the $24$ corner evaluations it feeds.
 
-The iteration then has three phases. \emph{Classify} decides every lane's fate
-from bounds the lane already carries and evaluates nothing. \emph{Evaluate}
-lays out the mid-face corner parameters of every lane and performs one flat
-vector sweep, even though different lanes are splitting different axes; lanes
-that are not splitting are predicated out, and since about half the lanes split
-on a given iteration this removes roughly a quarter of the kernel's total work.
-\emph{Assemble} pushes the upper child to the stack and keeps the \emph{lower}
-child in the lane. Each lane is therefore depth-first in $t$, so the running
-minimum converges sooner and prunes harder, and the arrangement also halves the
-stack traffic and skips a refill.
+The iteration has three phases. \emph{Classify} decides every lane's fate from
+bounds it already carries and evaluates nothing. \emph{Evaluate} lays out every
+lane's mid-face corner parameters and performs one flat vector sweep even though
+lanes split different axes, predicating out those not splitting; about half
+split per iteration, so this removes roughly a quarter of the kernel's total
+work. \emph{Assemble} pushes the upper child to the stack and keeps the
+\emph{lower} child in the lane, so each lane is depth-first in $t$: the running
+minimum converges sooner and prunes harder, stack traffic halves, and a refill
+is skipped.
 
-The two query types peak at different lane widths. A vertex-face corner costs
-one more multiply-add and one more subtraction than an edge-edge corner, so its
-vector sweeps take longer to amortise the per-lane scalar work between them, and
-it peaks narrower. On NEON, over the whole scene, narrowing vertex-face from
-four lanes to two moves it from $297.7$ to $246.0\,\mathrm{ms}$, and widening
-edge-edge from two to four moves it from $599.9$ to $494.6\,\mathrm{ms}$, while
-eight and sixteen lanes are worse for both. The x86 widths quoted above follow
-from the same operation count and have not been measured.
-
-A measurement caveat attaches to those figures and generalises beyond this
-kernel: the two query types must be timed in separate processes. Timed
-together, the edge-edge figure varies by about $20\%$ with the lane width chosen
-for the \emph{vertex-face} instantiation, which the measurement never executes.
-The effect is one of code layout and not of work, and it is large enough to
-manufacture or conceal a difference of the size reported here.
+The two query types peak at different lane widths, since a vertex-face corner
+costs one more multiply-add and one more subtraction than an edge-edge corner,
+so its sweeps take longer to amortise the per-lane scalar work between them. On
+NEON, over the whole scene, narrowing vertex-face from four lanes to two moves
+it from $297.7$ to $246.0\,\mathrm{ms}$ and widening edge-edge from two to four
+moves it from $599.9$ to $494.6\,\mathrm{ms}$, while eight and sixteen lanes are
+worse for both; the x86 widths above follow from the same operation count and
+have not been measured. A caveat generalises beyond this kernel: the two types
+must be timed in separate processes, since timed together the edge-edge figure
+varies by about $20\%$ with the lane width chosen for the \emph{vertex-face}
+instantiation, which the measurement never executes. The effect is one of code
+layout, not of work, and is large enough to manufacture or conceal a difference
+of the size reported here.
 
 \subsection{Device: a small stack, and a queue that redistributes}
 \label{sec:parallel:device}
 
 \begin{figure}[htbp]
   \centering
-  \input{tikz/gpu-workflow}
+  \resizebox{0.82\linewidth}{!}{\input{tikz/gpu-workflow}}
   \caption{The device narrow phase. Each block keeps a small stack in shared
     memory and spills the rest into one half of a double-buffered global queue;
     a launch writes one half and reads the other, so a producer and its consumer
@@ -180,6 +164,7 @@ manufacture or conceal a difference of the size reported here.
 was given, and a host loop that relaunches it on what it spilled. $S$ is the per-block shared stack ($64$ entries) and $G$ the
 double-buffered global queue.}
 \label{alg:device}
+\footnotesize
 \begin{algorithmic}[1]
 \Function{Kernel}{read buffer $G_{\mathrm{in}}$, write buffer $G_{\mathrm{out}}$}
   \State thread $t$ takes one box: its own query's root, or one entry of
@@ -224,90 +209,62 @@ double-buffered global queue.}
 \end{algorithmic}
 \end{algorithm}
 
-The device kernel runs one thread per query. \Cref{fig:gpu-workflow} gives its
-shape and \cref{alg:device} gives it in full. Three decisions determine its
-behaviour, and in each of them the straightforward alternative fails.
+The device kernel runs one thread per query, with its shape in
+\cref{fig:gpu-workflow} and its full form in \cref{alg:device}. In each of the
+three decisions below the straightforward alternative fails.
 
 \paragraph{The global queue.} The queue is double-buffered: a launch reads one
-buffer and
-writes the other, never both, so there is no producer--consumer handshake and
-nothing spins. A single shared buffer, in which writers spin on a
-compare-and-swap until a reader releases the slot, is invisible while the queue
-is lightly used and \emph{hangs the kernel} once the queue is driven hard, the
-condition created by using it to balance load. Separating the buffers removes
-the interaction outright.
+buffer and writes the other, never both, so there is no producer--consumer
+handshake and nothing spins. A single shared buffer, whose writers spin on a
+compare-and-swap until a reader releases the slot, \emph{hangs the kernel} once
+the queue is driven hard, which is exactly the condition load balancing creates.
 
-\paragraph{The shared stack.} The shared stack is deliberately small. The
-per-block stack is where
-a query's subtree lives, so a large one keeps a heavy query inside the block
-that seeded it. By \cref{tab:difficulty}, one block can work through a
+\paragraph{The shared stack.} The shared stack is deliberately small, since it
+is where a query's subtree lives and a large one keeps a heavy query inside the
+block that seeded it: by \cref{tab:difficulty}, one block can work through a
 $19.7$-million-box query while its neighbours finish and idle. Spilling early
-hands those boxes to the global queue, and the next launch spreads them over
-every block. \Cref{tab:stackcap} measures the effect.
+hands those boxes to the global queue for the next launch to spread over every
+block. \Supp{} measures the effect: on cloth-funnel the device narrow phase
+falls from $4059.2$ to $37.2\,\mathrm{ms}$ as the per-block capacity drops from
+$1024$ to $64$ entries, with false positives and negatives identical at every
+capacity, so this is a scheduling result.
 
-\begin{table}[htbp]
-  \centering
-  \caption{Device narrow-phase time against per-block shared stack capacity,
-    \textsc{Tight}, summed over $16$ cases per scene on \textsc{GH200}. False positives and
-    false negatives are identical at every capacity, so this is a scheduling
-    result. At $64$ entries the stack is $3{,}584$ bytes per block
-    against $57{,}376$ at $1024$. The kernel is register-limited to two blocks
-    per multiprocessor at both capacities, so the smaller stack buys balance.}
-  \label{tab:stackcap}
-  \begin{tabular}{lrrr}
-    \toprule
-    scene & cap $1024$ & cap $256$ & cap $64$ \\
-    \midrule
-    cloth-funnel      & 4059.2 ms & 198.2 ms & \textbf{37.2 ms} \\
-    armadillo-rollers & 3133.7 ms & 277.2 ms & \textbf{75.8 ms} \\
-    cloth-ball        &  129.8 ms & 110.2 ms & \textbf{105.9 ms} \\
-    \bottomrule
-  \end{tabular}
-\end{table}
-
-\paragraph{Overflow handling.} A box that does not fit in the
-global queue is counted and discarded, which is safe since dropping a box can
-only leave the reported time of impact earlier than the truth, never later
+\paragraph{Overflow handling.} A box that does not fit in the global queue is
+counted and discarded, which is safe since dropping a box can only leave the
+reported time of impact earlier than the truth, never later
 (\cref{sec:guarantee}). The host reads the deficit, grows the queue and re-runs
-the batch, keeping the times of impact found so far so that later attempts prune
-harder. The retry is bounded at $32$ rounds, since giving up keeps the result
-conservative whereas spinning does not keep it finite.
+the batch, keeping the times of impact found so far so later attempts prune
+harder; the retry is bounded at $32$ rounds, since giving up stays conservative
+whereas spinning is not finite.
 
-Two smaller decisions were also settled by measurement. The first is how often
-the running minimum is re-read from global memory, and it is re-read on
-\emph{every} iteration. Refreshing every 4th, 16th, 64th or 256th iteration was
-monotonically worse on all three scenes tested, a whole-scene $638 \to
-3377\,\mathrm{ms}$ on cloth-funnel at 256, because the pruning a fresh bound
-buys exceeds what the atomic costs. The second is the unit of work. One thread
-per query beat one block per query by $4.47\times$, $2.76\times$ and
-$4.43\times$ on the three scenes, because the block-per-query kernel was bound
-by \emph{scheduling blocks} and not by the search: $843{,}414$ blocks each
-classifying $63$ boxes across $128$ threads is half a box per thread.
-
-The device broad phase is a more conventional port: count, prefix sum and
-scatter, with a radix sort and a device scan from CUB~\citep{cub} replacing
-their host equivalents, one box per thread, and a scalar inner loop where the
-host uses its $32$-lane mask. Its shape suits a GPU, since no part of it walks
-a window sequentially.
+Two smaller decisions were settled by measurement: the running minimum is
+re-read from global memory on \emph{every} iteration, since refreshing less
+often was monotonically worse on all three scenes tested, the pruning a fresh
+bound buys exceeding what the atomic costs; and the unit of work is one thread
+per query, which beat one block per query by between $2.76\times$ and
+$4.43\times$, because the block-per-query kernel was bound by \emph{scheduling
+blocks} and not by the search. The device broad phase is a more conventional
+port: count, prefix sum and scatter, with a radix sort and a device scan from
+CUB~\citep{cub} for their host equivalents, one box per thread, and a scalar
+inner loop where the host uses its $32$-lane mask. Its shape suits a GPU, since
+no part of it walks a window sequentially.
 
 \subsection{Precision}
 \label{sec:parallel:precision}
 
-Both narrow phases compute in double precision internally, regardless of the
-type the caller stores geometry in, and this is a requirement of the method.
-With single-precision arithmetic the certified bound of \cref{eq:err} and the
-tolerances of \cref{eq:tol} sit too close together for the search to retain its
-guarantee. The single-precision device kernel reported nine times of impact
-\emph{later} than the true root on armadillo-rollers, which violates
-\cref{def:conservative}.
+Both narrow phases compute in double precision internally whatever type the
+caller stores geometry in, and this is a requirement of the method: in single
+precision the certified bound of \cref{eq:err} and the tolerances of
+\cref{eq:tol} sit too close together for the search to keep its guarantee, and
+the single-precision device kernel reported nine times of impact \emph{later}
+than the true root on armadillo-rollers, violating \cref{def:conservative}.
 
-The interface remains templated on the storage type, so a caller with float
-geometry keeps float buffers. Widening on load is exact and needs no care,
-whereas narrowing the computed time of impact back to float does.
-Round-to-nearest can round \emph{up}, publishing a value later than the one the
-search proved, so the narrowing rounds toward $-\infty$. Reporting earlier is
-always safe, and reporting later is the failure the whole design exists to
-prevent.
+The interface stays templated on the storage type, so a caller with float
+geometry keeps float buffers. Widening on load is exact, whereas narrowing the
+computed time of impact back to float is not: round-to-nearest can round
+\emph{up}, publishing a value later than the one the search proved, so the
+narrowing rounds toward $-\infty$. Reporting earlier is always safe; reporting
+later is the failure the whole design exists to prevent.
 
 \subsection{Why the work divides the way it does}
 \label{sec:parallel:why}
@@ -315,176 +272,23 @@ prevent.
 \Cref{tab:difficulty} shows the device exploring many more boxes than the host on
 the same queries, and \cref{sec:results:proc} shows the device narrow phase
 losing to the host on four of six scenes. Both have the same two structural
-causes, and neither is a property of the hardware.
+causes, neither a property of the hardware. The device re-evaluates all eight
+corners of both children at every split, where the host inherits four from the
+parent (\cref{sec:parallel:host}), a factor on the dominant operation paid on
+every box.
 
-First, the device re-evaluates all eight corners of both children at every
-split, where the host inherits four of them from the parent
-(\cref{sec:parallel:host}). That factor applies to the dominant operation and is
-paid on every box.
+The bound a box is pruned against is also probably sharper on the host at the
+moment it is needed, a candidate explanation and not an established one: host
+lanes descend depth-first in $t$ and publish continuously, so a query benefits
+from its neighbours' progress almost immediately, whereas the device walks a far
+wider frontier at any instant. The alternatives are easier to rule out than this
+explanation is to confirm, since the seeding would show on the easy queries too,
+and the acceptance test, the tolerances and the split rule are all transcribed
+from the host and would shift the whole distribution uniformly, whereas the
+measurement shows a stretched tail. Establishing the remaining explanation
+requires a single hard query traced box by box, which we have not done.
 
-Second, the bound a box is pruned against is probably sharper on the host at the
-moment it is needed; this is a candidate explanation and not an established one.
-Host lanes descend depth-first in $t$ and publish continuously, so a query
-benefits from its neighbours' progress almost immediately, whereas the device
-walks a far wider frontier at any instant. The alternatives are easier to rule
-out than this explanation is to confirm. The seeding is not responsible, since
-it would show on the easy queries too. Neither the acceptance test, the
-tolerances nor the split rule can be responsible either, since all three are
-transcribed from the host and would shift the whole distribution uniformly,
-whereas the measurement shows a stretched tail. Establishing the remaining
-explanation requires a single hard query traced box by box, which we have not
-done.
-
-The broad phase inverts both arguments, since it has no sequential dependence
-and no shared bound to lose. The GPU accordingly wins that phase on all six
-scenes, and the pipeline wins end to end on four of them despite losing the
-narrow phase on four. \Cref{sec:results} measures all of it.
-
-\subsection{Where the two processors spend their time}
-\label{sec:parallel:limits}
-
-The previous subsection explains the device's disadvantage in structural terms,
-and hardware counters identify the resource each processor is short of.
-\Cref{tab:counters} is Nsight Compute over the device search kernel and
-\cref{tab:counters-host,tab:symbols} are \texttt{perf} on the host, six scenes
-each, at the \op{Tight} mode and the shipped parameters.
-
-\paragraph{Memory traffic.} The device is not short of bandwidth. Across the
-six scenes the search moves between $0.8$ and $220\,\mathrm{MB}$ of dynamic
-random-access memory (DRAM) traffic per launch, and never exceeds $1.2\%$ of
-sustained DRAM peak. Arithmetic needs more care, because the natural measure of
-it is the wrong one here. \Cref{tab:pipes} reports what the units are doing, and
-\cref{tab:throughput} reports the throughput that matters here, candidate pairs
-resolved per second. The cache hierarchy explains the quiet memory system. On
-armadillo-rollers the kernel touches $63.9\,\mathrm{MB}$ of L1 sectors,
-$20.3\,\mathrm{MB}$ of those reach L2, and only $2.3\,\mathrm{MB}$ reach DRAM. A
-box is small, and its parent's corners are still resident when its children are
-built.
-
-\paragraph{Functional-unit utilisation.} The functional units are not idle; the
-multiprocessor is. Two columns of \cref{tab:pipes} are normalised differently.
-The pipe columns give each unit's share of its peak issue rate \emph{while the
-multiprocessor is active}, and on that basis the double-precision pipe runs at
-$18$ to $29\%$ of peak and the integer arithmetic logic unit (ALU) at $15$ to
-$25\%$, close behind it on every scene. The \emph{SM} column is the whole
-multiprocessor's share of peak over \emph{elapsed} time, and on the smallest
-scene it is $2.25\%$. Pipes that issue at a quarter of peak when they have warps
-to issue from do not limit this kernel, and cheaper arithmetic would not move
-it.
-
-The elapsed-time column also shows where the grid stops mattering. It climbs with
-the launch size, from $2.25\%$ at $0.41$ waves per multiprocessor to $28.4\%$ at
-$4.44$, and then stops: n-body and puffer-ball, at $333$ and $475$ waves, reach
-$26.4\%$ and $28.6\%$. Four waves is enough to cover the device, and the hundred
-after that buy nothing.
-
-No flop rate is reported here. A rate against arithmetic peak is the figure of
-merit for a dense kernel, whose work is fixed and whose only question is how
-fast it can be pushed through, whereas the work of a branch-and-bound search is
-not fixed and the whole design exists to do less of it. Corner inheritance in
-\cref{alg:host} turns eight corner evaluations into four, and sharing a bound
-across queries takes the search from about eleven boxes per query to roughly
-one. Both cut the flop count, and both make the implementation better. An
-implementation that raised its flop rate while returning the same answers would
-be a worse one. The rate therefore carries no information about quality, and the
-comparison against peak none about headroom. What we claim from the pipe columns
-is narrower: no functional unit is saturated, so no functional unit is the
-limit.
-
-The instruction mix settles one more question, the kind of arithmetic the search
-does. Integer thread-instructions run at $0.58$ to $0.95$ per double-precision
-instruction, so the kernel does nearly as much integer work as floating-point
-work. That integer work is the algorithm itself: stack indices, query
-identifiers, depth counters, the barycentric validity test and the atomics of
-\cref{alg:device}. A corner evaluation is double-precision work, and a box is
-more than a corner evaluation. The load-store pipe never exceeds $8.1\%$, the
-instruction-side counterpart of the quiet DRAM above.
-
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=\linewidth]{figures/device-counters.pdf}
-  \caption{Device counters per scene. Left: each pipe's share of its peak issue
-    rate while the multiprocessor is active. Right: warps stalled per issued
-    instruction, by reason. The dependency term is flat across inputs whose
-    launches differ by three orders of magnitude, which is the observation
-    \cref{sec:parallel:limits} rests on. The tables are
-    \cref{tab:pipes,tab:counters} in \cref{sec:appendix:counters}.}
-  \label{fig:counters}
-\end{figure}
-
-\paragraph{Available parallelism.} The kernel is not short of work to schedule
-either, and six scenes establish this where two would not. The grid size spans
-three orders of magnitude, from $0.41$ waves per multiprocessor on cloth-funnel,
-where the launch does not cover the device even once, to $475$ on puffer-ball,
-where it covers it hundreds of times over. Occupancy moves hardly at all across
-that range, from $8.4\%$ to $16.3\%$, and the issue rate stays between $0.20$
-and $0.35$ instructions per scheduler cycle out of a possible one. A kernel
-short of parallelism would improve when handed four hundred times as much of it,
-and this one does not.
-
-\paragraph{Latency.} The limit is latency, and the same latency on every scene.
-The last three columns of \cref{tab:counters} report the stall terms. Warps
-stalled on an execution dependency sit between $1.52$ and $1.65$ on every scene,
-a spread of $8\%$ across inputs whose launches differ by three orders of
-magnitude in size and whose candidate pairs per step differ by a factor of seven
-hundred. Stalls on memory are the smallest term almost everywhere, between
-$0.17$ and $1.40$. A corner evaluation is a chain of dependent multiply--adds,
-and with $8$ to $16\%$ of the warp slots filled, and $8$ to $24$ of a warp's
-$32$ lanes doing useful work when an instruction issues, there are not enough
-independent warps resident to cover that chain. Adding grid does not add
-residency.
-
-Barrier stalls are the one term that does move, from $0.99$ to $2.98$, with
-puffer-ball at the top of that range. Three block-wide barriers per iteration
-cost what the slowest thread in the block costs, and puffer-ball has both the
-most candidate pairs per step and the widest spread of query difficulty. The
-stall does not decide the outcome: puffer-ball's device narrow phase leads the
-host by $15.80\times$ in \cref{tab:processor}, the largest such margin in the
-benchmark. The counter bounds how much of that margin the barriers cost, and not
-whether the device wins.
-
-\paragraph{Host counters.} Grace is the opposite case. The host pipeline retires
-between $2.8$ and $3.8$ instructions per cycle at an L1 data miss rate of $0.2$
-to $2.1\%$, and the narrow phase on its own misses L1 on between $0.01$ and
-$0.65\%$ of loads. The per-lane geometry replication of \cref{sec:parallel:host}
-turns a gather into contiguous loads, and the counters show it doing so: a
-lane's working set stays resident. Its instruction rate tracks how hard the
-queries are and not how many there are. It is $0.49$ on cloth-ball, whose
-searches are deep, against $2.87$ on n-body, where the median answer is within
-$10^{-8}$ of the root and most queries are settled by a single box. That is the
-same dependent chain the device stalls on, paid on a core with enough
-out-of-order capacity to hide most of it.
-
-\paragraph{Host costs outside the timings.} \Cref{tab:symbols} attributes
-sampled host cycles to the object that spent them. On cloth-funnel $14.1\%$ of
-them are inside \texttt{libm}, and the symbol profile puts all of that in one
-call, the \texttt{pow} that raises $\delta$ to the third power in
-\cref{eq:err}. The share is scene-dependent, falling to $2.6\%$ on
-armadillo-rollers. It is written as \texttt{std::pow} deliberately.
-\Cref{sec:prelim:err} records that the error bound is certified for one sequence
-of operations, and the host keeps the reference's sequence so that its answers
-stay bit-identical to it (\cref{sec:results:ref}). The device kernel does not
-pay this cost, since it computes $\delta^{3}$ as a plain cube scaled to round
-upward. The host could do the same, at the price of the exact agreement that
-\cref{sec:results:ref} reports.
-
-The OpenMP runtime is the second such cost, and at its worst it is the largest
-of the three: $26.9\%$ of cycles on armadillo-rollers against $0.3\%$ on
-puffer-ball. The ordering follows case count and not problem size.
-Armadillo-rollers runs $781$ cases and puffer-ball $240$, and each case enters
-and leaves the parallel regions of \cref{alg:cell,alg:cellmin} and the narrow
-phase afresh. A scene made of many small steps therefore pays the runtime
-repeatedly, whereas a scene made of few large ones amortises it away. SCCD's own
-code accounts for the rest, between $45$ and $90\%$ of sampled cycles, depending
-on how much of the profile the runtime and the operating system take.
-
-\paragraph{Scope of the counters.} These counters cover one narrow-phase mode
-and the earliest-impact kernel. The device figures are taken under a profiler
-that serialises launches, so they support statements about ratios and none about
-absolute time. The host rows are whole-process counters and not per-phase ones.
-The pipeline row comes from a build with the device path compiled out, so it is
-host work throughout; the narrow-phase row comes from the oracle, which also
-drives the device modes, so its instruction rate is a floor. One prediction is
-left untested, and it belongs to \cref{sec:parallel:device}: if idle threads
-could claim new queries from a global cursor, the dependency and barrier stalls
-should fall together. Nothing here confirms that they would.
+The broad phase inverts both arguments, having no sequential dependence and no
+shared bound to lose. The GPU accordingly wins that phase on all six scenes, and
+the pipeline wins end to end on four of them despite losing the narrow phase on
+four. \Cref{sec:results} measures all of it.

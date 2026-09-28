@@ -3,13 +3,20 @@
 LATEXMK ?= latexmk
 PYTHON  ?= python3
 
-.PHONY: all inputs check clean distclean
+.PHONY: all inputs check clean distclean supplemental
 
-all: main.pdf
+all: main.pdf supplemental_material.pdf
 
-main.pdf: main.tex arxiv.sty refs.bib $(wildcard sections/*.tex) \
+main.pdf: main.tex preamble.tex arxiv.sty refs.bib $(wildcard sections/*.tex) \
           $(wildcard tikz/*.tex) $(wildcard generated/tables/*.tex)
 	$(LATEXMK) -pdf -halt-on-error -interaction=nonstopmode main.tex
+
+# The supplement resolves \cref into the article through xr-hyper, so it needs
+# main.aux to exist and be current: main.pdf is a prerequisite, not a courtesy.
+supplemental: supplemental_material.pdf
+supplemental_material.pdf: supplemental_material.tex preamble.tex main.pdf \
+          $(wildcard sections/supp-*.tex) $(wildcard generated/tables/*.tex)
+	$(LATEXMK) -pdf -halt-on-error -interaction=nonstopmode supplemental_material.tex
 
 # Rebuild the tables from benchmark/results/*.csv. Only needed after a new sweep;
 # the generated fragments are committed so the default target does not run this.

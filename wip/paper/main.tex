@@ -1,80 +1,4 @@
-\documentclass[11pt]{article}
-
-\usepackage[T1]{fontenc}
-\usepackage[utf8]{inputenc}
-\usepackage{lmodern}
-\usepackage{microtype}
-
-\usepackage{arxiv}
-
-\usepackage{amsmath}
-\usepackage{amssymb}
-\usepackage{amsthm}
-\usepackage{booktabs}
-\usepackage{graphicx}
-\usepackage{algorithm}
-% `noend`: one-line bodies dominate here, and an explicit terminator after each
-% of them costs more clarity than it buys. Indentation carries the structure.
-\usepackage[noend]{algpseudocode}
-\usepackage{tikz}
-\usetikzlibrary{arrows.meta, positioning, fit, backgrounds, calc, patterns}
-\usepackage{xcolor}
-\usepackage[numbers,sort&compress]{natbib}
-% Bibliography URLs are long enough to leave an underfull line if they can only
-% break at punctuation; xurl lets them break anywhere.
-\usepackage[hidelinks]{hyperref}
-\usepackage{xurl}
-\usepackage[capitalise,noabbrev]{cleveref}
-
-% Each environment gets its own counter. Sharing one makes cleveref name every
-% reference after the counter, so \cref of a definition comes out as "Theorem".
-\theoremstyle{plain}
-\newtheorem{theorem}{Theorem}
-\newtheorem{proposition}{Proposition}
-\theoremstyle{definition}
-\newtheorem{definition}{Definition}
-\theoremstyle{remark}
-\newtheorem{remark}{Remark}
-
-% The palette the figures were drawn with, so a TikZ schematic sitting beside
-% one of them does not look like it came from a different document.
-\definecolor{sccdTeal}{HTML}{0E8AA0}
-\definecolor{sccdAmber}{HTML}{C07C10}
-\definecolor{sccdPlum}{HTML}{8A3C74}
-\definecolor{sccdMoss}{HTML}{3E6E4B}
-\definecolor{sccdInk}{HTML}{333A41}
-\definecolor{sccdGrid}{HTML}{D6DBE0}
-
-% Notation used throughout, defined once.
-\newcommand{\Fdiff}{\mathbf{F}}          % the difference function
-\newcommand{\Rthree}{\mathbb{R}^{3}}
-\newcommand{\toi}{t^{\star}}             % the reported time of impact
-\newcommand{\toitrue}{\bar{t}}           % the true earliest root
-\newcommand{\mach}{\varepsilon}          % machine epsilon
-\newcommand{\dom}{\mathcal{B}}           % a box in (t, u, v)
-\newcommand{\Cand}{\mathcal{C}}          % the candidate set
-\newcommand{\Boxes}{\mathcal{B}}
-\DeclareMathOperator{\hull}{hull}
-% Small caps for the algorithm's named steps. Wrapped in \textnormal so it
-% survives the italic body of a theorem, where lmodern has no italic small caps.
-% The two primitives of a query, coloured as they are in the schematics: the
-% teal and plum boxes of Figure 8 are the same two primitives whose difference
-% function these equations root, so a reader can carry one picture into the
-% other. Named by role rather than by colour, so the palette can change in one
-% place.
-\newcommand{\primA}[1]{\textcolor{sccdTeal}{#1}}
-\newcommand{\primB}[1]{\textcolor{sccdPlum}{#1}}
-% The quantity under test -- amber in both schematics, where it marks the query
-% box, the overlap it forms, and the query that overruns a block.
-\newcommand{\tested}[1]{\textcolor{sccdAmber}{#1}}
-
-\newcommand{\op}[1]{\textnormal{\textsc{#1}}}
-
-% Generated tables are as wide as their data. This shrinks one only when it
-% would otherwise run into the margin, and leaves every table that already fits
-% at its natural size -- so the common case keeps the body font exactly.
-\newcommand{\fittable}[1]{%
-  \resizebox{\ifdim\width>\linewidth \linewidth\else \width\fi}{!}{#1}}
+\input{preamble}
 
 \headertitle{Conservative continuous collision detection on CPU and GPU}
 \preprintmark{\textsc{Preprint}}
@@ -133,9 +57,13 @@
 \input{sections/conclusion}
 \input{sections/acknowledgements}
 
-\bibliographystyle{plainnat}
+% abbrvnat abbreviates given names, which matters here: one entry has
+% twelve authors. The citation form in the text is unchanged.
+{\footnotesize
+\setlength{\bibsep}{2pt plus 1pt}
+\bibliographystyle{abbrvnat}
 \bibliography{refs}
+}
 
-\input{sections/appendix}
 
 \end{document}
