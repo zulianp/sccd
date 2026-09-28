@@ -910,11 +910,16 @@ This clears the bar to implement and measure. It is not yet a result about time.
 
 ### What it measured
 
-`Cell2DMinFV` against `Cell2DMin` from one binary, host, six scenes, 60 cases
-each, `tight`, three repeats, on one Grace at 72 threads under
+`Cell2DMinFV` against `Cell2DMin` from one binary, host, 60 cases per scene,
+`tight`, three repeats, on one Grace at 72 threads under
 `numactl --cpunodebind=0 --membind=0`, median over repeats per case and summed
 over cases. Both keep the same edge-edge query, so the vertex-face columns carry
 the whole difference.
+
+**Five scenes, not six.** Puffer-ball's row is empty because the subsample handed
+the run 60 edge-edge cases and no vertex-face ones, which is a defect in the
+harness described below. Its vertex-face half is unmeasured, and it is the
+largest scene in the set.
 
 | vertex-face, ms | prep | | | query | | | net |
 |---|---|---|---|---|---|---|---|
@@ -924,31 +929,32 @@ the whole difference.
 | cloth-ball | 33.2 | 30.7 | -2.4 | 176.2 | 63.9 | -112.3 | **-114.7** |
 | rod-twist | 41.4 | 43.7 | +2.3 | 51.2 | 28.9 | -22.3 | **-20.0** |
 | n-body-simulation | 41.0 | 38.3 | -2.6 | 835.3 | 145.9 | -689.5 | **-692.1** |
-| puffer-ball | 0.0 | 0.0 | +0.0 | 0.0 | 0.0 | +0.0 | +0.0 |
-| all six | 168.4 | 165.1 | **-3.3** | 1108.1 | 254.2 | **-853.9** | **-857.2** |
+| puffer-ball | -- | -- | | -- | -- | | not run |
+| those five | 168.4 | 165.1 | **-3.3** | 1108.1 | 254.2 | **-853.9** | **-857.2** |
 
 The prediction the plan rested on is the prep column. Extent-binning the faces
 cost `Cell2DSeg` between +15.3 ms and +110.7 ms of prep per scene, which is what
-sank it; one entry per face costs nothing measurable, -3.3 ms over six scenes,
+sank it; one entry per face costs nothing measurable, -3.3 ms over the five,
 inside the run-to-run spread. The query falls 4.36x and carries straight through
-to the net, so vertex-face over six scenes goes from 1276.5 ms to 419.3 ms,
-**3.04x**.
+to the net, so vertex-face goes from 1276.5 ms to 419.3 ms, **3.04x**.
 
-Puffer-ball issues no vertex-face queries, so it neither gains nor loses.
 Cloth-funnel is a wash at +0.7 ms: its vertex-face query is 7.4 ms to begin with,
 too small for the structure to pay for itself, and too small to matter.
 
-Attributing only the vertex-face delta, the full broad phase over six scenes goes
-from 7312.3 ms to 6455.1 ms, **1.13x**. The edge-edge columns move between -7.4%
-and +7.3% between the two runs although both execute identical code, so that
-spread is run-to-run noise and is not read as a result in either direction.
+Attributing only the vertex-face delta, the broad phase over those five scenes
+goes from 2141.9 ms to 1284.7 ms, **1.67x**. The edge-edge columns move between
+-7.4% and +7.3% between the two runs although both execute identical code, so
+that spread is run-to-run noise and is not read as a result in either direction.
 
 ### Correctness
 
 Across 2160 rows: no missed pair, no missed collision, no time of impact later
 than the dataset's exact root, under either strategy. False-positive counts are
 identical per scene (3, 12, 3, 51, 18, 564), and the candidate count agrees for
-every scene and query type, so the two emit the same pair set.
+every scene and query type, so the two emit the same pair set. Puffer-ball's 564
+are edge-edge, since its rows are all edge-edge; the vertex-face kernel is
+checked on the other five scenes here and on brute force in
+`src/tests/sccd_broadphase_cell2d_test.exe.cpp`.
 
 The reported earliest time of impact differs in the last digits on 224 of 1080
 cases, at most 2.9e-05 absolute, and symmetrically -- 114 earlier and 110 later.
@@ -959,3 +965,32 @@ has to hold.
 Measured with the double-`geom_t` smesh at `$SCRATCH/installations/smesh-f64`. A
 float build reports six late answers on armadillo under **both** strategies, so
 local runs settle A/B questions only and say nothing about conservativeness.
+
+### 11. Sampling the query type along with the trajectory
+
+The even-spread subsample took `cases[k * cases.size() / MAX_CASES]` from a list
+sorted by case key. Keys end in `ee` or `vf`, so a scene holding equal numbers of
+each sorts into interleaved pairs with edge-edge on every even index. Puffer-ball
+has exactly 240 such cases, so `--max-cases 60` strides by 4, every index it
+picks is even, and the subsample is entirely edge-edge. Index 0 is `100ee` and
+index 4 is `102ee`, which is what the result CSV's first two rows are.
+
+The other five scenes escaped by accident, their counts being unequal enough for
+the stride to drift across both types -- cloth-ball 43 and 36, armadillo 396 and
+385.
+
+Nothing in the output said so. Puffer-ball appeared in the table as a row of
+zeros, which reads as a scene that issues no vertex-face queries and was written
+down as exactly that. The dataset holds 130 converted vertex-face box directories
+and 120 vertex-face query CSVs for it.
+
+The subsample now spreads over each query type separately and keeps the two in
+the proportion the dataset has them, so a balanced case list yields 30 and 30
+where it yielded 60 and 0. A type the dataset holds is always represented, and
+neither share exceeds what that type has.
+
+The generalisation is the one this document already makes five times over: a
+measurement that answers a different question than the one asked. The particular
+form is worth naming on its own, because the tell was visible in the result file
+and went unread -- a count of rows by query type shows every scene with a mix and
+one scene without, which is not a shape a scene produces.

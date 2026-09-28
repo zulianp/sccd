@@ -216,14 +216,50 @@ namespace {
         // on the same cases within one allocation, so it needs a bounded, evenly
         // spread subsample rather than a prefix. SCCD_BENCH_MAX_CASES picks that
         // many cases spread across the trajectory; unset, everything runs.
+        //
+        // The spread runs over each query type separately, and the subset holds
+        // the two in the proportion the dataset does. Striding over the combined
+        // list samples the type as well as the trajectory: keys end in "ee" or
+        // "vf", so a scene with equal counts of each sorts into interleaved pairs
+        // with edge-edge on every even index. Puffer-ball has exactly 240 such
+        // cases, so a cap of 60 strides by 4 and returns edge-edge alone, leaving
+        // the vertex-face half of a broad-phase comparison unmeasured while the
+        // scene still appears in the table.
         int SCCD_BENCH_MAX_CASES = 0;
         SCCD_READ_ENV(SCCD_BENCH_MAX_CASES, atoi);
         if (SCCD_BENCH_MAX_CASES > 0 && (int)cases.size() > SCCD_BENCH_MAX_CASES) {
-            std::vector<CaseFile> subset;
-            subset.reserve(SCCD_BENCH_MAX_CASES);
-            for (int k = 0; k < SCCD_BENCH_MAX_CASES; ++k) {
-                subset.push_back(cases[(std::size_t)((double)k * cases.size() / SCCD_BENCH_MAX_CASES)]);
+            std::vector<CaseFile> by_type[2];
+            for (const CaseFile& c : cases) {
+                by_type[c.is_vf ? 1 : 0].push_back(c);
             }
+
+            // Rounded to nearest so the smaller type is not starved, and clamped
+            // so a type the dataset has is always represented and neither share
+            // exceeds what that type holds.
+            const std::size_t total = cases.size();
+            int want[2];
+            want[1] = (int)((by_type[1].size() * (std::size_t)SCCD_BENCH_MAX_CASES + total / 2) / total);
+            want[0] = SCCD_BENCH_MAX_CASES - want[1];
+            for (int t = 0; t < 2; ++t) {
+                const int have = (int)by_type[t].size();
+                if (want[t] > have) {
+                    want[1 - t] += want[t] - have;
+                    want[t] = have;
+                } else if (want[t] == 0 && have > 0 && want[1 - t] > 1) {
+                    want[t] = 1;
+                    want[1 - t] -= 1;
+                }
+            }
+
+            std::vector<CaseFile> subset;
+            subset.reserve((std::size_t)SCCD_BENCH_MAX_CASES);
+            for (int t = 0; t < 2; ++t) {
+                for (int k = 0; k < want[t]; ++k) {
+                    subset.push_back(by_type[t][(std::size_t)((double)k * by_type[t].size() / want[t])]);
+                }
+            }
+            std::sort(subset.begin(), subset.end(),
+                      [](const CaseFile& a, const CaseFile& b) { return a.key < b.key; });
             cases.swap(subset);
         }
 
