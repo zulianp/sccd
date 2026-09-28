@@ -30,11 +30,11 @@ RESULTS = REPO / "benchmark" / "results"
 BENCH_CSV = RESULTS / "sweep-gh200-bp.csv"
 ORACLE_CSV = RESULTS / "oracle-gh200-all.csv"
 # Order matters: the report renders one series per file in the order given, and
-# these are listed to match docs/BENCHMARKS.md -- the two host strategies
-# together, then the device -- so the article's table and the library's are the
-# same table.
+# these are listed to match docs/BENCHMARKS.md -- host then device -- so the
+# article's table and the library's are the same table. Both runs use the
+# shipped broad phase, so the one axis the study varies is the processor.
 SCALING = [RESULTS / "scaling" / n for n in
-           ("host-cell2d-mode2.txt", "host-sweep-mode2.txt", "device-mode2.txt")]
+           ("host-cell2dmin-mode2.txt", "device-cell2dmin-mode2.txt")]
 
 # The two mode selections the two committed documents are generated with.
 # `tight` is the article's subject; `relaxed` supplies the trade-off subsection.
@@ -165,14 +165,18 @@ PROSE_CLAIMS = [
     ("0.53", "tab-processor"),
     # The scaling ratios are quoted as divisions of these cells, so the reader
     # can do the arithmetic; checking the cells checks the ratios.
-    ("998.7", "tab-scaling"),
-    ("1825.1", "tab-scaling"),
-    ("4791.5", "tab-scaling"),
-    ("20886.6", "tab-scaling"),
-    ("11724.2", "tab-scaling"),
-    ("1195.1", "tab-scaling"),
-    ("91694.1", "tab-scaling"),
-    ("42228.3", "tab-scaling"),
+    ("55.7", "tab-scaling"),
+    ("75.4", "tab-scaling"),
+    ("242.7", "tab-scaling"),
+    ("297.5", "tab-scaling"),
+    ("441.7", "tab-scaling"),
+    ("823.9", "tab-scaling"),
+    ("1828.3", "tab-scaling"),
+    ("3644.3", "tab-scaling"),
+    ("840.2", "tab-scaling"),
+    ("1009.4", "tab-scaling"),
+    ("2804.1", "tab-scaling"),
+    ("818.9", "tab-scaling"),
 ]
 
 # Totals the prose states that are sums of a generated table's columns rather
