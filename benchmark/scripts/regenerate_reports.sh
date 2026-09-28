@@ -30,8 +30,10 @@ echo "== figures =="
 # and the plots stay behind. This is the step that was missing.
 cp /tmp/report-tight/figures/*.pdf /tmp/report-tight/figures/*.png docs/figures/
 cp /tmp/report-relaxed/figures/*.pdf /tmp/report-relaxed/figures/*.png docs/figures/
+# toi-error is not in this list: the article draws its own two-row version,
+# with additive CCD beneath ours, from the competitor run.
 for f in narrow-per-case reference-speedup refine-scaling results-grid \
-         runtime-breakdown toi-error; do
+         runtime-breakdown; do
     cp docs/figures/$f.pdf wip/paper/figures/$f.pdf
 done
 # The two the paper draws itself, from the profile data.
