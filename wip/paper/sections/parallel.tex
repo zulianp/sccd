@@ -349,8 +349,6 @@ and hardware counters identify the resource each processor is short of.
 \cref{tab:counters-host,tab:symbols} are \texttt{perf} on the host, six scenes
 each, at the \op{Tight} mode and the shipped parameters.
 
-\input{generated/tables/tab-counters}
-
 \paragraph{Memory traffic.} The device is not short of bandwidth. Across the
 six scenes the search moves between $0.8$ and $220\,\mathrm{MB}$ of dynamic
 random-access memory (DRAM) traffic per launch, and never exceeds $1.2\%$ of
@@ -362,8 +360,6 @@ armadillo-rollers the kernel touches $63.9\,\mathrm{MB}$ of L1 sectors,
 $20.3\,\mathrm{MB}$ of those reach L2, and only $2.3\,\mathrm{MB}$ reach DRAM. A
 box is small, and its parent's corners are still resident when its children are
 built.
-
-\input{generated/tables/tab-pipes}
 
 \paragraph{Functional-unit utilisation.} The functional units are not idle; the
 multiprocessor is. Two columns of \cref{tab:pipes} are normalised differently.
@@ -404,6 +400,18 @@ identifiers, depth counters, the barycentric validity test and the atomics of
 more than a corner evaluation. The load-store pipe never exceeds $8.1\%$, the
 instruction-side counterpart of the quiet DRAM above.
 
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{figures/device-counters.pdf}
+  \caption{Device counters per scene. Left: each pipe's share of its peak issue
+    rate while the multiprocessor is active. Right: warps stalled per issued
+    instruction, by reason. The dependency term is flat across inputs whose
+    launches differ by three orders of magnitude, which is the observation
+    \cref{sec:parallel:limits} rests on. The tables are
+    \cref{tab:pipes,tab:counters} in \cref{sec:appendix:counters}.}
+  \label{fig:counters}
+\end{figure}
+
 \paragraph{Available parallelism.} The kernel is not short of work to schedule
 either, and six scenes establish this where two would not. The grid size spans
 three orders of magnitude, from $0.41$ waves per multiprocessor on cloth-funnel,
@@ -434,9 +442,6 @@ stall does not decide the outcome: puffer-ball's device narrow phase leads the
 host by $15.80\times$ in \cref{tab:processor}, the largest such margin in the
 benchmark. The counter bounds how much of that margin the barriers cost, and not
 whether the device wins.
-
-\input{generated/tables/tab-counters-host}
-\input{generated/tables/tab-symbols}
 
 \paragraph{Host counters.} Grace is the opposite case. The host pipeline retires
 between $2.8$ and $3.8$ instructions per cycle at an L1 data miss rate of $0.2$

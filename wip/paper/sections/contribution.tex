@@ -1,0 +1,82 @@
+\subsection{Contributions and structure of the paper}
+\label{sec:contribution}
+
+We present SCCD, a two-phase CCD pipeline for triangle \emph{and} quad meshes,
+with host and device implementations of both phases. Its conservativeness is
+structural and not empirical (\cref{sec:guarantee}), and we assess it against
+TightInclusion on a dataset whose roots are known exactly. The contributions of
+this paper are the following:
+
+\begin{enumerate}
+  \item a broad phase with no tuning parameter and no sort, built on a
+        two-dimensional uniform cell list whose cell size is derived from the
+        data, with one query per pair type;
+  \item an order-independence result for the underlying branch-and-bound
+        search, which licenses vector lanes and thread blocks to be filled with
+        work from unrelated queries;
+  \item a host narrow phase that packs SIMD lanes across queries, and a device
+        narrow phase that redistributes work through a double-buffered global
+        queue;
+  \item a signed accuracy assessment against a certified reference over
+        $11{,}630{,}064$ checks against exact symbolic roots, on two processors
+        and six scenes;
+  \item a performance assessment against two further implementations, on the
+        question each of them answers.
+\end{enumerate}
+
+The first contribution is a broad phase whose two queries have different shapes
+and are constructed differently. The vertex-face query bins a box into every
+cell its extent touches and attributes a pair to the cell holding the corner of
+the overlap (\cref{sec:bp:cell}). The edge-edge query is one list against
+itself, which admits one entry per box at its minimum corner and a forward walk
+in row-major cell order, pruned by a prefix maximum per row of cells, so that no
+bound on the number of cells a box may span is required (\cref{sec:bp:self}).
+
+The search of TightInclusion is a priority queue ordered by the time lower
+bound, and its answer is the first box it accepts. We show in
+\cref{sec:np:order} that keeping the minimum over \emph{all} accepted boxes and
+pruning against it yields the same answer under \emph{any} traversal order. On
+the host this licenses a lane to hold boxes from different queries
+(\cref{alg:host}), turning a search with per-query divergence into a vector
+kernel, and sibling boxes then inherit four of their eight corner values from
+their parent, halving the dominant cost.
+
+On the device the same freedom is spent on redistribution. The difficulty of a
+CCD query is heavy-tailed: on one scene most queries need a single box, while
+$208$ of them need more than a million (\cref{tab:difficulty}). A large
+per-block work stack keeps such a query inside the block that seeded it while
+its neighbours idle. We therefore use a deliberately \emph{small} shared stack
+that spills early into a double-buffered global queue, which the next launch
+redistributes across every block (\cref{alg:device}). On the worst scene this is
+worth two orders of magnitude (\cref{tab:stackcap}).
+
+The accuracy assessment covers $11{,}630{,}064$ query-mode checks against exact
+symbolic roots on both processors and all six scenes, of which $11{,}044{,}766$
+place a reported time of impact beside an exact root. SCCD reports no missed
+collision and no late time of impact, and reproduces TightInclusion's median and
+worst-case error to every printed digit while running faster
+(\cref{sec:results:ref}).
+
+We also report the configurations on which the pipeline is the slower of the
+two, and the reasons. The device narrow phase is slower than the host on two of
+the six scenes, for a structural reason we identify, and on both of them this
+places the whole pipeline behind the host. The host cell list leads the device
+broad phase up to roughly six million elements, above which the ordering
+reverses. The mode that trades accuracy for speed is \emph{slower} on four of
+the six host scenes.
+
+The remainder of this paper is organised as follows.
+\Cref{sec:prelim} states the three queries, the difference function whose roots
+they reduce to, and the certified error bound that makes a floating-point
+decision about those roots sound. \Cref{sec:bp} describes the broad phase and
+its two queries, and \cref{sec:np} the narrow-phase search, its two acceptance
+tests and the order-independence result. \Cref{sec:parallel} gives the host and
+device implementations of that search and the measurements that explain how the
+work divides between the two processors. \Cref{sec:guarantee} assembles the
+conservativeness argument and identifies where an implementation can break it.
+\Cref{sec:results} reports the experiments: the machine and the dataset, the
+conservativeness and accuracy assessments against TightInclusion, and the
+performance assessment against Scalable CCD and additive CCD.
+\Cref{sec:limitations} collects the limitations and the threats to validity,
+\cref{sec:availability} the software and data, and \cref{sec:conclusion}
+concludes.

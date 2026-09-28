@@ -1,4 +1,4 @@
-\section{Related work}
+\subsection{Prior work}
 \label{sec:related}
 
 CCD is conventionally split into two stages. A \emph{broad phase} is a
@@ -7,7 +7,7 @@ volumes cannot meet. A \emph{narrow phase} then decides each surviving pair
 precisely enough to be trusted. The two stages have separate literatures and
 separate failure modes.
 
-\subsection{Broad phase}
+\subsubsection{Broad phase}
 
 The simplest broad phase tests every pair. It is trivially parallel and
 trivially correct, because the only operation on a box is a floating-point
@@ -53,7 +53,7 @@ sweep and balances work through a consumer queue. Our broad phase bins the
 boxes, so it inherits neither the sort's cost nor its dependence on one axis
 separating the geometry.
 
-\subsection{Narrow phase}
+\subsubsection{Narrow phase}
 
 For linear trajectories and no minimum separation, a vertex-face or edge-edge
 query reduces to finding roots of a cubic. The oldest family of methods solves

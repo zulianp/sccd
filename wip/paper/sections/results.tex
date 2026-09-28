@@ -1,4 +1,4 @@
-\section{Results}
+\section{Numerical experiments}
 \label{sec:results}
 
 This section evaluates three properties of the pipeline: conservativeness,
@@ -67,11 +67,28 @@ theoretical $4023$ GB/s, of which the triad reaches $93\%$. Where
 \cref{sec:parallel:limits} reports a share of peak, the normalisation is Nsight
 Compute's own and not the ratio to this measurement.
 
-The build uses \texttt{prgenv-gnu/24.11:v2} at \texttt{-O3} with
-\texttt{CMAKE\_CUDA\_ARCHITECTURES=90}, at the default search parameters: a depth
-cap of $69$ and a distance tolerance of $3\times10^{-8}$. Host loops are
-scheduled with OpenMP~\citep{dagum1998openmp}. oneTBB~\citep{onetbb} is an
-alternative backend and is not used here.
+\subsection{Software}
+\label{sec:results:software}
+
+Everything is built with the \texttt{prgenv-gnu/24.11:v2} programming
+environment at \texttt{-O3}, with \texttt{CMAKE\_CUDA\_ARCHITECTURES=90} for the
+device code, and run at the default search parameters: a depth cap of $69$ and a
+distance tolerance of $3\times10^{-8}$. Host loops are scheduled with
+OpenMP~\citep{dagum1998openmp}; oneTBB~\citep{onetbb} is an alternative backend
+and is not used here. SCCD itself has no external dependencies.
+
+The three implementations it is measured against are used exactly as released,
+built with the same compiler and the same optimisation level:
+TightInclusion~\citep{wang2021tight} for the certified reference, Scalable
+CCD~\citep{belgrod2025toi} for the earliest-time-of-impact comparison, and the
+additive CCD of~\citet{li2021codim} for the per-pair comparison. Additive CCD is
+driven through oneTBB, which follows the CPU affinity mask, so its runs are
+bound to one module in the same way as ours. Mesh input passes through the
+\texttt{smesh} library, configured with double-precision coordinates so that the
+mesh path and the exact roots of the dataset describe the same geometry.
+
+\subsection{Timing protocol and dataset}
+\label{sec:results:protocol}
 
 Each case is timed as three consecutive calls with separate clocks and reported
 as two phases. Every table and figure uses the same four tags. \emph{BP full} is
@@ -250,8 +267,6 @@ of magnitude in size.
 figure is the quantity a solver budgets against, and it compares a $43$-step
 scene with a $2{,}556$-step one.
 
-\input{generated/tables/tab-per-frame}
-
 \Cref{fig:perframe} plots the per-step cost against frame index. On cloth-funnel
 the device is behind for most of the trajectory, so its $0.56\times$ is a
 standing gap and not a few expensive frames; on rod-twist the cost climbs
@@ -329,7 +344,18 @@ libraries therefore run their earliest-time-of-impact path once per case from a
 bound of $1$, over identical broad-phase candidates, and \cref{tab:competitor-earliest}
 scores the step's answer against the step's earliest exact root.
 
-\input{generated/tables/tab-competitor-earliest}
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{figures/competitors.pdf}
+  \caption{The two competitor comparisons per scene, on the question each
+    answers. Left: the earliest time of impact for a simulation step, as the
+    mean cost of one case. Right: one time of impact per candidate pair, as
+    nanoseconds per candidate. Both axes are logarithmic. The tables these
+    summarise, with their accuracy columns, are
+    \cref{tab:competitor-earliest,tab:competitor-pair} in
+    \cref{sec:appendix:competitors}.}
+  \label{fig:competitors}
+\end{figure}
 
 End to end SCCD on the device is ahead on every scene, from $4.23\times$ on
 cloth-funnel to $11.93\times$ on puffer-ball. The whole-scene totals state the
@@ -398,8 +424,6 @@ without isolating a root~\citep{li2021codim}. It is the narrow phase of a
 different trade, and \cref{tab:competitor-pair} puts the two on the same
 candidates and the same curated queries.
 
-\input{generated/tables/tab-competitor-pair}
-
 It is the cheaper narrow phase on every scene, by $2.03\times$ per candidate on
 cloth-funnel, between $3.37\times$ and $5.38\times$ on armadillo-rollers,
 cloth-ball, n-body and puffer-ball, and $11.91\times$ on rod-twist, against
@@ -429,8 +453,6 @@ at each level from $92{,}230$ to $94.4$ million, over cloth-ball frames $0$ and
 $1$. Both processors run the shipped broad phase, so the one quantity the table
 varies is the processor. The two frames do not come into contact, which makes
 the broad phase the quantity the study measures.
-
-\input{generated/tables/tab-scaling}
 
 \begin{figure}[htbp]
   \centering

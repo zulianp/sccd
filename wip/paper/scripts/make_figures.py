@@ -418,10 +418,136 @@ def broad_vs_scalable():
     return p
 
 
+COUNTER_TEX = PAPER / "generated" / "tables"
+
+
+def _tex_rows(name):
+    """The body rows of a generated table, as lists of cells."""
+    f = COUNTER_TEX / f"{name}.tex"
+    if not f.is_file():
+        return []
+    body = f.read_text()
+    try:
+        body = body[body.index("\\midrule"):body.index("\\bottomrule")]
+    except ValueError:
+        return []
+    out = []
+    for line in body.splitlines():
+        if "&" not in line:
+            continue
+        out.append([c.strip() for c in line.replace("\\\\", "").split("&")])
+    return out
+
+
+# ------------------------------------------------ competitors, per scene ---
+def competitors():
+    """Both competitor comparisons as whole-scene bars, one panel each.
+
+    Read from the two generated tables and not recomputed, so the figure and the
+    appendix tables it summarises cannot disagree. Those tables are 19 rows
+    apiece; this is the form the body of the paper reads.
+    """
+    PANELS = (
+        ("tab-competitor-earliest", 6, "earliest time of impact, per case (ms)",
+         ("SCCD (CPU)", "SCCD (GPU)", "Scalable CCD (GPU)"),
+         ("SCCD (CPU)", "SCCD (GPU)", "Scalable CCD")),
+        ("tab-competitor-pair", 7, "per pair, narrow phase (ns/pair)",
+         ("SCCD (CPU)", "SCCD (GPU)", "Additive CCD (CPU)"),
+         ("SCCD (CPU)", "SCCD (GPU)", "Additive CCD")),
+    )
+    panels = []
+    for name, col, ylab, keys, labels in PANELS:
+        rows, scene, d = _tex_rows(name), None, collections.defaultdict(dict)
+        for r in rows:
+            if len(r) <= col:
+                continue
+            scene = r[0] or scene
+            try:
+                d[scene][r[1]] = float(r[col].replace(",", ""))
+            except ValueError:
+                pass
+        if not d:
+            print(f"no {name}; skipping competitors", file=sys.stderr)
+            return None
+        panels.append((ylab, list(d), keys, labels, d))
+
+    fig, axes = plt.subplots(1, 2, figsize=style.figsize(style.FULL_WIDTH_IN, 0.34))
+    for ax, (ylab, names, keys, labels, d) in zip(axes, panels):
+        x, w = range(len(names)), 0.8 / len(keys)
+        for i, (k, lab) in enumerate(zip(keys, labels)):
+            ax.bar([j + i * w - 0.4 + w / 2 for j in x],
+                   [d[n].get(k, float("nan")) for n in names], w,
+                   color=style.SERIES[i], label=lab, zorder=2)
+        ax.set_yscale("log")
+        ax.set_ylabel(ylab, fontsize=7)
+        ax.set_xticks(list(x))
+        ax.set_xticklabels(names, rotation=30, ha="right", fontsize=6)
+        ax.tick_params(labelsize=6)
+        ax.grid(True, which="major", axis="y", lw=0.4, color=style.GRID_INK)
+        ax.set_axisbelow(True)
+        ax.legend(frameon=False, fontsize=6)
+        drawn = sum(1 for n in names for k in keys if k in d[n])
+        if drawn != len(names) * len(keys):
+            raise SystemExit(
+                f"competitors: {ylab} drew {drawn} of {len(names) * len(keys)} bars")
+    fig.tight_layout()
+    p = OUT / "competitors.pdf"
+    fig.savefig(p, bbox_inches="tight"); plt.close(fig)
+    return p
+
+
+# ------------------------------------------------- device counters ---
+def device_counters():
+    """Pipe utilisation and warp stall reasons, the two counter tables as bars."""
+    pipes, stalls = _tex_rows("tab-pipes"), _tex_rows("tab-counters")
+    if not pipes or not stalls:
+        print("no counter tables; skipping device-counters", file=sys.stderr)
+        return None
+
+    def col(rows, idx):
+        out = {}
+        for r in rows:
+            try:
+                out[r[0]] = float(r[idx])
+            except (ValueError, IndexError):
+                pass
+        return out
+
+    PANELS = (
+        (r"pipe, \% of peak while active",
+         [("FP64", col(pipes, 1)), ("ALU", col(pipes, 2)), ("LSU", col(pipes, 3))]),
+        ("warps stalled, cycles per issued instruction",
+         [("dependency", col(stalls, 7)), ("barrier", col(stalls, 8)),
+          ("memory", col(stalls, 9))]),
+    )
+    scenes = [s for s in pipes]
+    names = [r[0] for r in pipes]
+    fig, axes = plt.subplots(1, 2, figsize=style.figsize(style.FULL_WIDTH_IN, 0.34))
+    x = range(len(names))
+    for ax, (ylab, series) in zip(axes, PANELS):
+        w = 0.8 / len(series)
+        for i, (lab, d) in enumerate(series):
+            ax.bar([j + i * w - 0.4 + w / 2 for j in x],
+                   [d.get(n, float("nan")) for n in names], w,
+                   color=style.SERIES[i], label=lab, zorder=2)
+        ax.set_ylabel(ylab, fontsize=7)
+        ax.set_xticks(list(x))
+        ax.set_xticklabels(names, rotation=30, ha="right", fontsize=6)
+        ax.tick_params(labelsize=6)
+        ax.grid(True, which="major", axis="y", lw=0.4, color=style.GRID_INK)
+        ax.set_axisbelow(True)
+        ax.legend(frameon=False, fontsize=6)
+    fig.tight_layout()
+    p = OUT / "device-counters.pdf"
+    fig.savefig(p, bbox_inches="tight"); plt.close(fig)
+    return p
+
+
 def main() -> int:
     style.apply_rcparams()
     OUT.mkdir(parents=True, exist_ok=True)
-    for fn in (strong_scaling, per_frame, broad_per_frame, broad_vs_scalable):
+    for fn in (strong_scaling, per_frame, broad_per_frame, broad_vs_scalable,
+               competitors, device_counters):
         p = fn()
         if p:
             print(f"wrote {p.relative_to(PAPER)}")
