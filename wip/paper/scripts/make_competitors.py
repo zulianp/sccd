@@ -29,6 +29,9 @@ ROOT = HERE.parent.parent.parent
 DATA = ROOT / "benchmark" / "competitors" / "results"
 OUT = HERE.parent / "generated" / "tables"
 
+# The broad phase the library ships and the only one these tables report.
+SHIPPED_BP = "cell2dmin"
+
 SCENES = ["armadillo-rollers", "cloth-ball", "cloth-funnel", "n-body-simulation",
           "puffer-ball", "rod-twist"]
 # The name the paper's other tables use for each scene.
@@ -58,7 +61,7 @@ def rows():
     # faster of the two on every scene of the device, so it is the one a caller
     # gets and the one the comparison reports.
     kept = [r for r in data
-            if not r["mode"].startswith("device-") or r.get("broadphase") == "cell2d"]
+            if not r["mode"].startswith("device-") or r.get("broadphase") == SHIPPED_BP]
     dropped = len(data) - len(kept)
     if dropped:
         print(f"  ({dropped} device rows of the other strategy left out)")

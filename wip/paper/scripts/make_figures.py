@@ -338,11 +338,7 @@ def compare_rows():
 
 # Our two strategies and theirs. Colour separates the library, intensity the
 # strategy, matching broad-per-frame.
-# Not SHIPPED_BP: this figure plots one recorded comparison run against
-# Scalable CCD, and that run was taken with the extent-binned cell list. The
-# series has to name what the data holds, not what the library now defaults
-# to; moving it to cell2dmin needs the comparison re-run, not a relabel.
-SERIES_VS = (("cell list (ours)", "device-tight", "cell2d", DEV, 0.0),
+SERIES_VS = (("cell list (ours)", "device-tight", SHIPPED_BP, DEV, 0.0),
              ("sweep (ours)", "device-tight", "sweep", DEV, SWEEP_TINT),
              ("Scalable CCD", "scalable-ccd-device", None, "relaxed", 0.0))
 

@@ -277,12 +277,12 @@ scores the step's answer against the step's earliest exact root.
 
 \input{generated/tables/tab-competitor-earliest}
 
-End to end SCCD on the device is ahead on every scene, from $3.0\times$ on
-cloth-funnel to $10.3\times$ on puffer-ball, and the whole-scene totals put the
-cost in the terms a simulation pays: $34.9$ against $143.6\,\mathrm{s}$ over
-rod-twist's $4{,}571$ cases, $27.1$ against $278.3\,\mathrm{s}$ over
+End to end SCCD on the device is ahead on every scene, from $4.23\times$ on
+cloth-funnel to $11.93\times$ on puffer-ball, and the whole-scene totals put the
+cost in the terms a simulation pays: $27.0$ against $142.9\,\mathrm{s}$ over
+rod-twist's $4{,}571$ cases, $23.3$ against $278.3\,\mathrm{s}$ over
 puffer-ball's $240$. Puffer-ball is also where our host path loses outright, at
-$461.1\,\mathrm{s}$, because its broad phase carries the scene on its own. The
+$458.6\,\mathrm{s}$, because its broad phase carries the scene on its own. The
 comparison is on the device throughout: Scalable CCD's narrow phase is CUDA, so
 its host side is a broad phase with no pipeline behind it and not something a
 caller runs end to end.
@@ -300,28 +300,28 @@ caller runs end to end.
 \end{figure}
 
 \Cref{fig:bpvs} puts the broad phases side by side through each simulation.
-Summed over the benchmark ours costs $30.3\,\mathrm{s}$ against
-$313.8\,\mathrm{s}$, and the margin is a standing one rather than a few
+Summed over the benchmark ours costs $40.3\,\mathrm{s}$ against
+$312.6\,\mathrm{s}$, and the margin is a standing one rather than a few
 expensive steps: on puffer-ball, the scene with the most candidate pairs, it is
-$10.4\,\mathrm{s}$ against $227.2$. Drawing both of our strategies separates
+$21.9\,\mathrm{s}$ against $226.8$. Drawing both of our strategies separates
 what the implementation earns from what the choice of algorithm earns, and on
 n-body the two answers differ: our sweep is the slower broad phase there,
-$7.4\,\mathrm{s}$ against Scalable CCD's $6.3$, while our cell list takes the
-scene at $1.9$. On cloth-funnel the ordering is the other way round -- our two
-strategies are within $4\%$ of each other, so the $5.0\times$ against Scalable
-CCD is the implementation and not the algorithm.
+$7.5\,\mathrm{s}$ against Scalable CCD's $6.3$, while our cell list takes the
+scene at $4.5$. On cloth-funnel the ordering is the other way round -- our two
+strategies are within $18\%$ of each other and both are far ahead, so the
+$5.4\times$ against Scalable CCD is the implementation and not the algorithm.
 
 The earliness columns are the ones to read carefully, because on three scenes
 they report a defect rather than a difference in tightness. On armadillo-rollers
-Scalable CCD's answer lands after the true root on $272$ of the $394$ steps that
-carry a contact -- its median earliness is $-9.8\times10^{-3}$, so the median
+Scalable CCD's answer lands after the true root on $269$ of the $394$ steps that
+carry a contact -- its median earliness is $-9.4\times10^{-3}$, so the median
 step is late, and its own \emph{tighter} entry reads \emph{late} because a ratio
 against a late answer would not measure tightness -- and its worst answer misses by
-$1.000$, reporting no contact at all where one exists early. It is late on $36$
-of rod-twist's $2{,}481$ steps and $10$ of cloth-funnel's $363$, and on none of
+$1.000$, reporting no contact at all where one exists early. It is late on $31$
+of rod-twist's $2{,}481$ steps and $9$ of cloth-funnel's $363$, and on none of
 cloth-ball's, n-body's or puffer-ball's. Where it does stay conservative it is
-still the looser answer, by $55\times$ on cloth-ball, $279\times$ on rod-twist
-and $3{,}060\times$ on puffer-ball.
+still the looser answer, against our device by $50.7\times$ on cloth-ball,
+$281\times$ on rod-twist and $2{,}844\times$ on puffer-ball.
 The cause is a race in its subdivision buffer, whose overflow check tests that
 the buffer is full and then advances the tail as two separate operations, so
 that concurrent pushes can wrap the tail onto domains that have not been
@@ -347,10 +347,11 @@ candidates and the same curated queries.
 
 \input{generated/tables/tab-competitor-pair}
 
-It is the cheaper narrow phase on every scene, by $2.1\times$ per candidate on
-cloth-funnel, $5.0\times$ to $5.3\times$ on armadillo-rollers, cloth-ball, n-body
-and puffer-ball, and $12.1\times$ on rod-twist, against \textsc{Tight} on the
-host: $6.8$ against $82.3\,\mathrm{s}$ over the whole of rod-twist.
+It is the cheaper narrow phase on every scene, by $2.03\times$ per candidate on
+cloth-funnel, between $3.37\times$ and $5.38\times$ on armadillo-rollers,
+cloth-ball, n-body and puffer-ball, and $11.91\times$ on rod-twist, against
+\textsc{Tight} on the host: $6.9$ against $82.4\,\mathrm{s}$ over the whole of
+rod-twist.
 
 What it buys with that is the answer. Its median earliness runs from
 $8.6\times10^{-3}$ to $1.1\times10^{-1}$ where \textsc{Tight}'s runs from
