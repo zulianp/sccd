@@ -179,10 +179,11 @@ puffer-ball by $2.05\times$, n-body by $2.02\times$, rod-twist by $1.89\times$
 and cloth-ball by $1.43\times$; the host wins armadillo-rollers at $0.75\times$
 and cloth-funnel at $0.56\times$, where a device broad phase behind at
 $0.56\times$ and a narrow phase behind at $0.56\times$ both point the same way.
-Cloth-funnel is the smallest scene in the benchmark by candidate pairs and
-puffer-ball the largest, and the device wins the larger one, so problem size is
-not a rule for choosing a processor on its own. \Cref{sec:results:scaling} shows
-what does move with it.
+The two scenes the host takes are the two smallest by candidate pairs, and the
+device takes every scene above a million. Within that the margin follows
+something else, cloth-ball at $2.2$ million pairs giving $1.43\times$ where
+rod-twist at $847{,}250$ gives $1.89\times$, so size indicates the processor
+and does not settle it. \Cref{sec:results:scaling} varies it directly.
 
 \Cref{tab:throughput} states the same comparison as a rate. Candidate pairs
 resolved per second is what the broad phase produces and the narrow phase
