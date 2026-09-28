@@ -285,8 +285,9 @@ and a shared scale along each row, so a box can be read against its neighbours
 as well as against the pair beside it. Broad-phase time is tight around its
 median; narrow-phase time is skewed by a long upper tail, the per-case form of
 the heavy-tailed difficulty of \cref{tab:difficulty}. \Cref{fig:toierr} gives
-the error distribution, one-sided by construction since every value is the
-distance \emph{before} the true root at which the answer falls.
+the earliness distribution, one-sided by construction since every value is the
+distance \emph{before} the true root at which the answer falls, with additive
+CCD on the same cases beneath it for comparison.
 
 \begin{figure}[htbp]
   \centering
@@ -321,11 +322,16 @@ distance \emph{before} the true root at which the answer falls.
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=\linewidth]{figures/toi-error.pdf}
-  \caption{Error against the exact symbolic roots, logarithmic axis, one value
-    per case: the largest earliness anywhere in that case. Every
-    reported time of impact lies at or before its root, so the whole
-    distribution sits on the early side of zero.}
+  \includegraphics[width=\linewidth]{figures/earliness.pdf}
+  \caption{Earliness against the exact symbolic roots, logarithmic axis, one
+    value per case: the largest earliness anywhere in that case. Above, SCCD on
+    both processors; below, additive CCD on the same cases, from the one
+    comparison run of \cref{sec:results:others} and in the same bins. Every
+    reported time of impact lies at or before its root, so both distributions
+    sit on the early side of zero and nothing falls outside the axis on the late
+    side. Additive CCD's
+    median case sits between $1.6$ and $4.8$ decades further from the root,
+    depending on the scene.}
   \label{fig:toierr}
 \end{figure}
 

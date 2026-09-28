@@ -450,13 +450,15 @@ def competitors():
     PANELS = (
         ("tab-competitor-earliest", 6, "earliest time of impact, per case (ms)",
          ("SCCD (CPU)", "SCCD (GPU)", "Scalable CCD (GPU)"),
-         ("SCCD (CPU)", "SCCD (GPU)", "Scalable CCD")),
+         ("SCCD (CPU)", "SCCD (GPU)", "Scalable CCD"), "log"),
+        # Linear: this panel spans well under two decades, where a log axis
+        # costs readability and buys nothing.
         ("tab-competitor-pair", 7, "per pair, narrow phase (ns/pair)",
          ("SCCD (CPU)", "SCCD (GPU)", "Additive CCD (CPU)"),
-         ("SCCD (CPU)", "SCCD (GPU)", "Additive CCD")),
+         ("SCCD (CPU)", "SCCD (GPU)", "Additive CCD"), "linear"),
     )
     panels = []
-    for name, col, ylab, keys, labels in PANELS:
+    for name, col, ylab, keys, labels, scale in PANELS:
         rows, scene, d = _tex_rows(name), None, collections.defaultdict(dict)
         for r in rows:
             if len(r) <= col:
@@ -469,16 +471,16 @@ def competitors():
         if not d:
             print(f"no {name}; skipping competitors", file=sys.stderr)
             return None
-        panels.append((ylab, list(d), keys, labels, d))
+        panels.append((ylab, list(d), keys, labels, d, scale))
 
     fig, axes = plt.subplots(1, 2, figsize=style.figsize(style.FULL_WIDTH_IN, 0.34))
-    for ax, (ylab, names, keys, labels, d) in zip(axes, panels):
+    for ax, (ylab, names, keys, labels, d, scale) in zip(axes, panels):
         x, w = range(len(names)), 0.8 / len(keys)
         for i, (k, lab) in enumerate(zip(keys, labels)):
             ax.bar([j + i * w - 0.4 + w / 2 for j in x],
                    [d[n].get(k, float("nan")) for n in names], w,
                    color=style.SERIES[i], label=lab, zorder=2)
-        ax.set_yscale("log")
+        ax.set_yscale(scale)
         ax.set_ylabel(ylab, fontsize=7)
         ax.set_xticks(list(x))
         ax.set_xticklabels(names, rotation=30, ha="right", fontsize=6)
@@ -543,11 +545,89 @@ def device_counters():
     return p
 
 
+# ------------------------------------------------ earliness distributions ---
+def earliness():
+    """Per-case earliness, SCCD above and additive CCD below, same bins.
+
+    Drawn from the competitor run, so both rows describe the same cases measured
+    in one allocation; that is what makes the two rows comparable at all. The
+    quantity is the largest earliness in a case, one-sided by construction.
+    """
+    import numpy as np
+
+    data = compare_rows()
+    if not data:
+        print("no comparison CSV; skipping earliness", file=sys.stderr)
+        return None
+
+    lo, hi = 1e-9, 1.0
+    edges = np.logspace(np.log10(lo), np.log10(hi), 26)
+    ROWS = (("SCCD", (("CPU", HOST, "-"), ("GPU", DEV, "--"))),
+            ("Additive CCD", (("Additive CCD (CPU)", "accd", "-"),)))
+
+    # scene -> mode -> one value per case
+    acc = collections.defaultdict(lambda: collections.defaultdict(list))
+    for r in data:
+        if r["mode"].startswith("device-") and r.get("broadphase") != SHIPPED_BP:
+            continue
+        try:
+            v = float(r["toi_max_early"])
+        except (ValueError, KeyError):
+            continue
+        if v > 0:
+            acc[r["dataset"]][r["mode"]].append(min(max(v, lo), hi))
+
+    present = [s_ for s_ in SCENES if acc[s_]]
+    if not present:
+        print("comparison CSV has no earliness; skipping", file=sys.stderr)
+        return None
+
+    fig, axes = plt.subplots(len(ROWS), len(present), squeeze=False, sharex=True,
+                             figsize=style.figsize(style.FULL_WIDTH_IN, 0.40))
+    for row, (rowlab, series) in enumerate(ROWS):
+        for col, scene in enumerate(present):
+            ax = axes[row][col]
+            for i, (lab, mode, ls) in enumerate(series):
+                vals = acc[scene].get(mode)
+                if not vals:
+                    continue
+                ax.hist(vals, bins=edges, histtype="step", linewidth=1.0,
+                        linestyle=ls, color=style.SERIES[i if row == 0 else 2],
+                        label=lab)
+            ax.set_xscale("log")
+            # Two decade ticks over nine decades leave the peaks unplaceable,
+            # which is the whole point of putting the two rows on one axis.
+            ax.set_xticks([1e-9, 1e-6, 1e-3, 1e0])
+            ax.xaxis.set_minor_locator(matplotlib.ticker.NullLocator())
+            ax.set_xlim(lo, hi)
+            ax.tick_params(labelsize=6, length=2, pad=1)
+            ax.grid(True, linewidth=0.3, color=style.GRID_INK)
+            ax.set_axisbelow(True)
+            if row == 0:
+                ax.set_title(LABEL.get(scene, scene), fontsize=7, pad=3)
+            if row == len(ROWS) - 1:
+                ax.set_xlabel("earliness", fontsize=6.5)
+            if col == 0:
+                ax.set_ylabel(f"{rowlab}\ncases", fontsize=6.5)
+
+    handles, labels = [], []
+    for row in range(len(ROWS)):
+        h, l = axes[row][0].get_legend_handles_labels()
+        handles += h; labels += l
+    fig.legend(handles, labels, loc="lower center", ncol=len(labels), fontsize=6.5,
+               frameon=False, handletextpad=0.4, columnspacing=1.4,
+               bbox_to_anchor=(0.5, -0.02))
+    fig.tight_layout(rect=(0, 0.08, 1, 1))
+    p = OUT / "earliness.pdf"
+    fig.savefig(p, bbox_inches="tight"); plt.close(fig)
+    return p
+
+
 def main() -> int:
     style.apply_rcparams()
     OUT.mkdir(parents=True, exist_ok=True)
     for fn in (strong_scaling, per_frame, broad_per_frame, broad_vs_scalable,
-               competitors, device_counters):
+               competitors, device_counters, earliness):
         p = fn()
         if p:
             print(f"wrote {p.relative_to(PAPER)}")
