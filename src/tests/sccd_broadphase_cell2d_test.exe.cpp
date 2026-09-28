@@ -217,6 +217,56 @@ namespace {
         return out;
     }
 
+    // The minimum-corner vertex-face query: the faces are binned, one entry
+    // each, and the vertices walk. The pair set must be identical to
+    // cell2d_pairs -- this moves where a pair is found, not which pairs exist.
+    template <int nxe>
+    PairSet cell2dmin_vf_pairs(Boxes& faces, Boxes& verts) {
+        sccd::Cell2DGrid<scalar_t> grid;
+        sccd::cell2d_setup<scalar_t>(faces.n, faces.ptr, grid);
+
+        sccd::Cell2DPartition part;
+        sccd::cell2dmin_partition<scalar_t>(faces.n, faces.ptr, grid, part);
+
+        std::vector<ptrdiff_t> cellptr(grid.ncells() + 1);
+        sccd::cell2dmin_count<scalar_t>(faces.n, faces.ptr, grid, part, cellptr.data());
+
+        std::vector<idx_t> cellidx(cellptr[grid.ncells()]);
+        std::vector<ptrdiff_t> cursor(grid.ncells());
+        sccd::cell2dmin_fill<scalar_t, idx_t>(
+            faces.n, faces.ptr, grid, part, cellptr.data(), cellidx.data(), cursor.data());
+
+        std::vector<scalar_t> row_prefix(grid.ncells()), cell_hi1(grid.ncells());
+        sccd::cell2dmin_bounds<scalar_t>(
+            faces.n, faces.ptr, grid, part, row_prefix.data(), cell_hi1.data());
+        const int krow = sccd::cell2dmin_max_row_span<scalar_t>(faces.n, faces.ptr, grid);
+
+        std::vector<scalar_t> boxdata[6];
+        scalar_t* cellbox[6];
+        for (int d = 0; d < 6; ++d) {
+            boxdata[d].resize((size_t)cellptr[grid.ncells()]);
+            cellbox[d] = boxdata[d].data();
+        }
+        sccd::cell2d_pack_boxes<scalar_t, idx_t>(grid, faces.ptr, cellptr.data(), cellidx.data(), cellbox);
+
+        std::vector<ptrdiff_t> ccdptr(verts.n + 1, 0);
+        const bool any = sccd::cell2dmin_count_vf_overlaps<nxe, scalar_t, idx_t>(
+            verts.n, verts.ptr, verts.idx.data(), faces.idx.data(), 1, faces.elem_ptr, grid,
+            cellptr.data(), cellidx.data(), cellbox, row_prefix.data(), cell_hi1.data(), krow,
+            ccdptr.data());
+
+        PairSet out;
+        if (!any) return out;
+
+        std::vector<idx_t> a(ccdptr[verts.n]), b(ccdptr[verts.n]);
+        sccd::cell2dmin_fill_vf_overlaps<nxe, scalar_t, idx_t>(
+            verts.n, verts.ptr, verts.idx.data(), faces.idx.data(), 1, faces.elem_ptr, grid,
+            cellptr.data(), cellidx.data(), cellbox, row_prefix.data(), cell_hi1.data(), krow,
+            ccdptr.data(), a.data(), b.data());
+        for (size_t i = 0; i < a.size(); ++i) out.insert({a[i], b[i]});
+        return out;
+    }
+
     // force_axis pins the sort axis instead of letting choose_axis pick. The
     // sweep must return the same pair set whichever axis it sorts on, and that
     // invariant is what exposes a candidate window inconsistent with the overlap
@@ -912,20 +962,41 @@ namespace {
 
         const PairSet cell = cell2d_pairs<nxe>(faces_c, verts_c);
         const PairSet sweep = sweep_pairs<nxe>(faces, verts);
+        Boxes faces_m = faces_c, verts_m = verts_c;
+        faces_m.bind();
+        verts_m.bind();
+        const PairSet mincorner = cell2dmin_vf_pairs<nxe>(faces_m, verts_m);
 
         std::vector<std::pair<idx_t, idx_t>> only_sweep, only_cell;
         std::set_difference(sweep.begin(), sweep.end(), cell.begin(), cell.end(), std::back_inserter(only_sweep));
         std::set_difference(cell.begin(), cell.end(), sweep.begin(), sweep.end(), std::back_inserter(only_cell));
 
-        const bool ok = only_sweep.empty() && only_cell.empty();
-        std::printf("%-20s nxe=%d faces=%-7ld verts=%-7ld sweep=%-8zu cell=%-8zu  %s\n",
+        std::vector<std::pair<idx_t, idx_t>> only_c, only_m;
+        std::set_difference(cell.begin(), cell.end(), mincorner.begin(), mincorner.end(),
+                            std::back_inserter(only_c));
+        std::set_difference(mincorner.begin(), mincorner.end(), cell.begin(), cell.end(),
+                            std::back_inserter(only_m));
+
+        const bool ok = only_sweep.empty() && only_cell.empty() && only_c.empty() && only_m.empty();
+        std::printf("%-20s nxe=%d faces=%-7ld verts=%-7ld sweep=%-8zu cell=%-8zu mincorner=%-8zu  %s\n",
                     name,
                     nxe,
                     (long)nf,
                     (long)nv,
                     sweep.size(),
                     cell.size(),
+                    mincorner.size(),
                     ok ? "ok" : "MISMATCH");
+        if (!only_c.empty() || !only_m.empty()) {
+            std::printf("    mincorner missed %zu of the cell list's pairs, invented %zu\n",
+                        only_c.size(), only_m.size());
+            for (size_t i = 0; i < only_c.size() && i < 5; ++i) {
+                std::printf("    mincorner missing (%d,%d)\n", only_c[i].first, only_c[i].second);
+            }
+            for (size_t i = 0; i < only_m.size() && i < 5; ++i) {
+                std::printf("    mincorner extra   (%d,%d)\n", only_m[i].first, only_m[i].second);
+            }
+        }
         if (!ok) {
             std::printf("    missed by cell list: %zu   extra in cell list: %zu\n",
                         only_sweep.size(),
