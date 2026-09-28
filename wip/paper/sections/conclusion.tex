@@ -1,36 +1,36 @@
 \section{Conclusion}
 \label{sec:conclusion}
 
-We have presented a continuous collision detection pipeline whose answer is
+We have presented a continuous collision detection pipeline that is
 conservative by construction on two very different processors, and measured it
-against a certified reference on a dataset with exact roots. The accuracy
-result is the one to take away. On the host, the median and worst-case error
-match TightInclusion's on all twelve scene-phases to every printed digit, at
-between $1.7\times$ and $4.9\times$ its speed. That reproduces the reference exactly. On the device, faster again by $2.5\times$ to
-$26.6\times$, the two agree to within a few percent.
+against a certified reference on a dataset with exact roots. On the host, the
+median and worst-case error match TightInclusion's on all twelve scene-phases to
+every printed digit, at between $1.7\times$ and $4.9\times$ its speed, so the
+pipeline reproduces the reference exactly. On the device,
+faster again by $2.5\times$ to $26.6\times$, the two agree to within a few
+percent.
 
-The design results generalise beyond this problem. \Cref{prop:order} is the
-useful one. A branch-and-bound search becomes order-independent once it keeps a minimum over
-all accepted leaves, in place of returning the first leaf a priority queue hands
-it. Order-independence then allows vector lanes and thread
+The design results generalise beyond this problem, and \cref{prop:order} is the
+principal one. A branch-and-bound search becomes order-independent once it keeps
+a minimum over all accepted leaves, in place of returning the first leaf a
+priority queue supplies. Order-independence then allows vector lanes and thread
 blocks to be filled with work from unrelated queries. Both of our parallel
-kernels are consequences of that observation, spent in opposite directions:
-packing lanes across queries on the host, and pushing work out of the block
-that generated it on the device.
+kernels are consequences of that observation, applied in opposite directions:
+packing lanes across queries on the host, and pushing work out of the block that
+generated it on the device.
 
-Two negative results carry as much as the positive ones. Four cheap statistics
-that ought to predict which broad phase is faster all fail on real geometry,
-and so does fixing the choice. The two algorithms rank oppositely depending on
-whether one times the traversal or the whole phase, and they change places
-again with the thread count. Measuring on two consecutive steps is cheaper and
-more reliable than any of it. The second negative result is that a principled
+Two further results are negative. The first concerns the choice of broad phase.
+Cheap geometric statistics computed from the input fail to predict which
+strategy will be faster, so the choice is settled by measurement: the cell list
+leads the sweep on every scene and on both processors, and the pipeline
+therefore runs a single strategy everywhere. The second is that a principled
 splitter, aimed at the largest root-free region, loses to a crude clamped one.
-A branch-and-bound search cannot exploit dead volume as such. It can exploit
+A branch-and-bound search cannot exploit dead volume as such; it can exploit
 only volume that a \emph{single} component rules out, and a multi-way split
-lets different children die by different components.
+allows different children to die by different components.
 
-Three next steps are obvious. Minimum-separation queries are generally required
-by the barrier-method solvers this work targets. Multi-GPU execution is a
-natural fit for the double-buffered queue, which already has the right shape
-for it. An in-solver evaluation is the one that matters most: without it, the
-practical value of these speedups stays inferred and unmeasured.
+Three extensions follow directly. Minimum-separation queries are generally
+required by the barrier-method solvers this work targets. Multi-GPU execution
+suits the double-buffered queue, which already has the appropriate structure.
+An in-solver evaluation is the most important of the three: without it, the
+practical value of these speedups remains inferred and unmeasured.

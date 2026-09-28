@@ -5,7 +5,7 @@ CCD is conventionally split into two stages. A \emph{broad phase} is a
 conservative filter: it discards pairs of primitives whose swept bounding
 volumes cannot meet. A \emph{narrow phase} then decides each surviving pair
 precisely enough to be trusted. The two stages have separate literatures and
-separate failure modes, so we treat them separately here.
+separate failure modes.
 
 \subsection{Broad phase}
 
@@ -15,7 +15,7 @@ comparison, and comparison is exact. It is also quadratic, which makes it
 unusable past a few tens of thousands of primitives.
 
 \emph{Sweep and prune}~\citep{baraff1992dynamic,cohen1995icollide} sorts the
-boxes along one axis and walks a window of overlapping intervals. That reduces
+boxes along one axis and walks a window of overlapping intervals, which reduces
 the expected cost to $O(n\log n)$ plus the number of overlaps. Parallel and
 incremental variants are
 numerous~\citep{capannini2018adaptive,tracy2009sweep,liu2010realtime}, and the
@@ -24,24 +24,24 @@ independent comparisons.
 
 \emph{Uniform grids and spatial hashes}~\citep{tang2018icloth,tang2018pscc} bin
 each box into the cells it touches and test only within a cell. They parallelise
-well and need no sort. They also introduce a parameter, the cell size, which the
-literature repeatedly identifies as the method's weak point. Too small, and
-duplicate candidates exhaust memory; too large, and the method degenerates
-towards brute force. No single value serves a scene whose geometry changes over
-the simulation. Published heuristics tie the cell to the average edge length and
-the average displacement, which is a reasonable prior and not a guarantee.
-\Cref{sec:bp:cell} takes a different route: it derives the cell from the swept
-boxes themselves and caps the cell count relative to the element count, so no
-value is left for a user to choose. For one list against itself these methods
-also have to suppress the pairs a box meets in more than one cell, whether by a
-rule on the cell or by a pass over the output. \Cref{sec:bp:self} instead gives a
-box one cell and reads forward from it, the arrangement linked-cell neighbour
-search uses~\citep{allen2017liquids}, which needs the cells to carry an order
-and a bound rather than the pairs to carry a test.
+well and need no sort, and they introduce a parameter, the cell size, which the
+literature repeatedly identifies as the method's weak point. A cell that is too
+small lets duplicate candidates exhaust memory, and one that is too large
+degenerates towards brute force. No single value serves a scene whose geometry
+changes over the simulation. Published heuristics tie the cell to the average
+edge length and the average displacement, which is a reasonable prior and not a
+guarantee. \Cref{sec:bp:cell} derives the cell from the swept boxes themselves
+and caps the cell count relative to the element count, so no value is left for a
+user to choose. For one list against itself these methods also have to suppress
+the pairs a box meets in more than one cell, whether by a rule on the cell or by
+a pass over the output. \Cref{sec:bp:self} gives a box one cell and reads
+forward from it, the arrangement linked-cell neighbour search
+uses~\citep{allen2017liquids}, which requires the cells to carry an order and a
+bound and requires no test on the pairs.
 
 \emph{Hierarchies} of bounding volumes, KD-trees and interval
 trees~\citep{serpa2019kdtree,serpa2020broadmark,zomorodian2000boxes} prune
-better per test. They are also harder to build and refit in parallel. On a GPU
+better per test. They are also harder to build and refit in parallel; on a GPU
 their traversal is irregular and their construction wants dynamic allocation.
 
 \citet{belgrod2025toi} benchmark thirteen broad-phase implementations against
@@ -49,9 +49,9 @@ exact ground truth, and find that several of them \emph{miss collisions}. The
 usual cause is a fixed-size candidate buffer that discards overflow silently.
 They conclude that sweeping along the most-varying axis is the most effective
 GPU strategy, and propose \emph{Sweep and Tiniest Queue}, which vectorises the
-sweep and balances work through a consumer queue. Our broad phase takes the
-other route: it bins rather than sorts, so it inherits neither the sort's cost
-nor its dependence on one axis separating the geometry.
+sweep and balances work through a consumer queue. Our broad phase bins the
+boxes, so it inherits neither the sort's cost nor its dependence on one axis
+separating the geometry.
 
 \subsection{Narrow phase}
 
@@ -71,34 +71,33 @@ square roots, however, so the underestimate it relies on is not certified.
 Tightening the factor to obtain a sharper time of impact reintroduces missed
 collisions~\citep{belgrod2025toi}.
 
-\emph{Exact} methods exist, and neither kind answers the question this paper
-asks. Root-parity tests~\citep{brochu2012efficient, tang2014bernstein,
+\emph{Exact} methods exist in two kinds, and neither answers the question this
+paper asks. Root-parity tests~\citep{brochu2012efficient, tang2014bernstein,
 wang2022rootparity} cannot distinguish zero roots from two, which is
-insufficient for CCD. Symbolic root finding is genuinely exact and takes seconds
-per query. It produced the ground truth used in this paper, and it is not a
-runtime method.
+insufficient for CCD. Symbolic root finding is genuinely exact, takes seconds
+per query, and produced the ground truth used in this paper; it is not a runtime
+method.
 
-\emph{Inclusion-based} root finding is the family this work belongs to. Instead
-of solving for the root, one brackets it: evaluate an inclusion function over a
-box in parameter space, discard the box when the function's range provably
-excludes the origin, and otherwise refine~\citep{snyder1992interval,
-snyder1993interval,vonherzen1990geometric}. Interval
-arithmetic~\citep{moore2009interval} gives such a bracket, but it overestimates.
-\citet{wang2021tight} instead construct an inclusion function specific to these
-queries, together with a forward error bound. Theirs is the first implementation whose conservativeness survives the
-implementation, and
-TightInclusion is that implementation. \citet{belgrod2025toi} restructure the
-same mathematics for a GPU. They parallelise over interval splits and alternate two global queues, and they observe that a direct CUDA
-port of TightInclusion does not scale, because of branching and register
-pressure.
+\emph{Inclusion-based} root finding is the family this work belongs to. These
+methods bracket the root: they evaluate an inclusion function over a box in
+parameter space, discard the box when the function's range provably excludes the
+origin, and otherwise refine~\citep{snyder1992interval, snyder1993interval,
+vonherzen1990geometric}. Interval arithmetic~\citep{moore2009interval} gives
+such a bracket, but it overestimates. \citet{wang2021tight} construct an
+inclusion function specific to these queries, together with a forward error
+bound. Theirs is the first implementation whose conservativeness survives the
+implementation, and TightInclusion is that implementation.
+\citet{belgrod2025toi} restructure the same mathematics for a GPU. They
+parallelise over interval splits and alternate two global queues, and they
+observe that a direct CUDA port of TightInclusion does not scale, because of
+branching and register pressure.
 
 Two further implementations answer neighbouring questions and are measured in
-\cref{sec:results:others}. Scalable CCD returns the earliest time of impact of a
-whole step rather than one per pair, which lets it prune every box against a
-running bound. Additive CCD~\citep{li2021codim} takes the other route entirely:
-it advances a conservative bound until the primitives touch, which is cheap per
-pair and stops well short of the root, and it is the narrow phase the
-codimensional IPC line of work uses.
+\cref{sec:results:others}. Scalable CCD returns one earliest time of impact for
+the whole step, which lets it prune every box against a running bound. Additive
+CCD~\citep{li2021codim} advances a conservative bound until the primitives
+touch, which is cheap per pair and stops well short of the root, and it is the
+narrow phase the codimensional IPC line of work uses.
 
 SCCD inherits TightInclusion's mathematics. It uses the same inclusion function
 in the same expression order, the same certified bound and the same acceptance

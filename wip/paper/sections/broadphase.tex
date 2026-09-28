@@ -1,18 +1,18 @@
 \section{Broad phase}
 \label{sec:bp}
 
-Of the two phases the broad one asks the cheaper question. It never evaluates
+The broad phase answers the cheaper of the two questions. It never evaluates
 $\Fdiff$ and never sees a tolerance. It turns a mesh into a set of candidate
 pairs, meaning pairs of primitives whose swept bounding boxes overlap and which
 might therefore touch, and hands them to \cref{sec:np}. It must be
-conservative, because a pair it discards is never examined again. On the scenes
-in our benchmark it is also the larger share of the host runtime, so it must be
-fast.
+conservative, since a pair it discards is never examined again, and on the
+scenes in our benchmark it is also the larger share of the host runtime, so it
+must be fast.
 
-One algorithm serves it, over one acceleration structure: a uniform grid on two
-of the three axes. The two queries it answers are not the same shape, so they
-are described separately. Vertex-face asks one list against another and is
-answered by binning a box into every cell its extent touches
+A single algorithm serves it over a single acceleration structure, a uniform
+grid on two of the three axes. The two queries it answers differ in shape and
+are therefore described separately. Vertex-face asks one list against another
+and is answered by binning a box into every cell its extent touches
 (\cref{sec:bp:cell}); edge-edge asks one list against itself, which admits a
 cheaper binning and a different walk (\cref{sec:bp:self}).
 
@@ -26,12 +26,11 @@ per edge and per face. Where the box is stored in a narrower type than the
 geometry, each bound is moved outward by one unit in the last place, so a
 rounded box can never exclude a candidate the exact box would have kept.
 
-Two conventions shape everything downstream. The first concerns the overlap
+Two conventions shape everything downstream. The first governs the overlap
 test, which rejects only on a \emph{strict} separation, $a_{\min} > b_{\max}$ on
-some axis. Boxes that merely touch are therefore reported as overlapping. This
-inclusivity is deliberate: a candidate window that rejects a pair of boxes
-merely touching drops the pairs a moving surface produces most often, which are
-the degenerate ones.
+some axis; boxes that merely touch are therefore reported as overlapping. The
+inclusivity is deliberate, since a candidate window that rejects a pair of boxes
+in contact drops the degenerate pairs that a moving surface produces most often.
 
 The second is that all storage is structure-of-arrays and every output is built
 \emph{count-then-fill}. A first pass counts the pairs each primitive will
@@ -44,51 +43,50 @@ per-thread container is not available.
 The host tests one box against $32$ consecutive boxes at a time, and an AVX-512,
 AVX2 or NEON kernel returns a $32$-bit mask of the survivors. Counting is then a
 population count, and enumeration is a bit scan. A rejected candidate therefore
-never issues the indirect load of its element indices, which is the expensive
-part of a test that usually fails.
+never issues the indirect load of its element indices, the expensive part of a
+test that usually fails.
 
 \subsection{The vertex-face query}
 \label{sec:bp:cell}
 
 Vertex-face takes two lists, the faces against the vertices, and
-\cref{alg:cell} answers it by binning one of them into a grid. Two of its
-choices are deliberate enough to state before the algorithm itself.
+\cref{alg:cell} answers it by binning one of them into a grid. Two choices in
+that construction, the dimensionality of the grid and its spacing, are
+described first.
 
-The grid is over \emph{two} axes, not three. For a surface of $N$ elements of
+The grid is over \emph{two} of the three axes. For a surface of $N$ elements of
 size $h$ inside a region of side $L$ we have $N \sim (L/h)^{2}$, because a
 surface does not fill a volume. A two-dimensional grid at element resolution
 therefore has $O(N)$ cells, and it is mostly occupied. A three-dimensional one
 has $(L/h)^{3} = N^{3/2}$ cells. At $N = 1.5\times10^{6}$ that is
-$1.8\times10^{9}$ cells at $0.08\%$ occupancy, which buys memory and empty-cell
-iteration in exchange for pruning along a direction the surface barely occupies.
-The third axis is not abandoned. The ordinary three-dimensional box test inside
-the cell culls it, where it costs nothing extra.
+$1.8\times10^{9}$ cells at $0.08\%$ occupancy, spending memory and empty-cell
+iteration for pruning along a direction the surface barely occupies. The third
+axis still culls, through the ordinary three-dimensional box test inside the
+cell, where it costs nothing extra.
 
-The cell size is derived, not chosen. The grid spacing on each of the two axes
+The cell size is derived from the data. The grid spacing on each of the two axes
 is the \emph{mean extent of the swept boxes} on that axis. The resulting cell
 counts are then scaled isotropically so that their product does not exceed $4N$:
 past that point more resolution does not pay, and a degenerate extent could
-otherwise allocate without bound. No voxel size is left for a caller to supply,
-and none to get wrong.
+otherwise allocate without bound. The caller supplies no voxel size.
 
-Two other spacings suggest themselves and both are worse, for opposite reasons.
-Sizing on the \emph{element} size makes the grid far too fine: a swept box is
-much larger than the element it came from, so every box would span a block of
-cells and the binning pass would cost more than the query saves. Sizing on the
-\emph{largest} box is the textbook uniform-grid rule, and it is the more
-tempting of the two, because it buys a property the mean does not -- if no box
-is wider than a cell, then two overlapping boxes lie within one cell of each
-other and a fixed $3\times3$ stencil around a single owning cell finds every
-partner, with no duplicates to settle. What that rule costs is that the widest
-box in the scene sets the spacing for all of them. The swept boxes are not of
-one size: the widest is $4.5\times$ the mean on armadillo-rollers' vertices and
-$24\times$ on cloth-funnel's edges, because a few elements move fast while most
+Two other spacings are available and both perform worse. Sizing on the
+\emph{element} size makes the grid far too fine: a swept box is much larger than
+the element it came from, so every box would span a block of cells and the
+binning pass would cost more than the query saves. Sizing on the \emph{largest}
+box is the textbook uniform-grid rule, and it buys a property the mean lacks: if
+no box is wider than a cell, then two overlapping boxes lie within one cell of
+each other, and a fixed $3\times3$ stencil around a single owning cell finds
+every partner, with no duplicates to settle. Its cost is that the widest box in
+the scene sets the spacing for all of them. The swept boxes span a wide range of
+sizes: the widest is $4.5\times$ the mean on armadillo-rollers' vertices and
+$24\times$ on cloth-funnel's edges, since a few elements move fast while most
 barely move. On armadillo-rollers one swept edge spans $11\%$ of the scene, so a
 cell at least that wide admits an $8\times9$ grid at any element count, and the
 scene's $36{,}363$ edges land in $72$ cells, $505$ to a cell. Measured, that
 costs the host broad phase up to $11.9\times$. The mean keeps the cost of a box
-proportional to that box's own size, which is what a heavy-tailed size
-distribution requires.
+proportional to that box's own size, as a heavy-tailed size distribution
+requires.
 
 \begin{algorithm}[htbp]
 \caption{The vertex-face query, one pass (count or fill)}
@@ -127,29 +125,29 @@ distribution requires.
     and a second pass scatters each box index into each of its cells. The
     result is a CRS structure: \texttt{cellptr[c]} to \texttt{cellptr[c+1]} is
     the run of \texttt{cellidx} holding cell $c$'s boxes.
-    \textbf{(b)} A box is binned into \emph{every} cell its extent touches, and
-    those same cells are what it reads. So when two boxes both reach more than
-    one cell in common -- two, here -- the second box's index is listed in each
-    of them, and the first box's walk meets it once per shared cell. The pair is
-    emitted from the one holding the minimum corner of their overlap.}
+    \textbf{(b)} A box is binned into \emph{every} cell its extent touches and
+    reads those same cells. When two boxes share more than one such cell (two,
+    here), the second box's index is listed in each of them, and the first
+    box's walk meets it once per shared cell. The pair is emitted from the cell
+    holding the minimum corner of their overlap.}
   \label{fig:cell2d}
 \end{figure}
 
-Construction is the count-then-fill of \cref{sec:bp:common}, over cells rather
-than pairs and drawn in \cref{fig:cell2d}(a). Its two passes share one function
-for deciding which cells a box covers, so they cannot disagree about it --- a
-disagreement there would corrupt the cell array silently rather than fail. The
-pair output is built the same way, so the whole broad phase allocates exactly
-twice and both sizes are counted rather than guessed.
+Construction is the count-then-fill of \cref{sec:bp:common} applied to cells,
+drawn in \cref{fig:cell2d}(a). Its two passes share one function for deciding
+which cells a box covers, so they cannot disagree about it; a disagreement there
+would corrupt the cell array silently and without failing. The pair output is
+built the same way, so the whole broad phase performs exactly two allocations,
+both of counted sizes.
 
-Duplicates are then settled without per-pair state. A box spans several cells,
-so a pair can be discovered in several of them, as in \cref{fig:cell2d}(b). The
+Duplicates are settled without per-pair state. A box spans several cells, so a
+pair can be discovered in several of them, as in \cref{fig:cell2d}(b). The
 usual remedies, a hash set of emitted pairs or a mark array, cost memory
-proportional to the number of pairs and are awkward on a GPU. Instead the pair
-is \emph{attributed} to the cell containing the minimum corner of the two boxes'
-overlap, on line 8 of \cref{alg:cell}. That corner lies inside both boxes, so
-both are binned in that cell, and the cell is unique. The rule costs two clamps
-per surviving pair and no state at all, which is why the same code runs
+proportional to the number of pairs and are awkward on a GPU. The pair is
+therefore \emph{attributed} to the cell containing the minimum corner of the two
+boxes' overlap, on line 8 of \cref{alg:cell}. That corner lies inside both
+boxes, so both are binned in that cell, and the cell is unique. The rule costs
+two clamps per surviving pair and carries no state, so the same code runs
 unchanged on the device.
 
 Nothing on this path is sorted and nothing assumes an order: the query tests
@@ -164,48 +162,45 @@ larger: a box pays for its own size and for no other box's.
 \subsection{The edge-edge query}
 \label{sec:bp:self}
 
-Edge-edge is one list against itself, and that admits a cheaper binning than
+Edge-edge is one list against itself, which admits a cheaper binning than
 \cref{sec:bp:cell} uses. A box enters the \emph{single} cell holding its
-minimum corner rather than every cell its extent touches, so the cell array
-holds one entry per box, a partner is met at most once, and the duplicate rule
-of \cref{alg:cell} is not needed. Reading
-only the cells that come after a box's own is how linked-cell neighbour search
-avoids handling a pair twice, a cell visiting half its
-neighbours~\citep{allen2017liquids}. It is sound there because a particle is a
-point binned by its centre in a cell at least the interaction radius wide, and
-extended boxes binned at a corner are neither.
+minimum corner, so the cell array holds one entry per box, a partner is met at
+most once, and the duplicate rule of \cref{alg:cell} becomes unnecessary.
+Reading only the cells that come after a box's own is how linked-cell neighbour
+search avoids handling a pair twice, with each cell visiting half its
+neighbours~\citep{allen2017liquids}. That walk is sound there because a particle
+is a point binned by its centre in a cell at least the interaction radius wide,
+whereas extended boxes binned at a corner satisfy neither condition.
 
-The obvious reading of "after" fails. If a box reads the cells of its own
-footprint, its columns crossed with its rows, the pair is found only when one
-box's cell lies in the other's footprint --- and two boxes can overlap with
-neither doing so. Put one a column to the right of the other and a row below it:
-each footprint then runs up and to the right, away from where the other is
-binned, and neither box ever reads the other (\cref{fig:incomparable}).
-Componentwise order on cells is \emph{partial}, and the incomparable pairs are
-exactly the ones lost. Held to its own footprint the walk drops $3{,}698$ of
-$23{,}756$ pairs on one of the test cases and $882$ of $6{,}971$ on a
-heavy-tailed size spread.
-
+The reading of ``after'' that holds a box to its own footprint, its columns
+crossed with its rows, is incomplete: the pair is found only when one box's cell
+lies in the other's footprint, and two boxes can overlap with neither doing so.
+Place one a column to the right of the other and a row below it, and each
+footprint runs up and to the right, away from where the other is binned, so
+neither box ever reads the other (\cref{fig:incomparable}). Componentwise order
+on cells is \emph{partial}, and the incomparable pairs are exactly the ones
+lost. Held to its own footprint the walk drops $3{,}698$ of $23{,}756$ pairs on
+one of the test cases and $882$ of $6{,}971$ on a heavy-tailed size spread.
 
 \begin{figure}[htbp]
   \centering
   \input{tikz/incomparable}
-  \caption{Why a query is not bounded by its own footprint, drawn to scale over
+  \caption{A query reaches beyond its own footprint, drawn to scale over
     a five-by-three grid of cells $0.62$ wide. \textbf{(a)} $A =
     [1.5,1.9]\times[0.1,0.9]$ is binned in cell $2$ and $B =
     [0.8,2.2]\times[0.7,1.0]$ in cell $6$; they overlap on both axes, shaded.
     $B$ begins a column to the left of $A$ and a row above it, so neither
     minimum-corner cell precedes the other componentwise.
     \textbf{(b)} $A$'s footprint is columns $2$--$3$ crossed with rows $0$--$1$,
-    cells $2$, $3$, $7$ and $8$. It covers $B$'s row and not its column.
+    cells $2$, $3$, $7$ and $8$. It covers $B$'s row while missing its column.
     \textbf{(c)} $B$'s footprint is columns $1$--$3$ on row $1$, cells $6$, $7$
-    and $8$. It covers $A$'s column and not its row. Each misses the other by
-    one coordinate, and no rule for deciding which box reports a pair recovers
-    one that neither box reads.
+    and $8$. It covers $A$'s column while missing its row. Each misses the other
+    by one coordinate, and no rule for deciding which box reports a pair
+    recovers one that neither box reads.
     \textbf{(d)} Row-major linear index puts $A$ first, so $A$ reports. It reads
     its own row from its own cell, and the row above from column $1$, which the
     row's prefix maximum names because $B$ reaches back to $A$ from there ---
-    left of $A$'s own column, which is the step (b) will not take.}
+    left of $A$'s own column, a step the footprint walk of (b) never takes.}
   \label{fig:incomparable}
 \end{figure}
 
@@ -215,17 +210,17 @@ $i$'s maximum on either grid axis, so $L(\operatorname{cell}(j.\min)) \le
 L(\operatorname{cell}(i.\max))$: the row term settles it when the rows differ and
 the column does when they agree. Whichever box has the smaller $L$ therefore
 holds the other in its range, and equal $L$ means one cell, where the index
-decides --- the only index test in \cref{alg:cellmin}.
+decides, the only index test in \cref{alg:cellmin}.
 
-Read literally that range is whole rows, which is what the bounds are for. Each
+Taken literally that range spans whole rows, and the bounds narrow it. Each
 cell carries the largest upper bound of the boxes in it, and each row the prefix
 maximum of those along the row, so one binary search gives the first column
 holding anything that reaches back to the querying box and skips every column
 before it at once. A second bound per cell does the same on the other axis.
 
-That prefix is what lets the binning stand without a bound on how many cells a
-box may span. A grid that stores a box only at its lower-left cell otherwise has
-to cap the box at $k$ cells and widen every query window by $k$ to match.
+That prefix allows the binning to stand with no bound on how many cells a box
+may span. A grid that stores a box only at its lower-left cell must otherwise
+cap the box at $k$ cells and widen every query window by $k$ to match.
 
 \begin{algorithm}[htbp]
 \caption{The edge-edge query, one pass (count or fill)}
@@ -282,7 +277,8 @@ to cap the box at $k$ cells and widen every query window by $k$ to match.
     \textbf{(b)} $a$ covers cells $0$, $1$, $6$ and $7$, the last holding its
     maximum corner, and finds $b$ and $c$ in $1$ and $7$. Cell $6$ is empty, so
     the running maximum starts that row at the next column and the cell is never
-    read. A run of empty cells costs one binary search and not a test per cell.
+    read. A run of empty cells costs a single binary search, with no test per
+    cell.
     \textbf{(c)} $d$ covers cells $3$, $4$, $9$, $10$, $15$ and $16$, of which
     $3$ holds $d$ itself and $9$ holds $e$, the pair it emits. Cells $4$ and
     $10$ are read and yield nothing. The third row is skipped whole, the empty
@@ -306,6 +302,6 @@ Cost follows the same two terms as \cref{alg:cell}, with the binning reduced to
 one incidence per box and the query to whatever the bounds leave. Ordering each
 cell's entries on the axis the grid does not use would make the scan inside a
 cell monotone as well, as the grid hybrids \citet{serpa2020broadmark} evaluates
-do. It culls where cells are densely occupied and pays an ordering pass
-everywhere; over our benchmark the ordering costs more than it saves, so the
-cells are left unordered.
+do. Such ordering culls where cells are densely occupied and pays an ordering
+pass everywhere; over our benchmark it costs more than it saves, so the cells
+are left unordered.

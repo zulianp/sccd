@@ -21,14 +21,14 @@ Every table and figure in \cref{sec:results} is generated from a published
 measurement file by a published script. The table sources of this article come
 from the same code that produces the software's own benchmark reports, so each
 figure has a single origin. The regeneration command is recorded next to the
-tables. A \verb|--check| mode re-derives the documents from the data and
+tables, and a \verb|--check| mode re-derives the documents from the data and
 returns non-zero if they no longer match.
 
 The counters of \cref{sec:parallel:limits} are collected by
 \texttt{benchmark/scripts/profile.sbatch.sh}, one job that runs Nsight Compute
 over the device search kernel and \texttt{perf stat} over the host. Their raw
-output is published under \texttt{benchmark/results/profile/}.
-\Cref{tab:counters} is generated from those files by a script in the article's
+output is published under \texttt{benchmark/results/profile/}, and
+\cref{tab:counters} is generated from those files by a script in the article's
 own directory, so no counter in it is transcribed by hand. Profiling changes no
 result and gates nothing.
 

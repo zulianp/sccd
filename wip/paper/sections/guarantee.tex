@@ -2,11 +2,10 @@
 \label{sec:guarantee}
 
 The measurements in \cref{sec:results} report no missed collision and no late
-time of impact over eleven million query-mode checks. That is evidence and not a
+time of impact over eleven million query-mode checks. Such evidence is not a
 proof, and on its own it leaves open the possibility of an untested query that
-fails. This section gives the structural argument, which is short. It then says
-exactly where an implementation can break that argument, which in our experience
-is the part that gets used.
+fails. This section gives the structural argument, which is short, and then
+identifies the points at which an implementation can break it.
 
 \begin{theorem}[Conservativeness]
 \label{thm:conservative}
@@ -32,9 +31,10 @@ Let $\dom$ be any box containing a root of $\Fdiff$. By \cref{eq:hull} the exact
 hull of the corner values contains $\Fdiff(\dom) \ni 0$ on every component, and by
 \cref{eq:err} the computed hull differs from the exact one by at most $\epsilon$
 componentwise. Widening the computed hull by $\epsilon$ therefore contains the
-origin, and (i) does not discard $\dom$. So no box containing a root is ever
-rejected. By (iv) a box holding the earliest root has a child that also holds it,
-so by induction the search retains such a box at every level it reaches.
+origin, and (i) does not discard $\dom$. Hence no box containing a root is
+ever rejected. By (iv) a box holding the earliest root has a child that also
+holds it, so by induction the search retains such a box at every level it
+reaches.
 
 Consider the terminal box $\dom^{\dagger}$ on that chain, the one at which the
 search stops refining. By (iii) it is not dropped, so it is accepted, and by
@@ -45,29 +45,29 @@ exceeds a value the search has attained, which by the same argument is itself
 at or below $\toitrue$; so pruning cannot raise the reported value. Hence $\toi
 \le \toitrue < \infty$. \end{proof}
 
-Three consequences follow, and each is routinely stated the wrong way round.
+Three consequences follow.
 
 \paragraph{Accepting is always safe, however loose the test.} Nothing in
 \cref{thm:conservative} constrains \textsc{Accept}. A looser test stops refining
 sooner, so it accepts an \emph{ancestor} of the box a tighter test would have
 accepted. An ancestor's lower bound in $t$ is at or before its descendant's, so
-the looser test reports at or earlier than the tighter one. That costs accuracy
-and produces false positives. It cannot produce a late answer or a miss.
-\textsc{Relaxed} and \textsc{Tight} therefore differ in accuracy and speed and
-not in safety, and the two can be compared on accuracy with no safety caveat
-attached.
+the looser test reports at or earlier than the tighter one, which costs accuracy
+and produces false positives while remaining unable to produce a late answer or
+a miss. \textsc{Relaxed} and \textsc{Tight} therefore differ in accuracy and
+speed and not in safety, and the two can be compared on accuracy with no safety
+caveat attached.
 
 \paragraph{A depth or stack cap is an accuracy limit, not a safety one.} By
 (iii) exhaustion accepts at the box's $t$ lower bound. An undersized cap
 therefore reports a time of impact earlier than the true one, and may report a
 contact where none exists. It \emph{cannot} miss a collision.
 
-The distinction matters because the effect is large enough to be mistaken for a
-correctness failure. A work list sized from the average is far too small for the
-tail of \cref{tab:difficulty}. The host explores about $1.2$ boxes per query when
-a shared bound is pruning, and about $11$ when it is not, which suggests a
-per-thread stack of a few dozen entries. On a vertex-quad query whose exact
-answer is $2/3$, that choice costs four orders of magnitude of accuracy:
+The effect is large enough to be mistaken for a correctness failure. A work list
+sized from the average is far too small for the tail of \cref{tab:difficulty}.
+The host explores about $1.2$ boxes per query when a shared bound is pruning,
+and about $11$ when it is not, which suggests a per-thread stack of a few dozen
+entries. On a vertex-quad query whose exact answer is $2/3$, that choice costs
+four orders of magnitude of accuracy:
 \begin{center}\ttfamily
 \begin{tabular}{ll}
 stack cap 32  & 0.6655369599 \\
@@ -78,16 +78,15 @@ stack cap 512 & 0.6666666238 \\
 At $32$ entries the answer falls $1.13\times10^{-3}$ before the true value, where
 the triangle path reaches $3.0\times10^{-7}$. Every one of the three values is
 early, so the invariant holds throughout, and only the step size a solver can
-take is lost. Diagnosing this as a conservativeness failure would send an
-implementer to the acceptance test, which is not where the problem lives.
+take is lost. Diagnosing this as a conservativeness failure directs an
+implementer to the acceptance test, where the problem does not lie.
 
-The remedy is to derive the capacity. Each pop pushes at
-most $k$ children, so a depth-$D$ search needs $1 + kD$ entries. Sizing the work
-list from the branching factor and the depth limit makes the tightness of the
-answer a property of the search depth. Headroom costs almost nothing: a
-$257$-entry stack is a $14.7\,\mathrm{KB}$ frame of which only the first few
-entries are ever touched, and register count and spill are unchanged between
-capacities $4$ and $513$.
+The remedy is to derive the capacity. Each pop pushes at most $k$ children, so a
+depth-$D$ search needs $1 + kD$ entries. Sizing the work list from the branching
+factor and the depth limit makes the tightness of the answer a property of the
+search depth. Headroom costs almost nothing: a $257$-entry stack is a
+$14.7\,\mathrm{KB}$ frame of which only the first few entries are ever touched,
+and register count and spill are unchanged between capacities $4$ and $513$.
 
 \paragraph{The only way to lose a root is an unsound rejection.} Condition (i)
 is the whole of the exposure, and it fails in exactly one way: padding the
@@ -97,26 +96,26 @@ Two such substitutions occur in practice, and both are silent.
 The first is to pad by the caller's distance tolerance $\tau$ in place of
 $\epsilon$. In double precision $\epsilon$ is at most $6.7\times10^{-15}$, while
 a typical tolerance is $3\times10^{-8}$. The substitution therefore changes no
-answer on any realistic input, and no benchmark detects it. It leaves the search
-unsound for any caller who asks for a tolerance below the error bound, and that
-is the caller who most needs the guarantee to hold. Padding by
+answer on any realistic input, and no benchmark detects it, yet it leaves the
+search unsound for any caller who asks for a tolerance below the error bound,
+and that is the caller who most needs the guarantee to hold. Padding by
 $\max(\tau,\epsilon)$ removes the dependence on what the caller passes. The
 second substitution is to pad by the machine epsilon itself, which for a
 bilinear query is about $30\times$ too small.
 
-Condition (iii) admits a third failure, and it is the one that most resembles a
-paradox. A depth cap that \emph{drops} an exhausted box misses a vertex falling straight
-through a stationary triangle in \emph{double} precision, on a
-query the same search resolves in single precision. In double the box goes on
-subdividing until the cap fires, and the cap then discards it. Exhaustion has to
-accept.
+Condition (iii) admits a third failure, whose symptom is the most
+counter-intuitive of the three. A depth cap that \emph{drops} an exhausted box
+misses a vertex falling straight through a stationary triangle in \emph{double}
+precision, on a query the same search resolves in single precision. In double
+the box goes on subdividing until the cap fires, and the cap then discards it.
+Exhaustion has to accept.
 
 Taken together, the three consequences make \cref{thm:conservative} usable as a
-checklist. It reduces ``is this implementation conservative'' to three local
-questions, and they are the same three for whatever search is being examined.
-Does the rejection test pad by the certified bound, or by something that merely
-resembles it? On acceptance, is the reported value the box's $t$ lower bound?
-On depth, resolution or queue exhaustion, is the box accepted and not dropped?
-If all three hold, the kernel is conservative however loose or tight its
-acceptance test is, and any measured violation points at one of the three and
-not at the algorithm.
+checklist, reducing the conservativeness of an implementation to three local
+questions that are the same for whatever search is being examined: whether the
+rejection test pads by the certified bound or by something that merely resembles
+it; whether acceptance reports the box's $t$ lower bound; and whether a box is
+accepted, and not dropped, on depth, resolution or queue exhaustion. If all
+three hold, the kernel is conservative however loose or tight its acceptance
+test is, and any measured violation points at one of the three and not at the
+algorithm.

@@ -3,38 +3,38 @@
 
 Every figure in \cref{sec:results} is checked against exact roots by a gate that
 fails on a missed collision or a late time of impact, and the data behind each
-table is published alongside the code. Three kinds of thing nevertheless lie
-outside what those numbers establish. The first is the reach of the ground truth
-they are measured against, the second the reach of the measurement itself, and
-the third the parts of the pipeline that were not measured at all.
+table is published alongside the code. Three kinds of limitation nevertheless
+lie outside what those numbers establish: the reach of the ground truth they are
+measured against, the reach of the measurement itself, and the parts of the
+pipeline that carry no measurement.
 
 \subsection{What the ground truth reaches}
 
 The dataset ships symbolic roots for its curated \emph{query sets} and not for
 the mesh frames, so everything in \cref{sec:results:cons,sec:results:ref} is
 measured on the query sets. The mesh path is checked only for
-\emph{agreement}. The answer computed over the mesh is compared against the
+\emph{agreement}: the answer computed over the mesh is compared against the
 earliest exact root of the corresponding query set, and a disagreement would
-mean the two paths were handed different geometry. That is a tripwire on the
+mean the two paths were handed different geometry. This is a tripwire on the
 inputs, not a verification of the kernel.
 
-The distinction matters because the two paths really do differ. The mesh
-container stores coordinates in single precision, and armadillo-rollers needs
-$52$ significand bits to represent its dyadic rationals exactly. The resulting
-divergence between mesh and query geometry is two-sided, and it ranges from
-$5\times10^{-8}$ to $4.6\times10^{-5}$. An accuracy claim tighter than that, made
-on the mesh path, measures the rounding and not the search.
+The two paths do differ in the geometry they carry. The mesh container stores
+coordinates in single precision, and armadillo-rollers needs $52$ significand
+bits to represent its dyadic rationals exactly. The resulting divergence between
+mesh and query geometry is two-sided, and it ranges from $5\times10^{-8}$ to
+$4.6\times10^{-5}$. An accuracy claim tighter than that, made on the mesh path,
+measures the rounding and not the search.
 
-Inflicting that rounding deliberately shows how large its effect is. On the same
+Deliberately inflicting that rounding shows the size of its effect. On the same
 $98{,}757$ armadillo-rollers edge-edge queries, \textsc{Tight} reports no missed
 collision and no late time of impact on the shipped double-precision geometry.
 Once the input is first rounded through single precision, it reports $4$ missed
 and $25{,}485$ late. A control settles where the fault lies: a host kernel
 bit-identical to TightInclusion, already computing in double, reports zero late
 on the shipped geometry and $4{,}543$ late under the same treatment. The cause
-is the input rounding and not either kernel. That is why
-single-precision-geometry runs are reported separately and never gate the build,
-and it is the empirical form of the argument in \cref{sec:parallel:precision}.
+is the input rounding and not either kernel. Single-precision-geometry runs are
+therefore reported separately and never gate the build, and the comparison is
+the empirical form of the argument in \cref{sec:parallel:precision}.
 \textsc{Tight} is hurt about fourteen times more than \textsc{Relaxed} here
 \emph{because} it reports closer to the true root: a perturbed root crosses a
 tight answer far more often than it crosses a loose one.
@@ -53,11 +53,11 @@ repeat of one scene showed the device \textsc{Relaxed} kernel missing $2$
 collisions and reporting $5$ late of $15{,}957$ queries. The next repeat over
 identical input was clean, as were the other five scenes and the other three
 modes across the remaining $65{,}079{,}040$ checks of that run. The cause was a
-single index: the root box was pruned against the first query's answer instead
-of its own. That bites only when the first query reports exactly zero, so
-whether a collision was missed depended on block scheduling. Repeating the case twelve
-times failed five times before the fix and none after it, and every device figure
-in this paper is from after the fix.
+single index, which pruned the root box against the first query's answer in
+place of its own. This occurs only when the first query reports exactly zero, so
+whether a collision was missed depended on block scheduling. Twelve repeats of
+the case failed five times before the fix and none after it, and every device
+figure in this paper is taken after the fix.
 
 The episode bounds what a check can establish, not what the kernel does. A
 defect surfacing in about two runs in five is invisible to a spot check and
@@ -69,8 +69,8 @@ case than the pipeline does: it loads the frame, classifies every candidate pair
 against the expected set, and compares every answer against an exact root. A
 case costs between $0.7$ and $3.3\,\mathrm{s}$ of wall clock across the six
 scenes, against measured work of a few tens of milliseconds. The timers exclude
-all of it, so the figures are sound as timings. The harness is still not a model
-of what the pipeline costs inside a solver.
+all of it, so the figures are sound as timings, although the harness remains no
+model of what the pipeline costs inside a solver.
 
 \subsection{What was not measured}
 
@@ -78,9 +78,9 @@ Three parts of the pipeline carry no measurement here, and each bounds a claim
 made earlier.
 
 Ordering each cell's entries on the axis the grid does not use is implemented
-on the host only. It is measured there and does not pay
-(\cref{sec:bp:self}), so the device carries no such kernel and the question is
-open on that processor.
+on the host only, where it is measured and does not pay
+(\cref{sec:bp:self}); the device therefore carries no such kernel and the
+question is open on that processor.
 
 The quad path is described in \cref{sec:np:quad} and evaluated nowhere. Every
 scene in this benchmark is a triangle mesh, and the error constant of
@@ -94,12 +94,12 @@ this ground truth, and theirs, not TightInclusion, is the state of the art in
 \emph{parallel} CCD. TightInclusion answers the question this paper puts first,
 which is whether the answer is right and how close it falls to the exact root,
 and it answers that as a certified reference running unmodified on the same
-hardware. The other question is left open: is this parallel design faster than
-that parallel design? Settling it requires building that pipeline on
-\textsc{GH200}, matching the two on tolerance, depth cap and output mode so the
-searches do comparable work, and timing both inside one allocation. Until then
-the speedups of \cref{sec:results:ref} are margins over a host reference and not
-over prior parallel work.
+hardware. The remaining question, whether this parallel design is faster than
+that parallel design, is left open. Settling it requires building that pipeline
+on \textsc{GH200}, matching the two on tolerance, depth cap and output mode so
+the searches do comparable work, and timing both inside one allocation. Until
+then the speedups of \cref{sec:results:ref} are margins over a host reference
+and not over prior parallel work.
 
 The counter measurements of \cref{sec:parallel:limits} are narrower than the
 timings they explain. They cover all six scenes, but only one narrow-phase mode
@@ -109,9 +109,8 @@ none about absolute time. The Grace rows are whole-process counters and not
 per-phase ones. The pipeline row comes from a build with the device path
 compiled out, so it is host work throughout. The narrow-phase row comes from the
 oracle, which also drives the device modes, so its instruction rate is a floor
-and not an estimate. What these counters establish is which resource each
-processor is short of, and that is a coarser claim than a per-phase model would
-make.
+and not an estimate. These counters establish which resource each processor is
+short of, a coarser claim than a per-phase model would make.
 
 Beyond the pipeline itself, three things are absent. There is no
 minimum-separation CCD, which solvers in the barrier family generally want, and

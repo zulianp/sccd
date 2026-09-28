@@ -3,11 +3,12 @@
 
 Each candidate pair that survives \cref{sec:bp} is decided here, by branch and
 bound over boxes in the parameter domain. Two properties from \cref{sec:prelim}
-make the search possible at all. \Cref{eq:hull} says that a box can be judged
-from its eight corners, and \cref{eq:err} says by how much that judgement can be
-wrong. \Cref{alg:np} is the skeleton every kernel in this paper instantiates.
-Three things vary between them: the acceptance test, the split rule, and how the
-work list is organised. The third is the subject of \cref{sec:parallel}.
+underpin the search. \Cref{eq:hull} establishes that a box can be judged from
+its eight corners, and \cref{eq:err} bounds the amount by which that judgement
+can be wrong. \Cref{alg:np} is the skeleton every kernel in this paper
+instantiates. Three components vary between them: the acceptance test, the
+split rule, and the organisation of the work list. The third is the subject of
+\cref{sec:parallel}.
 
 \begin{algorithm}[htbp]
 \caption{Branch and bound for one query. $\toi$ is the running minimum, shared
@@ -43,14 +44,14 @@ across queries when the caller asks only for the earliest impact.}
 
 On acceptance \cref{alg:np} reports the \emph{lower} bound in $t$ of the
 accepted box, never its midpoint and never its upper bound. Every exit that is
-not a rejection accepts. Those two facts are the whole of the safety argument,
-and \cref{sec:guarantee} makes them precise.
+not a rejection accepts. These two facts constitute the safety argument, which
+\cref{sec:guarantee} makes precise.
 
 \subsection{Two acceptance tests}
 \label{sec:np:modes}
 
 Two instantiations of \op{Accept} and \op{Split} appear in what follows. Both
-are conservative. They differ in how tight an answer they return, and in how
+are conservative, and they differ in how tight an answer they return and in how
 long they take to return it.
 
 The first, \textsc{Tight}, is TightInclusion's test transcribed:
@@ -63,8 +64,8 @@ The first, \textsc{Tight}, is TightInclusion's test transcribed:
 $\arg\max_{k} \dom.w_{k}/\tau_{k}$. The search starts from $[0,1]^{3}$, so
 every midpoint is a dyadic rational, and it is exact in binary floating point
 while the depth stays below the width of the significand. The implementation
-does not assume that. It checks that the midpoint separates the endpoints, and
-accepts the box when it does not.
+relies on none of this: it checks that the midpoint separates the endpoints,
+and accepts the box when it does not.
 
 The second, \textsc{Relaxed}, accepts on a \emph{codomain} width measured
 against a \emph{domain} tolerance, $\forall d:
@@ -74,42 +75,41 @@ units makes the test loose, so it accepts earlier and reports a time of impact
 further before the true one. \Cref{sec:results:relaxed} quantifies that trade,
 which does not run one way.
 
-Both tests also require $\dom.t_{\ell} > 0$. That refuses a contact reported at
-exactly $t=0$, which would stall a solver using $\toi$ as a step length.
-Measured against the exact roots the condition costs nothing: with it in place,
-no collision is missed and no time of impact is late.
+Both tests also require $\dom.t_{\ell} > 0$, which refuses a contact reported
+at exactly $t=0$ and would otherwise stall a solver using $\toi$ as a step
+length. Measured against the exact roots the condition costs nothing: with it
+in place, no collision is missed and no time of impact is late.
 
 \subsection{The adaptive splitter, and what measuring it showed}
 \label{sec:np:split}
 
-\textsc{Relaxed} and the quad kernel split an axis several ways at once. The chosen axis is cut at $N=2$ interior points, giving three
-children. Each point comes from a one-dimensional Gauss--Newton step against the
-linearisation of $\Fdiff$ along that axis, clamped to within $0.45h$ of its
-nominal position, where $h$ is the uniform spacing. The splitter is about
-$1.6\times$ faster than a uniform grid, which needs five sub-intervals where
-this uses three. Measuring \emph{why} produced a more useful result than the
-speedup did.
+\textsc{Relaxed} and the quad kernel split an axis several ways at once. The
+chosen axis is cut at $N=2$ interior points, giving three children. Each point
+comes from a one-dimensional Gauss--Newton step against the linearisation of
+$\Fdiff$ along that axis, clamped to within $0.45h$ of its nominal position,
+where $h$ is the uniform spacing. The splitter is about $1.6\times$ faster than
+a uniform grid, which needs five sub-intervals where this uses three.
+Measurement of the splitter establishes three further properties.
 
-First, the splitter barely adapts. The nominal point cancels exactly from the
-Gauss--Newton step, so all $N$ splitters solve for the same least-squares point.
-They differ only in which clamp window each one lands in, and $95.9\%$ of them
-are pinned at their clamp. The clamp, and not the Newton step, is what makes
-each child a bounded fraction of its parent. An unclamped version fails to
-terminate.
+First, the splitter adapts only marginally. The nominal point cancels exactly
+from the Gauss--Newton step, so all $N$ splitters solve for the same
+least-squares point. They differ only in which clamp window each one lands in,
+and $95.9\%$ of them are pinned at their clamp. The clamp, and not the Newton
+step, is what makes each child a bounded fraction of its parent. An unclamped
+version fails to terminate.
 
 Second, placement cannot affect correctness: the children tile the parent and
-every child is still tested, so the splitter is purely a performance knob.
+every child is still tested, so the splitter governs performance alone.
 
-Third, and most informative, a principled alternative \emph{lost}. A
-chord-based splitter aimed at the largest root-free region ran $2.7\times$
-slower and isolated \emph{less} dead volume, $56.7\%$ against $61.1\%$. The
-cause is a mismatch between what is dead and what is rejectable. On a typical
-parent, $68.4\%$ of the volume is root-free \emph{pointwise}, taken as a union
-over the three components of $\Fdiff$. Rejecting a child, however, requires a
-\emph{single} component to exclude the origin over the whole child, and only
-about $58\%$ of the axis is rejectable that way. A multi-way split does better
-because different children may die by different components. A single
-well-placed cut has no such advantage.
+Third, a principled alternative performs worse. A chord-based splitter aimed at
+the largest root-free region ran $2.7\times$ slower and isolated \emph{less}
+dead volume, $56.7\%$ against $61.1\%$. The cause is a mismatch between what is
+dead and what is rejectable. On a typical parent, $68.4\%$ of the volume is
+root-free \emph{pointwise}, taken as a union over the three components of
+$\Fdiff$. Rejecting a child, however, requires a \emph{single} component to
+exclude the origin over the whole child, and only about $58\%$ of the axis is
+rejectable that way. A multi-way split does better because different children
+may die by different components, an advantage a single well-placed cut lacks.
 
 \subsection{Order independence}
 \label{sec:np:order}
@@ -117,8 +117,8 @@ well-placed cut has no such advantage.
 TightInclusion pops boxes from a priority queue ordered by ascending $t$ lower
 bound, and returns the first box it accepts. Its answer is therefore the
 accepted box of globally smallest $t$. \Cref{alg:np} keeps no such order. The
-proposition below says that it needs none, and it is the result that licenses
-everything in \cref{sec:parallel}.
+proposition below establishes that it requires none, and thereby licenses the
+implementations of \cref{sec:parallel}.
 
 \begin{proposition}[Order independence]
 \label{prop:order}
@@ -153,30 +153,30 @@ $\min\{\dom.t_{\ell} : \dom \in \mathcal{A}\}$, the same quantity
 \cref{prop:order} gives.
 \end{remark}
 
-The hypotheses of \cref{prop:order} are not a formality. It fixes \op{Accept}
-and \op{Split}, and so fixes $\mathcal{A}$. Two searches agree only when they
-generate the same $\mathcal{A}$, and that requires the same acceptance
-\emph{rule} together with the same computed values feeding it, down to the last
-bit.
+The hypotheses of \cref{prop:order} carry weight. Fixing \op{Accept} and
+\op{Split} fixes $\mathcal{A}$, and two searches agree only when they generate
+the same $\mathcal{A}$, which requires the same acceptance \emph{rule} together
+with the same computed values feeding it, down to the last bit.
 
 Our host kernel and TightInclusion meet that condition. The corner evaluation is
 written in the reference's expression order precisely so that they do
 (\cref{sec:prelim:err}). \Cref{sec:results:ref} confirms the consequence to
-every printed digit on all twelve scene-phases, which is the sharpest check of
-the proposition available to us.
+every printed digit on all twelve scene-phases.
 
 Our \emph{device} kernel does not meet it. It evaluates the same formulas
-through vector fused multiply-adds, and it rounds $\delta^{3}$ upward with a plain cube. A box decided in the last few units in the last place
-can therefore fall differently, and its $\mathcal{A}$ is a slightly different
-set. \Cref{prop:order} thus explains why the host reproduces the reference, and
-says nothing about how closely the device will. \Cref{sec:results:ref} measures
-that separately, and the answer is close without being identical.
+through vector fused multiply-adds, and it rounds $\delta^{3}$ upward with a
+plain cube. A box decided in the last few units in the last place can therefore
+fall differently, and its $\mathcal{A}$ is a slightly different set.
+\Cref{prop:order} therefore accounts for the host reproducing the reference
+while leaving the device's agreement with it open. \Cref{sec:results:ref}
+measures the device separately and finds it close without being identical.
 
-What the proposition buys is freedom. The traversal may be depth-first,
-breadth-first, or interleaved across queries; boxes from unrelated queries may
-share a vector register or a thread block; work may migrate between processors
-mid-search. None of that can change the answer. The two implementations in
-\cref{sec:parallel} spend that freedom in different currencies.
+The proposition grants freedom in how the tree is traversed. The traversal may
+be depth-first, breadth-first, or interleaved across queries; boxes from
+unrelated queries may share a vector register or a thread block; and work may
+migrate between processors mid-search. None of that can change the answer. The
+two implementations in \cref{sec:parallel} exploit this freedom in different
+ways.
 
 \subsection{Quads}
 \label{sec:np:quad}
@@ -189,15 +189,15 @@ This path is \emph{not evaluated} in this paper. Every scene in
 \cref{sec:results} is a triangle mesh, so no measurement reported here bears on
 a quad, and the error constant of \cref{sec:prelim:err} for the bilinear form is
 uncertified. What follows is a design, verified for correctness against a
-densely sampled reference root and against the alternative factoring below. It
+densely sampled reference root and against the alternative factoring below; it
 is not a measured result.
 
-We considered extending the triangle kernel and rejected it. That kernel is
-built end to end around a four-point query packed into one vector register, on a
-barycentric domain whose validity test rejects $u+v \ge 1$. A vertex-quad query
-has five points on an independent domain, so the load, the tolerances, the error
-bound, the corner evaluation, the domain test and the split would all have had
-to change at once.
+The quad path is implemented separately from the triangle kernel. That kernel
+is built end to end around a four-point query packed into one vector register,
+on a barycentric domain whose validity test rejects $u+v \ge 1$. A vertex-quad
+query has five points on an independent domain, so the load, the tolerances,
+the error bound, the corner evaluation, the domain test and the split would all
+have to change at once.
 
 Two details of the implementation matter. The first is the factoring. The
 evaluation is written $\Fdiff = q(t) - \sum_{k} w_{k}(u,v)\,g_{k}(t)$, and not
@@ -208,14 +208,13 @@ evaluates, so the frame is computed once for the whole split.
 The second is the node order, which in \cref{eq:fvq} is lexicographic and not
 cyclic. Winding the nodes around the quad swaps the last two. The solver then
 searches a bilinear saddle stretched across the diagonal, and reports a
-perfectly valid time of impact for a surface the caller did not mean. That
-failure is silent, which is why we state the convention here and not in a
-manual.
+perfectly valid time of impact for a surface the caller did not mean. Since
+that failure is silent, the convention is recorded here.
 
 One further measurement from the quad path generalises. Hoisting the evaluation
 of the split planes out of the loop over children is the textbook optimisation.
 It is $1.3\times$ faster per isolated query and $1.35\times$ slower end to end.
 The cause is that $\toi$ sharpens \emph{during} the loop. A child whose $t$
 lower bound has since passed the running minimum is discarded unlooked-at, and
-hoisting evaluates it anyway. When the bound is shared, a loop-invariant
-computation is not invariant in the only sense that matters.
+hoisting evaluates it anyway. When the bound is shared, a syntactically
+loop-invariant computation is not invariant in the work it performs.

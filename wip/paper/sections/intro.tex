@@ -1,22 +1,22 @@
 \section{Introduction}
 \label{sec:intro}
 
-Continuous collision detection (CCD) asks a question that sounds simple and is
-not. Take two configurations of a mesh, one at the start of a time step and one
-at the end, with every vertex moving along a straight line in between. Does any
-pair of primitives touch during the step, and if so, when? The answer gates the
-step size in cloth, deformable and rigid-body simulation. The two ways of
-getting it wrong are not symmetric.
+Continuous collision detection (CCD) takes two configurations of a mesh, one at
+the start of a time step and one at the end, with every vertex moving along a
+straight line in between, and determines whether any pair of primitives touches
+during the step and at what time. The answer gates the step size in cloth,
+deformable and rigid-body simulation. The two ways of answering incorrectly are
+not symmetric.
 
-If a method reports a collision that does not happen, the solver takes a shorter
-step than it needed to. Work is wasted and nothing is broken. If a method misses
-a collision, or reports a time of impact \emph{after} the true one, the solver
-steps straight through the contact, and the configuration it lands in contains
-an interpenetration. One family of solvers is built on a barrier
-potential~\citep{li2020ipc,li2021codim,ferguson2021rigid}, and its whole
-argument depends on the state remaining intersection-free. For those solvers the
-result is worse than degraded: the barrier is infinite on the wrong side, and
-the optimisation has nowhere to go.
+A method that reports a collision which does not occur causes the solver to take
+a shorter step than necessary; work is wasted and nothing is broken. A method
+that misses a collision, or that reports a time of impact \emph{after} the true
+one, causes the solver to step through the contact into a configuration
+containing an interpenetration. One family of solvers is built on a barrier
+potential~\citep{li2020ipc,li2021codim,ferguson2021rigid}, and its argument
+depends on the state remaining intersection-free. For those solvers the
+consequence is severe: the barrier is infinite on the wrong side, and the
+optimisation has nowhere to go.
 
 \begin{definition}[Conservative]
 \label{def:conservative}
@@ -26,67 +26,69 @@ at or before the true earliest one.
 \end{definition}
 
 \Cref{def:conservative} is the specification this work implements, and it is
-deliberately stronger than the usual one. Reporting the Boolean correctly is not
-enough. A query can agree with an exact reference on whether a contact happens
-and still return a time after it, which costs the solver as much as a missed
-collision does. Every accuracy measurement in this paper is therefore
-\emph{signed}, and a time of impact later than the exact root counts as a
-failure of the same severity as a miss.
+stronger than the usual one. Reporting the Boolean correctly is insufficient: a
+query can agree with an exact reference on whether a contact occurs and still
+return a time after it, which costs the solver as much as a missed collision.
+Every accuracy measurement in this paper is therefore \emph{signed}, and a time
+of impact later than the exact root counts as a failure of the same severity as
+a miss.
 
-The difficulty is that conservativeness is a statement about real arithmetic,
-while implementations run in floating point. \citet{wang2021tight} showed that
-most published CCD implementations are not conservative once the rounding is
-accounted for, and they gave the first one that provably is. That
-implementation, TightInclusion, replaces interval arithmetic with a custom
-inclusion function and a certified error bound. It is the reference we measure
-against throughout, used exactly as released.
+Conservativeness is a statement about real arithmetic, while implementations run
+in floating point. \citet{wang2021tight} showed that most published CCD
+implementations fail to be conservative once rounding is accounted for, and gave
+the first one that provably is. That implementation, TightInclusion, replaces
+interval arithmetic with a custom inclusion function and a certified error
+bound. It is the reference we measure against throughout, used exactly as
+released.
 
 \paragraph{This work.} We present SCCD, a two-phase CCD pipeline for triangle
 \emph{and} quad meshes, with host and device implementations of both phases. Its
 conservativeness is structural and not empirical (\cref{sec:guarantee}), and we
 assess it against TightInclusion on a dataset whose roots are known exactly. The
-contribution is the parallel design, its measured performance and the accuracy
-assessment, and not an implementation of a known algorithm on new hardware.
+contributions are the parallel design, its measured performance, and the
+accuracy assessment.
 
 The first contribution is a broad phase with no tuning parameter and no sort: a
-two-dimensional uniform cell list whose cell size comes from the data itself.
-Its two queries have different shapes and are built differently. Vertex-face
-bins a box into every cell its extent touches and attributes a pair to the cell
-holding the corner of the overlap (\cref{sec:bp:cell}). Edge-edge is one list
-against itself, which admits one entry per box at its minimum corner and a
-forward walk in row-major cell order, pruned by a prefix maximum per row of
-cells, so no bound on how many cells a box may span is needed
-(\cref{sec:bp:self}).
+two-dimensional uniform cell list whose cell size is derived from the data. Its
+two queries have different shapes and are constructed differently. The
+vertex-face query bins a box into every cell its extent touches and attributes a
+pair to the cell holding the corner of the overlap (\cref{sec:bp:cell}). The
+edge-edge query is one list against itself, which admits one entry per box at
+its minimum corner and a forward walk in row-major cell order, pruned by a
+prefix maximum per row of cells, so that no bound on the number of cells a box
+may span is required (\cref{sec:bp:self}).
 
 The second is a host narrow phase that packs single-instruction,
-multiple-data (SIMD) lanes across queries. TightInclusion's search is a
+multiple-data (SIMD) lanes across queries. The search of TightInclusion is a
 priority queue ordered by the time lower bound, and its answer is the first box
 it accepts. We show in \cref{sec:np:order} that keeping the minimum over
-\emph{all} accepted boxes and pruning against it gives the same answer under
-\emph{any} traversal order. That licenses a lane to hold boxes from different
-queries (\cref{alg:host}), which turns a search with per-query divergence into
-a vector kernel. Sibling boxes then inherit four of their eight corner values
+\emph{all} accepted boxes and pruning against it yields the same answer under
+\emph{any} traversal order. This licenses a lane to hold boxes from different
+queries (\cref{alg:host}), turning a search with per-query divergence into a
+vector kernel. Sibling boxes then inherit four of their eight corner values
 from their parent, halving the dominant cost.
 
-The third is a device narrow phase built around redistribution. The difficulty of a CCD query is heavy-tailed: on one scene most
-queries need a single box, while $208$ of them need more than a million
-(\cref{tab:difficulty}). A large per-block work stack keeps such a query inside
-the block that seeded it while its neighbours idle. We use a deliberately
-\emph{small} shared stack that spills early into a double-buffered global
-queue, which the next launch redistributes across every block
-(\cref{alg:device}). On the worst scene this is worth two orders of magnitude
-(\cref{tab:stackcap}).
+The third is a device narrow phase built around redistribution. The difficulty
+of a CCD query is heavy-tailed: on one scene most queries need a single box,
+while $208$ of them need more than a million (\cref{tab:difficulty}). A large
+per-block work stack keeps such a query inside the block that seeded it while
+its neighbours idle. We therefore use a deliberately \emph{small} shared stack
+that spills early into a double-buffered global queue, which the next launch
+redistributes across every block (\cref{alg:device}). On the worst scene this is
+worth two orders of magnitude (\cref{tab:stackcap}).
 
-The fourth is a signed accuracy assessment against a certified reference. It
-covers $11{,}630{,}064$ query-mode checks against exact symbolic roots, on both
+The fourth is a signed accuracy assessment against a certified reference,
+covering $11{,}630{,}064$ query-mode checks against exact symbolic roots on both
 processors and all six scenes, of which $11{,}044{,}766$ place a reported time
 of impact beside an exact root. SCCD reports no missed collision and no late
 time of impact, and reproduces TightInclusion's median and worst-case error to
 every printed digit while running faster (\cref{sec:results:ref}).
 
-We are equally explicit about where the pipeline does not win, and why. The device narrow phase is slower than the host on four of six scenes, for a
-structural reason we can name, and that is enough to put the whole pipeline
-behind on one of them. The host cell list beats the device broad phase at every
-mesh size we measured, and by more as the mesh grows. The mode that trades accuracy for speed is \emph{slower} on
-half the host scenes. \Cref{sec:limitations} collects those results, together
-with the threats to validity that bound what the measurements can support.
+We report the configurations on which the pipeline is the slower of the two, and
+the reasons. The device narrow phase is slower than the host on two of the six
+scenes, for a structural reason we identify, and on both of them this places the
+whole pipeline behind the host. The host cell list leads the device broad phase
+up to roughly six million elements, above which the ordering reverses. The mode
+that trades accuracy for speed is \emph{slower} on four of the six host scenes.
+\Cref{sec:limitations} collects those results, together with the threats to
+validity that bound what the measurements support.
