@@ -59,16 +59,14 @@
 \DeclareMathOperator{\hull}{hull}
 % Small caps for the algorithm's named steps. Wrapped in \textnormal so it
 % survives the italic body of a theorem, where lmodern has no italic small caps.
-% The two primitives of a query, coloured as they are in the schematics: the
-% teal and plum boxes of Figure 8 are the same two primitives whose difference
-% function these equations root, so a reader can carry one picture into the
-% other. Named by role rather than by colour, so the palette can change in one
-% place.
-\newcommand{\primA}[1]{\textcolor{sccdTeal}{#1}}
-\newcommand{\primB}[1]{\textcolor{sccdPlum}{#1}}
-% The quantity under test -- amber in both schematics, where it marks the query
-% box, the overlap it forms, and the query that overruns a block.
-\newcommand{\tested}[1]{\textcolor{sccdAmber}{#1}}
+% The two primitives of a query and the quantity under test. These mark the role
+% a term plays in an equation and set no colour: the formulas print black, and a
+% reader who wants the correspondence with a schematic has the symbol names.
+% They are kept as markup so the roles stay visible in the source and the
+% typographic treatment can be changed in one place.
+\newcommand{\primA}[1]{#1}
+\newcommand{\primB}[1]{#1}
+\newcommand{\tested}[1]{#1}
 
 \newcommand{\op}[1]{\textnormal{\textsc{#1}}}
 
