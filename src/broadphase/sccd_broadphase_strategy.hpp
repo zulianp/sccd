@@ -80,8 +80,9 @@
  *
  * ## The five strategies
  *
- * `SCCD_BROADPHASE=sweep`, `=cell2d`, `=cell2dmin`, `=cell2dminsort` or
- * `=cell2dseg` names one and skips both the default and the race.
+ * `SCCD_BROADPHASE=sweep`, `=cell2d`, `=cell2dmin`, `=cell2dminsort`,
+ * `=cell2dseg` or `=cell2dminfv` names one and skips both the default and the
+ * race.
  *
  * `cell2dmin` is the cell list with a different edge-edge query, and the host
  * default: one entry per box at its minimum corner, walked forward in linear
@@ -97,6 +98,13 @@
  * rather than two boxes against each other. Its edge-edge query is `cell2d`'s.
  * It hands the narrow phase 2% to 26% fewer pairs, and pays for the larger cell
  * array it has to build.
+ *
+ * `cell2dminfv` also binds the faces and queries per vertex, and indexes them at
+ * their minimum corner rather than by extent, which is what `cell2dseg` pays for
+ * -- one entry per face instead of about four. The vertex reaches back with the
+ * row prefix maximum on one axis and a bound on the widest face on the other.
+ * The pair set is `cell2d`'s exactly; only where a pair is found changes. Its
+ * edge-edge query is `cell2dmin`'s.
  */
 
 namespace sccd {
@@ -107,7 +115,8 @@ namespace sccd {
         Cell2D = 2,
         Cell2DMin = 3,
         Cell2DMinSort = 4,
-        Cell2DSeg = 5
+        Cell2DSeg = 5,
+        Cell2DMinFV = 6
     };
 
     /**
@@ -172,6 +181,7 @@ namespace sccd {
         if (std::strcmp(v, "cell2dmin") == 0) return BroadPhaseStrategy::Cell2DMin;
         if (std::strcmp(v, "cell2dminsort") == 0) return BroadPhaseStrategy::Cell2DMinSort;
         if (std::strcmp(v, "cell2dseg") == 0) return BroadPhaseStrategy::Cell2DSeg;
+        if (std::strcmp(v, "cell2dminfv") == 0) return BroadPhaseStrategy::Cell2DMinFV;
         return BroadPhaseStrategy::Auto;
     }
 
@@ -301,6 +311,7 @@ namespace sccd {
             case BroadPhaseStrategy::Cell2DMin: return "cell2dmin";
             case BroadPhaseStrategy::Cell2DMinSort: return "cell2dminsort";
             case BroadPhaseStrategy::Cell2DSeg: return "cell2dseg";
+            case BroadPhaseStrategy::Cell2DMinFV: return "cell2dminfv";
             case BroadPhaseStrategy::Auto: return "auto";
         }
         return "?";

@@ -184,6 +184,7 @@ namespace sccd {
         bool use_cell2d_min_{false};
         bool use_cell2d_min_sorted_{false};
         bool use_cell2d_seg_{false};
+        bool use_cell2d_min_fv_{false};
 
         // Broad-phase strategy race. The tuner decides; these carry the pending
         // measurement from the steps back to the next prep, which is where it is
@@ -217,6 +218,12 @@ namespace sccd {
         std::vector<smesh::idx_t> f_cellidx_;
         std::vector<scalar_t> f_cellbox_data_[6];
         scalar_t* f_cellbox_[6]{};
+        // Only Cell2DMinFV builds these: the face row bounds and the widest
+        // face in rows, which is how a vertex knows how far below itself a
+        // face can still reach.
+        std::vector<scalar_t> f_row_prefix_;
+        std::vector<scalar_t> f_cell_hi1_;
+        int f_krow_{0};
 
         sccd::Cell2DGrid<scalar_t> e_grid_;
         sccd::Cell2DPartition e_part_;
@@ -630,10 +637,13 @@ namespace sccd {
             const sccd::BroadPhaseStrategy chosen = tuner_.next();
             use_cell2d_min_sorted_ = (chosen == sccd::BroadPhaseStrategy::Cell2DMinSort);
             use_cell2d_seg_ = (chosen == sccd::BroadPhaseStrategy::Cell2DSeg);
-            use_cell2d_min_ =
-                (chosen == sccd::BroadPhaseStrategy::Cell2DMin) || use_cell2d_min_sorted_;
-            use_cell2d_ =
-                (chosen == sccd::BroadPhaseStrategy::Cell2D) || use_cell2d_min_ || use_cell2d_seg_;
+            use_cell2d_min_fv_ = (chosen == sccd::BroadPhaseStrategy::Cell2DMinFV);
+            // Cell2DMinFV keeps cell2dmin's edge-edge query and changes only the
+            // face-vertex one, so it is a cell2dmin that also binds the faces.
+            use_cell2d_min_ = (chosen == sccd::BroadPhaseStrategy::Cell2DMin) ||
+                              use_cell2d_min_sorted_ || use_cell2d_min_fv_;
+            use_cell2d_ = (chosen == sccd::BroadPhaseStrategy::Cell2D) || use_cell2d_min_ ||
+                          use_cell2d_seg_;
             timed_strategy_ = chosen;
 
             if (getenv("SCCD_BROADPHASE_VERBOSE")) {
@@ -716,7 +726,21 @@ namespace sccd {
                 fill_identity_(fidx_->data(), n_faces);
                 fill_identity_(eidx_->data(), n_edges);
 
-                if (use_cell2d_seg_) {
+                if (use_cell2d_min_fv_) {
+                    // The vertices walk, so the faces are binned -- one entry
+                    // each, which is what this variant is for, and the cells are
+                    // sized from the faces because cell2d_setup follows the list
+                    // it is given.
+                    bin_min_host_(n_faces, faabb_->data(), f_grid_, f_part_, f_cellptr_, f_cellidx_,
+                                  f_cursor_, f_row_prefix_, f_cell_hi1_);
+                    f_krow_ = sccd::cell2dmin_max_row_span<scalar_t>(n_faces, faabb_->data(), f_grid_);
+                    for (int d = 0; d < 6; ++d) {
+                        f_cellbox_data_[d].resize((size_t)f_cellptr_[f_grid_.ncells()]);
+                        f_cellbox_[d] = f_cellbox_data_[d].data();
+                    }
+                    sccd::cell2d_pack_boxes<scalar_t, smesh::idx_t>(
+                        f_grid_, faabb_->data(), f_cellptr_.data(), f_cellidx_.data(), f_cellbox_);
+                } else if (use_cell2d_seg_) {
                     // The face-vertex query walks the faces, so the faces are what
                     // the cell array holds and the vertices never enter one.
                     bin_host_<true>(n_faces, faabb_->data(), f_grid_, f_part_, f_cellptr_, f_cellidx_,
@@ -906,6 +930,46 @@ namespace sccd {
             return SCCD_SUCCESS;
         }
 
+        template <int nxe>
+        int cell2dmin_fv_step_host_(const ptrdiff_t n_nodes) {
+            sccd::cell2dmin_count_vf_overlaps<nxe, scalar_t, smesh::idx_t>(n_nodes,
+                                                                          vaabb_->data(),
+                                                                          vidx_->data(),
+                                                                          fidx_->data(),
+                                                                          1,
+                                                                          faces_->data(),
+                                                                          f_grid_,
+                                                                          f_cellptr_.data(),
+                                                                          f_cellidx_.data(),
+                                                                          f_cellbox_,
+                                                                          f_row_prefix_.data(),
+                                                                          f_cell_hi1_.data(),
+                                                                          f_krow_,
+                                                                          ccdptr_->data());
+
+            const ptrdiff_t n_pairs = ccdptr_->data()[n_nodes];
+            f_overlap_ = smesh::create_buffer<smesh::idx_t>(n_pairs, execution_space_);
+            v_overlap_ = smesh::create_buffer<smesh::idx_t>(n_pairs, execution_space_);
+
+            sccd::cell2dmin_fill_vf_overlaps<nxe, scalar_t, smesh::idx_t>(n_nodes,
+                                                                         vaabb_->data(),
+                                                                         vidx_->data(),
+                                                                         fidx_->data(),
+                                                                         1,
+                                                                         faces_->data(),
+                                                                         f_grid_,
+                                                                         f_cellptr_.data(),
+                                                                         f_cellidx_.data(),
+                                                                         f_cellbox_,
+                                                                         f_row_prefix_.data(),
+                                                                         f_cell_hi1_.data(),
+                                                                         f_krow_,
+                                                                         ccdptr_->data(),
+                                                                         f_overlap_->data(),
+                                                                         v_overlap_->data());
+            return SCCD_SUCCESS;
+        }
+
         int broad_phase_fv_step_host_() {
             SMESH_TRACE_SCOPE("Broad_phase: F2V");
 
@@ -917,9 +981,11 @@ namespace sccd {
             if (use_cell2d_) {
                 SMESH_TRACE_SCOPE("cell2d f2v");
                 if (element_type == smesh::TRISHELL3) {
+                    if (use_cell2d_min_fv_) return cell2dmin_fv_step_host_<3>(n_nodes);
                     return use_cell2d_seg_ ? cell2dseg_fv_step_host_<3>(n_nodes)
                                            : cell2d_fv_step_host_<3>(n_faces);
                 } else if (element_type == smesh::QUADSHELL4) {
+                    if (use_cell2d_min_fv_) return cell2dmin_fv_step_host_<4>(n_nodes);
                     return use_cell2d_seg_ ? cell2dseg_fv_step_host_<4>(n_nodes)
                                            : cell2d_fv_step_host_<4>(n_faces);
                 } else {
@@ -1219,12 +1285,13 @@ namespace sccd {
 
             choose_strategy_(n_nodes);
 
-            if (use_cell2d_min_sorted_) {
+            if (use_cell2d_min_sorted_ || use_cell2d_min_fv_) {
                 // Ordering each cell is a host kernel so far, and it loses to
                 // the unordered walk on every scene of the benchmark anyway.
-                // Saying so beats running the unordered one under its name,
-                // which would put a timing against a label that did not produce
-                // it.
+                // The minimum-corner face-vertex query is host-only until it is
+                // measured there. Saying so beats running another under its
+                // name, which would put a timing against a label that did not
+                // produce it.
                 SMESH_ERROR("sccd: SCCD_BROADPHASE=%s has no device implementation yet\n",
                             sccd::broadphase_strategy_name(timed_strategy_));
                 return SCCD_FAILURE;
