@@ -1002,3 +1002,40 @@ Counting reduces with a ballot popcount and collecting writes at each lane's
 rank within the ballot, so neither pass needs an atomic.
 
 It was the walk itself, and the warp-per-box form above is the answer.
+
+## Confirming the device default with one binary
+
+The competitor comparison of 28 September and the one of 21 September were
+placed side by side to see what the minimum-corner list costs the device, and
+they disagreed with everything else: puffer-ball read 21.9 s against 10.4 for
+the extent-binned list and n-body 4.5 against 1.9, while armadillo-rollers,
+cloth-funnel and rod-twist went the other way. Two runs a week apart, two
+builds, so the comparison was between builds as much as between binnings.
+
+Measuring both with the same binary answers it. Device, mode 2, prep + broad
+over the first 100 cases of each scene, median over two repeats
+(`benchmark/assessment/device-binning.csv`):
+
+| scene | cell2dmin | cell2d | ratio |
+|---|---|---|---|
+| armadillo-rollers | 148.7 ms | 400.5 | **0.37x** |
+| cloth-ball | 690.2 | 977.7 | **0.71x** |
+| cloth-funnel | 295.4 | 525.9 | **0.56x** |
+| n-body-simulation | 2670.2 | 4323.3 | **0.62x** |
+| puffer-ball | 8922.4 | 10951.7 | **0.81x** |
+| rod-twist | 193.8 | 411.3 | **0.47x** |
+| all six | **12920.7** | 17590.3 | **0.73x** |
+
+The minimum-corner list leads on every scene of the device, so `Cell2DMin` as
+the single default holds on both processors and nothing measured with it needs
+revising.
+
+What the cross-run comparison actually saw is a device regression in the
+extent-binned kernel between the two builds: n-body cost it 12.7 ms per case in
+the 21 September build and 43.2 ms here. `cell2d` is a shipped option rather
+than the default, so this does not affect any reported number, and the cause is
+not yet identified.
+
+A comparison taken from two runs of different builds measures the difference
+between the builds. Only the same binary answers a question about two
+strategies.
