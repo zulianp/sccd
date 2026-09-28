@@ -7,12 +7,67 @@ accuracy relative to the exact roots of the dataset, and cost on each processor.
 the section reports cost, including the configurations on which the pipeline is
 the slower of the two.
 
-\subsection{Setup and dataset}
+\subsection{Experimental setup}
 \label{sec:results:setup}
 
-All measurements are taken on one \textsc{NVIDIA GH200} node of the CSCS Alps
-system, with the Grace host and the Hopper (sm\_90) device in the same
-allocation. The build uses \texttt{prgenv-gnu/24.11:v2} at \texttt{-O3} with
+All measurements are taken on the CSCS Alps system, on nodes built from the
+\textsc{NVIDIA GH200} Grace Hopper superchip~\citep{nvidia2023gh200}. One node
+carries four such modules, each pairing a Grace host with a Hopper device over
+a cache-coherent NVLink-C2C link. Every measurement in this paper uses a
+\emph{single} module: the host figures are taken on its $72$ Grace cores and the
+device figures on its one Hopper, with both in the same allocation, so that a
+host and a device number quoted together describe one module and not a node.
+Host threads are bound to that module with \texttt{numactl}, since an unbound
+run spreads across all four and measures a machine the device half does not
+share. \Cref{tab:hardware} states the two processors.
+
+\begin{table}[htbp]
+  \centering
+  \caption{The two processors of one \textsc{GH200} module. Core, multiprocessor,
+    clock, cache and capacity figures are as reported by the operating system and
+    the CUDA device properties on the compute nodes used. Peak \textsc{fp64} is
+    derived from those clocks and the per-core and per-multiprocessor unit counts
+    of the two architectures~\citep{arm2022neoversev2,nvidia2022hopper}. The
+    bandwidth row is measured: the best of ten \textsc{stream} triad passes over
+    arrays of $200$ and $300$ million doubles respectively.}
+  \label{tab:hardware}
+  \fittable{%
+  \begin{tabular}{lll}
+    \toprule
+     & Grace (host) & Hopper (device) \\
+    \midrule
+    architecture & Arm Neoverse V2 & NVIDIA Hopper, sm\_90 \\
+    parallel units & $72$ cores & $132$ multiprocessors \\
+    maximum clock & $3.42$ GHz & $1.98$ GHz \\
+    vector width & $128$-bit SVE2 & $32$-thread warp \\
+    threads in flight & $72$ & $270{,}336$ \\
+    L1 / shared memory & $64$ KiB per core & $228$ KiB per multiprocessor \\
+    L2 cache & $1$ MiB per core & $60$ MiB \\
+    L3 cache & $114$ MiB & -- \\
+    memory & $119$ GiB LPDDR5X & $95$ GiB HBM3 \\
+    peak \textsc{fp64} & $3.9$ TFLOP/s & $33.5$ TFLOP/s \\
+    triad bandwidth & $429$ GB/s & $3{,}738$ GB/s \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+The two peak \textsc{fp64} figures are the products of the unit counts and the
+clocks in \cref{tab:hardware}. A Neoverse V2 core issues four $128$-bit SVE2
+operations per cycle, giving eight double-precision lanes and $16$ flop per
+cycle with a fused multiply-add, so $72$ cores at $3.42$ GHz reach
+$3.9$ TFLOP/s. A Hopper multiprocessor carries $64$ double-precision units, so
+$132$ multiprocessors at $1.98$ GHz reach $33.5$ TFLOP/s. The device therefore
+offers $8.5\times$ the arithmetic and $8.7\times$ the memory bandwidth of the
+host it is paired with, which is the ratio against which
+\cref{sec:results:proc} should be read: a phase that does not reach it is
+limited by something other than the peak figures.
+
+The device memory system has a $6144$-bit interface at $2.619$ GHz, a
+theoretical $4023$ GB/s, of which the triad reaches $93\%$. Where
+\cref{sec:parallel:limits} reports a share of peak, the normalisation is Nsight
+Compute's own and not the ratio to this measurement.
+
+The build uses \texttt{prgenv-gnu/24.11:v2} at \texttt{-O3} with
 \texttt{CMAKE\_CUDA\_ARCHITECTURES=90}, at the default search parameters: a depth
 cap of $69$ and a distance tolerance of $3\times10^{-8}$. Host loops are
 scheduled with OpenMP~\citep{dagum1998openmp}. oneTBB~\citep{onetbb} is an

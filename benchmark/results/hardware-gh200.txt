@@ -1,0 +1,37 @@
+# Hardware of one NVIDIA GH200 module, CSCS Alps (daint), as queried on a
+# compute node. Source of the figures in the paper table tab:hardware.
+
+## host, from lscpu / numactl / sysfs
+host nid006544
+CPU(s):                                  288
+Model name:                              Neoverse-V2
+Core(s) per socket:                      72
+Socket(s):                               4
+CPU(s) scaling MHz:                      100%
+CPU max MHz:                             3420.0000
+CPU min MHz:                             81.0000
+L1d cache:                               18 MiB (288 instances)
+L2 cache:                                288 MiB (288 instances)
+L3 cache:                                456 MiB (4 instances)
+--- sysfs max kHz: 3357000
+--- SVE bytes: 16
+--- numa0 MB: 121920
+--- gpus: 4
+NVIDIA GH200 120GB, 9.0, 97871 MiB, 1980 MHz, 2619 MHz
+
+## device, from cudaGetDeviceProperties
+name                 NVIDIA GH200 120GB
+compute capability   9.0
+multiprocessors      132
+max threads / SM     2048
+clock rate (SM)      1.980 GHz
+memory clock         2.619 GHz
+memory bus width     6144 bit
+global memory        95.0 GiB
+L2 cache             60.0 MiB
+shared mem / SM      228 KiB
+theoretical DRAM BW  4023 GB/s
+
+## STREAM triad, best of ten, one module, 72 threads bound with numactl
+Grace  STREAM triad  428.9 GB/s  (threads=72)
+Hopper STREAM triad  3738 GB/s
