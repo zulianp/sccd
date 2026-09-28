@@ -227,14 +227,16 @@ namespace sccd {
         /**
          * \brief The most rows on the second grid axis any of \p n boxes spans.
          *
-         * The cross-list walk bounds its row range with this. It is the one part
-         * of the structure the host needs a value for, since it is a launch
-         * argument, so it synchronises; the queries that follow do not.
+         * The cross-list walk bounds its row range with this. It is written to
+         * \p krow, a single `int` of device memory that the query kernels read
+         * directly, so the value stays on the device and no step synchronises
+         * for it.
          */
         template <typename T>
-        int cell2dmin_max_row_span(const ptrdiff_t n,
-                                   T** const SCCD_RESTRICT aabbs,
-                                   const Cell2DGridD<T>& grid);
+        void cell2dmin_max_row_span(const ptrdiff_t n,
+                                    T** const SCCD_RESTRICT aabbs,
+                                    const Cell2DGridD<T>& grid,
+                                    int* const SCCD_RESTRICT krow);
 
         /**
          * \brief Vertex-face count over a minimum-corner binning of the faces.
@@ -244,7 +246,8 @@ namespace sccd {
          * a vertex reads a fraction of the cells a face does. The pair set is the
          * same -- this changes where a pair is found, not which pairs exist.
          *
-         * \p krow comes from \ref cell2dmin_max_row_span over the same faces, and
+         * \p krow points at the single device `int` \ref cell2dmin_max_row_span
+         * filled over the same faces, and
          * the grid, \p cellptr, \p cellidx, \p row_prefix and \p cell_hi1 from
          * binning the faces with \ref cell2dmin_setup_and_count,
          * \ref cell2dmin_fill and \ref cell2dmin_bounds.
@@ -265,7 +268,7 @@ namespace sccd {
                                          const I* const SCCD_RESTRICT cellidx,
                                          const T* const SCCD_RESTRICT row_prefix,
                                          const T* const SCCD_RESTRICT cell_hi1,
-                                         const int krow,
+                                         const int* const SCCD_RESTRICT krow,
                                          ptrdiff_t* const SCCD_RESTRICT ccdptr);
 
         /** \brief Write those pairs, face first, to match the shipped query. */
@@ -282,7 +285,7 @@ namespace sccd {
                                            const I* const SCCD_RESTRICT cellidx,
                                            const T* const SCCD_RESTRICT row_prefix,
                                            const T* const SCCD_RESTRICT cell_hi1,
-                                           const int krow,
+                                           const int* const SCCD_RESTRICT krow,
                                            const ptrdiff_t* const SCCD_RESTRICT ccdptr,
                                            I* const SCCD_RESTRICT face_out,
                                            I* const SCCD_RESTRICT vertex_out);

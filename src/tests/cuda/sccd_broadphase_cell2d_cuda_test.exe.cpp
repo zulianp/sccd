@@ -46,11 +46,15 @@ namespace {
         return d;
     }
 
+    // Four nodes an element, not three: quads are a supported face type, so a
+    // test that cannot hold one cannot check the shared-vertex filter on it.
+    static constexpr int kMaxNxe = 4;
+
     struct DeviceBoxes {
         std::vector<scalar_t> h[6];
-        std::vector<idx_t> h_elem[3];
+        std::vector<idx_t> h_elem[kMaxNxe];
         scalar_t* rows[6] = {};
-        idx_t* elem_rows[3] = {};
+        idx_t* elem_rows[kMaxNxe] = {};
         scalar_t** aabbs = nullptr;
         idx_t** elements = nullptr;
         idx_t* idx = nullptr;
@@ -64,7 +68,7 @@ namespace {
             SCCD_CUDA_CHECK(cudaMemcpy(aabbs, rows, sizeof(scalar_t*) * 6, cudaMemcpyHostToDevice));
 
             for (int v = 0; v < nxe; ++v) elem_rows[v] = dup(h_elem[v]);
-            SCCD_CUDA_CHECK(cudaMalloc(&elements, sizeof(idx_t*) * 3));
+            SCCD_CUDA_CHECK(cudaMalloc(&elements, sizeof(idx_t*) * kMaxNxe));
             SCCD_CUDA_CHECK(cudaMemcpy(elements, elem_rows, sizeof(idx_t*) * (size_t)nxe, cudaMemcpyHostToDevice));
 
             std::vector<idx_t> ids(n);
@@ -431,7 +435,9 @@ namespace {
         sccd::device::cell2dmin_fill<scalar_t, idx_t>(faces.n, faces.aabbs, grid, cellptr, cellidx, cursor);
         sccd::device::cell2dmin_bounds<scalar_t, idx_t>(grid, faces.aabbs, cellptr, cellidx,
                                                         row_prefix, cell_hi1);
-        const int krow = sccd::device::cell2dmin_max_row_span<scalar_t>(faces.n, faces.aabbs, grid);
+        int* krow = nullptr;
+        SCCD_CUDA_CHECK(cudaMalloc(&krow, sizeof(int)));
+        sccd::device::cell2dmin_max_row_span<scalar_t>(faces.n, faces.aabbs, grid, krow);
 
         ptrdiff_t* ccdptr = nullptr;
         SCCD_CUDA_CHECK(cudaMalloc(&ccdptr, sizeof(ptrdiff_t) * (size_t)(verts.n + 1)));
@@ -458,6 +464,7 @@ namespace {
         cudaFree(cursor);
         cudaFree(row_prefix);
         cudaFree(cell_hi1);
+        cudaFree(krow);
         cudaFree(ccdptr);
         cudaFree(o0);
         cudaFree(o1);

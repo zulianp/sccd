@@ -810,7 +810,7 @@ namespace sccd {
                 const I* const SCCD_RESTRICT cellidx,
                 const T* const SCCD_RESTRICT row_prefix,
                 const T* const SCCD_RESTRICT cell_hi1,
-                const int krow,
+                const int* const SCCD_RESTRICT krow,
                 Combine&& combine) {
                 const unsigned lane = threadIdx.x & (SCCD_WARP_SIZE - 1);
 
@@ -829,7 +829,10 @@ namespace sccd {
                 // box's maximum on both axes.
                 const int c0e = cell0<T>(grid, first_aabbs[SCCD_DIM + grid.axis0][fi]);
                 const int c1e = cell1<T>(grid, first_aabbs[SCCD_DIM + grid.axis1][fi]);
-                int c1b = cell1<T>(grid, amin1) - krow;
+                // Read from the device rather than taken as a launch argument:
+                // it is computed by a kernel, and fetching it to pass it back
+                // would put a full synchronisation in every step.
+                int c1b = cell1<T>(grid, amin1) - *krow;
                 if (c1b < 0) c1b = 0;
 
                 for (int c1 = c1b; c1 <= c1e; ++c1) {
@@ -887,7 +890,7 @@ namespace sccd {
                                                 const I* const SCCD_RESTRICT cellidx,
                                                 const T* const SCCD_RESTRICT row_prefix,
                                                 const T* const SCCD_RESTRICT cell_hi1,
-                                                const int krow,
+                                                const int* const SCCD_RESTRICT krow,
                                                 ptrdiff_t* const SCCD_RESTRICT ccdptr) {
                 const ptrdiff_t tid = (ptrdiff_t)blockIdx.x * blockDim.x + threadIdx.x;
                 const ptrdiff_t vi = tid / SCCD_WARP_SIZE;
@@ -920,7 +923,7 @@ namespace sccd {
                                                   const I* const SCCD_RESTRICT cellidx,
                                                   const T* const SCCD_RESTRICT row_prefix,
                                                   const T* const SCCD_RESTRICT cell_hi1,
-                                                  const int krow,
+                                                  const int* const SCCD_RESTRICT krow,
                                                   const ptrdiff_t* const SCCD_RESTRICT ccdptr,
                                                   I* const SCCD_RESTRICT face_out,
                                                   I* const SCCD_RESTRICT vertex_out) {
@@ -1386,15 +1389,12 @@ namespace sccd {
         }
 
         template <typename T>
-        int cell2dmin_max_row_span(const ptrdiff_t n,
-                                   T** const SCCD_RESTRICT aabbs,
-                                   const Cell2DGridD<T>& grid) {
-            if (n <= 0) return 0;
-
-            // The walk takes this as a launch argument, so it is the one value
-            // of the structure that has to come back across the bus.
-            int* const acc = (int*)workspace(WorkspaceSlot::TempStorage).get(sizeof(int));
-            SCCD_CHECK_CUDA(cudaMemset(acc, 0, sizeof(int)));
+        void cell2dmin_max_row_span(const ptrdiff_t n,
+                                    T** const SCCD_RESTRICT aabbs,
+                                    const Cell2DGridD<T>& grid,
+                                    int* const SCCD_RESTRICT krow) {
+            SCCD_CHECK_CUDA(cudaMemset(krow, 0, sizeof(int)));
+            if (n <= 0) return;
 
             dim3 block(SCCD_C2D_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
             dim3 gridsz((n + block.x - 1) / block.x);
@@ -1403,12 +1403,8 @@ namespace sccd {
                 soa_device_row<T>(aabbs, grid.axis1),
                 soa_device_row<T>(aabbs, SCCD_DIM + grid.axis1),
                 grid,
-                acc);
+                krow);
             SCCD_CUDA_LAST_ERROR();
-
-            int krow = 0;
-            SCCD_CHECK_CUDA(cudaMemcpy(&krow, acc, sizeof(int), cudaMemcpyDeviceToHost));
-            return krow;
         }
 
         template <int S, typename T, typename I>
@@ -1424,7 +1420,7 @@ namespace sccd {
                                          const I* const SCCD_RESTRICT cellidx,
                                          const T* const SCCD_RESTRICT row_prefix,
                                          const T* const SCCD_RESTRICT cell_hi1,
-                                         const int krow,
+                                         const int* const SCCD_RESTRICT krow,
                                          ptrdiff_t* const SCCD_RESTRICT ccdptr) {
             if (vertex_count <= 0) {
                 SCCD_CHECK_CUDA(cudaMemset(ccdptr, 0, sizeof(*ccdptr)));
@@ -1453,7 +1449,7 @@ namespace sccd {
                                            const I* const SCCD_RESTRICT cellidx,
                                            const T* const SCCD_RESTRICT row_prefix,
                                            const T* const SCCD_RESTRICT cell_hi1,
-                                           const int krow,
+                                           const int* const SCCD_RESTRICT krow,
                                            const ptrdiff_t* const SCCD_RESTRICT ccdptr,
                                            I* const SCCD_RESTRICT face_out,
                                            I* const SCCD_RESTRICT vertex_out) {
@@ -1518,7 +1514,7 @@ namespace sccd {
         const I*,                                                                              \
         const T*,                                                                              \
         const T*,                                                                              \
-        const int,                                                                             \
+        const int*,                                                                            \
         ptrdiff_t*);                                                                           \
     template void sccd::device::cell2dmin_collect_vf_overlaps<NXE, T, I>(                      \
         const ptrdiff_t,                                                                       \
@@ -1533,7 +1529,7 @@ namespace sccd {
         const I*,                                                                              \
         const T*,                                                                              \
         const T*,                                                                              \
-        const int,                                                                             \
+        const int*,                                                                            \
         const ptrdiff_t*,                                                                      \
         I*,                                                                                    \
         I*);
@@ -1597,8 +1593,8 @@ SCCD_C2D_INSTANTIATE_IDX(int32_t)
         const ptrdiff_t*,                                                                      \
         I*,                                                                                    \
         I*);                                                                                   \
-    template int sccd::device::cell2dmin_max_row_span<T>(                                      \
-        const ptrdiff_t, T**, const sccd::device::Cell2DGridD<T>&);                            \
+    template void sccd::device::cell2dmin_max_row_span<T>(                                     \
+        const ptrdiff_t, T**, const sccd::device::Cell2DGridD<T>&, int*);                      \
     SCCD_C2D_INSTANTIATE_FV(3, T, I)                                                           \
     SCCD_C2D_INSTANTIATE_FV(4, T, I)                                                           \
     template void sccd::device::cell2d_count_self_overlaps<2, T, I>(                           \
