@@ -353,7 +353,10 @@ namespace sccd {
         DeviceArray<smesh::idx_t> f_cellidx_d_;
         DeviceArray<scalar_t> f_row_prefix_d_;
         DeviceArray<scalar_t> f_cell_hi1_d_;
-        int f_krow_d_{0};
+        // One int, and it stays on the device: the query kernels read it, so
+        // fetching it to pass it back as a launch argument would put a full
+        // synchronisation in every step.
+        DeviceArray<int> f_krow_d_;
 #endif
 
 
@@ -1324,8 +1327,8 @@ namespace sccd {
                 } else {
                     bin_min_device_(n_faces, faabb_->data(), f_grid_d_, f_cellptr_d_,
                                     f_cellidx_d_, f_cursor_d_, f_row_prefix_d_, f_cell_hi1_d_);
-                    f_krow_d_ = sccd::device::cell2dmin_max_row_span<scalar_t>(
-                        n_faces, faabb_->data(), f_grid_d_);
+                    sccd::device::cell2dmin_max_row_span<scalar_t>(
+                        n_faces, faabb_->data(), f_grid_d_, f_krow_d_.get());
                 }
                 if (use_cell2d_min_) {
                     bin_min_device_(n_edges, eaabb_->data(), e_grid_d_, e_cellptr_d_,
@@ -1420,7 +1423,7 @@ namespace sccd {
                 sccd::device::cell2dmin_count_vf_overlaps<nxe, scalar_t, smesh::idx_t>(
                     n_nodes, vaabb_->data(), vidx_->data(), faabb_->data(), fidx_->data(), 1,
                     faces_->data(), f_grid_d_, f_cellptr_d_.get(), f_cellidx_d_.get(),
-                    f_row_prefix_d_.get(), f_cell_hi1_d_.get(), f_krow_d_, ccdptr_->data());
+                    f_row_prefix_d_.get(), f_cell_hi1_d_.get(), f_krow_d_.get(), ccdptr_->data());
             }
 
             ptrdiff_t n_pairs = 0;
@@ -1441,7 +1444,7 @@ namespace sccd {
                 sccd::device::cell2dmin_collect_vf_overlaps<nxe, scalar_t, smesh::idx_t>(
                     n_nodes, vaabb_->data(), vidx_->data(), faabb_->data(), fidx_->data(), 1,
                     faces_->data(), f_grid_d_, f_cellptr_d_.get(), f_cellidx_d_.get(),
-                    f_row_prefix_d_.get(), f_cell_hi1_d_.get(), f_krow_d_, ccdptr_->data(),
+                    f_row_prefix_d_.get(), f_cell_hi1_d_.get(), f_krow_d_.get(), ccdptr_->data(),
                     f_overlap_->data(), v_overlap_->data());
             }
             return SCCD_SUCCESS;
@@ -1928,6 +1931,7 @@ namespace sccd {
                 f_cellidx_d_.reserve(n_faces > 0 ? n_faces : 1);
                 f_row_prefix_d_.reserve(4 * n_faces + 1);
                 f_cell_hi1_d_.reserve(4 * n_faces + 1);
+                f_krow_d_.reserve(1);
             }
 #endif
         }
