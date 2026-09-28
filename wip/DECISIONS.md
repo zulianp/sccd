@@ -914,50 +914,58 @@ This clears the bar to implement and measure. It is not yet a result about time.
 `tight`, three repeats, on one Grace at 72 threads under
 `numactl --cpunodebind=0 --membind=0`, median over repeats per case and summed
 over cases. Both keep the same edge-edge query, so the vertex-face columns carry
-the whole difference.
+the whole difference. Taken after the subsample was fixed to spread over each
+query type, which is what put puffer-ball's vertex-face cases in the run at all.
 
-**Five scenes, not six.** Puffer-ball's row is empty because the subsample handed
-the run 60 edge-edge cases and no vertex-face ones, which is a defect in the
-harness described below. Its vertex-face half is unmeasured, and it is the
-largest scene in the set.
-
-| vertex-face, ms | prep | | | query | | | net |
-|---|---|---|---|---|---|---|---|
-| | min | minfv | delta | min | minfv | delta | |
-| cloth-funnel | 24.2 | 26.7 | +2.5 | 7.4 | 5.6 | -1.8 | +0.7 |
-| armadillo-rollers | 28.7 | 25.7 | -3.0 | 38.0 | 10.0 | -28.0 | **-31.1** |
-| cloth-ball | 33.2 | 30.7 | -2.4 | 176.2 | 63.9 | -112.3 | **-114.7** |
-| rod-twist | 41.4 | 43.7 | +2.3 | 51.2 | 28.9 | -22.3 | **-20.0** |
-| n-body-simulation | 41.0 | 38.3 | -2.6 | 835.3 | 145.9 | -689.5 | **-692.1** |
-| puffer-ball | -- | -- | | -- | -- | | not run |
-| those five | 168.4 | 165.1 | **-3.3** | 1108.1 | 254.2 | **-853.9** | **-857.2** |
+| vertex-face, ms | prep | | | query | | | net | |
+|---|---|---|---|---|---|---|---|---|
+| | min | minfv | delta | min | minfv | delta | | |
+| cloth-funnel | 24.3 | 26.5 | +2.2 | 7.7 | 5.7 | -2.0 | +0.2 | 0.99x |
+| armadillo-rollers | 32.3 | 25.9 | -6.3 | 35.5 | 9.9 | -25.6 | **-31.9** | 1.89x |
+| cloth-ball | 37.4 | 35.0 | -2.4 | 199.7 | 68.3 | -131.4 | **-133.8** | 2.30x |
+| rod-twist | 38.9 | 43.7 | +4.7 | 48.0 | 28.3 | -19.7 | **-15.0** | 1.21x |
+| n-body-simulation | 43.7 | 41.3 | -2.4 | 923.1 | 147.0 | -776.1 | **-778.5** | 5.13x |
+| puffer-ball | 468.9 | 286.1 | -182.8 | 2951.4 | 993.4 | -1958.0 | **-2140.8** | 2.67x |
+| all six | 645.5 | 458.5 | **-187.0** | 4165.4 | 1252.6 | **-2912.8** | **-3099.8** | **2.81x** |
 
 The prediction the plan rested on is the prep column. Extent-binning the faces
 cost `Cell2DSeg` between +15.3 ms and +110.7 ms of prep per scene, which is what
-sank it; one entry per face costs nothing measurable, -3.3 ms over the five,
-inside the run-to-run spread. The query falls 4.36x and carries straight through
-to the net, so vertex-face goes from 1276.5 ms to 419.3 ms, **3.04x**.
+sank it; one entry per face costs nothing anywhere and pays 182.8 ms back on
+puffer-ball, where the shipped scheme's 468.9 ms of vertex binning is a sixth of
+the whole broad phase. The query falls 3.33x on top of that.
 
-Cloth-funnel is a wash at +0.7 ms: its vertex-face query is 7.4 ms to begin with,
+Cloth-funnel is a wash at +0.2 ms: its vertex-face query is 7.7 ms to begin with,
 too small for the structure to pay for itself, and too small to matter.
 
-Attributing only the vertex-face delta, the broad phase over those five scenes
-goes from 2141.9 ms to 1284.7 ms, **1.67x**. The edge-edge columns move between
--7.4% and +7.3% between the two runs although both execute identical code, so
-that spread is run-to-run noise and is not read as a result in either direction.
+Attributing only the vertex-face delta, the broad phase over the six scenes goes
+from 8219.9 ms to 5120.0 ms, **1.61x**:
+
+| BP full, ms | min | minfv | |
+|---|---|---|---|
+| cloth-funnel | 88.5 | 88.8 | 1.00x |
+| armadillo-rollers | 118.1 | 86.2 | 1.37x |
+| cloth-ball | 429.6 | 295.8 | 1.45x |
+| rod-twist | 249.2 | 234.3 | 1.06x |
+| n-body-simulation | 1338.6 | 560.1 | 2.39x |
+| puffer-ball | 5995.8 | 3854.9 | 1.56x |
+| all six | **8219.9** | **5120.0** | **1.61x** |
+
+The edge-edge halves are held at the measured `cell2dmin` figure in that table
+rather than carried across from the other run, because both strategies execute
+identical edge-edge code and its columns move several percent between runs. That
+spread is run-to-run noise and is not read as a result in either direction.
 
 ### Correctness
 
 Across 2160 rows: no missed pair, no missed collision, no time of impact later
 than the dataset's exact root, under either strategy. False-positive counts are
-identical per scene (3, 12, 3, 51, 18, 564), and the candidate count agrees for
-every scene and query type, so the two emit the same pair set. Puffer-ball's 564
-are edge-edge, since its rows are all edge-edge; the vertex-face kernel is
-checked on the other five scenes here and on brute force in
-`src/tests/sccd_broadphase_cell2d_test.exe.cpp`.
+identical per scene (3, 6, 3, 60, 6, 372), and the candidate count agrees for
+every scene and query type, so the two emit the same pair set. Brute force checks
+the same kernel on every case of
+`src/tests/sccd_broadphase_cell2d_test.exe.cpp`, quads included.
 
-The reported earliest time of impact differs in the last digits on 224 of 1080
-cases, at most 2.9e-05 absolute, and symmetrically -- 114 earlier and 110 later.
+The reported earliest time of impact differs in the last digits on 292 of 1080
+cases, at most 2.6e-05 absolute, and symmetrically -- 141 earlier and 151 later.
 Changing the order in which pairs reach the shared atomic minimum sharpens it
 differently; neither run is late against ground truth, which is the property that
 has to hold.
@@ -988,6 +996,12 @@ The subsample now spreads over each query type separately and keeps the two in
 the proportion the dataset has them, so a balanced case list yields 30 and 30
 where it yielded 60 and 0. A type the dataset holds is always represented, and
 neither share exceeds what that type has.
+
+What it cost to miss: puffer-ball is the largest scene in the set, and on the
+rerun it is the largest absolute win of the change, -2140.8 ms, with the biggest
+prep saving of any scene. The table above was published without it and read
+1.67x where it now reads 1.61x on a set twice the size -- the direction held, but
+the scene carrying the most weight had been dropped silently.
 
 The generalisation is the one this document already makes five times over: a
 measurement that answers a different question than the one asked. The particular
