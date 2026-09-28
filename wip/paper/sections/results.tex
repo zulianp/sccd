@@ -243,7 +243,7 @@ $0.56\times$ is a standing gap and not a few expensive frames, and on rod-twist
 the cost climbs steadily on both processors as the rod winds up, so the median
 understates the end of the simulation.
 
-Splitting the same runs by phase, as \supp{} does, the broad phase takes $57$
+\Cref{fig:breakdown} splits the same runs by phase: the broad phase takes $57$
 to $84\%$ of the host total on every scene and $34$ to $64\%$ on the device, and
 within the host's broad phase the structure it builds is the part that scales
 worst with thread count (\cref{sec:results:threads}). Behind those medians,
@@ -253,6 +253,16 @@ skewed by a long upper tail, the per-case form of the heavy-tailed difficulty of
 the earliness distribution, one-sided by construction since every value is the
 distance \emph{before} the true root at which the answer falls, with additive
 CCD on the same cases beneath it.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{figures/runtime-breakdown.pdf}
+  \caption{Whole-scene totals split into BP full and NP EToI, as a share of each
+    processor's total. The BP bar is shaded into BP prep, the structure it
+    builds, and BP queries over it. BP full dominates on the host, and within it
+    BP prep.}
+  \label{fig:breakdown}
+\end{figure}
 
 \begin{figure}[htbp]
   \centering
@@ -278,8 +288,8 @@ earliest time of impact for a simulation step, and additive
 CCD~\citep{li2021codim} returns one per pair. Both are used exactly as released,
 built with the same compiler flags, and run on the same node over all six scenes
 and all $6{,}394$ cases, three repeats each, over identical broad-phase
-candidates. The lower panels of \cref{fig:reference} summarise both comparisons per scene;
-\supp{} carries the per-scene tables with their accuracy columns.
+candidates. The lower panels of \cref{fig:reference} summarise both comparisons
+per scene; \supp{} carries the per-scene tables with their accuracy columns.
 
 Against Scalable CCD, SCCD on the device is ahead end to end on every scene,
 from $4.23\times$ on cloth-funnel to $11.93\times$ on puffer-ball: $27.0$
@@ -288,8 +298,30 @@ $278.3\,\mathrm{s}$ over puffer-ball's $240$. Puffer-ball is also the scene on
 which our host path loses outright, at $458.6\,\mathrm{s}$, since its broad
 phase carries the scene on its own. The comparison is on the device throughout,
 because the narrow phase of Scalable CCD is CUDA and its host side is a broad
-phase with no pipeline behind it. Comparing the broad phases alone, ours costs
-$40.3\,\mathrm{s}$ over the benchmark against $312.6\,\mathrm{s}$.
+phase with no pipeline behind it.
+
+\Cref{fig:bpvs} compares the two broad phases step by step. Summed over the
+benchmark ours costs $40.3\,\mathrm{s}$ against $312.6\,\mathrm{s}$, and the
+margin is a standing one: on puffer-ball, the scene with the most candidate
+pairs, it is $21.9\,\mathrm{s}$ against $226.8$. Drawing both of our strategies
+separates what the implementation earns from what the choice of algorithm earns.
+On n-body the two differ, our sweep being the slower broad phase there,
+$7.5\,\mathrm{s}$ against Scalable CCD's $6.3$, while our cell list takes the
+scene at $4.5$; on cloth-funnel the two are within $18\%$ of each other and both
+far ahead, so the $5.4\times$ against Scalable CCD is attributable to the
+implementation.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{figures/broad-vs-scalable.pdf}
+  \caption{Device BP full against Scalable CCD's, step by step, the
+    acceleration structure and the queries over it added, in milliseconds for
+    one step, both query types together. All three curves come from one
+    comparison run, so they are measured in one allocation. Both of our
+    strategies are drawn, since the choice between them accounts for part
+    of the difference.}
+  \label{fig:bpvs}
+\end{figure}
 
 Its earliness columns report a defect on three scenes and not a difference in
 tightness: its answer lands after the true root on $269$ of armadillo-rollers'

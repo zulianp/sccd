@@ -70,19 +70,8 @@ over every block. \Cref{tab:stackcap} measures the effect.
 \section{Per-scene cost}
 \label{sec:supp:cost}
 
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=\linewidth]{figures/runtime-breakdown.pdf}
-  \caption{Whole-scene totals split into BP full and NP EToI, as a share of each
-    processor's total. The BP bar is shaded into BP prep, the structure it
-    builds, and BP queries over it. BP full dominates on the host, and within it
-    BP prep.}
-  \label{fig:breakdown}
-\end{figure}
-
-\Cref{fig:breakdown} splits the whole-scene totals by phase,
-\cref{tab:per-frame} gives their per-step form,
-\cref{tab:throughput} states the same comparison as a rate, and
+\Cref{tab:per-frame} gives the per-step form of the whole-scene totals the
+article reports, \cref{tab:throughput} states the same comparison as a rate, and
 \cref{tab:scaling} is the refinement study. \Cref{fig:perframe,fig:grid} give
 the distributions behind the medians, and \cref{fig:percase} narrow-phase cost
 against problem size.
@@ -174,29 +163,6 @@ false positives.
 \input{generated/tables/tab-competitor-earliest}
 
 \input{generated/tables/tab-competitor-pair}
-
-\Cref{fig:bpvs} compares the device broad phases step by step. Summed over the
-benchmark ours costs $40.3\,\mathrm{s}$ against $312.6\,\mathrm{s}$, and the
-margin is a standing one: on puffer-ball, the scene with the most candidate
-pairs, it is $21.9\,\mathrm{s}$ against $226.8$. Drawing both of our strategies
-separates what the implementation earns from what the choice of algorithm earns.
-On n-body the two differ: our sweep is the slower broad phase there,
-$7.5\,\mathrm{s}$ against Scalable CCD's $6.3$, while our cell list takes the
-scene at $4.5$. On cloth-funnel our two strategies are within $18\%$ of each
-other and both are far ahead, so the $5.4\times$ against Scalable CCD is
-attributable to the implementation.
-
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=\linewidth]{figures/broad-vs-scalable.pdf}
-  \caption{Device BP full against Scalable CCD's, step by step, the
-    acceleration structure and the queries over it added, in milliseconds for
-    one step, both query types together. All three curves come from one
-    comparison run, so they are measured in one allocation. Both of our
-    strategies are drawn, since the choice between them accounts for part
-    of the difference.}
-  \label{fig:bpvs}
-\end{figure}
 
 \section{The race in Scalable CCD's subdivision buffer}
 \label{sec:supp:race}
