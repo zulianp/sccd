@@ -2,6 +2,7 @@
   \centering
   \caption{How far before the true time of impact each mode reports. \emph{median} is the median over cases of the per-case median; \emph{worst case} is the largest earliness reported anywhere in the scene. Reporting early is always safe and always costs a solver step size, so the worst case is the largest step the mode can cost, not a tail to discount.}
   \label{tab:earliness}
+  \fittable{%
   \begin{tabular}{llrr}
     \toprule
     scene & mode & median & worst case \\
@@ -19,6 +20,6 @@
     rod-twist & GPU & 2.75e-04 & 9.93e-01 \\
     rod-twist & CPU & 2.75e-04 & 9.93e-01 \\
     \bottomrule
-  \end{tabular}
+  \end{tabular}}
   \par\smallskip\footnotesize Source: \texttt{benchmark/assessment/broadphase-cell2dmin.csv}
 \end{table}

@@ -27,7 +27,10 @@ REPO = PAPER.parent.parent
 sys.path.insert(0, str(REPO / "benchmark"))
 
 RESULTS = REPO / "benchmark" / "results"
-BENCH_CSV = RESULTS / "sweep-gh200-bp.csv"
+# The same CSV `benchmark/scripts/regenerate_reports.sh` builds the documents
+# from, so this script and that one cannot disagree about a cell. It holds the
+# shipped broad phase and the sweep it is measured against.
+BENCH_CSV = REPO / "benchmark" / "assessment" / "broadphase-cell2dmin.csv"
 ORACLE_CSV = RESULTS / "oracle-gh200-all.csv"
 # Order matters: the report renders one series per file in the order given, and
 # these are listed to match docs/BENCHMARKS.md -- host then device -- so the
@@ -104,39 +107,11 @@ def _build(only_modes: set[str], label_override: dict[str, str], suffix: str):
     return built, tables
 
 
-# `report.tables.render_tex` escapes the caption and the notes with the same
-# function it uses on a cell, which turns their intentional LaTeX into literal
-# text -- a caption reading "\\emph{late}" comes out as "\\textbackslash{}emph\\{late\\}".
-# It has never shown because the Markdown path, which is what the committed
-# documents use, never renders a caption. Rather than change the shipped
-# generator, the two lines are rebuilt here from the unescaped source. The
-# captions contain LaTeX commands and math but none of the characters that would
-# need escaping, so escaping them at all is the mistake.
-# The article uses the captions the generator writes. One of them used to
-# misdescribe its own columns -- it called the traversal "broad", which is what
-# the whole phase is called elsewhere -- and was replaced here. That is fixed at
-# the source now, in benchmark/report/tables.py, where every caption states the
-# phase tags: BP full, BP prep, BP queries and NP.
-CAPTION_OVERRIDE: dict[str, tuple[str, str]] = {}
-
-_CAPTION = re.compile(r"^(\s*)\\caption\{.*\}$", re.M)
-_TABULAR = re.compile(r"(\\begin\{tabular\}.*?\\end\{tabular\})", re.S)
-_NOTE = re.compile(r"^(\s*\\par\\smallskip\\footnotesize )(?!Source: ).*$", re.M)
-
-
-def _restore_latex(body: str, caption: str, notes: str) -> str:
-    body = _CAPTION.sub(lambda m: f"{m.group(1)}\\caption{{{caption}}}", body, count=1)
-    if notes:
-        # Markdown backticks are the note author's code voice; give them one in
-        # LaTeX rather than the opening double quote a bare backtick produces.
-        fixed = re.sub(r"`([^`]+)`", r"\\texttt{\1}", notes)
-        body = _NOTE.sub(lambda m: m.group(1) + fixed, body, count=1)
-    # Wrap the tabular so a table wider than the column shrinks to fit and one
-    # that already fits is left at the body font. Which tables are too wide
-    # depends on the page geometry, so it is not a decision the generator upstream
-    # could have made.
-    body = _TABULAR.sub(lambda m: "\\fittable{%\n" + m.group(1) + "}", body, count=1)
-    return body
+# `benchmark/report.tables.render_tex` now emits the article's LaTeX directly:
+# it leaves the caption and the notes as their authors wrote them, gives a
+# note's backticks \texttt, and wraps every tabular in \fittable. Nothing is
+# rewritten here, so this script and `scripts/make_tables.sh` produce the same
+# file for the same table.
 
 
 def _write(built, tables_mod, suffix: str) -> list[str]:
@@ -148,8 +123,7 @@ def _write(built, tables_mod, suffix: str) -> list[str]:
         stem = t.label.replace(":", "-") + suffix
         # Relaxed tables reuse the Tight labels, which would be a duplicate-label
         # warning and a \ref pointing at whichever came last. Suffix both.
-        caption, notes = CAPTION_OVERRIDE.get(t.label, (t.caption, t.notes))
-        body = _restore_latex(tables_mod.render_tex(t), caption, notes)
+        body = tables_mod.render_tex(t)
         if suffix:
             body = body.replace("\\label{" + t.label + "}",
                                 "\\label{" + t.label + suffix + "}")
@@ -161,8 +135,8 @@ def _write(built, tables_mod, suffix: str) -> list[str]:
 # Figures quoted in the prose, and the table each must still appear in. A claim
 # that drifts from its evidence is the failure this guards against.
 PROSE_CLAIMS = [
-    ("5.75", "tab-broadphase"),
-    ("0.53", "tab-processor"),
+    ("15.80", "tab-processor"),
+    ("2.05", "tab-processor"),
     # The scaling ratios are quoted as divisions of these cells, so the reader
     # can do the arithmetic; checking the cells checks the ratios.
     ("55.7", "tab-scaling"),

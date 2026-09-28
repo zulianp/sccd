@@ -2,6 +2,7 @@
   \centering
   \caption{Broad- and narrow-phase throughput in candidate pairs per second, median over repeats. A rate, so it is directly comparable between scenes of very different size: a rate, so it is neither a whole-scene total nor a per-step figure. \emph{BP full} is the whole broad phase, the acceleration structure plus the queries over it; \emph{BP prep} is the structure alone and \emph{BP queries} the queries alone. The narrow phase is named by the answer it is asked for: \emph{NP EToI} returns one earliest time of impact for the step, so every query prunes against the running minimum, and \emph{NP per-pair} returns one per candidate with no shared bound. }
   \label{tab:throughput-relaxed}
+  \fittable{%
   \begin{tabular}{llrr}
     \toprule
     scene & mode & BP full (Mpair/s) & NP EToI (Mpair/s) \\
@@ -19,6 +20,6 @@
     rod-twist & GPU & 446.1 & 433.6 \\
     rod-twist & CPU & 237.2 & 109.1 \\
     \bottomrule
-  \end{tabular}
+  \end{tabular}}
   \par\smallskip\footnotesize Source: \texttt{benchmark/assessment/broadphase-cell2dmin.csv}
 \end{table}

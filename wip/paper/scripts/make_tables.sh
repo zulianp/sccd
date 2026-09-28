@@ -67,8 +67,12 @@ for blk in blocks:
     if lost:
         skipped.append(f"tab-{m.group(1)} ({lost} cells would become --)")
         continue
-    txt = re.sub(r"\\texttt\{[^}]*\}",
-                 "\\\\texttt{benchmark/assessment/broadphase-cell2dmin.csv}", blk)
+    # Only the Source line, and only when it already names the bench CSV. A
+    # blunter rewrite reaches the \texttt in a note -- which made one caption
+    # read "<path> names the winning strategy" -- and overwrites the Source of
+    # a table whose data comes from the oracle CSV instead.
+    txt = re.sub(r"(Source: )\\texttt\{(?!benchmark/results/oracle)[^}]*\}",
+                 r"\1\\texttt{benchmark/assessment/broadphase-cell2dmin.csv}", blk)
     open(path, "w").write(txt + "\n")
     written.append(f"tab-{m.group(1)}")
 
