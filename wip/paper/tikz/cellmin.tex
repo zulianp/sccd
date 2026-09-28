@@ -26,7 +26,17 @@
   full/.style={fill=sccdTeal!14},
   empty/.style={fill=sccdMoss!30},
   beyond/.style={fill=sccdInk!6},
+  % The span one binary search over the row's prefix maximum steps over. The
+  % tint is translucent so the cell fills beneath it still read: a searched cell
+  % can be covered, empty, or neither.
+  search/.style={draw=sccdAmber, line width=0.8pt,
+                 dash pattern=on 2pt off 1.4pt,
+                 fill=sccdAmber, fill opacity=0.16},
 ]
+
+% The columns a row's lower-bound search steps over, as c0..c1 on row r.
+\newcommand{\searchspan}[3]{%
+  \draw[search] ({#1*0.62},{#3*0.62}) rectangle ({(#2+1)*0.62},{(#3+1)*0.62});}
 
 % One cell, addressed by column and row.
 \newcommand{\cellfill}[3]{%
@@ -88,6 +98,9 @@
   \draw[found] (0.80,0.85) rectangle (1.50,1.50);
   \draw[query] (0.35,0.30) rectangle (1.10,1.00);
   \fill[sccdTeal] (0.35,0.30) circle (1.4pt);
+  % Row 1: the search starts the row at column 1, stepping over cell 6.
+  \searchspan{0}{0}{1}
+
   \node[lbl, text=sccdPlum, anchor=south west] at (1.67,0.75) {$b$};
   \node[lbl, text=sccdPlum, anchor=south west] at (1.52,1.50) {$c$};
   \node[lbl, text=sccdTeal, anchor=north east] at (0.33,0.28) {$a$};
@@ -114,6 +127,12 @@
   \draw[found] (2.40,1.10) rectangle (3.10,1.70);
   \draw[query] (1.95,0.45) rectangle (2.60,1.55);
   \fill[sccdTeal] (1.95,0.45) circle (1.4pt);
+  % Row 1: the search steps over columns 0-2, left of $d$'s own columns, where a
+  % partner binned lower could still reach back. Row 2: it returns a column past
+  % 4 and steps over the whole row.
+  \searchspan{0}{2}{1}
+  \searchspan{0}{4}{2}
+
   \node[lbl, text=sccdPlum, anchor=south west] at (3.12,1.70) {$e$};
   \node[lbl, text=sccdTeal, anchor=north east] at (1.93,0.43) {$d$};
 \end{scope}
@@ -134,6 +153,9 @@
   \draw[found] (0.75,1.95) rectangle (1.45,2.40);
   \draw[query] (0.30,1.75) rectangle (0.90,2.30);
   \fill[sccdTeal] (0.30,1.75) circle (1.4pt);
+  % Row 3: the search starts the row at column 1, stepping over cell 18.
+  \searchspan{0}{0}{3}
+
   \node[lbl, text=sccdPlum, anchor=south west] at (1.47,2.40) {$g$};
   \node[lbl, text=sccdTeal, anchor=north east] at (0.28,1.73) {$f$};
 \end{scope}
@@ -151,5 +173,8 @@
   \fill[beyond] (0.00,-0.68) rectangle ++(0.22,0.16);
   \draw[draw=sccdInk!30, line width=0.3pt] (0.00,-0.68) rectangle ++(0.22,0.16);
   \node[lbl, anchor=west] at (0.26,-0.60) {past the box's own maximum corner};
+  \draw[search] (0.00,-0.98) rectangle ++(0.22,0.16);
+  \node[lbl, anchor=west] at (0.26,-0.90)
+    {the columns one lower-bound search steps over};
 \end{scope}
 \end{tikzpicture}

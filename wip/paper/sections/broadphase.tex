@@ -224,28 +224,29 @@ widen every query window by $k$ to match.
   \centering
   \input{tikz/cellmin}
   \caption{The edge-edge binning run through on one scene, drawn to scale: every
-    cell index, walk range and skipped span follows from the coordinates shown.
-    \textbf{(a)} Seven swept boxes over a six-by-four grid, each binned into the
-    one cell holding its minimum corner, the cells numbered row-major from the
-    bottom left. Four pairs overlap, and each is emitted by whichever of the two
-    sits in the lower cell, so only three of the seven boxes emit anything.
-    \textbf{(b)} $a$ covers cells $0$, $1$, $6$ and $7$, the last holding its
-    maximum corner, and finds $b$ and $c$ in $1$ and $7$. Cell $6$ is empty, so
-    the running maximum starts that row at the next column and the cell is never
-    read: a run of empty cells costs a single binary search, with no test per
-    cell. \textbf{(c)} $d$ covers cells $3$, $4$, $9$, $10$, $15$ and $16$, of
-    which $3$ holds $d$ itself and $9$ holds $e$, the pair it emits; $4$ and
-    $10$ are read and yield nothing. The third row is skipped whole, the empty
-    cells $15$ and $16$ included, because the only box binned there is $f$,
-    which ends well to the left of where $d$ begins. Past its own row the walk
-    also reaches left of its own columns, since a box binned in a lower column
-    can still be wide enough to reach back into $d$; such a partner is exactly
-    the one a footprint walk loses, its cell neither preceding nor following
-    $d$'s componentwise. \textbf{(d)} $f$ covers cells $12$, $13$, $18$ and
-    $19$, and finds $g$ in $19$; of the two empty cells $13$ is read and $18$
-    the search steps over. $b$, $c$, $e$ and $g$ walk too and emit nothing, each
-    of their partners sitting in a lower cell that has already reported the
-    pair.}
+    cell index, walk range and searched span follows from the coordinates shown.
+    The amber spans are the columns one lower-bound search over that row's
+    prefix maximum steps over, at a cost independent of how many cells they
+    hold. \textbf{(a)} Seven swept boxes over a six-by-four grid, each binned
+    into the one cell holding its minimum corner, the cells numbered row-major
+    from the bottom left. Four pairs overlap, and each is emitted by whichever
+    of the two sits in the lower cell, so only three of the seven boxes emit
+    anything. \textbf{(b)} $a$ covers cells $0$, $1$, $6$ and $7$, the last
+    holding its maximum corner, and finds $b$ and $c$ in $1$ and $7$. Cell $6$
+    is empty, so the search starts that row at the next column and the cell is
+    never read. \textbf{(c)} $d$ covers cells $3$, $4$, $9$, $10$, $15$ and
+    $16$, of which $3$ holds $d$ itself and $9$ holds $e$, the pair it emits;
+    $4$ and $10$ are read and yield nothing. The third row is skipped whole, the
+    empty cells $15$ and $16$ included, because the only box binned there is
+    $f$, which ends well to the left of where $d$ begins. The two amber spans
+    also show the walk reaching left of $d$'s own columns on every row above its
+    own, since a box binned in a lower column can still be wide enough to reach
+    back into $d$; such a partner is exactly the one a footprint walk loses, its
+    cell neither preceding nor following $d$'s componentwise. \textbf{(d)} $f$
+    covers cells $12$, $13$, $18$ and $19$, and finds $g$ in $19$; of the two
+    empty cells $13$ is read and $18$ the search steps over. $b$, $c$, $e$ and
+    $g$ walk too and emit nothing, each of their partners sitting in a lower
+    cell that has already reported the pair.}
   \label{fig:cellmin}
 \end{figure}
 
