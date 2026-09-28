@@ -10,6 +10,7 @@ article can be traced to the run that produced it.
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -75,11 +76,11 @@ def render_tex(table: Table) -> str:
         f"  \\caption{{{table.caption}}}",
         f"  \\label{{{table.label}}}",
     ]
-    # A table wider than four columns does not fit the column at full size, so
-    # it goes through \fittable, which scales it down only when it has to.
-    wide = len(table.columns) > 4
-    if wide:
-        lines.append(r"  \fittable{%")
+    # Every table goes through \fittable, which scales one down only when it
+    # would otherwise run into the margin and leaves the rest at the body font.
+    # Applying it everywhere keeps the decision with the macro, where the page
+    # geometry is known, so no generator has to guess from the column count.
+    lines.append(r"  \fittable{%")
     lines += [
         f"  \\begin{{tabular}}{{{spec}}}",
         r"    \toprule",
@@ -88,9 +89,13 @@ def render_tex(table: Table) -> str:
     ]
     for row in table.rows:
         lines.append("    " + " & ".join(_tex_escape(c) for c in row) + r" \\")
-    lines += [r"    \bottomrule", r"  \end{tabular}" + ("}" if wide else "")]
+    lines += [r"    \bottomrule", r"  \end{tabular}}"]
     if table.notes:
-        lines.append(f"  \\par\\smallskip\\footnotesize {table.notes}")
+        # A note's backticks are its author's code voice. A bare backtick sets
+        # an opening single quote in LaTeX, so give it \texttt here and let the
+        # markdown renderer keep the backticks it was written with.
+        notes = re.sub(r"`([^`]+)`", r"\\texttt{\1}", table.notes)
+        lines.append(f"  \\par\\smallskip\\footnotesize {notes}")
     if table.source:
         lines.append(f"  \\par\\smallskip\\footnotesize Source: "
                      f"\\texttt{{{_tex_escape(table.source)}}}")
