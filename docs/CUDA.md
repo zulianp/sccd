@@ -160,19 +160,22 @@ The GPU is not uniformly faster, and which phase wins is not the same on every
 scene. Measured over six scenes on a GH200 node ([`BENCHMARKS.md`](BENCHMARKS.md)
 has the tables):
 
-- The **broad phase** is the stage whose shape suits a GPU — count, prefix sum,
-  scatter, with no sequential window walk. It runs 2.2× to 4.2× faster than
-  Grace on five of the six scenes, and 1.2× slower on the sixth.
-- The **narrow phase** is usually the slower one on the GPU: 0.27× to 0.76× of
-  Grace on five scenes, and 1.26× on the sixth.
-- **End to end** the GPU wins five of six by 1.5× to 2.9×, and loses one at
-  0.62×.
+- The **broad phase** is count, prefix sum and scatter, with no sequential
+  window walk. It runs at 0.56× to 1.83× of Grace — a narrow range around
+  parity, faster on armadillo-rollers, puffer-ball and rod-twist and slower on
+  the other three.
+- The **narrow phase** is where the GPU earns its place, and it spans a far
+  wider range: 0.44× to 15.80× of Grace, ahead on cloth-ball, n-body,
+  puffer-ball and rod-twist, behind on the two scenes with the smallest
+  candidate lists.
+- **End to end** the GPU wins four of six by 1.43× to 2.05×, and loses
+  armadillo-rollers at 0.75× and cloth-funnel at 0.56×.
 
-The two exceptions are different scenes, which is the point: the phase that
-wins is a property of the geometry, not a fixed property of the processor. And
-the scene the GPU loses outright is the largest in the set by candidate pairs —
-30.5 million per step — so "bigger problem, use the GPU" is not a safe rule.
-Measure the scene you have.
+The two scenes the host takes are the two smallest in the set by candidate
+pairs, 43,661 and 109,214 per step, and the GPU takes every scene above a
+million. The margin within that is not ordered by size — cloth-ball at 2.2
+million pairs gives 1.43× where rod-twist at 847,250 gives 1.89× — so size
+indicates the processor and does not settle it. Measure the scene you have.
 
 One trap when comparing: `Tight` is the host's faster mode and the device's
 slower one, so pinning the same `SCCD_NARROWPHASE_MODE` on both sides races the

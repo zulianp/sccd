@@ -16,9 +16,10 @@ Three results:
 
 - **Conservative on every query.** Zero missed collisions and zero late times of
   impact over 66,268,596 comparisons against exact symbolic roots.
-- **Identical accuracy to the reference.** Median and worst-case error match
-  TightInclusion's on all twelve scene-phases, to every digit.
-- **1.6× to 3.7× faster on CPU** and 2.5× to 18.2× on GPU, at that accuracy.
+- **The reference's accuracy.** On CPU the median and worst-case earliness match
+  TightInclusion's on all twelve scene-phases, to every printed digit. On GPU
+  they agree to within 0.6% and 4.5%.
+- **2.1× to 3.5× faster on CPU** and 2.6× to 20.9× on GPU, at that accuracy.
 
 Every number is generated from a committed CSV by a committed script:
 
@@ -219,17 +220,21 @@ Source: `benchmark/assessment/broadphase-cell2dmin.csv`
 
 <!-- sccd:end processor -->
 
-The split is mechanical. The **broad phase** suits a GPU — count, prefix sum,
-scatter, no sequential window walk — and runs 2.6× to 5.5× faster on five of six
-scenes. The **narrow phase** is a depth-first interval search with a divergent
-stack, and runs at 0.16× to 1.06× of host speed. The broad phase is the larger
-share on the host, so the GPU still wins end to end on five scenes by 1.6× to
-3.0×.
+The split is mechanical. The **broad phase** is count, prefix sum and scatter,
+and it runs at 0.56× to 1.83× of host speed — a narrow range around parity,
+because the edge-edge walk suits a host. The **narrow phase** is a depth-first
+interval search with a divergent stack, and it spans a far wider range, 0.44× to
+15.80×: behind the host where the candidate lists are smallest, and ahead by an
+order of magnitude on n-body and puffer-ball, where tens of millions of
+candidates keep every lane busy. The GPU's advantage is therefore the narrow
+phase, and the broad phase is what limits it.
 
-**puffer-ball inverts it**, at 0.63× overall: its GPU narrow phase is six times
-slower and its broad phase gives nothing back. It is the largest scene in the set
-by candidate pairs, 30.5 million per step, so problem size is not a rule for
-choosing a processor.
+End to end the GPU wins puffer-ball by 2.05×, n-body by 2.02×, rod-twist by
+1.89× and cloth-ball by 1.43×; the host wins armadillo-rollers at 0.75× and
+cloth-funnel at 0.56×. Cloth-funnel is the smallest scene by candidate pairs at
+43,661 per step and puffer-ball the largest at 30.5 million, and the GPU takes
+the larger one, so problem size is not a rule for choosing a processor on its
+own.
 
 Per simulation step, which is the figure a solver budgets against and the only
 one comparable between a 79-step scene and a 4,571-step one:
@@ -260,7 +265,7 @@ Source: `benchmark/assessment/broadphase-cell2dmin.csv`
 ## 6. Broad phase
 
 Two strategies produce the candidate pairs — a sweep over sorted intervals and a
-cell list over a uniform grid. Across 25,538 case-mode combinations they report
+cell list over a uniform grid. Across 25,576 case-mode combinations they report
 identical candidate pair counts, so the choice is purely about cost, and the
 measurement below is what fixes it: `cell2dmin`, the cell list with the
 edge-edge query binned at the minimum corner, is the default on both
@@ -289,10 +294,11 @@ Source: `benchmark/assessment/broadphase-cell2dmin.csv`
 
 <!-- sccd:end broadphase -->
 
-**Neither wins.** The sweep takes armadillo-rollers, cloth-ball, n-body and
-rod-twist by 1.03× to 1.88×; the cell list takes cloth-funnel by 1.06× and
-puffer-ball by **4.0×** — 27 s against 109 s on the largest scene. A fixed choice
-is wrong somewhere, and wrong by a factor of four at the worst point.
+**The cell list wins every row.** Its margin on the whole broad phase runs from
+1.06× on cloth-funnel's GPU to **16.95×** on puffer-ball's CPU, where it takes
+24.8 s against 420.5 s on the largest scene in the benchmark. It also builds its
+acceleration structure faster in every row, by 1.20× to 4.00×. One strategy is
+therefore the right default everywhere, which is what `cell2dmin` is.
 
 ## 7. Scaling with element count
 

@@ -25,23 +25,22 @@ drops.
 
 ## Broad phase
 
-Two implementations, both kept, because neither wins everywhere and they produce
-**identical pair sets**.
+Two implementations, both kept, producing **identical pair sets**.
 
 | | `sccd_broadphase_sweep.hpp` | `sccd_broadphase_cell2d.hpp` |
 |---|---|---|
 | method | sweep and prune along a sorted axis | uniform 2D cell list, no sorting |
-| wins | armadillo-rollers 1.59×, cloth-ball 1.36× | cloth-funnel; dense synthetic input by 4–7× |
 
 Two dimensions, not three: a surface does not fill a volume, so a third axis buys
 cells rather than selectivity.
 
-`sccd_broadphase_strategy.hpp` chooses between them by **racing them** — one on a
-step, the other on the next, keep the faster, re-probe periodically. Five
-attempts to predict the winner from geometry all failed (anisotropy, expected
-sweep window, estimated pair density, mesh size, and a fixed default), and they
-are documented there so they are not retried. `SCCD_BROADPHASE=sweep|cell2d|cell2dmin|cell2dminsort|cell2dseg`
-forces one.
+`sccd_broadphase_strategy.hpp` resolves `Auto` to `Cell2DMin`, the cell list with
+the edge-edge query binned at the minimum corner. It is the faster of the two on
+every scene of the benchmark and on both processors, by 1.06× to 16.95× on the
+whole broad phase, so the default is a measurement and the library runs one
+strategy everywhere. The race in `BroadPhaseAutoTuner` remains for a caller that
+sets no default of its own.
+`SCCD_BROADPHASE=sweep|cell2d|cell2dmin|cell2dminsort|cell2dseg` forces one.
 
 Both handle triangles and quads, on host and device.
 
@@ -53,7 +52,8 @@ Both handle triangles and quads, on host and device.
 | 2 | `Tight` | lane-packed; domain widths against domain tolerances |
 
 Two modes, and both ship because neither dominates: `Relaxed` wins cloth-funnel on
-speed, `Tight` wins cloth-ball, and `Tight` is 69× tighter at the median error.
+speed by 2.19×, `Tight` wins cloth-ball by 1.62×, and `Tight` is 14× tighter at
+the median earliness.
 They differ in accuracy and speed, never in safety — every mode is conservative.
 
 `SCCD_NARROWPHASE_MODE` selects between them and takes `0` or `2`; any other
