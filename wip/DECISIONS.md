@@ -1039,3 +1039,65 @@ not yet identified.
 A comparison taken from two runs of different builds measures the difference
 between the builds. Only the same binary answers a question about two
 strategies.
+
+## Vertex-face: binning the faces at their minimum corner
+
+The edge-edge query was moved to minimum-corner binning and left the vertex-face
+one alone, so vertex-face is now the larger half of the broad phase: over six
+scenes at `tight`, host 18,807.7 ms against edge-edge's 16,097.5 (53.9%), device
+11,323.6 against 17,829.4 (38.8%), reaching 74.6% on n-body host and 82.6% on
+armadillo device. It is a third to an eighth of the queries and 29% to 83% of the
+time, so it costs two to seven times more per emitted pair.
+
+What ships bins the **vertices** by extent and iterates over the **faces**.
+`cell2d_setup` sizes cells from the list it bins, so the cells are vertex-sized
+and the larger element walks a rectangle of them, paying the overlap-corner
+duplicate rule on every surviving candidate. Binning the vertices at their
+minimum corner instead buys little: they already occupy about two cells each, and
+a prefix maximum over small boxes rises steadily, so the search would skip
+almost nothing. The lever is which list is indexed, not the binning rule.
+
+`Cell2DSeg` already established that the mirror image has the cheaper query, and
+lost on the structure: extent-binning faces costs about 4.3 entries each over
+twice as many elements. **Minimum-corner binning removes exactly that cost**, one
+entry per face, which is why this was measured again.
+
+Completeness differs from the edge-edge walk, which leans on a self-symmetry that
+two lists do not have. A face overlaps a vertex only if `f.min <= v.max`
+componentwise, so `cell(f.min) <= cell(v.max)` in both axes and nothing right of
+or above the vertex's maximum cell is ever read. Leftwards, the per-row prefix
+maximum gives the first column holding anything that reaches back, by the same
+binary search the edge-edge walk uses. Downwards, a face reaching the vertex on
+the second axis has `row(f.max) >= row(v.min)` and spans at most `K1` rows, so it
+is binned no lower than `row(v.min) - K1`. Anchoring that bound on `row(v.max)`
+instead loses pairs whenever the vertex straddles a boundary -- 81 of 5,543 in
+the first run of the probe.
+
+`spikes/src/cellmin_vf_probe.probe.cpp` counts both schemes on the same boxes,
+with each grid sized from the list it bins and the `4n` cell cap applied, which
+brings the occupancies to 2.44 and 4.49 cells against the 2.06 and 3.95 measured
+on the scenes. Proposed over shipped:
+
+| shape | entries | cells read | candidates |
+|---|---|---|---|
+| base | 0.82x | **0.23x** | 0.57x |
+| + 8 faces at 20x the mean | 0.82x | 0.25x | 0.62x |
+| + 80 faces at 20x | 0.82x | 0.30x | 0.83x |
+| five times the elements | 0.59x | 0.28x | 0.68x |
+| five times, + 200 at 20x | 0.59x | 0.34x | 0.96x |
+| two vertices per face | 0.19x | 0.33x | 0.73x |
+
+Neither scheme misses a pair on any of eight shapes. Cells read fall three to
+four times over, and that is the counter the case rests on: the candidate count
+degrades towards parity under a heavy tail (0.96x with 200 oversized faces)
+because a wide face reaches into many vertices however it is indexed.
+
+The cost the table does not show is the binary search per row scanned. `K1` is a
+maximum, so one face twenty times the mean takes the row range from 3 to 21, and
+every vertex then pays 21 searches whether or not a row yields a cell. The
+skipped-column counts say those rows are almost entirely empty (778,094 columns
+skipped without the tail, 4,423,950 with it), so the searches are doing their
+job -- but an implementation should count them, and a per-row upper bound on the
+second axis would let a row be rejected before its search rather than after.
+
+This clears the bar to implement and measure. It is not yet a result about time.
