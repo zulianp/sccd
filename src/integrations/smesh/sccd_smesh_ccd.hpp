@@ -642,7 +642,7 @@ namespace sccd {
             // both queries. Cell2DMinFV is that walk applied to the vertex-face
             // query as well as the edge-edge one, so it keeps everything
             // Cell2DMin won on and indexes the faces instead of the vertices.
-            // The broad phase falls 1.61x on the host and 1.14x on the device
+            // The broad phase falls 1.61x on the host and 1.17x on the device
             // over the six, ahead on every scene of both. Nothing is raced.
             tuner_.set_default(sccd::BroadPhaseStrategy::Cell2DMinFV);
 

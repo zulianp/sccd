@@ -84,31 +84,98 @@ namespace sccd {
                 return false;
             }
 
+            /** \brief Threads a block brings to the grid-sizing reduction. */
+            static constexpr int kGridStatsBlock = 256;
+            /** \brief Blocks it splits the array over, and so partials to combine. */
+            static constexpr int kGridStatsBlocks = 512;
+
             /**
-             * \brief Per-axis min, max and mean extent, for sizing the grid.
+             * \brief Reduce a block's stride of the array to one (min, max, sum).
              *
-             * One block with a shared-array tree reduction rather than atomics:
-             * there is no atomic_max for floating point here, and this runs once
-             * per axis over arrays the later passes traverse many times, so its
-             * cost is not worth optimising.
+             * Per-axis min, max and mean extent size the grid. A shared-array tree
+             * rather than atomics, because there is no floating-point atomic
+             * minimum or maximum here; over many blocks rather than one, because
+             * one block is 256 threads of a device that has hundreds of times
+             * that, and the reduction is then linear in the element count with
+             * none of the machine working. Profiled on puffer-ball it was 10.1%
+             * of all GPU time, and the largest single term in the difference
+             * between binning the faces and binning the vertices -- not because
+             * either is wrong, but because the face list is the longer one and
+             * this kernel charges by length.
              */
             template <typename T>
-            __global__ void grid_stats_kernel(const ptrdiff_t n,
-                                              const T* const SCCD_RESTRICT lo,
-                                              const T* const SCCD_RESTRICT hi,
-                                              T* const SCCD_RESTRICT out_min,
-                                              T* const SCCD_RESTRICT out_max,
-                                              T* const SCCD_RESTRICT out_sum) {
+            __global__ void grid_stats_partial_kernel(const ptrdiff_t n,
+                                                      const T* const SCCD_RESTRICT lo,
+                                                      const T* const SCCD_RESTRICT hi,
+                                                      T* const SCCD_RESTRICT part_min,
+                                                      T* const SCCD_RESTRICT part_max,
+                                                      T* const SCCD_RESTRICT part_sum) {
                 extern __shared__ char s_raw[];
                 T* const s_min = (T*)s_raw;
                 T* const s_max = s_min + blockDim.x;
                 T* const s_sum = s_max + blockDim.x;
 
+                // lo[0] and hi[0] are the identity for a lane with no element:
+                // they are a real box's bounds, so folding them in cannot widen
+                // the result past what the array holds.
                 T tmin = lo[0], tmax = hi[0], tsum = T(0);
-                for (ptrdiff_t i = threadIdx.x; i < n; i += blockDim.x) {
+                const ptrdiff_t stride = (ptrdiff_t)blockDim.x * (ptrdiff_t)gridDim.x;
+                for (ptrdiff_t i = (ptrdiff_t)blockIdx.x * blockDim.x + threadIdx.x; i < n; i += stride) {
                     tmin = lo[i] < tmin ? lo[i] : tmin;
                     tmax = hi[i] > tmax ? hi[i] : tmax;
                     tsum += hi[i] - lo[i];
+                }
+                s_min[threadIdx.x] = tmin;
+                s_max[threadIdx.x] = tmax;
+                s_sum[threadIdx.x] = tsum;
+                __syncthreads();
+
+                for (unsigned element_stride = blockDim.x / 2; element_stride > 0; element_stride >>= 1) {
+                    if (threadIdx.x < element_stride) {
+                        const unsigned o = threadIdx.x + element_stride;
+                        s_min[threadIdx.x] = s_min[o] < s_min[threadIdx.x] ? s_min[o] : s_min[threadIdx.x];
+                        s_max[threadIdx.x] = s_max[o] > s_max[threadIdx.x] ? s_max[o] : s_max[threadIdx.x];
+                        s_sum[threadIdx.x] += s_sum[o];
+                    }
+                    __syncthreads();
+                }
+
+                if (threadIdx.x == 0) {
+                    part_min[blockIdx.x] = s_min[0];
+                    part_max[blockIdx.x] = s_max[0];
+                    part_sum[blockIdx.x] = s_sum[0];
+                }
+            }
+
+            /**
+             * \brief Combine the per-block partials into the axis's three values.
+             *
+             * One block, which is right here: there are at most
+             * \ref kGridStatsBlocks of them however long the array was, so this
+             * stage does not grow with the input.
+             *
+             * The sums arrive already summed, so this one adds where the first
+             * pass subtracted -- the two stages are not the same reduction and
+             * cannot share a kernel.
+             */
+            template <typename T>
+            __global__ void grid_stats_final_kernel(const int nparts,
+                                                    const T* const SCCD_RESTRICT part_min,
+                                                    const T* const SCCD_RESTRICT part_max,
+                                                    const T* const SCCD_RESTRICT part_sum,
+                                                    T* const SCCD_RESTRICT out_min,
+                                                    T* const SCCD_RESTRICT out_max,
+                                                    T* const SCCD_RESTRICT out_sum) {
+                extern __shared__ char s_raw[];
+                T* const s_min = (T*)s_raw;
+                T* const s_max = s_min + blockDim.x;
+                T* const s_sum = s_max + blockDim.x;
+
+                T tmin = part_min[0], tmax = part_max[0], tsum = T(0);
+                for (int i = threadIdx.x; i < nparts; i += blockDim.x) {
+                    tmin = part_min[i] < tmin ? part_min[i] : tmin;
+                    tmax = part_max[i] > tmax ? part_max[i] : tmax;
+                    tsum += part_sum[i];
                 }
                 s_min[threadIdx.x] = tmin;
                 s_max[threadIdx.x] = tmax;
@@ -1001,15 +1068,31 @@ namespace sccd {
             // Axis choice is on the host: it needs three reductions and then a
             // decision, and the arrays are small enough that a kernel per axis is
             // cheaper than the launch overhead of doing it any other way.
-            T* const stats = workspace(WorkspaceSlot::Scratch).get_as<T>(9);
+            // Nine results and three partial arrays, in one allocation so the
+            // three axes can be in flight together as they were before.
+            constexpr int kB = detail::kGridStatsBlock;
+            constexpr int kG = detail::kGridStatsBlocks;
+            // At least one, since both callers return before this on an empty
+            // list, and at most kG so the partial arrays are a fixed size.
+            const ptrdiff_t want = (n + kB - 1) / kB;
+            const int nparts = (int)(want < (ptrdiff_t)kG ? want : (ptrdiff_t)kG);
+            T* const stats = workspace(WorkspaceSlot::Scratch).get_as<T>(9 + 9 * (ptrdiff_t)kG);
+            T* const parts = stats + 9;
             T h_min[3], h_max[3], h_sum[3];
+            const size_t shmem = 3 * kB * sizeof(T);
             for (int d = 0; d < 3; ++d) {
-                detail::grid_stats_kernel<T><<<1, 256, 3 * 256 * sizeof(T)>>>(n,
-                                                      soa_device_row<T>(aabbs, d),
-                                                      soa_device_row<T>(aabbs, SCCD_DIM + d),
-                                                      stats + 3 * d,
-                                                      stats + 3 * d + 1,
-                                                      stats + 3 * d + 2);
+                // Each axis gets its own third of the partial space, so the
+                // three reductions stay independent.
+                T* const pmin = parts + (ptrdiff_t)(3 * d + 0) * kG;
+                T* const pmax = parts + (ptrdiff_t)(3 * d + 1) * kG;
+                T* const psum = parts + (ptrdiff_t)(3 * d + 2) * kG;
+                detail::grid_stats_partial_kernel<T><<<nparts, kB, shmem>>>(
+                    n,
+                    soa_device_row<T>(aabbs, d),
+                    soa_device_row<T>(aabbs, SCCD_DIM + d),
+                    pmin, pmax, psum);
+                detail::grid_stats_final_kernel<T><<<1, kB, shmem>>>(
+                    nparts, pmin, pmax, psum, stats + 3 * d, stats + 3 * d + 1, stats + 3 * d + 2);
             }
             SCCD_CUDA_LAST_ERROR();
             T host_stats[9];

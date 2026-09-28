@@ -1031,41 +1031,60 @@ Six scenes, 60 cases each, `tight`, three repeats, medians, one binary:
 
 | vertex-face, ms | prep min | prep fv | delta | query min | query fv | delta | net | |
 |---|---|---|---|---|---|---|---|---|
-| cloth-funnel | 8.3 | 9.5 | +1.2 | 90.6 | 7.3 | -83.2 | **-82.0** | 5.89x |
-| armadillo-rollers | 10.0 | 10.4 | +0.4 | 70.4 | 8.5 | -61.8 | **-61.4** | 4.25x |
-| cloth-ball | 20.2 | 23.5 | +3.3 | 319.4 | 53.0 | -266.4 | **-263.1** | 4.44x |
-| rod-twist | 19.6 | 20.1 | +0.6 | 29.5 | 16.8 | -12.7 | **-12.1** | 1.33x |
-| n-body-simulation | 39.6 | 42.2 | +2.6 | 684.2 | 336.5 | -347.7 | **-345.1** | 1.91x |
-| puffer-ball | 389.8 | 469.5 | +79.7 | 1412.8 | 1181.3 | -231.5 | **-151.8** | 1.09x |
-| all six | 487.5 | 575.2 | **+87.7** | 2606.8 | 1603.6 | **-1003.2** | **-915.5** | **1.42x** |
+| cloth-funnel | 6.5 | 7.3 | +0.8 | 91.8 | 7.3 | -84.5 | **-83.7** | 6.75x |
+| armadillo-rollers | 6.9 | 6.3 | -0.6 | 69.9 | 8.4 | -61.5 | **-62.1** | 5.22x |
+| cloth-ball | 7.9 | 9.3 | +1.3 | 322.2 | 55.2 | -267.0 | **-265.6** | 5.12x |
+| rod-twist | 9.3 | 7.2 | -2.1 | 30.3 | 16.9 | -13.3 | **-15.4** | 1.64x |
+| n-body-simulation | 16.0 | 14.1 | -1.9 | 694.7 | 349.9 | -344.9 | **-346.8** | 1.95x |
+| puffer-ball | 65.3 | 68.1 | +2.8 | 1418.8 | 1176.1 | -242.7 | **-239.9** | 1.19x |
+| all six | 111.9 | 112.3 | **+0.4** | 2627.7 | 1613.7 | **-1013.9** | **-1013.6** | **1.59x** |
 
-The broad phase over the six goes from 7563.9 ms to 6648.4 ms, **1.14x**, ahead
-on every scene: 2.48x on armadillo, 2.16x on cloth-ball, 2.03x on cloth-funnel,
-1.27x on n-body, 1.11x on rod-twist and 1.03x on puffer-ball.
+The broad phase over the six goes from 6869.5 ms to 5855.9 ms, **1.17x**, ahead
+on every scene: 2.81x on armadillo, 2.33x on cloth-ball, 2.14x on cloth-funnel,
+1.27x on n-body, 1.18x on rod-twist and 1.06x on puffer-ball.
 
-### The prep column goes the other way here, and the reason is not yet known
+### The prep column went the other way, and it was the grid sizing
 
-On the host the same change makes prep *cheaper* -- one entry per face against
-about four per vertex, -187.0 ms over the six scenes. On the device it is dearer
-by 87.7 ms, and 79.7 of that is puffer-ball. The two measurements are of the same
-structure, so one of them is being charged for something the other is not.
+The table above is the corrected one. On the first device run prep came out
+**dearer** by 87.7 ms over six scenes, 79.7 of it puffer-ball, where the host
+measurement of the same structure had it *cheaper* by 187.0. Two measurements of
+the same thing disagreeing in sign meant one of them was being charged for
+something the other was not.
 
-A first guess was wrong and is worth recording as such. The walk took the face
-row span as a launch argument, so every step fetched it back with a `cudaMemcpy`
-that synchronises the whole device; keeping the value in device memory, where the
-kernel that writes it and the kernel that reads it both live, moved the six-scene
-prep gap from +97.7 ms to +87.7 and puffer-ball's from +85.9 to +79.7. Real, and
-about a tenth of the gap. The change is kept because a host round trip for a
-device-computed value is wrong regardless of what it costs, but it is not the
-explanation.
+Two guesses, both wrong, both worth recording as such:
 
-The leading candidate for the rest is `min_row_prefix_kernel`, which the
-extent-binned path does not run at all: one thread to a row, scanning its columns
-serially. The face grid is capped at four cells per face and there are about
-twice as many faces as vertices, so it is the larger grid of the two. Against
-that, the kernel's own note records a cub segmented scan measured against it on
-four scenes and found noise in both directions -- on the *edge* grid, which is
-where it was already used. Untested on this grid, so it is a hypothesis.
+1. **The row span round trip.** The walk took it as a launch argument, so every
+   step fetched it back with a `cudaMemcpy` that synchronises the device. Keeping
+   it in device memory moved the gap from +97.7 ms to +87.7 -- about a tenth. The
+   change is kept, because a host round trip for a device-computed value is wrong
+   whatever it costs, but it was not the explanation.
+2. **`min_row_prefix_kernel`.** The extent path never runs it, it is one thread
+   to a row scanning serially, and the face grid is the larger of the two, so it
+   looked like the answer. It is **0.78 ms**, 0.0% of GPU time.
 
-It does not change the decision: the query saves an order more than the structure
-costs on every scene, and both processors agree on the direction.
+`nsys` on the shipped binary settled in one run what two readings of the source
+had not. Puffer-ball, 12 cases, per-kernel, shipped against minimum-corner:
+
+| prep kernel | cell2dmin | cell2dminfv | delta |
+|---|---|---|---|
+| `grid_stats_kernel` | 152.12 ms | 191.18 ms | **+39.06** |
+| `min_cell_bounds_kernel` | 1.94 | 3.51 | +1.57 |
+| all the binning, prefix and span kernels together | 2.42 | 2.93 | +0.51 |
+
+**94% of the gap, and 10.1% of all GPU time, in the kernel that sizes the grid.**
+Nothing about minimum-corner binning is expensive. `grid_stats_kernel` launched
+`<<<1, 256>>>` -- one block reducing the whole array on a device with 132 SMs, so
+its cost is linear in the element count with none of the machine working. The
+minimum-corner path sizes its grid from the faces, which is the longer list, and
+the kernel charges by length.
+
+Split into a grid-stride pass over 512 blocks writing per-block partials and a
+single-block pass combining them, it falls from 152.12 ms to **1.33 ms**, and the
+difference between the two strategies from +39.06 ms to **+0.17**. The kernel's
+own note had said its cost was "not worth optimising", which was true when it was
+a fixed small cost and stopped being true once it was a tenth of the device.
+
+It helps both strategies, so the incumbent gains too: `cell2dmin`'s broad phase
+over the six scenes falls from 7563.9 ms to 6869.5. The vertex-face prep gap is
+now +0.4 ms over six scenes, which is the host's answer as well -- one entry per
+face costs nothing, on either processor.
