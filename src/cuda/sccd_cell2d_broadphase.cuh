@@ -224,6 +224,69 @@ namespace sccd {
                                              I* const SCCD_RESTRICT first_out,
                                              I* const SCCD_RESTRICT second_out);
 
+        /**
+         * \brief The most rows on the second grid axis any of \p n boxes spans.
+         *
+         * The cross-list walk bounds its row range with this. It is the one part
+         * of the structure the host needs a value for, since it is a launch
+         * argument, so it synchronises; the queries that follow do not.
+         */
+        template <typename T>
+        int cell2dmin_max_row_span(const ptrdiff_t n,
+                                   T** const SCCD_RESTRICT aabbs,
+                                   const Cell2DGridD<T>& grid);
+
+        /**
+         * \brief Vertex-face count over a minimum-corner binning of the faces.
+         *
+         * The mirror image of \ref cell2d_count_overlaps for this query: the
+         * faces are binned and the vertices walk, so the cells are face-sized and
+         * a vertex reads a fraction of the cells a face does. The pair set is the
+         * same -- this changes where a pair is found, not which pairs exist.
+         *
+         * \p krow comes from \ref cell2dmin_max_row_span over the same faces, and
+         * the grid, \p cellptr, \p cellidx, \p row_prefix and \p cell_hi1 from
+         * binning the faces with \ref cell2dmin_setup_and_count,
+         * \ref cell2dmin_fill and \ref cell2dmin_bounds.
+         *
+         * \p ccdptr holds `vertex_count + 1` entries, one per vertex, since the
+         * vertices are what the walk is indexed by here.
+         */
+        template <int S, typename T, typename I>
+        void cell2dmin_count_vf_overlaps(const ptrdiff_t vertex_count,
+                                         T** const SCCD_RESTRICT vaabbs,
+                                         const I* const SCCD_RESTRICT vertex_idx,
+                                         T** const SCCD_RESTRICT faabbs,
+                                         const I* const SCCD_RESTRICT face_idx,
+                                         const ptrdiff_t face_element_stride,
+                                         I** const SCCD_RESTRICT face_elements,
+                                         const Cell2DGridD<T>& grid,
+                                         const ptrdiff_t* const SCCD_RESTRICT cellptr,
+                                         const I* const SCCD_RESTRICT cellidx,
+                                         const T* const SCCD_RESTRICT row_prefix,
+                                         const T* const SCCD_RESTRICT cell_hi1,
+                                         const int krow,
+                                         ptrdiff_t* const SCCD_RESTRICT ccdptr);
+
+        /** \brief Write those pairs, face first, to match the shipped query. */
+        template <int S, typename T, typename I>
+        void cell2dmin_collect_vf_overlaps(const ptrdiff_t vertex_count,
+                                           T** const SCCD_RESTRICT vaabbs,
+                                           const I* const SCCD_RESTRICT vertex_idx,
+                                           T** const SCCD_RESTRICT faabbs,
+                                           const I* const SCCD_RESTRICT face_idx,
+                                           const ptrdiff_t face_element_stride,
+                                           I** const SCCD_RESTRICT face_elements,
+                                           const Cell2DGridD<T>& grid,
+                                           const ptrdiff_t* const SCCD_RESTRICT cellptr,
+                                           const I* const SCCD_RESTRICT cellidx,
+                                           const T* const SCCD_RESTRICT row_prefix,
+                                           const T* const SCCD_RESTRICT cell_hi1,
+                                           const int krow,
+                                           const ptrdiff_t* const SCCD_RESTRICT ccdptr,
+                                           I* const SCCD_RESTRICT face_out,
+                                           I* const SCCD_RESTRICT vertex_out);
+
     }  // namespace device
 }  // namespace sccd
 

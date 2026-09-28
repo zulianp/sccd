@@ -747,6 +747,209 @@ namespace sccd {
                     });
             }
 
+            /**
+             * \brief The most rows any box of the binned list spans.
+             *
+             * The second axis has no prefix array to search, so the cross-list
+             * walk bounds its row range with this instead: a box reaching the
+             * querying box on that axis has its maximum at or above the querying
+             * box's minimum row, and spans at most this many rows, so it is
+             * binned no lower than that row less this.
+             */
+            template <typename T>
+            __global__ void min_row_span_kernel(const ptrdiff_t n,
+                                                const T* const SCCD_RESTRICT lo,
+                                                const T* const SCCD_RESTRICT hi,
+                                                const Cell2DGridD<T> grid,
+                                                int* const SCCD_RESTRICT out) {
+                const ptrdiff_t i = (ptrdiff_t)blockIdx.x * blockDim.x + threadIdx.x;
+                int span = 0;
+                if (i < n) {
+                    span = cell1<T>(grid, hi[i]) - cell1<T>(grid, lo[i]);
+                }
+                // One atomic per warp rather than per thread: the maximum is a
+                // single number and the whole grid contends for it.
+                for (int off = SCCD_WARP_SIZE / 2; off > 0; off >>= 1) {
+                    const int other = __shfl_down_sync(0xffffffffu, span, off);
+                    span = other > span ? other : span;
+                }
+                if ((threadIdx.x & (SCCD_WARP_SIZE - 1)) == 0 && span > 0) {
+                    atomicMax(out, span);
+                }
+            }
+
+            /**
+             * \brief Walk a minimum-corner binning of the other list, one warp
+             *        to a querying box.
+             *
+             * The device counterpart of \ref sccd::detail::for_each_min_corner_partner,
+             * and it inherits the warp shape of \ref warp_forward_self_partner for
+             * the same reason: the rows a box spans, the columns its search
+             * leaves and the entries in each cell all differ between neighbouring
+             * boxes. Every lane computes the same walk and the lanes split each
+             * cell's entries between them.
+             *
+             * Two things the self walk needs are absent here. There is no own
+             * cell to visit first and no index test, because the two lists are
+             * distinct and a partner has exactly one cell, so a pair is met
+             * exactly once. In exchange the row range is bounded from below by
+             * \p krow instead of starting at this box's own row, and every row
+             * pays a search -- the self walk skips the search on its own row.
+             */
+            template <int S, typename T, typename I, typename Combine>
+            static __device__ __forceinline__ void warp_min_corner_partner(
+                T** const SCCD_RESTRICT first_aabbs,
+                const ptrdiff_t fi,
+                const I vidx,
+                T** const SCCD_RESTRICT second_aabbs,
+                const I* const SCCD_RESTRICT second_idx,
+                I** const SCCD_RESTRICT second_elements,
+                const ptrdiff_t second_element_stride,
+                const Cell2DGridD<T>& grid,
+                const ptrdiff_t* const SCCD_RESTRICT cellptr,
+                const I* const SCCD_RESTRICT cellidx,
+                const T* const SCCD_RESTRICT row_prefix,
+                const T* const SCCD_RESTRICT cell_hi1,
+                const int krow,
+                Combine&& combine) {
+                const unsigned lane = threadIdx.x & (SCCD_WARP_SIZE - 1);
+
+                const T aminx = first_aabbs[0][fi];
+                const T aminy = first_aabbs[1][fi];
+                const T aminz = first_aabbs[2][fi];
+                const T amaxx = first_aabbs[SCCD_DIM + 0][fi];
+                const T amaxy = first_aabbs[SCCD_DIM + 1][fi];
+                const T amaxz = first_aabbs[SCCD_DIM + 2][fi];
+
+                const T amin0 = first_aabbs[grid.axis0][fi];
+                const T amin1 = first_aabbs[grid.axis1][fi];
+
+                // Above and to the right needs nothing stored: a partner
+                // overlapping this box has its minimum corner at or below this
+                // box's maximum on both axes.
+                const int c0e = cell0<T>(grid, first_aabbs[SCCD_DIM + grid.axis0][fi]);
+                const int c1e = cell1<T>(grid, first_aabbs[SCCD_DIM + grid.axis1][fi]);
+                int c1b = cell1<T>(grid, amin1) - krow;
+                if (c1b < 0) c1b = 0;
+
+                for (int c1 = c1b; c1 <= c1e; ++c1) {
+                    const ptrdiff_t row = (ptrdiff_t)c1 * grid.n0;
+                    int c0 = lower_bound_row<T>(row_prefix + row, c0e + 1, amin0);
+
+                    for (; c0 <= c0e; ++c0) {
+                        const ptrdiff_t cell = row + c0;
+                        if (cell_hi1[cell] < amin1) continue;
+
+                        const ptrdiff_t begin = cellptr[cell];
+                        const ptrdiff_t end = cellptr[cell + 1];
+                        // Every lane runs the same trip count, so the warp is
+                        // converged where combine takes its ballot.
+                        for (ptrdiff_t base = begin; base < end; base += SCCD_WARP_SIZE) {
+                            const ptrdiff_t k = base + (ptrdiff_t)lane;
+                            bool keep = false;
+                            I jidx = 0;
+                            if (k < end) {
+                                const ptrdiff_t j = (ptrdiff_t)cellidx[k];
+                                if (!disjoint<T>(aminx, aminy, aminz, amaxx, amaxy, amaxz,
+                                                 second_aabbs[0][j],
+                                                 second_aabbs[1][j],
+                                                 second_aabbs[2][j],
+                                                 second_aabbs[SCCD_DIM + 0][j],
+                                                 second_aabbs[SCCD_DIM + 1][j],
+                                                 second_aabbs[SCCD_DIM + 2][j])) {
+                                    jidx = second_idx[j];
+                                    keep = true;
+                                    for (int v = 0; v < S; ++v) {
+                                        if (second_elements[v][(ptrdiff_t)jidx * second_element_stride] ==
+                                            vidx) {
+                                            keep = false;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            combine(keep, jidx);
+                        }
+                    }
+                }
+            }
+
+            template <int S, typename T, typename I>
+            __global__ void min_count_vf_kernel(const ptrdiff_t vertex_count,
+                                                T** const SCCD_RESTRICT vaabbs,
+                                                const I* const SCCD_RESTRICT vertex_idx,
+                                                T** const SCCD_RESTRICT faabbs,
+                                                const I* const SCCD_RESTRICT face_idx,
+                                                const ptrdiff_t face_element_stride,
+                                                I** const SCCD_RESTRICT face_elements,
+                                                const Cell2DGridD<T> grid,
+                                                const ptrdiff_t* const SCCD_RESTRICT cellptr,
+                                                const I* const SCCD_RESTRICT cellidx,
+                                                const T* const SCCD_RESTRICT row_prefix,
+                                                const T* const SCCD_RESTRICT cell_hi1,
+                                                const int krow,
+                                                ptrdiff_t* const SCCD_RESTRICT ccdptr) {
+                const ptrdiff_t tid = (ptrdiff_t)blockIdx.x * blockDim.x + threadIdx.x;
+                const ptrdiff_t vi = tid / SCCD_WARP_SIZE;
+                if (tid == 0) ccdptr[0] = 0;
+                // Uniform over the warp, so the whole warp leaves together and
+                // the ballots below are taken converged.
+                if (vi >= vertex_count) return;
+
+                ptrdiff_t count = 0;
+                warp_min_corner_partner<S, T, I>(
+                    vaabbs, vi, vertex_idx[vi], faabbs, face_idx, face_elements,
+                    face_element_stride, grid, cellptr, cellidx, row_prefix, cell_hi1, krow,
+                    [&](const bool keep, const I) {
+                        count += __popc(__ballot_sync(0xffffffffu, keep));
+                    });
+                // Every lane accumulated the same total, so one writes it.
+                if ((threadIdx.x & (SCCD_WARP_SIZE - 1)) == 0) ccdptr[vi + 1] = count;
+            }
+
+            template <int S, typename T, typename I>
+            __global__ void min_collect_vf_kernel(const ptrdiff_t vertex_count,
+                                                  T** const SCCD_RESTRICT vaabbs,
+                                                  const I* const SCCD_RESTRICT vertex_idx,
+                                                  T** const SCCD_RESTRICT faabbs,
+                                                  const I* const SCCD_RESTRICT face_idx,
+                                                  const ptrdiff_t face_element_stride,
+                                                  I** const SCCD_RESTRICT face_elements,
+                                                  const Cell2DGridD<T> grid,
+                                                  const ptrdiff_t* const SCCD_RESTRICT cellptr,
+                                                  const I* const SCCD_RESTRICT cellidx,
+                                                  const T* const SCCD_RESTRICT row_prefix,
+                                                  const T* const SCCD_RESTRICT cell_hi1,
+                                                  const int krow,
+                                                  const ptrdiff_t* const SCCD_RESTRICT ccdptr,
+                                                  I* const SCCD_RESTRICT face_out,
+                                                  I* const SCCD_RESTRICT vertex_out) {
+                const ptrdiff_t tid = (ptrdiff_t)blockIdx.x * blockDim.x + threadIdx.x;
+                const ptrdiff_t vi = tid / SCCD_WARP_SIZE;
+                if (vi >= vertex_count) return;
+
+                const unsigned lane = threadIdx.x & (SCCD_WARP_SIZE - 1);
+                const unsigned below = (1u << lane) - 1u;
+
+                const I vidx = vertex_idx[vi];
+
+                // `at` stays the same on every lane: each step advances it by the
+                // whole warp's count, and a lane writes at its rank within that.
+                ptrdiff_t at = ccdptr[vi];
+                warp_min_corner_partner<S, T, I>(
+                    vaabbs, vi, vidx, faabbs, face_idx, face_elements, face_element_stride,
+                    grid, cellptr, cellidx, row_prefix, cell_hi1, krow,
+                    [&](const bool keep, const I jidx) {
+                        const unsigned mask = __ballot_sync(0xffffffffu, keep);
+                        if (keep) {
+                            const ptrdiff_t w = at + (ptrdiff_t)__popc(mask & below);
+                            face_out[w] = jidx;
+                            vertex_out[w] = vidx;
+                        }
+                        at += (ptrdiff_t)__popc(mask);
+                    });
+            }
+
             template <typename T>
             static void inclusive_sum(ptrdiff_t* const data, const ptrdiff_t n) {
                 size_t bytes = 0;
@@ -1182,6 +1385,88 @@ namespace sccd {
             SCCD_CUDA_LAST_ERROR();
         }
 
+        template <typename T>
+        int cell2dmin_max_row_span(const ptrdiff_t n,
+                                   T** const SCCD_RESTRICT aabbs,
+                                   const Cell2DGridD<T>& grid) {
+            if (n <= 0) return 0;
+
+            // The walk takes this as a launch argument, so it is the one value
+            // of the structure that has to come back across the bus.
+            int* const acc = (int*)workspace(WorkspaceSlot::TempStorage).get(sizeof(int));
+            SCCD_CHECK_CUDA(cudaMemset(acc, 0, sizeof(int)));
+
+            dim3 block(SCCD_C2D_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
+            dim3 gridsz((n + block.x - 1) / block.x);
+            detail::min_row_span_kernel<T><<<gridsz, block>>>(
+                n,
+                soa_device_row<T>(aabbs, grid.axis1),
+                soa_device_row<T>(aabbs, SCCD_DIM + grid.axis1),
+                grid,
+                acc);
+            SCCD_CUDA_LAST_ERROR();
+
+            int krow = 0;
+            SCCD_CHECK_CUDA(cudaMemcpy(&krow, acc, sizeof(int), cudaMemcpyDeviceToHost));
+            return krow;
+        }
+
+        template <int S, typename T, typename I>
+        void cell2dmin_count_vf_overlaps(const ptrdiff_t vertex_count,
+                                         T** const SCCD_RESTRICT vaabbs,
+                                         const I* const SCCD_RESTRICT vertex_idx,
+                                         T** const SCCD_RESTRICT faabbs,
+                                         const I* const SCCD_RESTRICT face_idx,
+                                         const ptrdiff_t face_element_stride,
+                                         I** const SCCD_RESTRICT face_elements,
+                                         const Cell2DGridD<T>& grid,
+                                         const ptrdiff_t* const SCCD_RESTRICT cellptr,
+                                         const I* const SCCD_RESTRICT cellidx,
+                                         const T* const SCCD_RESTRICT row_prefix,
+                                         const T* const SCCD_RESTRICT cell_hi1,
+                                         const int krow,
+                                         ptrdiff_t* const SCCD_RESTRICT ccdptr) {
+            if (vertex_count <= 0) {
+                SCCD_CHECK_CUDA(cudaMemset(ccdptr, 0, sizeof(*ccdptr)));
+                return;
+            }
+            dim3 block(SCCD_C2D_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
+            // One warp to a vertex, so the launch is sized in warps.
+            dim3 gridsz((vertex_count * SCCD_WARP_SIZE + block.x - 1) / block.x);
+            detail::min_count_vf_kernel<S, T, I><<<gridsz, block>>>(
+                vertex_count, vaabbs, vertex_idx, faabbs, face_idx, face_element_stride,
+                face_elements, grid, cellptr, cellidx, row_prefix, cell_hi1, krow, ccdptr);
+            SCCD_CUDA_LAST_ERROR();
+            detail::inclusive_sum<T>(ccdptr, vertex_count + 1);
+        }
+
+        template <int S, typename T, typename I>
+        void cell2dmin_collect_vf_overlaps(const ptrdiff_t vertex_count,
+                                           T** const SCCD_RESTRICT vaabbs,
+                                           const I* const SCCD_RESTRICT vertex_idx,
+                                           T** const SCCD_RESTRICT faabbs,
+                                           const I* const SCCD_RESTRICT face_idx,
+                                           const ptrdiff_t face_element_stride,
+                                           I** const SCCD_RESTRICT face_elements,
+                                           const Cell2DGridD<T>& grid,
+                                           const ptrdiff_t* const SCCD_RESTRICT cellptr,
+                                           const I* const SCCD_RESTRICT cellidx,
+                                           const T* const SCCD_RESTRICT row_prefix,
+                                           const T* const SCCD_RESTRICT cell_hi1,
+                                           const int krow,
+                                           const ptrdiff_t* const SCCD_RESTRICT ccdptr,
+                                           I* const SCCD_RESTRICT face_out,
+                                           I* const SCCD_RESTRICT vertex_out) {
+            if (vertex_count <= 0) return;
+            dim3 block(SCCD_C2D_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
+            dim3 gridsz((vertex_count * SCCD_WARP_SIZE + block.x - 1) / block.x);
+            detail::min_collect_vf_kernel<S, T, I><<<gridsz, block>>>(
+                vertex_count, vaabbs, vertex_idx, faabbs, face_idx, face_element_stride,
+                face_elements, grid, cellptr, cellidx, row_prefix, cell_hi1, krow, ccdptr,
+                face_out, vertex_out);
+            SCCD_CUDA_LAST_ERROR();
+        }
+
     }  // namespace device
 }  // namespace sccd
 
@@ -1217,6 +1502,38 @@ namespace sccd {
         const sccd::device::Cell2DGridD<T>&,                                                   \
         const ptrdiff_t*,                                                                      \
         const I*,                                                                              \
+        const ptrdiff_t*,                                                                      \
+        I*,                                                                                    \
+        I*);                                                                                   \
+    template void sccd::device::cell2dmin_count_vf_overlaps<NXE, T, I>(                        \
+        const ptrdiff_t,                                                                       \
+        T**,                                                                                   \
+        const I*,                                                                              \
+        T**,                                                                                   \
+        const I*,                                                                              \
+        const ptrdiff_t,                                                                       \
+        I**,                                                                                   \
+        const sccd::device::Cell2DGridD<T>&,                                                   \
+        const ptrdiff_t*,                                                                      \
+        const I*,                                                                              \
+        const T*,                                                                              \
+        const T*,                                                                              \
+        const int,                                                                             \
+        ptrdiff_t*);                                                                           \
+    template void sccd::device::cell2dmin_collect_vf_overlaps<NXE, T, I>(                      \
+        const ptrdiff_t,                                                                       \
+        T**,                                                                                   \
+        const I*,                                                                              \
+        T**,                                                                                   \
+        const I*,                                                                              \
+        const ptrdiff_t,                                                                       \
+        I**,                                                                                   \
+        const sccd::device::Cell2DGridD<T>&,                                                   \
+        const ptrdiff_t*,                                                                      \
+        const I*,                                                                              \
+        const T*,                                                                              \
+        const T*,                                                                              \
+        const int,                                                                             \
         const ptrdiff_t*,                                                                      \
         I*,                                                                                    \
         I*);
@@ -1280,6 +1597,8 @@ SCCD_C2D_INSTANTIATE_IDX(int32_t)
         const ptrdiff_t*,                                                                      \
         I*,                                                                                    \
         I*);                                                                                   \
+    template int sccd::device::cell2dmin_max_row_span<T>(                                      \
+        const ptrdiff_t, T**, const sccd::device::Cell2DGridD<T>&);                            \
     SCCD_C2D_INSTANTIATE_FV(3, T, I)                                                           \
     SCCD_C2D_INSTANTIATE_FV(4, T, I)                                                           \
     template void sccd::device::cell2d_count_self_overlaps<2, T, I>(                           \

@@ -345,6 +345,15 @@ namespace sccd {
         DeviceArray<smesh::idx_t> e_cellidx_d_;
         DeviceArray<scalar_t> e_row_prefix_d_;
         DeviceArray<scalar_t> e_cell_hi1_d_;
+
+        // Cell2DMinFV bins the faces as well, and queries them per vertex.
+        sccd::device::Cell2DGridD<scalar_t> f_grid_d_;
+        DeviceArray<ptrdiff_t> f_cellptr_d_;
+        DeviceArray<ptrdiff_t> f_cursor_d_;
+        DeviceArray<smesh::idx_t> f_cellidx_d_;
+        DeviceArray<scalar_t> f_row_prefix_d_;
+        DeviceArray<scalar_t> f_cell_hi1_d_;
+        int f_krow_d_{0};
 #endif
 
 
@@ -1285,13 +1294,11 @@ namespace sccd {
 
             choose_strategy_(n_nodes);
 
-            if (use_cell2d_min_sorted_ || use_cell2d_min_fv_) {
+            if (use_cell2d_min_sorted_) {
                 // Ordering each cell is a host kernel so far, and it loses to
                 // the unordered walk on every scene of the benchmark anyway.
-                // The minimum-corner face-vertex query is host-only until it is
-                // measured there. Saying so beats running another under its
-                // name, which would put a timing against a label that did not
-                // produce it.
+                // Saying so beats running another under its name, which would
+                // put a timing against a label that did not produce it.
                 SMESH_ERROR("sccd: SCCD_BROADPHASE=%s has no device implementation yet\n",
                             sccd::broadphase_strategy_name(timed_strategy_));
                 return SCCD_FAILURE;
@@ -1308,8 +1315,18 @@ namespace sccd {
                 sccd::device::fill_identity<smesh::idx_t>(n_faces, fidx_->data());
                 sccd::device::fill_identity<smesh::idx_t>(n_edges, eidx_->data());
 
-                bin_device_(n_nodes, vaabb_->data(), v_grid_d_, v_cellptr_d_, v_cellidx_d_,
-                            v_cursor_d_, v_ranges_d_);
+                // The vertex grid is what the shipped face-vertex query walks.
+                // Cell2DMinFV queries the faces instead, so it needs neither
+                // that grid nor the extent binning that builds it.
+                if (!use_cell2d_min_fv_) {
+                    bin_device_(n_nodes, vaabb_->data(), v_grid_d_, v_cellptr_d_, v_cellidx_d_,
+                                v_cursor_d_, v_ranges_d_);
+                } else {
+                    bin_min_device_(n_faces, faabb_->data(), f_grid_d_, f_cellptr_d_,
+                                    f_cellidx_d_, f_cursor_d_, f_row_prefix_d_, f_cell_hi1_d_);
+                    f_krow_d_ = sccd::device::cell2dmin_max_row_span<scalar_t>(
+                        n_faces, faabb_->data(), f_grid_d_);
+                }
                 if (use_cell2d_min_) {
                     bin_min_device_(n_edges, eaabb_->data(), e_grid_d_, e_cellptr_d_,
                                     e_cellidx_d_, e_cursor_d_, e_row_prefix_d_, e_cell_hi1_d_);
@@ -1393,6 +1410,42 @@ namespace sccd {
             }
             return SCCD_SUCCESS;
         }
+
+        /** \brief The minimum-corner face-vertex step: the faces are binned and
+         *         the vertices walk them, one warp to a vertex. */
+        template <int nxe>
+        int cell2dmin_fv_step_device_(const ptrdiff_t n_nodes) {
+            {
+                SMESH_TRACE_SCOPE("cell2dmin count_vf_overlaps");
+                sccd::device::cell2dmin_count_vf_overlaps<nxe, scalar_t, smesh::idx_t>(
+                    n_nodes, vaabb_->data(), vidx_->data(), faabb_->data(), fidx_->data(), 1,
+                    faces_->data(), f_grid_d_, f_cellptr_d_.get(), f_cellidx_d_.get(),
+                    f_row_prefix_d_.get(), f_cell_hi1_d_.get(), f_krow_d_, ccdptr_->data());
+            }
+
+            ptrdiff_t n_pairs = 0;
+            check_read_back(
+                cudaMemcpy(&n_pairs, ccdptr_->data() + n_nodes, sizeof(n_pairs), cudaMemcpyDeviceToHost),
+                "the face-vertex overlap count");
+
+            {
+                SMESH_TRACE_SCOPE("f2v allocations");
+                f_overlap_ = smesh::create_buffer<smesh::idx_t>(n_pairs, execution_space_);
+                v_overlap_ = smesh::create_buffer<smesh::idx_t>(n_pairs, execution_space_);
+            }
+
+            // An empty output buffer has a null data pointer, so the collect is
+            // only safe to launch when there is something to write.
+            if (n_pairs > 0) {
+                SMESH_TRACE_SCOPE("cell2dmin collect_vf_overlaps");
+                sccd::device::cell2dmin_collect_vf_overlaps<nxe, scalar_t, smesh::idx_t>(
+                    n_nodes, vaabb_->data(), vidx_->data(), faabb_->data(), fidx_->data(), 1,
+                    faces_->data(), f_grid_d_, f_cellptr_d_.get(), f_cellidx_d_.get(),
+                    f_row_prefix_d_.get(), f_cell_hi1_d_.get(), f_krow_d_, ccdptr_->data(),
+                    f_overlap_->data(), v_overlap_->data());
+            }
+            return SCCD_SUCCESS;
+        }
 #endif
 
         int broad_phase_fv_step_device_() {
@@ -1407,8 +1460,10 @@ namespace sccd {
             if (use_cell2d_) {
                 SMESH_TRACE_SCOPE("cell2d f2v");
                 if (element_type == smesh::TRISHELL3) {
+                    if (use_cell2d_min_fv_) return cell2dmin_fv_step_device_<3>(n_nodes);
                     return cell2d_fv_step_device_<3>(n_faces);
                 } else if (element_type == smesh::QUADSHELL4) {
+                    if (use_cell2d_min_fv_) return cell2dmin_fv_step_device_<4>(n_nodes);
                     return cell2d_fv_step_device_<4>(n_faces);
                 } else {
                     SMESH_ERROR("Unsupported CCD face element type: %s\n", smesh::type_to_string(element_type));
@@ -1864,6 +1919,15 @@ namespace sccd {
                 e_cellidx_d_.reserve(n_edges > 0 ? n_edges : 1);
                 e_row_prefix_d_.reserve(4 * n_edges + 1);
                 e_cell_hi1_d_.reserve(4 * n_edges + 1);
+
+                // The same again over the faces, for the vertex-face query that
+                // bins them. The vertices keep their extent binning, so nothing
+                // here replaces what is above.
+                f_cellptr_d_.reserve(4 * n_faces + 2);
+                f_cursor_d_.reserve(4 * n_faces + 2);
+                f_cellidx_d_.reserve(n_faces > 0 ? n_faces : 1);
+                f_row_prefix_d_.reserve(4 * n_faces + 1);
+                f_cell_hi1_d_.reserve(4 * n_faces + 1);
             }
 #endif
         }
