@@ -30,6 +30,7 @@
 #include <cstdio>
 #include <string>
 #include <cstdlib>
+#include <cstring>
 #include <cmath>
 #include <limits>
 #include <vector>
@@ -153,7 +154,7 @@ int main(int argc, char** argv) {
 
     if (argc < 2) {
         fprintf(stderr,
-                "usage: %s <levels> [mesh_t0] [mesh_t1]\n"
+                "usage: %s <levels|first:last> [mesh_t0] [mesh_t1]\n"
                 "\n"
                 "Refines a closed surface <levels> times, quadrupling the triangle\n"
                 "count at each level, and runs one collision step per level.\n"
@@ -172,7 +173,25 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    const int levels = atoi(argv[1]);
+    // `<levels>` runs 0..levels; `<first>:<last>` runs that range alone. Each
+    // level refines the base mesh from scratch and shares nothing with the one
+    // before it, so a range is the same measurement as the corresponding slice
+    // of a whole run -- and the top level of this study builds tens of millions
+    // of elements, which is more than a short queue slot holds. Splitting it
+    // across jobs beats asking for a slot long enough for all of them.
+    int first_level = 0;
+    int levels = 0;
+    {
+        const char* colon = strchr(argv[1], ':');
+        if (colon) {
+            first_level = atoi(argv[1]);
+            levels = atoi(colon + 1);
+        } else {
+            levels = atoi(argv[1]);
+        }
+        if (first_level < 0) first_level = 0;
+        if (levels < first_level) levels = first_level;
+    }
 
     int SCCD_MAX_DEPTH = 69;
     SCCD_READ_ENV(SCCD_MAX_DEPTH, atoi);
@@ -267,7 +286,7 @@ int main(int argc, char** argv) {
            "ns/pair",
            "toi");
 
-    for (int level = 0; level <= levels; ++level) {
+    for (int level = first_level; level <= levels; ++level) {
         std::shared_ptr<smesh::Mesh> refined = (level == 0) ? base : smesh::refine(base, level);
         std::shared_ptr<smesh::Mesh> mesh = base_is_surface ? refined : smesh::skin(refined);
 
@@ -297,7 +316,7 @@ int main(int argc, char** argv) {
         // fixed start-up cost sitting in the smallest sample, where it inverts
         // the fitted exponent. It is a real cost, but it is not a cost that
         // scales with the element count, which is what this study measures.
-        if (level == 0) {
+        if (level == first_level) {
             smesh::SharedBuffer<smesh::idx_t> w0, w1, w2, w3;
             scalar_t warm_toi = 1;
             smesh::SharedBuffer<scalar_t> warm_vf, warm_ee;
@@ -307,11 +326,11 @@ int main(int argc, char** argv) {
             ccd->narrow_phase(warm_toi, warm_vf, warm_ee, SCCD_MAX_DEPTH, SCCD_TOL);
         }
 
-        // Broken out rather than timed as one call: the prep (AABBs + the sort
-        // that sweep-and-prune needs) scales with elements, while the two sweeps
-        // scale with how much the sorted intervals overlap. Those are different
-        // costs with different fixes, and a single total hides which
-        // one is growing.
+        // Broken out rather than timed as one call: the prep (the swept boxes
+        // and the grid built over them) scales with elements, while the two
+        // queries scale with how much those boxes overlap. Those are different
+        // costs with different fixes, and a single total hides which one is
+        // growing.
         finish_device_work(space);
         const double t_prep0 = now_ms();
         ccd->broad_phase_prep(points0, points1);

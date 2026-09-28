@@ -163,8 +163,6 @@ def table(runs: list[ScalingRun], source: str):
         caption=("Cost against element count on a repeatedly refined surface, "
                  "each level quadrupling the element count. Every time is one "
                  "collision step at that level, in milliseconds. " + TAGS +
-                 "BP prep here is the acceleration structure and BP queries the "
-                 "two overlap queries over it. "
                  "$p$ is the least-squares exponent in $t \\sim n^{p}$ fitted "
                  "over all levels of that series."),
         columns=[Column(_first_header, "l"), Column("level"), Column("elements"),
@@ -182,10 +180,7 @@ def table(runs: list[ScalingRun], source: str):
                "against problem size is in the per-case figure, over cases that "
                "do collide. Where the exponent is below 1 it is because the fixed "
                "cost visible at the smallest size is amortised as the mesh "
-               "grows. `prep` builds the acceleration structure -- the cell "
-               "list's grid or the sweep's sorted intervals -- and `step` is "
-               "the traversal that reports pairs; the two strategies divide "
-               "the work between those columns quite differently."),
+               "grows."),
     )
     for run, label in zip(runs, labels):
         faces = [float(f) for f in run.faces]
