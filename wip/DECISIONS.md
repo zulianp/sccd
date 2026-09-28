@@ -1008,3 +1008,64 @@ measurement that answers a different question than the one asked. The particular
 form is worth naming on its own, because the tell was visible in the result file
 and went unread -- a count of rows by query type shows every scene with a mix and
 one scene without, which is not a shape a scene produces.
+
+## The minimum-corner vertex-face query on the device
+
+A warp to a vertex, the shape `warp_forward_self_partner` already uses for the
+edge-edge walk and for the same reason: the rows a box spans, the columns its
+search leaves and the entries in each cell all differ between neighbouring
+boxes, so every lane computes the same walk and the lanes split each cell's
+entries between them. The cross-list form drops the own cell and the index test,
+because the lists are distinct and a face has exactly one cell, so a pair is met
+exactly once. In exchange every row pays a search, where the self walk skips it
+on its own row.
+
+**It is correct.** The device test now runs both vertex-face forms on the same
+boxes and they return the same pair set on all nine shapes -- triangles and
+quads, both lopsided list ratios, and the degenerate spreads. Over the six
+scenes, 2160 rows: no missed pair, no missed collision, no time of impact later
+than the dataset's exact roots, false positives identical per scene
+(3, 6, 3, 60, 9, 387) and candidate counts equal everywhere.
+
+Six scenes, 60 cases each, `tight`, three repeats, medians, one binary:
+
+| vertex-face, ms | prep min | prep fv | delta | query min | query fv | delta | net | |
+|---|---|---|---|---|---|---|---|---|
+| cloth-funnel | 8.3 | 9.5 | +1.2 | 90.6 | 7.3 | -83.2 | **-82.0** | 5.89x |
+| armadillo-rollers | 10.0 | 10.4 | +0.4 | 70.4 | 8.5 | -61.8 | **-61.4** | 4.25x |
+| cloth-ball | 20.2 | 23.5 | +3.3 | 319.4 | 53.0 | -266.4 | **-263.1** | 4.44x |
+| rod-twist | 19.6 | 20.1 | +0.6 | 29.5 | 16.8 | -12.7 | **-12.1** | 1.33x |
+| n-body-simulation | 39.6 | 42.2 | +2.6 | 684.2 | 336.5 | -347.7 | **-345.1** | 1.91x |
+| puffer-ball | 389.8 | 469.5 | +79.7 | 1412.8 | 1181.3 | -231.5 | **-151.8** | 1.09x |
+| all six | 487.5 | 575.2 | **+87.7** | 2606.8 | 1603.6 | **-1003.2** | **-915.5** | **1.42x** |
+
+The broad phase over the six goes from 7563.9 ms to 6648.4 ms, **1.14x**, ahead
+on every scene: 2.48x on armadillo, 2.16x on cloth-ball, 2.03x on cloth-funnel,
+1.27x on n-body, 1.11x on rod-twist and 1.03x on puffer-ball.
+
+### The prep column goes the other way here, and the reason is not yet known
+
+On the host the same change makes prep *cheaper* -- one entry per face against
+about four per vertex, -187.0 ms over the six scenes. On the device it is dearer
+by 87.7 ms, and 79.7 of that is puffer-ball. The two measurements are of the same
+structure, so one of them is being charged for something the other is not.
+
+A first guess was wrong and is worth recording as such. The walk took the face
+row span as a launch argument, so every step fetched it back with a `cudaMemcpy`
+that synchronises the whole device; keeping the value in device memory, where the
+kernel that writes it and the kernel that reads it both live, moved the six-scene
+prep gap from +97.7 ms to +87.7 and puffer-ball's from +85.9 to +79.7. Real, and
+about a tenth of the gap. The change is kept because a host round trip for a
+device-computed value is wrong regardless of what it costs, but it is not the
+explanation.
+
+The leading candidate for the rest is `min_row_prefix_kernel`, which the
+extent-binned path does not run at all: one thread to a row, scanning its columns
+serially. The face grid is capped at four cells per face and there are about
+twice as many faces as vertices, so it is the larger grid of the two. Against
+that, the kernel's own note records a cub segmented scan measured against it on
+four scenes and found noise in both directions -- on the *edge* grid, which is
+where it was already used. Untested on this grid, so it is a hypothesis.
+
+It does not change the decision: the query saves an order more than the structure
+costs on every scene, and both processors agree on the direction.

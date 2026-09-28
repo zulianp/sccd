@@ -636,10 +636,15 @@ namespace sccd {
          * lost is the final one of a run.
          */
         void choose_strategy_(const ptrdiff_t n_nodes) {
-            // Measured over the six benchmark scenes on both processors: the
-            // minimum-corner edge-edge walk, with each cell left unordered,
-            // leads the rest on every one of them. Nothing is raced.
-            tuner_.set_default(sccd::BroadPhaseStrategy::Cell2DMin);
+            // Measured over the six benchmark scenes on both processors, one
+            // binary each, medians over repeats: the minimum-corner walk with
+            // each cell left unordered leads the rest on every one of them, for
+            // both queries. Cell2DMinFV is that walk applied to the vertex-face
+            // query as well as the edge-edge one, so it keeps everything
+            // Cell2DMin won on and indexes the faces instead of the vertices.
+            // The broad phase falls 1.61x on the host and 1.14x on the device
+            // over the six, ahead on every scene of both. Nothing is raced.
+            tuner_.set_default(sccd::BroadPhaseStrategy::Cell2DMinFV);
 
             if (broad_phase_pending_) {
                 tuner_.record(timed_strategy_, broad_phase_pending_ms_);
