@@ -525,6 +525,8 @@ flush_pack() {
                      export SCCD_DB_TO_RAW='${SCCD_DB_TO_RAW}'; \
                      export MAX_CASES_ENV='${MAX_CASES_ENV}'; \
                      export OMP_NUM_THREADS='${THREADS}'; \
+                     export OMP_PROC_BIND=close OMP_PLACES=cores; \
+                     export SCCD_BIND='${BIND}'; \
                      header() { '${SCCD_BENCH}' --header; }; \
                      ${body}"; then
         printf 'FAILED %s (see %s/logs)\n' "${label}" "${OUT_DIR}" >&2
