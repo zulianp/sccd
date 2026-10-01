@@ -502,6 +502,7 @@ flush_pack() {
                              export OMP_NUM_THREADS='${THREADS}'; \
                              export OMP_PROC_BIND=close OMP_PLACES=cores; \
                              export SCCD_BIND='${BIND}'; \
+                             header() { '${SCCD_BENCH}' --header; }; \
                              ${body}"; then
                 printf 'ok %s\n' "${label}" > "${status_file}"
             else
