@@ -10,7 +10,14 @@ SC="benchmark/results/scaling/host-cell2dmin-mode2.txt benchmark/results/scaling
 # One CSV behind every table and figure of both documents and the article, so a
 # number in one is the number in the others. It holds the shipped broad phase
 # and the sweep it is measured against.
-BENCH="benchmark/assessment/broadphase-cell2dmin.csv"
+BENCH="benchmark/assessment/broadphase-cell2dminfv.csv"
+
+# Same gate as the paper's tables: the documents quote the same measurements, so
+# they are refused on the same grounds.
+"$PY" benchmark/scripts/validate_results.py timings "$BENCH" --expect-bp cell2dminfv || {
+    echo "regenerate_reports: refusing to regenerate from $BENCH" >&2
+    exit 1
+}
 
 echo "== docs/BENCHMARKS.md =="
 $PY -m report "$BENCH" /tmp/report-tight \
