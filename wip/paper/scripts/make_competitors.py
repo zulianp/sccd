@@ -30,7 +30,7 @@ DATA = ROOT / "benchmark" / "competitors" / "results"
 OUT = HERE.parent / "generated" / "tables"
 
 # The broad phase the library ships and the only one these tables report.
-SHIPPED_BP = "cell2dmin"
+SHIPPED_BP = "cell2dminfv"
 
 SCENES = ["armadillo-rollers", "cloth-ball", "cloth-funnel", "n-body-simulation",
           "puffer-ball", "rod-twist"]
