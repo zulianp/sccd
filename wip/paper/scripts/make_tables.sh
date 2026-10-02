@@ -23,12 +23,24 @@ PAPER="$(cd "$(dirname "$0")/.." && pwd)"
 REPO="$(cd "$PAPER/../.." && pwd)"
 PY="${1:-python3}"
 
-BENCH="$REPO/benchmark/assessment/broadphase-cell2dmin.csv"
+BENCH="$REPO/benchmark/assessment/broadphase-cell2dminfv.csv"
 ORACLE="$REPO/benchmark/results/oracle-gh200-all.csv"
 OUT="$(mktemp -d)"
 trap 'rm -rf "$OUT"' EXIT
 
 cd "$REPO"
+
+# A table is only as good as the run behind it, and the ways a run can measure
+# the wrong thing do not show up in its numbers: a strategy name the build did
+# not know and so raced instead, a submit path that lost the thread binding, a
+# merge that ate a row per chunk. Those are provenance faults, and this refuses
+# to publish a file carrying one.
+"$PY" "$REPO/benchmark/scripts/validate_results.py" timings "$BENCH" \
+      --expect-bp cell2dminfv || {
+    echo "make_tables: refusing to regenerate from $BENCH" >&2
+    exit 1
+}
+
 "$PY" -m benchmark.report "$BENCH" "$OUT" "$ORACLE" \
       --modes=tight,device-tight \
       --label="tight:CPU,device-tight:GPU"
@@ -72,7 +84,7 @@ for blk in blocks:
     # read "<path> names the winning strategy" -- and overwrites the Source of
     # a table whose data comes from the oracle CSV instead.
     txt = re.sub(r"(Source: )\\texttt\{(?!benchmark/results/oracle)[^}]*\}",
-                 r"\1\\texttt{benchmark/assessment/broadphase-cell2dmin.csv}", blk)
+                 r"\1\\texttt{benchmark/assessment/broadphase-cell2dminfv.csv}", blk)
     open(path, "w").write(txt + "\n")
     written.append(f"tab-{m.group(1)}")
 
