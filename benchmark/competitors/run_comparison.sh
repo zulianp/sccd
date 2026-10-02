@@ -50,6 +50,19 @@ B=${SCCD_COMPETITOR_BUILD:-$SCRATCH/sccd/build-comp-f64}
 # be bound to one Grace (--cpus-per-task=72). The line records what the chunk
 # actually had.
 export OMP_NUM_THREADS=72
+# --cpus-per-task alone does not pin: measured on a compute node, a task with
+# --cpus-per-task=72 still reported an affinity list of 0-287, so SCCD's threads
+# spread over four Grace modules while oneTBB followed the mask and took all of
+# them. That makes the host comparison wrong in the other library's favour, which
+# is the direction least likely to be questioned. Bound the same way sweep.sh
+# binds its timing chunks.
+export OMP_PROC_BIND=close OMP_PLACES=cores
+if command -v numactl > /dev/null 2>&1; then
+    SCCD_BIND="numactl --cpunodebind=0 --membind=0"
+else
+    SCCD_BIND="taskset -c 0-71"
+fi
+export SCCD_BIND
 echo "$(hostname) cpus=$(nproc) OMP_NUM_THREADS=$OMP_NUM_THREADS GPU=${CUDA_VISIBLE_DEVICES:-unset} $scene [$begin,$end)"
 
 tmp="${out}.partial"
@@ -62,7 +75,9 @@ run() {  # $1 label  $2.. command
     local label="$1"; shift
     local t0 rc
     t0=$(date +%s)
-    "$@" 2>"${tmp%.partial}.$label.err" | tail -n +2 >> "$tmp"
+    # Every library through the same binding, so the comparison is between the
+    # libraries and not between their thread placements.
+    ${SCCD_BIND:-} "$@" 2>"${tmp%.partial}.$label.err" | tail -n +2 >> "$tmp"
     rc=$?
     printf '  %-26s exit=%-3d %5ds\n' "$label" "$rc" "$(( $(date +%s) - t0 ))"
     if [[ $rc -ne 0 ]]; then

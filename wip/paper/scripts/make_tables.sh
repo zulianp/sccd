@@ -83,8 +83,11 @@ for blk in blocks:
     # blunter rewrite reaches the \texttt in a note -- which made one caption
     # read "<path> names the winning strategy" -- and overwrites the Source of
     # a table whose data comes from the oracle CSV instead.
+    # The path comes from the file actually read, not from a literal: a literal
+    # here is how every table came to cite a CSV that was not its source after a
+    # bulk rename, and `rel` was computed for this and then left unused.
     txt = re.sub(r"(Source: )\\texttt\{(?!benchmark/results/oracle)[^}]*\}",
-                 r"\1\\texttt{benchmark/assessment/broadphase-cell2dminfv.csv}", blk)
+                 lambda m: m.group(1) + "\\texttt{" + rel + "}", blk)
     open(path, "w").write(txt + "\n")
     written.append(f"tab-{m.group(1)}")
 

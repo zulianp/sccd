@@ -60,6 +60,19 @@ def rows():
     # different runs of the same case and describe neither. The cell list is the
     # faster of the two on every scene of the device, so it is the one a caller
     # gets and the one the comparison reports.
+    # A name this file does not carry means the comparison predates the current
+    # default. Filtering for it would drop every device row, and the only visible
+    # effect is that the SCCD (GPU) row quietly leaves both tables while this
+    # script exits 0 -- which is how a correct table would have been replaced by
+    # an incomplete one.
+    seen = {r.get("broadphase") for r in data if r["mode"].startswith("device-")}
+    seen.discard(None)
+    seen.discard("")
+    if SHIPPED_BP not in seen:
+        sys.exit(f"error: {path.name} carries device strategies {sorted(seen)}, not "
+                 f"{SHIPPED_BP!r}. Re-run the comparison against the current default "
+                 f"rather than reporting the old strategy under its name.")
+
     kept = [r for r in data
             if not r["mode"].startswith("device-") or r.get("broadphase") == SHIPPED_BP]
     dropped = len(data) - len(kept)

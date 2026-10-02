@@ -37,12 +37,43 @@ import matplotlib  # noqa: E402
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
-SWEEP = REPO / "benchmark" / "assessment" / "broadphase-cell2dmin.csv"
-# The strategy the library runs by default, and the one every figure that is
-# not explicitly comparing strategies should draw. Named once: it was hard-coded
-# in four places, and changing three of them left one figure silently empty.
-SHIPPED_BP = "cell2dmin"
+SWEEP = REPO / "benchmark" / "assessment" / "broadphase-cell2dminfv.csv"
+# The strategy the library runs by default, and the one every figure that is not
+# explicitly comparing strategies should draw.
+#
+# Two constants, not one, because the two CSVs below are separate measurements
+# and can disagree about which strategy they hold: the sweep is re-run when the
+# default moves, the competitor comparison on its own schedule. A single name
+# served both for a while and was wrong for one of them whichever value it took
+# -- the rename that fixed the comparison left this file matching zero rows of
+# the sweep, which aborted the figure run a third of the way through and left
+# five committed PDFs untouched.
+#
+# assert_strategy below is what keeps these honest: a name that the data does
+# not carry is a stale measurement, and saying so beats drawing the old strategy
+# under the new one's name.
+SWEEP_BP = "cell2dminfv"
+COMPARE_BP = "cell2dminfv"
 COMPARE = REPO / "benchmark" / "competitors" / "results"
+
+def assert_strategy(rows, path, expect, where):
+    """Refuse rows whose device side was measured with another strategy.
+
+    A measurement that predates the current default is stale, not a variant to
+    draw anyway. Matching zero rows and carrying on is how a figure went out
+    empty and how a table lost its GPU rows while its script exited 0.
+    """
+    seen = {r.get("broadphase") for r in rows if r.get("mode", "").startswith("device-")}
+    seen.discard(None)
+    seen.discard("")
+    if expect not in seen:
+        raise SystemExit(
+            f"error: {where}: {path} carries device strategies {sorted(seen)}, "
+            f"not {expect!r}. That run predates the current default; re-measure it "
+            f"rather than publishing the old strategy under the new one's name.")
+    return expect
+
+
 PROF = REPO / "benchmark" / "results" / "profile"
 OUT = PAPER / "figures"
 
@@ -192,7 +223,7 @@ def per_frame():
     acc = collections.defaultdict(lambda: collections.defaultdict(
         lambda: collections.defaultdict(float)))
     for r in sweep_rows():
-        if r["mode"] not in (HOST, DEV) or (r.get("broadphase") or SHIPPED_BP) != SHIPPED_BP:
+        if r["mode"] not in (HOST, DEV) or (r.get("broadphase") or SWEEP_BP) != SWEEP_BP:
             continue
         fr = frame_of(r["case"])
         if fr is None:
@@ -220,7 +251,7 @@ def per_frame():
         if not drawn:
             raise SystemExit(
                 f"per-frame: {scene} drew no series; no row of {SWEEP.name} "
-                f"has broadphase={SHIPPED_BP!r} on {HOST} or {DEV}")
+                f"has broadphase={SWEEP_BP!r} on {HOST} or {DEV}")
         log_y(ax)
         ax.set_title(LABEL.get(scene, scene), fontsize=7)
         if i >= 3:
@@ -251,9 +282,9 @@ def per_frame():
 # Colour carries the processor and intensity the strategy: the cell list at full
 # strength, the sweep at the same hue lightened.
 SWEEP_TINT = 0.45
-SERIES_BP = (("cell list, CPU", HOST, (SHIPPED_BP,), 0.0),
+SERIES_BP = (("cell list, CPU", HOST, (SWEEP_BP,), 0.0),
              ("sweep, CPU", HOST, ("sweep",), SWEEP_TINT),
-             ("cell list, GPU", DEV, (SHIPPED_BP,), 0.0),
+             ("cell list, GPU", DEV, (SWEEP_BP,), 0.0),
              ("sweep, GPU", DEV, ("sweep",), SWEEP_TINT))
 
 
@@ -274,7 +305,7 @@ def broad_per_frame():
         if fr is None:
             continue
         try:
-            acc[r["dataset"]][(r["mode"], r.get("broadphase") or SHIPPED_BP)][fr] += (
+            acc[r["dataset"]][(r["mode"], r.get("broadphase") or SWEEP_BP)][fr] += (
                 float(r["prep_ms"]) + float(r["broad_ms"]))
         except ValueError:
             continue
@@ -338,7 +369,7 @@ def compare_rows():
 
 # Our two strategies and theirs. Colour separates the library, intensity the
 # strategy, matching broad-per-frame.
-SERIES_VS = (("cell list (ours)", "device-tight", SHIPPED_BP, DEV, 0.0),
+SERIES_VS = (("cell list (ours)", "device-tight", COMPARE_BP, DEV, 0.0),
              ("sweep (ours)", "device-tight", "sweep", DEV, SWEEP_TINT),
              ("Scalable CCD", "scalable-ccd-device", None, "relaxed", 0.0))
 
@@ -568,7 +599,7 @@ def earliness():
     # scene -> mode -> one value per case
     acc = collections.defaultdict(lambda: collections.defaultdict(list))
     for r in data:
-        if r["mode"].startswith("device-") and r.get("broadphase") != SHIPPED_BP:
+        if r["mode"].startswith("device-") and r.get("broadphase") != COMPARE_BP:
             continue
         try:
             v = float(r["toi_max_early"])

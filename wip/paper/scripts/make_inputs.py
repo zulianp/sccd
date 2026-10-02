@@ -30,7 +30,7 @@ RESULTS = REPO / "benchmark" / "results"
 # The same CSV `benchmark/scripts/regenerate_reports.sh` builds the documents
 # from, so this script and that one cannot disagree about a cell. It holds the
 # shipped broad phase and the sweep it is measured against.
-BENCH_CSV = REPO / "benchmark" / "assessment" / "broadphase-cell2dmin.csv"
+BENCH_CSV = REPO / "benchmark" / "assessment" / "broadphase-cell2dminfv.csv"
 ORACLE_CSV = RESULTS / "oracle-gh200-all.csv"
 # Order matters: the report renders one series per file in the order given, and
 # these are listed to match docs/BENCHMARKS.md -- host then device -- so the
