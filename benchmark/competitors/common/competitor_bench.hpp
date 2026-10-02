@@ -138,12 +138,49 @@ namespace sccd_competitor {
         int max_cases = 0;
         if (const char* v = std::getenv("SCCD_BENCH_MAX_CASES")) max_cases = std::atoi(v);
         if (max_cases > 0 && static_cast<int>(cases.size()) > max_cases) {
+            // Spread over each query type separately and hold the two in the
+            // proportion the dataset has them, exactly as bench.exe.cpp does.
+            //
+            // Striding the combined list samples the type as well as the
+            // trajectory: keys end in "ee" or "vf", so a scene with equal counts
+            // of each sorts into interleaved pairs with edge-edge on every even
+            // index, and an even stride returns edge-edge alone. That is bad
+            // enough in one binary; across two it is worse, because the SCCD
+            // rows and the competitor rows of the same chunk then describe
+            // different cases and every head-to-head ratio divides timings of
+            // different work.
+            std::vector<CaseFile> by_type[2];
+            for (const CaseFile& c : cases) {
+                by_type[c.is_vf ? 1 : 0].push_back(c);
+            }
+
+            const std::size_t total = cases.size();
+            int want[2];
+            want[1] = static_cast<int>(
+                (by_type[1].size() * static_cast<std::size_t>(max_cases) + total / 2) / total);
+            want[0] = max_cases - want[1];
+            for (int t = 0; t < 2; ++t) {
+                const int have = static_cast<int>(by_type[t].size());
+                if (want[t] > have) {
+                    want[1 - t] += want[t] - have;
+                    want[t] = have;
+                } else if (want[t] == 0 && have > 0 && want[1 - t] > 1) {
+                    want[t] = 1;
+                    want[1 - t] -= 1;
+                }
+            }
+
             std::vector<CaseFile> subset;
             subset.reserve(static_cast<std::size_t>(max_cases));
-            for (int k = 0; k < max_cases; ++k) {
-                subset.push_back(cases[static_cast<std::size_t>(
-                    static_cast<double>(k) * static_cast<double>(cases.size()) / max_cases)]);
+            for (int t = 0; t < 2; ++t) {
+                for (int k = 0; k < want[t]; ++k) {
+                    subset.push_back(by_type[t][static_cast<std::size_t>(
+                        static_cast<double>(k) * static_cast<double>(by_type[t].size()) / want[t])]);
+                }
             }
+            // Back into the one order both binaries slice with.
+            std::sort(subset.begin(), subset.end(),
+                      [](const CaseFile& a, const CaseFile& b) { return a.key < b.key; });
             cases.swap(subset);
         }
 

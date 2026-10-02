@@ -386,7 +386,12 @@ run_oracle_body() {
     # --no-strict so one scene's violation does not abort the sweep before the
     # rest is measured. The violations are in the CSV either way, and the report
     # fails on them; losing the remaining scenes as well helps nobody.
-    "${TI_ORACLE}" "${DATA_DIR}/${scene}" --csv "${tmp}" --no-strict \
+    # Bound exactly as the timing chunks are. TightInclusion's own time is a
+    # reported reference, not only a correctness oracle, so measuring it with its
+    # threads loose over four Grace modules while ours are pinned to one would
+    # inflate every speedup against it -- in our favour, which is the direction
+    # that must never be an accident.
+    ${SCCD_BIND:-} "${TI_ORACLE}" "${DATA_DIR}/${scene}" --csv "${tmp}" --no-strict \
         "${range[@]}" >/dev/null 2>&1 || true
     [[ -s "${tmp}" ]] || return 1
     mv "${tmp}" "${out}"
@@ -591,6 +596,8 @@ flush_oracle_pack() {
             --wrap="$(declare -f run_oracle_body); \
                      export TI_ORACLE='${TI_ORACLE}' DATA_DIR='${DATA_DIR}'; \
                      export OMP_NUM_THREADS='${THREADS}'; \
+                     export OMP_PROC_BIND=close OMP_PLACES=cores; \
+                     export SCCD_BIND='${BIND}'; \
                      ${body}"; then
         printf 'FAILED %s (see %s/logs)\n' "${label}" "${OUT_DIR}" >&2
         failures=$((failures + ${#oracle_calls[@]}))
@@ -607,6 +614,8 @@ for i in "${oracle_todo[@]:-}"; do
 
     if [[ "${LOCAL}" -eq 1 ]]; then
         printf '==> %s\n' "${label}"
+        export OMP_NUM_THREADS="${THREADS}" OMP_PROC_BIND=close OMP_PLACES=cores
+        export SCCD_BIND="${BIND}"
         if ! run_oracle_body "${scene}" "${out}" "${fb}" "${span}"; then
             printf 'FAILED %s\n' "${label}" >&2
             failures=$((failures + 1))
