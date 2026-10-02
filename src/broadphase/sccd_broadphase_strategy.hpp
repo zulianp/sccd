@@ -8,6 +8,7 @@
 // ptrdiff_t is used below; the header must not rely on a previous include in
 // the translation unit for it. Including this header first exposed that.
 #include <cstddef>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
@@ -182,6 +183,18 @@ namespace sccd {
         if (std::strcmp(v, "cell2dminsort") == 0) return BroadPhaseStrategy::Cell2DMinSort;
         if (std::strcmp(v, "cell2dseg") == 0) return BroadPhaseStrategy::Cell2DSeg;
         if (std::strcmp(v, "cell2dminfv") == 0) return BroadPhaseStrategy::Cell2DMinFV;
+        // A name this build does not know is a mistake, not a request to race.
+        // Falling through silently turns an explicit choice into Auto, and the
+        // only trace is the word "auto" in a column nobody reads: a whole
+        // competitor comparison was once measured that way, against a build
+        // predating the strategy its harness asked for.
+        if (*v) {
+            fprintf(stderr,
+                    "sccd: SCCD_BROADPHASE=%s is not a strategy this build knows; "
+                    "racing instead. Valid: sweep, cell2d, cell2dmin, cell2dminsort, "
+                    "cell2dseg, cell2dminfv\n",
+                    v);
+        }
         return BroadPhaseStrategy::Auto;
     }
 

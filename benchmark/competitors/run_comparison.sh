@@ -88,8 +88,8 @@ done
 # the candidates the host produces, and changing them would change that
 # comparison rather than this one.
 for mode in 0 2; do
-    run "sccd-device-cell2dmin-m$mode" env "${range[@]}" \
-        SCCD_BENCH_EXECUTION_SPACE=device SCCD_NARROWPHASE_MODE=$mode SCCD_BROADPHASE=cell2dmin \
+    run "sccd-device-cell2dminfv-m$mode" env "${range[@]}" \
+        SCCD_BENCH_EXECUTION_SPACE=device SCCD_NARROWPHASE_MODE=$mode SCCD_BROADPHASE=cell2dminfv \
         "$B/sccd_bench" "$D" "$scene"
 done
 
