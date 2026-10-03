@@ -9,7 +9,7 @@ supported configuration.
 | Variable | Values | Default | Effect |
 |---|---|---|---|
 | `SCCD_NARROWPHASE_MODE` | `0`, `2` | `0` | Narrow-phase kernel: `0` `Relaxed`, `2` `Tight`. Any other value warns and runs `0`. **Ignored for quads**, which have one root-finder variant. |
-| `SCCD_BROADPHASE` | `sweep`, `cell2d`, `cell2dmin`, `cell2dminsort`, `cell2dseg`, `cell2dminfv` | auto | Names the broad phase. Unset, both processors run `cell2dmin`, which is the fastest over the benchmark on every scene of it. Every choice produces the same pair set except `cell2dseg`, which emits fewer face-vertex pairs and is equally conservative, so this only changes speed. `cell2dminsort` and `cell2dminfv` are host only and report an error on the device. |
+| `SCCD_BROADPHASE` | `sweep`, `cell2d`, `cell2dmin`, `cell2dminsort`, `cell2dseg`, `cell2dminfv` | auto | Names the broad phase. Unset, both processors run `cell2dminfv`, which is the fastest over the benchmark on every scene of it. Every choice produces the same pair set except `cell2dseg`, which emits fewer face-vertex pairs and is equally conservative, so this only changes speed. `cell2dminsort` and `cell2dseg` are host only and report an error on the device. A name this build does not know is reported on stderr and the shipped strategy runs. |
 | `SCCD_USE_TI` | `0`, `1` | `0` | Calls TightInclusion directly. Requires a TightInclusion build. Oracle use only. |
 
 ### Getting TightInclusion's answer

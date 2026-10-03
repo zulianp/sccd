@@ -270,7 +270,7 @@ int main(int argc, char** argv) {
            SCCD_SCALE,
            space == smesh::EXECUTION_SPACE_DEVICE ? "device" : "host",
            smesh::type_to_string(base->block(0)->element_type()),
-           sccd::broadphase_strategy_name(sccd::broadphase_strategy_setting()),
+           sccd::broadphase_strategy_name(sccd::broadphase_strategy_resolved()),
            argc >= 3 ? argv[2] : "generated",
            argc >= 4 ? argv[3] : "synthesized");
     printf("%5s %10s %12s %12s %9s %9s %9s %9s %10s %10s %14s\n",
