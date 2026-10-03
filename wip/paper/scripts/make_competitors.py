@@ -290,16 +290,20 @@ def pair_table(data):
             if s is None:
                 continue
             if them is None or mode == "accd":
-                slowdown = "1.0$\\times$ (ref)"
+                cost = "1.0$\\times$ (ref)"
                 tighter = ("late" if s["med"] is not None and s["med"] < 0
                            else "1.0$\\times$ (ref)")
             else:
-                slowdown = f"{s['total'] / them['total']:.2f}$\\times$"
+                # Additive CCD's total over ours: above one is our lead. Reported
+                # the other way round it read as a slowdown, and every value came
+                # out below one, so the column and its caption each asserted the
+                # opposite of the measurement.
+                cost = f"{them['total'] / s['total']:.1f}$\\times$"
                 tighter = ratio(s["med"], them["med"])
             lines.append(
                 f"    {PRETTY[scene] if label.startswith('SCCD (CPU)') else ''} & {label} & "
                 f"{s['fp']} & {s['fn']} & {fmt(s['med'], 3)} & {fmt(s['max'], 3)} & "
-                f"{ms(s['total'])} & {fmt(s['nsq'], 3)} & {slowdown} & {tighter} \\\\")
+                f"{ms(s['total'])} & {fmt(s['nsq'], 3)} & {cost} & {tighter} \\\\")
         lines.append("    \\midrule")
     if lines and lines[-1].strip() == "\\midrule":
         lines.pop()
@@ -320,15 +324,15 @@ def pair_table(data):
     reported for it, so a positive value is conservative, and {late_note}
     \\emph{{total}} is NP per-pair over the whole scene, summed over every case with the median
     over repeats taken first, and \\emph{{avg}} divides it by the candidates it
-    was handed. \\emph{{slowdown}} is our total over additive CCD's, so above one
-    is what the tighter answer costs, and \\emph{{tighter}} is its median
+    was handed. \\emph{{our lead}} is additive CCD's total over ours, so above one
+    is how many times cheaper the tighter answer is here, and \\emph{{tighter}} is its median
     earliness over ours, so above one is how many times further from the root its
     median answer sits.}}
   \\label{{tab:competitor-pair}}
   \\fittable{{%
 \\begin{{tabular}}{{llrrrrrrrr}}
     \\toprule
-    scene & library & f.p. & missed & earl.\\ med. & earl.\\ max & total (ms) & avg (ns/pair) & slowdown & tighter \\\\
+    scene & library & f.p. & missed & earl.\\ med. & earl.\\ max & total (ms) & avg (ns/pair) & our lead & tighter \\\\
     \\midrule
 {chr(10).join(lines)}
     \\bottomrule
