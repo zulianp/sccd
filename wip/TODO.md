@@ -235,3 +235,17 @@ The refinement scaling study in `docs/BENCHMARKS.md` uses two cloth-ball frames
 that do not come into contact, so it measures the broad phase and its
 preparation. A pair that collides at every refinement level would let it measure
 the narrow phase against element count too.
+
+## Patch the overflow check in Scalable CCD's subdivision buffer
+
+Its answer lands after the true root on three scenes -- 269 of
+armadillo-rollers' 394 contact-carrying steps, 31 of rod-twist's 2,481 and 9 of
+cloth-funnel's 363 -- and the cause is a race in the overflow check of its
+subdivision buffer, which tests that the buffer is full and then advances the
+tail as two separate operations. `wip/paper/supplemental_material.tex` section 6
+records the three observations that identify it.
+
+The paper reports the library as published. Fix it upstream and send a patch to
+the authors' repository; the paper's `\silentoverflow` macro in
+`wip/paper/preamble.tex` is the one place its description will want revising once
+that lands.

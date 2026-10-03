@@ -10,11 +10,11 @@ this paper are the following:
 \begin{enumerate}
   \item a broad phase with no tuning parameter and no sort, built on a
         two-dimensional uniform cell list whose cell size is derived from the
-        data, with one query per pair type: the vertex-face query bins a box
-        into every cell its extent touches (\cref{sec:bp:cell}), while the
-        edge-edge query, being one list against itself, keeps one entry per box
-        at its minimum corner and walks forward in row-major cell order, pruned
-        by a prefix maximum per row (\cref{sec:bp:self});
+        data and which keeps one entry per box, at its minimum corner
+        (\cref{sec:bp:grid}): cumulative maxima per cell and per row bound how
+        far a query must read back, so the edge-edge query walks forward from
+        its own cell in row-major order (\cref{sec:bp:self}) and the vertex-face
+        query a range those maxima close from below (\cref{sec:bp:cell});
   \item an order-independence result for the underlying branch-and-bound search
         (\cref{sec:np:order}): keeping the minimum over \emph{all} accepted
         boxes and pruning against it yields the same answer under \emph{any}

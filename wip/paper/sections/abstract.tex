@@ -8,11 +8,13 @@ conservative by construction on both CPU and GPU, and we assess it against the
 certified reference implementation TightInclusion over $11{,}630{,}064$ checks
 against exactly known roots.
 
-The broad phase is a two-dimensional cell list requiring neither a sort nor a
-user-chosen cell size, with one query per pair type: the vertex-face query bins
-each box into every cell it touches, while the edge-edge query, being one list
-against itself, binds each box to the single cell holding its minimum corner and
-walks forward from it. The host narrow phase packs SIMD lanes with boxes drawn
+The broad phase is a variant of the cell list over two axes, requiring neither a
+sort nor a user-chosen cell size: every box enters the single cell holding its
+minimum corner, so the structure holds one index per box, and the per-cell and
+per-row running maxima it carries tell a query how far back it must look. Both
+pair types share that structure, the edge-edge query walking forward from its own
+cell under a total order on cells and the vertex-face query a range those maxima
+bound. The host narrow phase packs SIMD lanes with boxes drawn
 from \emph{different} queries, which an order-independence argument shows to be
 legal. The device narrow phase pairs a small per-block stack with a
 double-buffered global queue, so that a query requiring millions of boxes
@@ -21,8 +23,10 @@ spreads across the machine.
 Over six scenes and $6{,}394$ cases on one \textsc{GH200} node, SCCD reports no
 missed collision and no late time of impact. On the host, the median and
 worst-case error match TightInclusion's on all twelve scene-phases to every
-printed digit, at $1.7\times$ to $4.9\times$ its speed. The device is
-$2.5\times$ to $26.6\times$ faster and agrees to within $0.6\%$ and $4.5\%$. Its
-narrow phase nevertheless runs at $0.64\times$ host speed on the smallest scene,
-which places the whole pipeline behind the host there, at $0.96\times$.
+printed digit, at $1.7\times$ to $4.9\times$ its speed; the device is
+$2.5\times$ to $26.6\times$ faster and agrees to within $0.6\%$ and $4.5\%$.
+Against additive CCD, which advances conservatively without isolating a root,
+the reported time of impact is $1.9$ to $6.3$ decades closer to the true one, and
+that accuracy costs at most $7.1\times$ per candidate pair and nothing at all on
+the two largest scenes.
 \end{abstract}

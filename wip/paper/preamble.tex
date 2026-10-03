@@ -86,6 +86,14 @@
 
 % The supplement is a separate document, so the article names it rather than
 % \cref-ing into it; referencing both ways would make each need the other's aux.
+% The silent-overflow finding, in one place. It is cited to its authors'
+% benchmark, and it names a defect we intend to patch upstream, so it will want
+% revising once that lands -- having it in a macro means revising it once.
+\newcommand{\silentoverflow}{%
+\citet{belgrod2025toi} benchmark thirteen broad-phase implementations against
+exact ground truth and find that several of them \emph{miss collisions}, usually
+through a fixed-size candidate buffer that discards overflow silently}
+
 \newcommand{\supp}{the supplemental material}
 \newcommand{\Supp}{The supplemental material}
 

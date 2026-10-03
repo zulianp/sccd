@@ -35,148 +35,153 @@ counting is a population count and enumeration a bit scan, and a rejected
 candidate never issues the indirect load of its element indices, the expensive
 part of a test that usually fails.
 
-\subsection{The vertex-face query}
-\label{sec:bp:cell}
+\subsection{The cell list}
+\label{sec:bp:grid}
 
-Vertex-face takes two lists, the faces against the vertices, and
-\cref{alg:cell} answers it by binning one of them into a grid over \emph{two} of
-the three axes: for a surface of $N$ elements of size $h$ in a region of side
-$L$ we have $N \sim (L/h)^{2}$, since a surface does not fill a volume, so a
-two-dimensional grid at element resolution has $O(N)$ cells and is mostly
-occupied, where a three-dimensional one has $(L/h)^{3} = N^{3/2}$ cells --- at
-$N = 1.5\times10^{6}$, $1.8\times10^{9}$ cells at $0.08\%$ occupancy, spending
-memory and empty-cell iteration to prune along a direction the surface barely
-occupies. The third axis still culls, through the ordinary three-dimensional box
-test inside the cell, where it costs nothing extra. The spacing on each of the
-two axes is the \emph{mean extent of the swept boxes} on that axis, the
-resulting cell counts scaled isotropically so that their product does not exceed
-$4N$: past that point more resolution does not pay, and a degenerate extent
-could otherwise allocate without bound. The caller supplies no voxel size.
+Both queries read one structure, and it is built once per step. The grid spans
+\emph{two} of the three axes: for a surface of $N$ elements of size $h$ in a
+region of side $L$ we have $N \sim (L/h)^{2}$, since a surface does not fill a
+volume, so a two-dimensional grid at element resolution has $O(N)$ cells and is
+mostly occupied, where a three-dimensional one has $(L/h)^{3} = N^{3/2}$ cells
+--- at $N = 1.5\times10^{6}$, $1.8\times10^{9}$ cells at $0.08\%$ occupancy,
+spending memory and empty-cell iteration to prune along a direction the surface
+barely occupies. The third axis still culls, through the ordinary
+three-dimensional box test inside the cell, where it costs nothing extra. The
+spacing on each of the two axes is the \emph{mean extent of the swept boxes} on
+that axis, the resulting cell counts scaled isotropically so that their product
+does not exceed $4N$: past that point more resolution does not pay, and a
+degenerate extent could otherwise allocate without bound. The caller supplies no
+voxel size.
 
-Two other spacings perform worse. The \emph{element} size makes the grid far too
-fine, since a swept box is much larger than its element, so every box would span
-a block of cells and binning would cost more than the query saves. The
-\emph{largest} box, the textbook uniform-grid rule, buys a property the mean
-lacks: with no box wider than a cell, two overlapping boxes lie within one cell
-of each other, so a fixed $3\times3$ stencil around one owning cell finds every
-partner, with no duplicates to settle. Its cost is that the widest box in the
-scene sets the spacing for all of them, and swept box sizes span a wide range
---- the widest is $4.5\times$ the mean on armadillo-rollers' vertices and
-$24\times$ on cloth-funnel's edges, since a few elements move fast while most
-barely move. On armadillo-rollers one swept edge spans $11\%$ of the scene, so a
-cell at least that wide admits an $8\times9$ grid at any element count, and the
-scene's $36{,}363$ edges land in $72$ cells, $505$ to a cell, which measured
-costs the host broad phase up to $11.9\times$. The mean instead keeps a box's
-cost proportional to its own size, as a heavy-tailed size distribution requires.
+The quantity that sets the spacing is the swept box, not the element it came
+from, and the two differ by the distance the element travels in one step. Taking
+the \emph{largest} swept box instead of the mean is the textbook uniform-grid
+rule, and it buys a property the mean lacks: with no box wider than a cell, two
+overlapping boxes lie within one cell of each other, so a fixed $3\times3$
+stencil finds every partner with no duplicates to settle. Its cost is that the
+widest box in the scene sets the spacing for all of them, and swept box sizes
+span a wide range --- the widest is $4.5\times$ the mean on armadillo-rollers'
+vertices and $24\times$ on cloth-funnel's edges, since a few elements move fast
+while most barely move. On armadillo-rollers one swept edge spans $11\%$ of the
+scene, so a cell at least that wide admits an $8\times9$ grid at any element
+count, and the scene's $36{,}363$ edges land in $72$ cells, $505$ to a cell,
+which measured costs the host broad phase up to $11.9\times$. Splitting the
+boxes across a fine grid and a coarse one recovers most of that, and still
+loses: with the cut chosen per step by costing every candidate against a
+histogram of box sizes, the two-level structure returns identical pair sets and
+runs $1.3\times$ to $1.5\times$ behind the single level, because one cut has to
+straddle the two to five octaves these scenes span. The mean keeps a box's cost
+proportional to its own size, as a heavy-tailed size distribution requires.
+
+Each box enters the \emph{single} cell holding its minimum corner. The cell
+array therefore holds exactly one index per box, for both pair types, and its
+length is known before it is filled, so construction is the count-then-fill of
+\cref{sec:bp:common} with no span count to agree on: the cell a box lands in is
+one clamp of one coordinate pair, a pure function of the box and the grid, which
+the counting and the scatter cannot read differently. The pair output is built
+the same way, so the whole broad phase performs exactly two allocations, both of
+counted sizes.
+
+Binning at a corner tells a query nothing about how far the boxes in a cell
+reach back towards it, so the structure carries two running maxima, and they are
+what make a bounded walk possible (\cref{alg:cell}). Each cell records the
+largest upper bound of the boxes in it on the second axis. Along each row, the
+cells record the \emph{cumulative} maximum of the largest upper bound on the
+first axis, so one binary search over a row gives the first column holding
+anything that reaches back to the querying box, and skips every column before it
+at once. Those two numbers let the binning stand with no bound on how many cells
+a box may span, where a grid storing a box only at its lower-left cell must cap
+the box at $k$ cells and widen every query window by $k$ to match.
 
 \begin{algorithm}[htbp]
-\caption{The vertex-face query, one pass (count or fill)}
+\caption{Building the cell list, shared by both queries}
 \label{alg:cell}
 \small
 \begin{algorithmic}[1]
-\Function{CellList}{$A$, $B$}
+\Function{BuildCellList}{$B$}
   \State $(a_{0},a_{1}) \gets$ the two axes of largest centre variance
   \State $h_{k} \gets$ mean extent of the boxes on axis $a_{k}$;\quad
          $n_{k} \gets \lfloor \operatorname{span}_{k}/h_{k} \rfloor$,
          scaled so $n_{0}n_{1} \le 4N$
-  \State count the cells of each box of $B$, prefix-sum them, and scatter
-         each box index into its cells
-  \ForAll{$i$ \textbf{in parallel}}
-    \ForAll{cells $c$ touched by $A_{i}$, and $j$ listed in $c$}
-      \If{$A_{i}$ and $B_{j}$ are disjoint in 3D} \textbf{continue} \EndIf
-      \State $o_{k} \gets \max(A_{i}.\min_{a_{k}},\, B_{j}.\min_{a_{k}})$
-        \Comment{corner of the overlap}
-      \If{$c \ne \operatorname{cell}(o_{0},o_{1})$} \textbf{continue}
-        \Comment{another cell owns this pair}
-      \EndIf
-      \If{$A_{i}$ and $B_{j}$ share a vertex} \textbf{continue} \EndIf
-      \State count, or emit the pair
-    \EndFor
+  \State $\operatorname{cell}(i) \gets L\bigl(\operatorname{clamp}_{0}(B_{i}.\min_{a_{0}}),
+         \operatorname{clamp}_{1}(B_{i}.\min_{a_{1}})\bigr)$
+         \Comment{one cell per box, both passes}
+  \State count $\operatorname{cell}(i)$ over all $i$, prefix-sum into \textit{cellptr},
+         scatter each $i$ into $\operatorname{cellidx}$
+  \ForAll{cells $c$ \textbf{in parallel}}
+    \State $\mathit{hi}_{1}[c] \gets \max_{i \in c} B_{i}.\max_{a_{1}}$
+      \Comment{how far the cell reaches on the second axis}
+    \State $\mathit{pre}[c] \gets \max_{i \in c} B_{i}.\max_{a_{0}}$
   \EndFor
+  \ForAll{rows $r$ \textbf{in parallel}}
+    \State $\mathit{pre}[r,c] \gets \max_{c' \le c} \mathit{pre}[r,c']$
+      \Comment{cumulative along the row}
+  \EndFor
+  \State $k \gets \max_{i} \bigl(\operatorname{clamp}_{1}(B_{i}.\max_{a_{1}})
+         - \operatorname{clamp}_{1}(B_{i}.\min_{a_{1}})\bigr)$
+         \Comment{rows a box may span; read by the vertex-face walk}
 \EndFunction
 \end{algorithmic}
 \end{algorithm}
 
-\begin{figure}[htbp]
-  \centering
-  \input{tikz/cell2d}
-  \caption{The cell list, schematically and not to scale.
-    \textbf{(a)} Construction is count-then-fill, the same shape as the pair
-    collection that follows it. One pass over the boxes counts the cells each
-    one's extent covers, a prefix sum turns those counts into \texttt{cellptr},
-    and a second pass scatters each box index into each of its cells. The
-    result is a CRS structure: \texttt{cellptr[c]} to \texttt{cellptr[c+1]} is
-    the run of \texttt{cellidx} holding cell $c$'s boxes.
-    \textbf{(b)} A box is binned into \emph{every} cell its extent touches and
-    reads those same cells. When two boxes share more than one such cell (two,
-    here), the second box's index is listed in each of them, and the first
-    box's walk meets it once per shared cell. The pair is emitted from the cell
-    holding the minimum corner of their overlap.}
-  \label{fig:cell2d}
-\end{figure}
+What the maxima cannot do is license a walk over a box's own footprint.
+Componentwise order on cells is \emph{partial}: place one box a column to the
+right of another and a row below it, and each footprint runs up and to the right,
+away from where the other is binned, so each misses the other by one coordinate
+and neither ever reads the other --- a loss no rule for deciding which box
+reports a pair can recover. Held to its own footprint such a walk drops
+$3{,}698$ of $23{,}756$ pairs on one of the test cases and $882$ of $6{,}971$ on
+a heavy-tailed size spread. Row-major linear index $L(c_{0},c_{1}) = c_{1}n_{0} +
+c_{0}$ is \emph{total}, and over it a walk is complete: for an overlapping pair
+$j$'s minimum does not pass $i$'s maximum on either grid axis, so
+$L(\operatorname{cell}(j.\min)) \le L(\operatorname{cell}(i.\max))$, the row term
+settling it when the rows differ and the column when they agree. The two queries
+below differ in how much of that range each must read.
 
-Construction applies the count-then-fill of \cref{sec:bp:common} to cells
-(\cref{fig:cell2d}(a)), both passes sharing one function for deciding which
-cells a box covers, so they cannot disagree and corrupt the cell array silently
-and without failing; the pair output is built the same way, so the whole broad
-phase performs exactly two allocations, both of counted sizes. Duplicates are
-then settled without per-pair state. A box spans several cells, so a pair can be
-discovered in several of them (\cref{fig:cell2d}(b)), and the usual remedies, a
-hash set of emitted pairs or a mark array, cost memory proportional to the
-number of pairs and are awkward on a GPU. The pair is therefore
-\emph{attributed} to the cell holding the minimum corner of the two boxes'
-overlap, on line 8 of \cref{alg:cell}: that corner lies inside both boxes, so
-both are binned there, and the cell is unique. Costing two clamps per surviving
-pair and carrying no state, the rule runs unchanged on the device.
+Nothing is sorted and nothing assumes an order within a cell, since a query
+tests every entry of a cell it reads and never breaks on a first miss. Binning
+costs $O(N)$ and a query $O\bigl(\sum_{i}\sum_{c}\text{occupancy}(c)\bigr)$ over
+the cells $c$ it reads, with no logarithmic factor beyond the one binary search
+per row. \Cref{sec:results:scaling} measures the exponents both achieve in
+practice.
 
-Nothing here is sorted and nothing assumes an order, since the query tests every
-entry of a touched cell and never breaks on a first miss. Binning costs
-$O\bigl(\sum_{i}\text{cells}(i)\bigr)$ and the query
-$O\bigl(\sum_{i}\sum_{c \ni i}\text{occupancy}(c)\bigr)$, with no logarithmic
-factor in either, where $\text{cells}(i)$ is the footprint of box $i$ at the
-mean spacing, $O(1)$ in the mean and larger for the few boxes that are larger: a
-box pays for its own size and for no other box's.
-\Cref{sec:results:scaling} measures the exponents both achieve in practice.
+\subsection{The vertex-face query}
+\label{sec:bp:cell}
+
+Vertex-face takes two lists, and the faces are the list that is binned: a vertex
+then walks the cells that can hold a face reaching it. Above and to the right the
+range needs nothing stored, since a face overlapping a vertex has its minimum
+corner at or below the vertex's maximum on both axes, so no cell past the
+vertex's own maximum cell is ever read. Below and to the left the two maxima of
+\cref{sec:bp:grid} bound it: per row, the cumulative maximum gives the first
+column holding a face that reaches back, by the one binary search; across rows,
+the largest number of rows any face spans bounds how far below the vertex's own
+row a reaching face can be binned. Because a face occupies one cell, a pair is
+met exactly once and no duplicate rule is needed.
+
+Binning the faces rather than the vertices is what makes that cheap. The cells
+are sized from the list that is binned, so binning the vertices gives
+vertex-sized cells that a face --- much larger than a vertex's own sweep ---
+must walk a rectangle of, paying a duplicate test on every surviving candidate.
+Indexing the faces at their minimum corner costs one entry each instead,
+measured at a third to a seventh of the cells read per emitted pair, and the pair
+set is unchanged: only where a pair is found differs.
 
 \subsection{The edge-edge query}
 \label{sec:bp:self}
 
-Edge-edge is one list against itself, which admits a cheaper binning than
-\cref{sec:bp:cell} uses: a box enters the \emph{single} cell holding its minimum
-corner, so the cell array holds one entry per box, a partner is met at most
-once, and the duplicate rule of \cref{alg:cell} becomes unnecessary. Reading
-only the cells that come after a box's own is how linked-cell neighbour search
-avoids handling a pair twice, each cell visiting half its
+Edge-edge is one list against itself, so each box walks \emph{forward} from its
+own cell under the total order of \cref{sec:bp:grid}, and the whole range above
+its own maximum cell goes unread because a partner there is the one that reads
+it. Reading only the cells that come after a box's own is how linked-cell
+neighbour search avoids handling a pair twice, each cell visiting half its
 neighbours~\citep{allen2017liquids}; that walk is sound there because a particle
 is a point binned by its centre in a cell at least the interaction radius wide,
-whereas extended boxes binned at a corner satisfy neither condition. Reading
-``after'' as a box's own footprint, its columns crossed with its rows, is in
-consequence incomplete: place one box a column to the right of another and a row
-below it, and each footprint runs up and to the right, away from where the other
-is binned, so each misses the other by one coordinate and neither ever reads the
-other, a loss no rule for deciding which box reports a pair can recover.
-Componentwise order on cells is \emph{partial}, and these incomparable pairs are
-exactly the ones lost: held to its own footprint the walk drops $3{,}698$ of
-$23{,}756$ pairs on one of the test cases and $882$ of $6{,}971$ on a
-heavy-tailed size spread.
-
-Row-major linear index $L(c_{0},c_{1}) = c_{1}n_{0} + c_{0}$ is \emph{total},
-and over it the walk is complete: for an overlapping pair $j$'s minimum does not
-pass $i$'s maximum on either grid axis, so $L(\operatorname{cell}(j.\min)) \le
-L(\operatorname{cell}(i.\max))$, the row term settling it when the rows differ
-and the column when they agree. Whichever box has the smaller $L$ holds the
-other in its range, and equal $L$ means one cell, where the index decides, the
-only index test in \cref{alg:cellmin}. Taken literally that range spans whole
-rows, and the bounds narrow it: each cell carries the largest upper bound of the
-boxes in it, and each row the prefix maximum of those along the row, so one
-binary search gives the first column holding anything that reaches back to the
-querying box --- left of that box's own column, where an incomparable partner
-sits and where a footprint walk never steps --- and skips every column before it
-at once. A second bound per cell does the same on the other axis, and
-\cref{fig:cellmin} runs the resulting walk through on one scene. That prefix
-lets the binning stand with no bound on how many cells a box may span, where a
-grid storing a box only at its lower-left cell must cap the box at $k$ cells and
-widen every query window by $k$ to match.
+whereas extended boxes binned at a corner satisfy neither condition, which is
+what the total order repairs. Equal $L$ means one cell, where the index decides
+which of the two boxes reports the pair, and that is the only index test in
+\cref{alg:cellmin}. The row the box is binned in needs no search, since the
+walk starts from the box's own column.
 
 \begin{algorithm}[htbp]
 \caption{The edge-edge query, one pass (count or fill)}
@@ -250,10 +255,7 @@ widen every query window by $k$ to match.
   \label{fig:cellmin}
 \end{figure}
 
-Cost follows the same two terms as \cref{alg:cell}, with the binning reduced to
-one incidence per box and the query to whatever the bounds leave. Ordering each
-cell's entries on the axis the grid does not use, as the grid hybrids
-\citet{serpa2020broadmark} evaluates do, would make the scan inside a cell
-monotone as well; it culls where cells are densely occupied and pays an ordering
-pass everywhere, costing more than it saves over our benchmark, so the cells are
-left unordered.
+Intra-cell ordering was measured and rejected: ordering each cell by its second
+coordinate lets a walk break out of a cell early, and over the benchmark it
+loses to the unordered walk on every scene, because the order has to be rebuilt
+every step while the walk it saves is already bounded by the two maxima.

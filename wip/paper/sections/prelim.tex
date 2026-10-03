@@ -72,7 +72,7 @@ inclusion function of \citet{wang2021tight} from generic interval arithmetic,
 which widens at every operation, and it allows a box to be discarded on the
 strength of its corners alone.
 
-\subsection{What floating point costs: the error bound and the tolerances}
+\subsection{Error bound and the tolerances}
 \label{sec:prelim:err}
 
 The exactness of \cref{eq:hull} is a statement about real arithmetic, whereas
@@ -109,8 +109,8 @@ The second is that the bound is derived for one particular sequence of
 floating-point operations. An algebraically identical but differently associated
 expression has a different rounding profile, and $\kappa$ does not cover it. The
 corner evaluation is therefore written in TightInclusion's order and is not free
-to be rearranged. The implementation pins IEEE semantics across those regions
-and refuses to build under \texttt{-ffast-math}.
+to be rearranged. The implementation pins IEEE semantics across those regions,
+and no \texttt{-ffast-math} compilation flag is used anywhere in this work.
 
 No constant is certified in the literature for the bilinear query of
 \cref{eq:fvq}. We use $\kappa = 38$, which exceeds both certified constants and

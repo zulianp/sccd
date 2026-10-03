@@ -24,17 +24,13 @@ point: a cell that is too small lets duplicate candidates exhaust memory, one
 that is too large degenerates towards brute force, and no single value serves a
 scene whose geometry changes over the simulation. \Cref{sec:bp:cell} derives the
 cell from the swept boxes themselves and caps the cell count relative to the
-element count, so no value is left for a user to choose. For one list against
-itself these methods also have to suppress the pairs a box meets in more than
-one cell, whether by a rule on the cell or by a pass over the output.
-\Cref{sec:bp:self} gives a box one cell and reads forward from it, the
-arrangement linked-cell neighbour search uses~\citep{allen2017liquids}, which
-requires the cells to carry an order and a bound and requires no test on the
-pairs.
+element count, so no value is left for a user to choose. These methods also have to suppress the pairs a box meets in more
+than one cell, whether by a rule on the cell or by a pass over the output.
+\Cref{sec:bp:grid} gives a box one cell instead, the arrangement linked-cell
+neighbour search uses~\citep{allen2017liquids}, which requires the cells to
+carry an order and a bound and requires no test on the pairs.
 
-\citet{belgrod2025toi} benchmark thirteen broad-phase implementations against
-exact ground truth and find that several of them \emph{miss collisions}, usually
-through a fixed-size candidate buffer that discards overflow silently. Our broad
+\silentoverflow. Our broad
 phase bins the boxes, so it inherits neither the sort's cost nor its dependence
 on one axis separating the geometry.
 
