@@ -35,6 +35,11 @@ namespace {
     int narrowphase_max_depth = 69;
     scalar_t narrowphase_tol = scalar_t(3e-8);
 
+    // Set when any case reports a missed pair or a missed collision. The
+    // project treats those as illegal rather than as data, so the run fails even
+    // though every row is still written and still counted.
+    bool g_missed_collision = false;
+
     struct CaseFile {
         fs::path dir;
         std::string key;
@@ -1179,9 +1184,17 @@ namespace {
                            write_raw(roots_dir / "sccd_fn_broad_c0.int32", fn_broad_c0) &&
                            write_raw(roots_dir / "sccd_fn_broad_c1.int32", fn_broad_c1);
         if (fn_count != 0 || broad_fn_count != 0) {
-            std::cerr << "warning: false negatives in " << dataset << "/" << case_file.key << ": fn=" << fn_count
+            std::cerr << "error: false negatives in " << dataset << "/" << case_file.key << ": fn=" << fn_count
                       << " broad_fn=" << broad_fn_count << "\n";
-            return wrote && append_missing_pairs_report(dataset_dir, dataset, case_file, c0, c1, fn, fn_broad);
+            (void)append_missing_pairs_report(dataset_dir, dataset, case_file, c0, c1, fn, fn_broad);
+            // The row is still written and the case still enters the timing
+            // population. Returning here dropped both, and the cases that miss a
+            // contact are the hardest ones, so every median and maximum was taken
+            // over a sample biased towards the cases that worked -- invisibly,
+            // since an absent row looks like a case the range never selected.
+            // A missed collision is illegal rather than a data point, so this
+            // also fails the run instead of warning on stderr.
+            g_missed_collision = true;
         }
 
         timings_ms.push_back(narrow_ms);
@@ -1224,7 +1237,7 @@ namespace {
                   // The broad phase is part of what produced the row. Without it
                   // a sweep that varies the strategy cannot be told apart, and
                   // the default is not self-evident.
-                  << sccd::broadphase_strategy_name(sccd::broadphase_strategy_setting()) << ','
+                  << sccd::broadphase_strategy_name(sccd::broadphase_strategy_resolved()) << ','
                   << case_file.key << ',' << (case_file.is_vf ? "vf" : "ee") << ',' << narrow_queries
                   << ',' << prep_ms << ',' << broad_ms << ',' << narrow_ms << ',' << query_narrow_ms << ','
                   << fp_count << ',' << fn_count << ',' << broadphase.false_positives << ',' << broad_fn_count
@@ -1408,5 +1421,9 @@ int main(int argc, char** argv) {
         ok = write_raw(out_dir / (dataset + "-ee.float64"), ee_timings) && ok;
     }
 
-    return ok ? EXIT_SUCCESS : EXIT_FAILURE;
+    if (g_missed_collision) {
+        std::cerr << "error: at least one case reported a missed pair or a missed "
+                     "collision; see the warnings above and the missing-pairs report\n";
+    }
+    return (ok && !g_missed_collision) ? EXIT_SUCCESS : EXIT_FAILURE;
 }

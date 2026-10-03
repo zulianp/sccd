@@ -251,6 +251,35 @@ done
 # prepared dataset from one to the other therefore reconverts, and the converter
 # removes the coordinates it is replacing.
 GEOM_PRECISION="${SCCD_GEOM_PRECISION:-float32}"
+
+# Refuse to change the precision of a tree that already has one, unless it is
+# asked for by name. bench.sh calls this script on every invocation with nothing
+# set, so the float32 default silently reconverted a float64 tree and deleted the
+# coordinates it replaced -- and the benchmarks that need double would then
+# measure different geometry, whose symptom is times of impact that look late and
+# are not, which is the shape of a conservativeness bug.
+_existing=""
+for _s in "${scenes[@]}"; do
+    if ls "${DATA_DIR}/${_s}/frames_raw"/*.float64 > /dev/null 2>&1; then
+        _existing=float64
+    elif ls "${DATA_DIR}/${_s}/frames_raw"/*.float32 > /dev/null 2>&1; then
+        _existing=float32
+    fi
+    [ -n "${_existing}" ] && break
+done
+if [ -n "${_existing}" ] && [ "${_existing}" != "${GEOM_PRECISION}" ]; then
+    if [ -z "${SCCD_GEOM_PRECISION:-}" ]; then
+        printf 'error: %s is prepared at %s and nothing asked for a change.\n' \
+               "${DATA_DIR}" "${_existing}" >&2
+        printf '       Reconverting deletes the coordinates it replaces. Set\n' >&2
+        printf '       SCCD_GEOM_PRECISION=%s to keep it, or =%s to convert on purpose.\n' \
+               "${_existing}" "${GEOM_PRECISION}" >&2
+        exit 1
+    fi
+    printf '  frames: converting %s -> %s as asked; the old coordinates are removed\n' \
+           "${_existing}" "${GEOM_PRECISION}"
+fi
+
 printf '  frames (converting to raw arrays, %s)\n' "${GEOM_PRECISION}"
 "${PYTHON}" "${BENCHMARK_DIR}/frames_to_raw.py" \
     "--precision=${GEOM_PRECISION}" "${DATA_DIR}" "${scenes[@]}"

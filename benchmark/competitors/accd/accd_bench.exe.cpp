@@ -285,7 +285,7 @@ int main(int argc, char** argv) {
             Row row;
             row.dataset = scene;
             row.mode = "accd";
-            row.broadphase = sccd::broadphase_strategy_name(sccd::broadphase_strategy_setting());
+            row.broadphase = sccd::broadphase_strategy_name(sccd::broadphase_strategy_resolved());
             row.key = c.key;
             row.type = c.is_vf ? "vf" : "ee";
             row.gt_earliest = truth.gt_earliest;

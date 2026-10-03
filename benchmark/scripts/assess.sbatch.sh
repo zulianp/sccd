@@ -109,13 +109,29 @@ run_bench() { # hardware scene component variant repeat  [env assignments...]
         return
     fi
 
+    # Columns by name, read from the header row the driver prints. They were
+    # positional, and `broadphase` was later inserted at position 3 rather than
+    # appended, so every offset shifted by one: `queries` read the `type` string
+    # and summed to zero, `prep_ms` was labelled the broad phase, `broad_ms` the
+    # narrow phase, and `query_narrow_ms` was recorded as the false-positive
+    # count. NF >= 13 passed throughout, because a real row has 26 fields.
     echo "$out" | awk -F, -v hw="$hw" -v scene="$scene" -v comp="$comp" \
                         -v var="$var" -v rep="$rep" '
-        NR > 1 && NF >= 13 {
-            q += $5; broad += $7; narrow += $8; fp += $10; fn += $11; n++
+        NR == 1 {
+            for (i = 1; i <= NF; ++i) col[$i] = i
+            for (k in need) if (!(k in col)) { missing = missing " " k }
+            next
+        }
+        NR == 2 && ( !("queries" in col) || !("broad_ms" in col) ||
+                     !("narrow_ms" in col) || !("fp" in col) || !("fn" in col) ) {
+            print "SCHEMA-MISMATCH"; exit 1
+        }
+        NF >= 13 {
+            q += $(col["queries"]); broad += $(col["prep_ms"]) + $(col["broad_ms"])
+            narrow += $(col["narrow_ms"]); fp += $(col["fp"]); fn += $(col["fn"]); n++
         }
         END {
-            if (n == 0) { print "MISSING" ; exit }
+            if (n == 0) { print "MISSING" ; exit 1 }
             printf "%s,%s,-,%s,%s,broad,%s,%.3f,%d,cases=%d\n", hw, scene, comp, var, rep, broad, q, n
             printf "%s,%s,-,%s,%s,narrow,%s,%.3f,%d,fp=%d;fn=%d\n", hw, scene, comp, var, rep, narrow, q, fp, fn
         }' >> "$CSV"

@@ -644,7 +644,7 @@ namespace sccd {
             // Cell2DMin won on and indexes the faces instead of the vertices.
             // The broad phase falls 1.61x on the host and 1.17x on the device
             // over the six, ahead on every scene of both. Nothing is raced.
-            tuner_.set_default(sccd::BroadPhaseStrategy::Cell2DMinFV);
+            tuner_.set_default(sccd::kShippedBroadPhase);
 
             if (broad_phase_pending_) {
                 tuner_.record(timed_strategy_, broad_phase_pending_ms_);
@@ -1302,9 +1302,14 @@ namespace sccd {
 
             choose_strategy_(n_nodes);
 
-            if (use_cell2d_min_sorted_) {
+            if (use_cell2d_min_sorted_ || use_cell2d_seg_) {
                 // Ordering each cell is a host kernel so far, and it loses to
                 // the unordered walk on every scene of the benchmark anyway.
+                // The segment query is a host kernel too: the device path has no
+                // branch for it, so it used to fall through to cell2d and report
+                // cell2d's pair count under the cell2dseg label -- which makes
+                // the one property that strategy exists to show, 2% to 26% fewer
+                // pairs, read as exactly none.
                 // Saying so beats running another under its name, which would
                 // put a timing against a label that did not produce it.
                 SMESH_ERROR("sccd: SCCD_BROADPHASE=%s has no device implementation yet\n",

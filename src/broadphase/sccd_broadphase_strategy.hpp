@@ -173,6 +173,20 @@ namespace sccd {
         return st;
     }
 
+    /** \brief Declared here so the setting's diagnostic can name a strategy. */
+    static inline const char* broadphase_strategy_name(const BroadPhaseStrategy s);
+
+    /**
+     * \brief The strategy the library selects when nothing is asked for.
+     *
+     * Named here so the tuner's default and the value a driver records are the
+     * same constant. They were two, and the recorded column therefore said
+     * `auto` while the shipped strategy ran -- which made a sweep that varied
+     * SCCD_BROADPHASE and mistyped one value produce identical measurements
+     * under different labels.
+     */
+    static constexpr BroadPhaseStrategy kShippedBroadPhase = BroadPhaseStrategy::Cell2DMinFV;
+
     /** \brief The strategy the user asked for, or Auto. */
     static inline BroadPhaseStrategy broadphase_strategy_setting() {
         const char* v = getenv("SCCD_BROADPHASE");
@@ -191,13 +205,25 @@ namespace sccd {
         if (*v) {
             fprintf(stderr,
                     "sccd: SCCD_BROADPHASE=%s is not a strategy this build knows; "
-                    "racing instead. Valid: sweep, cell2d, cell2dmin, cell2dminsort, "
+                    "running %s. Valid: sweep, cell2d, cell2dmin, cell2dminsort, "
                     "cell2dseg, cell2dminfv\n",
-                    v);
+                    v, broadphase_strategy_name(kShippedBroadPhase));
         }
         return BroadPhaseStrategy::Auto;
     }
 
+
+    /**
+     * \brief The strategy that will actually run.
+     *
+     * What a result file has to record. `broadphase_strategy_setting()` reports
+     * the request, so an unset variable recorded `auto` and a typo recorded
+     * `auto` as well, both while \ref kShippedBroadPhase ran.
+     */
+    static inline BroadPhaseStrategy broadphase_strategy_resolved() {
+        const BroadPhaseStrategy asked = broadphase_strategy_setting();
+        return asked == BroadPhaseStrategy::Auto ? kShippedBroadPhase : asked;
+    }
 
     /** \brief Wall clock in milliseconds, for the race below. */
     static inline double broadphase_now_ms() {

@@ -637,6 +637,13 @@ int main(int argc, char** argv) {
         auto next = [&]() -> std::string { return (i + 1 < argc) ? argv[++i] : std::string(); };
         if (a == "--phase") {
             const std::string p = next();
+            // A value this does not know left both phases off, so every file was
+            // skipped, a header-only CSV was written and the run reported no
+            // missed collisions -- the gate passing because it checked nothing.
+            if (p != "vf" && p != "ee" && p != "both") {
+                std::cerr << "error: --phase takes vf, ee or both (got '" << p << "')\n";
+                return 1;
+            }
             opt.do_vf = (p == "vf" || p == "both");
             opt.do_ee = (p == "ee" || p == "both");
         } else if (a == "--max-files") {
@@ -672,8 +679,22 @@ int main(int argc, char** argv) {
             opt.bench_repeats = v.empty() ? 3 : std::max(1, atoi(v.c_str()));
         } else if (a == "--gate") {
             opt.gate = next();
+            // The gate matches opt.gate against "all" or a mode name. A value
+            // matching neither counted no violations, so the run printed its OK
+            // verdict with the bogus name echoed back in place of a mode.
+            if (opt.gate != "all" && opt.gate != "relaxed" && opt.gate != "tight" &&
+                opt.gate != "device-relaxed" && opt.gate != "device-tight") {
+                std::cerr << "error: --gate takes all, relaxed, tight, device-relaxed "
+                             "or device-tight (got '" << opt.gate << "')\n";
+                return 1;
+            }
         } else if (!a.empty() && a[0] != '-') {
             opt.dataset_dir = a;
+        } else {
+            // Every other dash-prefixed argument used to be dropped in silence,
+            // so --max-files=20 and --nostrict were accepted and ignored.
+            std::cerr << "error: unknown option '" << a << "'\n";
+            return 1;
         }
     }
 
@@ -726,6 +747,11 @@ int main(int argc, char** argv) {
     std::vector<std::string> violation_rows;
     const fs::path& violation_csv = opt.violations_csv;
     std::size_t violations_total = 0;
+    // Queries the gate actually examined. Without this the OK verdict below is
+    // printed whenever no violation was counted, which includes every way of
+    // counting nothing: a --phase or --gate value no mode matches, a --bench run
+    // that skips the accuracy pass, and a --file-begin past the end of the list.
+    std::size_t gated_queries = 0;
 
     for (const Phase& phase : phases) {
         if ((phase.is_vf && !opt.do_vf) || (!phase.is_vf && !opt.do_ee)) {
@@ -1247,6 +1273,7 @@ int main(int argc, char** argv) {
             const bool gated = (opt.gate == "all") || (opt.gate == mode_name(mode_of(m)));
             if (gated) {
                 violations_total += bad;
+                gated_queries += s.gt_checked ? s.gt_checked : s.queries;
             }
             std::printf("  %s %s violates conservativeness on %zu queries "
                         "(%zu missed, %zu late). First few:\n",
@@ -1309,9 +1336,19 @@ int main(int argc, char** argv) {
                 "~4500 'late' queries on armadillo-rollers under --float-geometry and zero\n"
                 "without it. Use the double-geometry run to gate.\n");
         }
-    } else {
-        std::printf("\nOK: no missed collisions and no late times of impact%s.\n",
+    } else if (gated_queries == 0) {
+        // Nothing was examined, so there is no verdict to give. Saying OK here is
+        // how a run that measured no query at all reported the invariant holding.
+        std::printf("\nNOT GATED: no query was examined%s, so this run says nothing "
+                    "about conservativeness. Check --phase, --gate, --file-begin and "
+                    "--bench.\n",
                     opt.gate == "all" ? "" : (" for mode " + opt.gate).c_str());
+        return 1;
+    } else {
+        std::printf("\nOK: no missed collisions and no late times of impact%s, "
+                    "over %zu gated queries.\n",
+                    opt.gate == "all" ? "" : (" for mode " + opt.gate).c_str(),
+                    gated_queries);
     }
 
     return 0;
