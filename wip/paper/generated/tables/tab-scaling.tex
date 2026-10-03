@@ -7,20 +7,20 @@
     \toprule
     processor & level & elements & candidate pairs & BP prep (ms) & BP queries (ms) & BP full (ms) & NP EToI (ms) & p \\
     \midrule
-    CPU & 0 & 92,230 & 17,982 & 0.9 & 1.8 & 2.7 & 0.5 & 1.01 \\
-     & 1 & 368,920 & 87,771 & 6.5 & 7.9 & 14.3 & 0.7 &  \\
-     & 2 & 1,475,680 & 379,818 & 21.9 & 33.7 & 55.7 & 2.0 &  \\
-     & 3 & 5,902,720 & 1,573,741 & 86.3 & 156.4 & 242.7 & 8.0 &  \\
-     & 4 & 23,610,880 & 6,402,081 & 181.2 & 642.7 & 823.9 & 32.5 &  \\
-     & 5 & 94,443,520 & 25,824,702 & 840.2 & 2804.1 & 3644.3 & 132.6 &  \\
-    GPU & 0 & 92,230 & 17,982 & 0.7 & 1.2 & 2.0 & 1.6 & 0.86 \\
-     & 1 & 368,920 & 87,771 & 15.2 & 4.3 & 19.6 & 1.9 &  \\
-     & 2 & 1,475,680 & 379,818 & 58.9 & 16.5 & 75.4 & 2.0 &  \\
-     & 3 & 5,902,720 & 1,573,741 & 238.3 & 59.2 & 297.5 & 2.4 &  \\
-     & 4 & 23,610,880 & 6,402,081 & 251.8 & 189.9 & 441.7 & 3.5 &  \\
-     & 5 & 94,443,520 & 25,824,702 & 1009.4 & 818.9 & 1828.3 & 8.1 &  \\
+    CPU & 0 & 92,230 & 17,982 & 1.0 & 1.4 & 2.4 & 0.3 & 1.03 \\
+     & 1 & 368,920 & 87,771 & 6.6 & 7.2 & 13.9 & 0.6 &  \\
+     & 2 & 1,475,680 & 379,818 & 23.3 & 28.3 & 51.6 & 2.1 &  \\
+     & 3 & 5,902,720 & 1,573,741 & 94.0 & 149.6 & 243.7 & 8.0 &  \\
+     & 4 & 23,610,880 & 6,402,081 & 183.3 & 619.5 & 802.9 & 32.5 &  \\
+     & 5 & 94,443,520 & 25,824,702 & 808.9 & 2993.0 & 3801.9 & 130.8 &  \\
+    GPU & 0 & 92,230 & 17,982 & 0.3 & 1.3 & 1.6 & 3.0 & 0.80 \\
+     & 1 & 368,920 & 87,771 & 10.9 & 5.9 & 16.8 & 3.1 &  \\
+     & 2 & 1,475,680 & 379,818 & 43.9 & 22.8 & 66.7 & 2.7 &  \\
+     & 3 & 5,902,720 & 1,573,741 & 168.3 & 92.4 & 260.7 & 3.5 &  \\
+     & 4 & 23,610,880 & 6,402,081 & 13.8 & 329.7 & 343.5 & 4.9 &  \\
+     & 5 & 94,443,520 & 25,824,702 & 50.4 & 1422.2 & 1472.5 & 9.2 &  \\
     \bottomrule
   \end{tabular}}
   \par\smallskip\footnotesize The two frames used here do not come into contact, so the narrow phase has almost no work to do and its column is dominated by noise rather than by element count; what this measures is the broad phase and the preparation that feeds it. Narrow-phase cost against problem size is in the per-case figure, over cases that do collide. Where the exponent is below 1 it is because the fixed cost visible at the smallest size is amortised as the mesh grows.
-  \par\smallskip\footnotesize Source: \texttt{benchmark/results/scaling/host-cell2dmin-mode2.txt, benchmark/results/scaling/device-cell2dmin-mode2.txt}
+  \par\smallskip\footnotesize Source: \texttt{benchmark/results/scaling/host-cell2dminfv-mode2.txt, benchmark/results/scaling/device-cell2dminfv-mode2.txt}
 \end{table}

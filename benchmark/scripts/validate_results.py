@@ -70,12 +70,19 @@ def check_timings(args):
     other = len(rows) - len(ours)
     if other:
         print(f"({other} rows belong to another library and are not checked here)")
-    per_mode = collections.Counter(r["mode"] for r in ours)
-    print(f"rows per mode: {dict(per_mode)}")
-    if len(set(per_mode.values())) > 1:
-        bad.append(f"modes hold different row counts {dict(per_mode)}; a slice was "
-                   "dropped, and the merge eating one row per chunk looks exactly "
-                   "like this")
+    # Counted per (mode, strategy), not per mode. A comparison CSV measures the
+    # device over two broad phases on purpose, so that they and the competitor's
+    # sit in one allocation -- which doubles every device mode's rows and is not a
+    # dropped slice. Counting by mode alone called that a fault, and a gate that
+    # cries wolf is a gate that gets ignored.
+    per_cell = collections.Counter((r["mode"], r.get("broadphase", "")) for r in ours)
+    print("rows per (mode, broadphase):")
+    for k in sorted(per_cell):
+        print(f"  {k[0]:<16}{k[1]:<14}{per_cell[k]}")
+    if len(set(per_cell.values())) > 1:
+        bad.append(f"the (mode, broadphase) cells hold different row counts "
+                   f"{dict(per_cell)}; a slice was dropped, and the merge eating one "
+                   "row per chunk looks exactly like this")
     for scene in sorted({r["dataset"] for r in ours}):
         for mode in sorted({r["mode"] for r in ours}):
             seen = {t for r in ours

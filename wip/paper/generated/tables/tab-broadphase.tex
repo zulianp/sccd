@@ -5,22 +5,22 @@
   \fittable{%
   \begin{tabular}{llrrrrl}
     \toprule
-    scene & mode & cell2dmin BP prep & sweep BP prep & cell2dmin BP queries & sweep BP queries & faster \\
+    scene & mode & cell2dminfv BP prep & sweep BP prep & cell2dminfv BP queries & sweep BP queries & faster \\
     \midrule
-    armadillo-rollers & GPU & 256 & 987 & 1199 & 2504 & cell2dmin 2.09x \\
-    armadillo-rollers & CPU & 763 & 1167 & 1380 & 2244 & cell2dmin 1.63x \\
-    cloth-ball & GPU & 62 & 244 & 649 & 862 & cell2dmin 1.33x \\
-    cloth-ball & CPU & 120 & 193 & 569 & 1292 & cell2dmin 2.27x \\
-    cloth-funnel & GPU & 203 & 630 & 1562 & 1660 & cell2dmin 1.06x \\
-    cloth-funnel & CPU & 630 & 818 & 879 & 1668 & cell2dmin 1.90x \\
-    n-body & GPU & 202 & 648 & 3893 & 6075 & cell2dmin 1.56x \\
-    n-body & CPU & 219 & 417 & 3152 & 11223 & cell2dmin 3.56x \\
-    puffer-ball & GPU & 4189 & 7566 & 21042 & 69259 & cell2dmin 3.29x \\
-    puffer-ball & CPU & 4298 & 5161 & 24807 & 420458 & cell2dmin 16.95x \\
-    rod-twist & GPU & 3093 & 12360 & 8812 & 21166 & cell2dmin 2.40x \\
-    rod-twist & CPU & 5994 & 10018 & 16143 & 23905 & cell2dmin 1.48x \\
+    armadillo-rollers & GPU & 168 & 987 & 447 & 2554 & cell2dminfv 5.71x \\
+    armadillo-rollers & CPU & 770 & 1258 & 1093 & 2330 & cell2dminfv 2.13x \\
+    cloth-ball & GPU & 27 & 244 & 258 & 867 & cell2dminfv 3.37x \\
+    cloth-ball & CPU & 119 & 192 & 398 & 1276 & cell2dminfv 3.21x \\
+    cloth-funnel & GPU & 179 & 623 & 718 & 1660 & cell2dminfv 2.31x \\
+    cloth-funnel & CPU & 710 & 798 & 929 & 1653 & cell2dminfv 1.78x \\
+    n-body & GPU & 70 & 656 & 3102 & 6223 & cell2dminfv 2.01x \\
+    n-body & CPU & 206 & 437 & 1392 & 11222 & cell2dminfv 8.06x \\
+    puffer-ball & GPU & 1752 & 8056 & 18623 & 69996 & cell2dminfv 3.76x \\
+    puffer-ball & CPU & 3580 & 5148 & 15756 & 411130 & cell2dminfv 26.09x \\
+    rod-twist & GPU & 1229 & 12637 & 6221 & 21577 & cell2dminfv 3.47x \\
+    rod-twist & CPU & 6430 & 10095 & 15261 & 23808 & cell2dminfv 1.56x \\
     \bottomrule
   \end{tabular}}
   \par\smallskip\footnotesize \texttt{faster} names the winning strategy and by how much on the whole broad phase. A margin inside the run-to-run spread is a tie.
-  \par\smallskip\footnotesize Source: \texttt{benchmark/assessment/broadphase-cell2dmin.csv}
+  \par\smallskip\footnotesize Source: \texttt{benchmark/assessment/broadphase-cell2dminfv.csv}
 \end{table}

@@ -21,29 +21,29 @@
     \toprule
     scene & library & f.p. & missed & earl.\ med. & earl.\ max & total (ms) & avg (ns/pair) & slowdown & tighter \\
     \midrule
-    armadillo-rollers & SCCD (CPU) & 24 & 0 & 3.39e-06 & 0.016 & 2,784 & 32.6 & 4.83$\times$ & 8,436$\times$ \\
-     & SCCD (GPU) & 24 & 0 & 3.39e-06 & 0.016 & 2,719 & 31.9 & 4.72$\times$ & 8,436$\times$ \\
-     & Additive CCD (CPU) & 444 & 0 & 0.0286 & 0.996 & 576.6 & 6.76 & 1.0$\times$ (ref) & 1.0$\times$ (ref) \\
+    armadillo-rollers & SCCD (CPU) & 24 & 0 & 3.39e-06 & 0.016 & 2,735 & 32.1 & 0.09$\times$ & 8,436$\times$ \\
+     & SCCD (GPU) & 24 & 0 & 3.4e-06 & 0.016 & 2,953 & 34.6 & 0.10$\times$ & 8,408$\times$ \\
+     & Additive CCD (CPU) & 444 & 0 & 0.0286 & 0.996 & 28,845 & 338 & 1.0$\times$ (ref) & 1.0$\times$ (ref) \\
     \midrule
-    cloth-ball & SCCD (CPU) & 1 & 0 & 2.72e-07 & 0.000193 & 1,387 & 7.92 & 5.38$\times$ & 241,276$\times$ \\
-     & SCCD (GPU) & 1 & 0 & 2.7e-07 & 0.000193 & 852.4 & 4.87 & 3.31$\times$ & 242,541$\times$ \\
-     & Additive CCD (CPU) & 21 & 0 & 0.0656 & 0.94 & 257.7 & 1.47 & 1.0$\times$ (ref) & 1.0$\times$ (ref) \\
+    cloth-ball & SCCD (CPU) & 1 & 0 & 2.72e-07 & 0.000193 & 1,349 & 7.7 & 0.03$\times$ & 241,276$\times$ \\
+     & SCCD (GPU) & 1 & 0 & 2.71e-07 & 0.000192 & 876.0 & 5 & 0.02$\times$ & 242,500$\times$ \\
+     & Additive CCD (CPU) & 21 & 0 & 0.0656 & 0.94 & 39,042 & 223 & 1.0$\times$ (ref) & 1.0$\times$ (ref) \\
     \midrule
-    cloth-funnel & SCCD (CPU) & 15 & 0 & 6.87e-06 & 1 & 715.8 & 28.4 & 2.03$\times$ & 1,248$\times$ \\
-     & SCCD (GPU) & 15 & 0 & 6.83e-06 & 1 & 977.1 & 38.8 & 2.77$\times$ & 1,256$\times$ \\
-     & Additive CCD (CPU) & 422 & 0 & 0.00857 & 0.956 & 352.8 & 14 & 1.0$\times$ (ref) & 1.0$\times$ (ref) \\
+    cloth-funnel & SCCD (CPU) & 15 & 0 & 6.87e-06 & 1 & 702.3 & 27.9 & 0.16$\times$ & 1,248$\times$ \\
+     & SCCD (GPU) & 15 & 0 & 6.75e-06 & 1 & 1,386 & 55 & 0.32$\times$ & 1,269$\times$ \\
+     & Additive CCD (CPU) & 422 & 0 & 0.00857 & 0.956 & 4,293 & 170 & 1.0$\times$ (ref) & 1.0$\times$ (ref) \\
     \midrule
-    n-body & SCCD (CPU) & 11 & 0 & 3.02e-08 & 0.00024 & 11,272 & 5 & 3.37$\times$ & 2,128,613$\times$ \\
-     & SCCD (GPU) & 12 & 0 & 3.02e-08 & 0.00024 & 4,331 & 1.92 & 1.30$\times$ & 2,131,357$\times$ \\
-     & Additive CCD (CPU) & 107 & 0 & 0.0643 & 0.897 & 3,343 & 1.48 & 1.0$\times$ (ref) & 1.0$\times$ (ref) \\
+    n-body & SCCD (CPU) & 11 & 0 & 3.02e-08 & 0.00024 & 7,641 & 3.39 & 0.01$\times$ & 2,128,613$\times$ \\
+     & SCCD (GPU) & 12 & 0 & 3.02e-08 & 0.00024 & 4,639 & 2.06 & 0.01$\times$ & 2,131,979$\times$ \\
+     & Additive CCD (CPU) & 107 & 0 & 0.0643 & 0.897 & 546,318 & 242 & 1.0$\times$ (ref) & 1.0$\times$ (ref) \\
     \midrule
-    puffer-ball & SCCD (CPU) & 536 & 0 & 4e-05 & 0.261 & 41,871 & 5.71 & 4.65$\times$ & 2,624$\times$ \\
-     & SCCD (GPU) & 558 & 0 & 4e-05 & 0.261 & 10,785 & 1.47 & 1.20$\times$ & 2,624$\times$ \\
-     & Additive CCD (CPU) & 27374 & 0 & 0.105 & 0.976 & 9,003 & 1.23 & 1.0$\times$ (ref) & 1.0$\times$ (ref) \\
+    puffer-ball & SCCD (CPU) & 536 & 0 & 4e-05 & 0.261 & 24,439 & 3.34 & 0.02$\times$ & 2,624$\times$ \\
+     & SCCD (GPU) & 558 & 0 & 4.03e-05 & 0.261 & 10,040 & 1.37 & 0.01$\times$ & 2,608$\times$ \\
+     & Additive CCD (CPU) & 27374 & 0 & 0.105 & 0.976 & 1,619,535 & 221 & 1.0$\times$ (ref) & 1.0$\times$ (ref) \\
     \midrule
-    rod-twist & SCCD (CPU) & 1243 & 0 & 0.000275 & 0.993 & 82,394 & 21.3 & 11.91$\times$ & 84.6$\times$ \\
-     & SCCD (GPU) & 1245 & 0 & 0.000274 & 0.993 & 27,344 & 7.06 & 3.95$\times$ & 84.7$\times$ \\
-     & Additive CCD (CPU) & 16708 & 0 & 0.0232 & 0.994 & 6,919 & 1.79 & 1.0$\times$ (ref) & 1.0$\times$ (ref) \\
+    rod-twist & SCCD (CPU) & 1243 & 0 & 0.000275 & 0.993 & 82,563 & 21.3 & 0.11$\times$ & 84.6$\times$ \\
+     & SCCD (GPU) & 1245 & 0 & 0.000275 & 0.993 & 28,898 & 7.46 & 0.04$\times$ & 84.5$\times$ \\
+     & Additive CCD (CPU) & 16708 & 0 & 0.0232 & 0.994 & 763,507 & 197 & 1.0$\times$ (ref) & 1.0$\times$ (ref) \\
     \bottomrule
   \end{tabular}}
   \par\smallskip\footnotesize Source: \texttt{benchmark/competitors/results/}

@@ -7,14 +7,14 @@
     \toprule
     scene & CPU ms & GPU ms & total$\times$ & BP full$\times$ & NP EToI$\times$ \\
     \midrule
-    armadillo-rollers & 2,068 & 2,749 & 0.75x & 1.15x & 0.44x \\
-    cloth-ball & 1,188 & 829 & 1.43x & 0.88x & 3.44x \\
-    cloth-funnel & 1,319 & 2,345 & 0.56x & 0.56x & 0.56x \\
-    n-body & 8,812 & 4,369 & 2.02x & 0.81x & 11.89x \\
-    puffer-ball & 45,852 & 22,374 & 2.05x & 1.18x & 15.80x \\
-    rod-twist & 47,854 & 25,382 & 1.89x & 1.83x & 1.91x \\
+    armadillo-rollers & 1,803 & 1,893 & 0.95x & 2.45x & 0.49x \\
+    cloth-ball & 1,035 & 437 & 2.37x & 1.54x & 3.55x \\
+    cloth-funnel & 1,421 & 1,480 & 0.96x & 1.29x & 0.64x \\
+    n-body & 7,305 & 3,568 & 2.05x & 0.45x & 12.69x \\
+    puffer-ball & 37,432 & 19,936 & 1.88x & 0.85x & 16.51x \\
+    rod-twist & 47,152 & 22,909 & 2.06x & 2.45x & 1.91x \\
     \bottomrule
   \end{tabular}}
   \par\smallskip\footnotesize A ratio is the host median over the device median, so 2.0 means the device takes half the time. Ratios below 1.0 are the cases where the host wins and are the ones worth reading.
-  \par\smallskip\footnotesize Source: \texttt{benchmark/assessment/broadphase-cell2dmin.csv}
+  \par\smallskip\footnotesize Source: \texttt{benchmark/assessment/broadphase-cell2dminfv.csv}
 \end{table}

@@ -37,7 +37,7 @@ ORACLE_CSV = RESULTS / "oracle-gh200-all.csv"
 # article's table and the library's are the same table. Both runs use the
 # shipped broad phase, so the one axis the study varies is the processor.
 SCALING = [RESULTS / "scaling" / n for n in
-           ("host-cell2dmin-mode2.txt", "device-cell2dmin-mode2.txt")]
+           ("host-cell2dminfv-mode2.txt", "device-cell2dminfv-mode2.txt")]
 
 # The two mode selections the two committed documents are generated with.
 # `tight` is the article's subject; `relaxed` supplies the trade-off subsection.
@@ -60,8 +60,18 @@ def _build(only_modes: set[str], label_override: dict[str, str], suffix: str):
     # would sum two runs of the same cases into one scene total. The report picks
     # one for the headline tables and compares the rest against it, preferring
     # the cell list because that is what the shipped default probes first.
+    # Named, not inferred. data.broadphases returns a sorted list, so taking
+    # [0] picked the headline strategy by alphabet: "cell2dminfv" wins only
+    # because it sorts before "sweep", and any future strategy sorting earlier
+    # would silently become the subject of every headline table while the
+    # captions and the prose went on describing the cell list.
+    SHIPPED_BP = "cell2dminfv"
     strategies = data.broadphases(rows)
-    primary = ("cell2d" if "cell2d" in strategies else strategies[0]) if strategies else None
+    if strategies and SHIPPED_BP not in strategies:
+        sys.exit(f"error: {BENCH_CSV.name} holds strategies {sorted(strategies)}, not "
+                 f"{SHIPPED_BP!r}. Re-measure against the current default rather than "
+                 f"reporting another strategy under its name.")
+    primary = SHIPPED_BP if strategies else None
     scenes = data.by_scene(rows, primary)
 
     source = str(BENCH_CSV.relative_to(REPO))
@@ -135,22 +145,34 @@ def _write(built, tables_mod, suffix: str) -> list[str]:
 # Figures quoted in the prose, and the table each must still appear in. A claim
 # that drifts from its evidence is the failure this guards against.
 PROSE_CLAIMS = [
-    ("15.80", "tab-processor"),
+    # Host against device, the ratios the prose names scene by scene.
+    ("16.51", "tab-processor"),
+    ("0.49", "tab-processor"),
+    ("2.45", "tab-processor"),
+    ("0.45", "tab-processor"),
+    ("2.37", "tab-processor"),
+    ("2.06", "tab-processor"),
     ("2.05", "tab-processor"),
+    ("1.88", "tab-processor"),
+    ("0.95", "tab-processor"),
+    ("0.96", "tab-processor"),
+    ("1.29", "tab-processor"),
+    ("0.64", "tab-processor"),
     # The scaling ratios are quoted as divisions of these cells, so the reader
     # can do the arithmetic; checking the cells checks the ratios.
-    ("55.7", "tab-scaling"),
-    ("75.4", "tab-scaling"),
-    ("242.7", "tab-scaling"),
-    ("297.5", "tab-scaling"),
-    ("441.7", "tab-scaling"),
-    ("823.9", "tab-scaling"),
-    ("1828.3", "tab-scaling"),
-    ("3644.3", "tab-scaling"),
-    ("840.2", "tab-scaling"),
-    ("1009.4", "tab-scaling"),
-    ("2804.1", "tab-scaling"),
-    ("818.9", "tab-scaling"),
+    ("51.6", "tab-scaling"),
+    ("66.7", "tab-scaling"),
+    ("243.7", "tab-scaling"),
+    ("260.7", "tab-scaling"),
+    ("343.5", "tab-scaling"),
+    ("802.9", "tab-scaling"),
+    ("1472.5", "tab-scaling"),
+    ("3801.9", "tab-scaling"),
+    ("50.4", "tab-scaling"),
+    ("808.9", "tab-scaling"),
+    ("1422.2", "tab-scaling"),
+    ("2993.0", "tab-scaling"),
+    ("130.8", "tab-scaling"),
 ]
 
 # Totals the prose states that are sums of a generated table's columns rather
@@ -174,7 +196,14 @@ def _check() -> int:
     status = 0
     for needle, table in PROSE_CLAIMS:
         if needle not in prose:
-            print(f"note: {needle} no longer appears in the prose", file=sys.stderr)
+            # An error, not a note. Printing and continuing let a guarded claim
+            # retire itself the moment the prose was edited, so the list silently
+            # shrank to whatever still happened to match and the check passed on
+            # numbers nobody was asserting any more.
+            print(f"error: {needle} is guarded for {table} but no longer appears in "
+                  "the prose; quote it again or drop it from PROSE_CLAIMS",
+                  file=sys.stderr)
+            status = 1
             continue
         if needle not in (gen / f"{table}.tex").read_text():
             print(f"error: prose claims {needle} but {table}.tex does not contain it",

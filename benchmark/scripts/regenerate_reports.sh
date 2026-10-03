@@ -6,7 +6,7 @@ PY="${PY:-./.venv/bin/python}"
 export PYTHONPATH=benchmark
 # The shipped broad phase on both processors, and nothing else: the paper
 # reports no other strategy outside the Scalable CCD comparison.
-SC="benchmark/results/scaling/host-cell2dmin-mode2.txt benchmark/results/scaling/device-cell2dmin-mode2.txt"
+SC="benchmark/results/scaling/host-cell2dminfv-mode2.txt benchmark/results/scaling/device-cell2dminfv-mode2.txt"
 # One CSV behind every table and figure of both documents and the article, so a
 # number in one is the number in the others. It holds the shipped broad phase
 # and the sweep it is measured against.
