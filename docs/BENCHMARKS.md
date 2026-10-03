@@ -24,7 +24,7 @@ Three results:
 Every number is generated from a committed CSV by a committed script:
 
 ```sh
-python3 -m report benchmark/assessment/broadphase-cell2dmin.csv /tmp/report \
+python3 -m report benchmark/assessment/broadphase-cell2dminfv.csv /tmp/report \
         benchmark/results/oracle-gh200-all.csv \
         --modes=tight,device-tight --label="tight:CPU,device-tight:GPU" \
         --embed=docs/BENCHMARKS.md --check
@@ -49,7 +49,7 @@ whose roots were computed symbolically.
 | puffer-ball       |   240 |           30,529,227 | 1,514,172 |   1,486,790 |
 | rod-twist         | 4,571 |              847,250 |   549,208 |     285,431 |
 
-Source: `benchmark/assessment/broadphase-cell2dmin.csv`
+Source: `benchmark/assessment/broadphase-cell2dminfv.csv`
 
 <!-- sccd:end dataset -->
 
@@ -105,7 +105,7 @@ roots, on both processors, for every scene.
 
 Measured against the exact roots shipped with the dataset, not against TightInclusion: TightInclusion's own answer is itself a lower bound on the truth, so comparing against it over-reports lateness.
 
-Source: `benchmark/assessment/broadphase-cell2dmin.csv`
+Source: `benchmark/assessment/broadphase-cell2dminfv.csv`
 
 <!-- sccd:end conservativeness -->
 
@@ -207,16 +207,16 @@ already-touching configuration.
 
 | scene             | CPU ms | GPU ms | total | broad | narrow |
 |-------------------|-------:|-------:|------:|------:|-------:|
-| armadillo-rollers |  2,068 |  2,749 | 0.75x | 1.15x |  0.44x |
-| cloth-ball        |  1,188 |    829 | 1.43x | 0.88x |  3.44x |
-| cloth-funnel      |  1,319 |  2,345 | 0.56x | 0.56x |  0.56x |
-| n-body            |  8,812 |  4,369 | 2.02x | 0.81x | 11.89x |
-| puffer-ball       | 45,852 | 22,374 | 2.05x | 1.18x | 15.80x |
-| rod-twist         | 47,854 | 25,382 | 1.89x | 1.83x |  1.91x |
+| armadillo-rollers |  1,803 |  1,893 | 0.95x | 2.45x |  0.49x |
+| cloth-ball        |  1,035 |    437 | 2.37x | 1.54x |  3.55x |
+| cloth-funnel      |  1,421 |  1,480 | 0.96x | 1.29x |  0.64x |
+| n-body            |  7,305 |  3,568 | 2.05x | 0.45x | 12.69x |
+| puffer-ball       | 37,432 | 19,936 | 1.88x | 0.85x | 16.51x |
+| rod-twist         | 47,152 | 22,909 | 2.06x | 2.45x |  1.91x |
 
 A ratio is the host median over the device median, so 2.0 means the device takes half the time. Ratios below 1.0 are the cases where the host wins and are the ones worth reading.
 
-Source: `benchmark/assessment/broadphase-cell2dmin.csv`
+Source: `benchmark/assessment/broadphase-cell2dminfv.csv`
 
 <!-- sccd:end processor -->
 
@@ -243,22 +243,22 @@ one comparable between a 79-step scene and a 4,571-step one:
 
 | scene             | frames | mode | broad ms | narrow ms | total ms |
 |-------------------|-------:|------|---------:|----------:|---------:|
-| armadillo-rollers |    396 | GPU  |     3.03 |      3.91 |     6.94 |
-| armadillo-rollers |    396 | CPU  |     3.48 |      1.74 |     5.22 |
-| cloth-ball        |     43 | GPU  |    15.10 |      4.18 |    19.28 |
-| cloth-ball        |     43 | CPU  |    13.23 |     14.39 |    27.62 |
-| cloth-funnel      |    372 | GPU  |     4.20 |      2.10 |     6.30 |
-| cloth-funnel      |    372 | CPU  |     2.36 |      1.18 |     3.55 |
-| n-body            |     74 | GPU  |    52.61 |      6.43 |    59.04 |
-| n-body            |     74 | CPU  |    42.60 |     76.48 |   119.08 |
-| puffer-ball       |    120 | GPU  |   175.35 |     11.10 |   186.45 |
-| puffer-ball       |    120 | CPU  |   206.72 |    175.38 |   382.10 |
-| rod-twist         |  2,556 | GPU  |     3.45 |      6.48 |     9.93 |
-| rod-twist         |  2,556 | CPU  |     6.32 |     12.41 |    18.72 |
+| armadillo-rollers |    396 | GPU  |     1.13 |      3.65 |     4.78 |
+| armadillo-rollers |    396 | CPU  |     2.76 |      1.79 |     4.55 |
+| cloth-ball        |     43 | GPU  |     5.99 |      4.18 |    10.17 |
+| cloth-ball        |     43 | CPU  |     9.25 |     14.81 |    24.07 |
+| cloth-funnel      |    372 | GPU  |     1.93 |      2.05 |     3.98 |
+| cloth-funnel      |    372 | CPU  |     2.50 |      1.32 |     3.82 |
+| n-body            |     74 | GPU  |    41.92 |      6.29 |    48.22 |
+| n-body            |     74 | CPU  |    18.81 |     79.91 |    98.71 |
+| puffer-ball       |    120 | GPU  |   155.19 |     10.94 |   166.13 |
+| puffer-ball       |    120 | CPU  |   131.30 |    180.63 |   311.93 |
+| rod-twist         |  2,556 | GPU  |     2.43 |      6.53 |     8.96 |
+| rod-twist         |  2,556 | CPU  |     5.97 |     12.48 |    18.45 |
 
 A mean rather than a median over steps: the scene total is what a run costs, and the mean is the only average that divides back into it.
 
-Source: `benchmark/assessment/broadphase-cell2dmin.csv`
+Source: `benchmark/assessment/broadphase-cell2dminfv.csv`
 
 <!-- sccd:end per-frame -->
 
@@ -273,24 +273,24 @@ processors.
 
 <!-- sccd:begin broadphase -->
 
-| scene             | mode | cell2dmin structure ms | sweep structure ms | cell2dmin broad ms | sweep broad ms | faster           |
-|-------------------|------|-----------------------:|-------------------:|-------------------:|---------------:|------------------|
-| armadillo-rollers | GPU  |                    256 |                987 |               1199 |           2504 | cell2dmin 2.09x  |
-| armadillo-rollers | CPU  |                    763 |               1167 |               1380 |           2244 | cell2dmin 1.63x  |
-| cloth-ball        | GPU  |                     62 |                244 |                649 |            862 | cell2dmin 1.33x  |
-| cloth-ball        | CPU  |                    120 |                193 |                569 |           1292 | cell2dmin 2.27x  |
-| cloth-funnel      | GPU  |                    203 |                630 |               1562 |           1660 | cell2dmin 1.06x  |
-| cloth-funnel      | CPU  |                    630 |                818 |                879 |           1668 | cell2dmin 1.90x  |
-| n-body            | GPU  |                    202 |                648 |               3893 |           6075 | cell2dmin 1.56x  |
-| n-body            | CPU  |                    219 |                417 |               3152 |          11223 | cell2dmin 3.56x  |
-| puffer-ball       | GPU  |                   4189 |               7566 |              21042 |          69259 | cell2dmin 3.29x  |
-| puffer-ball       | CPU  |                   4298 |               5161 |              24807 |         420458 | cell2dmin 16.95x |
-| rod-twist         | GPU  |                   3093 |              12360 |               8812 |          21166 | cell2dmin 2.40x  |
-| rod-twist         | CPU  |                   5994 |              10018 |              16143 |          23905 | cell2dmin 1.48x  |
+| scene             | mode | cell2dminfv structure ms | sweep structure ms | cell2dminfv broad ms | sweep broad ms | faster             |
+|-------------------|------|-------------------------:|-------------------:|---------------------:|---------------:|--------------------|
+| armadillo-rollers | GPU  |                      168 |                987 |                  447 |           2554 | cell2dminfv 5.71x  |
+| armadillo-rollers | CPU  |                      770 |               1258 |                 1093 |           2330 | cell2dminfv 2.13x  |
+| cloth-ball        | GPU  |                       27 |                244 |                  258 |            867 | cell2dminfv 3.37x  |
+| cloth-ball        | CPU  |                      119 |                192 |                  398 |           1276 | cell2dminfv 3.21x  |
+| cloth-funnel      | GPU  |                      179 |                623 |                  718 |           1660 | cell2dminfv 2.31x  |
+| cloth-funnel      | CPU  |                      710 |                798 |                  929 |           1653 | cell2dminfv 1.78x  |
+| n-body            | GPU  |                       70 |                656 |                 3102 |           6223 | cell2dminfv 2.01x  |
+| n-body            | CPU  |                      206 |                437 |                 1392 |          11222 | cell2dminfv 8.06x  |
+| puffer-ball       | GPU  |                     1752 |               8056 |                18623 |          69996 | cell2dminfv 3.76x  |
+| puffer-ball       | CPU  |                     3580 |               5148 |                15756 |         411130 | cell2dminfv 26.09x |
+| rod-twist         | GPU  |                     1229 |              12637 |                 6221 |          21577 | cell2dminfv 3.47x  |
+| rod-twist         | CPU  |                     6430 |              10095 |                15261 |          23808 | cell2dminfv 1.56x  |
 
 `faster` names the winning strategy and by how much on the whole broad phase. A margin inside the run-to-run spread is a tie.
 
-Source: `benchmark/assessment/broadphase-cell2dmin.csv`
+Source: `benchmark/assessment/broadphase-cell2dminfv.csv`
 
 <!-- sccd:end broadphase -->
 
@@ -310,22 +310,22 @@ to 94.4 million.
 
 | processor | level |   elements | candidate pairs | structure ms | traversal ms | broad ms | narrow ms |    p |
 |-----------|------:|-----------:|----------------:|-------------:|-------------:|---------:|----------:|-----:|
-| CPU       |     0 |     92,230 |          17,982 |          0.9 |          1.8 |      2.7 |       0.5 | 1.01 |
-|           |     1 |    368,920 |          87,771 |          6.5 |          7.9 |     14.3 |       0.7 |      |
-|           |     2 |  1,475,680 |         379,818 |         21.9 |         33.7 |     55.7 |       2.0 |      |
-|           |     3 |  5,902,720 |       1,573,741 |         86.3 |        156.4 |    242.7 |       8.0 |      |
-|           |     4 | 23,610,880 |       6,402,081 |        181.2 |        642.7 |    823.9 |      32.5 |      |
-|           |     5 | 94,443,520 |      25,824,702 |        840.2 |       2804.1 |   3644.3 |     132.6 |      |
-| GPU       |     0 |     92,230 |          17,982 |          0.7 |          1.2 |      2.0 |       1.6 | 0.86 |
-|           |     1 |    368,920 |          87,771 |         15.2 |          4.3 |     19.6 |       1.9 |      |
-|           |     2 |  1,475,680 |         379,818 |         58.9 |         16.5 |     75.4 |       2.0 |      |
-|           |     3 |  5,902,720 |       1,573,741 |        238.3 |         59.2 |    297.5 |       2.4 |      |
-|           |     4 | 23,610,880 |       6,402,081 |        251.8 |        189.9 |    441.7 |       3.5 |      |
-|           |     5 | 94,443,520 |      25,824,702 |       1009.4 |        818.9 |   1828.3 |       8.1 |      |
+| CPU       |     0 |     92,230 |          17,982 |          1.0 |          1.4 |      2.4 |       0.3 | 1.03 |
+|           |     1 |    368,920 |          87,771 |          6.6 |          7.2 |     13.9 |       0.6 |      |
+|           |     2 |  1,475,680 |         379,818 |         23.3 |         28.3 |     51.6 |       2.1 |      |
+|           |     3 |  5,902,720 |       1,573,741 |         94.0 |        149.6 |    243.7 |       8.0 |      |
+|           |     4 | 23,610,880 |       6,402,081 |        183.3 |        619.5 |    802.9 |      32.5 |      |
+|           |     5 | 94,443,520 |      25,824,702 |        808.9 |       2993.0 |   3801.9 |     130.8 |      |
+| GPU       |     0 |     92,230 |          17,982 |          0.3 |          1.3 |      1.6 |       3.0 | 0.80 |
+|           |     1 |    368,920 |          87,771 |         10.9 |          5.9 |     16.8 |       3.1 |      |
+|           |     2 |  1,475,680 |         379,818 |         43.9 |         22.8 |     66.7 |       2.7 |      |
+|           |     3 |  5,902,720 |       1,573,741 |        168.3 |         92.4 |    260.7 |       3.5 |      |
+|           |     4 | 23,610,880 |       6,402,081 |         13.8 |        329.7 |    343.5 |       4.9 |      |
+|           |     5 | 94,443,520 |      25,824,702 |         50.4 |       1422.2 |   1472.5 |       9.2 |      |
 
 The two frames used here do not come into contact, so the narrow phase has almost no work to do and its column is dominated by noise rather than by element count; what this measures is the broad phase and the preparation that feeds it. Narrow-phase cost against problem size is in the per-case figure, over cases that do collide. Where the exponent is below 1 it is because the fixed cost visible at the smallest size is amortised as the mesh grows.
 
-Source: `benchmark/results/scaling/host-cell2dmin-mode2.txt, benchmark/results/scaling/device-cell2dmin-mode2.txt`
+Source: `benchmark/results/scaling/host-cell2dminfv-mode2.txt, benchmark/results/scaling/device-cell2dminfv-mode2.txt`
 
 <!-- sccd:end scaling -->
 
@@ -395,7 +395,7 @@ because these two frames do not come into contact.
 
 <!-- sccd:begin provenance -->
 
-- Timings: `benchmark/assessment/broadphase-cell2dmin.csv`, 6394 cases over 6 scenes, 2 independent repeats.
+- Timings: `benchmark/assessment/broadphase-cell2dminfv.csv`, 6394 cases over 6 scenes, 2 independent repeats.
 - Accuracy: `benchmark/results/oracle-gh200-all.csv`, every query of every scene checked against the dataset's exact roots.
 - Regenerate with `python3 -m report <bench.csv> <out> <oracle.csv> --embed=docs/BENCHMARKS.md`; add `--check` to assert the document still matches the data.
 
