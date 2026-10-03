@@ -17,7 +17,7 @@ every one of these was believed at the time on evidence that looked sufficient.
   spill" — see below
 - Corrected: "Scalable CCD misses 74% of curated contacts" and its timings — see
   section 8
-- Withdrawn: "SCCD is 6x to 24x cheaper per collision pair than Additive CCD" —
+- Withdrawn, then withdrawn again: the per-pair comparison with Additive CCD —
   see section 9
 - Demoted: a centroid-binned cell list, at one level and at two — see below
 - Corrected twice: "binning self pairs at the minimum corner loses pairs", then
@@ -351,6 +351,41 @@ used in, and timing it as if it were measures the harness's loop rather than the
 method. The check that would have caught it is the one that caught the second
 fault: assert that the candidate counts agree case by case, and ask what hardware
 each number was produced on.
+
+### Withdrawn in turn: "per pair additive CCD is about five times cheaper"
+
+That `9.2` ns per candidate is itself a units error, and the correction above is
+wrong in the direction it corrected.
+
+The harness times additive CCD twice. `narrow_ms` is its pass over the
+broad-phase candidates, and `query_narrow_ms` its pass over the curated queries,
+which for armadillo-rollers are `85,296,282` and `131,441` -- six hundred times
+apart. `9.2` is the second divided by the first's denominator. Dividing
+`query_narrow_ms` by the candidate count today gives `4.03` ns, the same order,
+on a chunk of the scene; dividing `narrow_ms` by it gives `338.18`.
+
+Measured over the whole of armadillo-rollers, both libraries answering one time
+of impact per candidate over a candidate list that agrees case by case on all
+`6,394` cases of the benchmark, on the same 72 threads:
+
+| | ns per candidate |
+|---|---|
+| SCCD Tight, `narrow_ms_s1` | **32.07** |
+| additive CCD, `narrow_ms` | **338.18** |
+
+So per pair SCCD is about ten times cheaper, and the trade against additive CCD
+is not speed against tightness: SCCD is ahead on both, its median earliness
+`3.39e-06` against `0.0286`. Additive CCD's cost is also insensitive to the
+thread binding -- 131.7, 130.9 and 131.4 ns per candidate unbound, under
+`numactl --cpunodebind=0` and under `taskset -c 0-71` -- so the original serial
+reading of `332` was a serial loop and nothing else.
+
+Two things follow for the harness. The `queries` column is the candidate count,
+so any per-pair figure has to come from a column measured over candidates:
+`narrow_ms_s1` for SCCD, `narrow_ms` for additive CCD. And SCCD's
+`query_narrow_ms` is not a per-query cost at all -- `8413.8` ms over `131,441`
+curated queries is `64` microseconds each, `10.8` ms per case over 781 cases,
+which is per-case buffer setup rather than search.
 
 ## 10. Explaining an artefact instead of removing it
 
