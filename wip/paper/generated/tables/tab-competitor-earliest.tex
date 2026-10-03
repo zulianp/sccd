@@ -24,29 +24,29 @@
     \toprule
     scene & library & earl.\ med. & earl.\ max & late & total (ms) & avg (ms) & speedup & tighter \\
     \midrule
-    armadillo-rollers & SCCD (CPU) & 1.24e-06 & 0.00144 & 0 & 2,940 & 3.76 & 5.31$\times$ & -- \\
-     & SCCD (GPU) & 1.39e-06 & 0.00144 & 0 & 2,472 & 3.17 & 6.31$\times$ & -- \\
-     & Scalable CCD (GPU) & -0.0102 & 0.0504 & 264 & 15,597 & 19.97 & 1.0$\times$ (ref) & late \\
+    armadillo-rollers & SCCD (CPU) & 1.24e-06 & 0.00144 & 0 & 2,954 & 3.78 & 4.96$\times$ & -- \\
+     & SCCD (GPU) & 1.4e-06 & 0.00144 & 0 & 2,434 & 3.12 & 6.02$\times$ & -- \\
+     & Scalable CCD (GPU) & -0.00868 & 0.042 & 268 & 14,653 & 18.76 & 1.0$\times$ (ref) & late \\
     \midrule
-    cloth-ball & SCCD (CPU) & 1.7e-07 & 3.23e-06 & 0 & 1,931 & 24.44 & 3.06$\times$ & 58.8$\times$ \\
-     & SCCD (GPU) & 2e-07 & 3.26e-06 & 0 & 472.0 & 5.97 & 12.51$\times$ & 49.8$\times$ \\
-     & Scalable CCD (GPU) & 9.97e-06 & 0.931 & 0 & 5,904 & 74.74 & 1.0$\times$ (ref) & 1.0$\times$ (ref) \\
+    cloth-ball & SCCD (CPU) & 1.66e-07 & 3.23e-06 & 0 & 1,933 & 24.46 & 2.79$\times$ & 60.0$\times$ \\
+     & SCCD (GPU) & 1.97e-07 & 3.26e-06 & 0 & 488.0 & 6.18 & 11.03$\times$ & 50.7$\times$ \\
+     & Scalable CCD (GPU) & 9.97e-06 & 0.931 & 0 & 5,382 & 68.13 & 1.0$\times$ (ref) & 1.0$\times$ (ref) \\
     \midrule
-    cloth-funnel & SCCD (CPU) & 0 & 0.0167 & 0 & 2,019 & 3.50 & 4.95$\times$ & -- \\
-     & SCCD (GPU) & 0 & 0.0167 & 0 & 1,950 & 3.38 & 5.13$\times$ & -- \\
-     & Scalable CCD (GPU) & 0 & 0.963 & 9 & 10,001 & 17.33 & 1.0$\times$ (ref) & 1.0$\times$ (ref) \\
+    cloth-funnel & SCCD (CPU) & 0 & 0.0167 & 0 & 2,009 & 3.48 & 4.67$\times$ & -- \\
+     & SCCD (GPU) & 0 & 0.0167 & 0 & 1,807 & 3.13 & 5.19$\times$ & -- \\
+     & Scalable CCD (GPU) & 0 & 0.963 & 10 & 9,381 & 16.26 & 1.0$\times$ (ref) & 1.0$\times$ (ref) \\
     \midrule
-    n-body & SCCD (CPU) & 0 & 0 & 0 & 16,354 & 112.01 & 1.90$\times$ & -- \\
-     & SCCD (GPU) & 0 & 0 & 0 & 3,604 & 24.68 & 8.61$\times$ & -- \\
-     & Scalable CCD (GPU) & 0 & 0 & 0 & 31,029 & 212.53 & 1.0$\times$ (ref) & 1.0$\times$ (ref) \\
+    n-body & SCCD (CPU) & 0 & 0 & 0 & 16,071 & 110.07 & 1.86$\times$ & -- \\
+     & SCCD (GPU) & 0 & 0 & 0 & 3,478 & 23.82 & 8.57$\times$ & -- \\
+     & Scalable CCD (GPU) & 0 & 0 & 0 & 29,814 & 204.20 & 1.0$\times$ (ref) & 1.0$\times$ (ref) \\
     \midrule
-    puffer-ball & SCCD (CPU) & 1.75e-05 & 0.000315 & 0 & 442,282 & 1842.84 & 0.66$\times$ & 3,349$\times$ \\
-     & SCCD (GPU) & 2.11e-05 & 0.000315 & 0 & 20,043 & 83.51 & 14.56$\times$ & 2,763$\times$ \\
-     & Scalable CCD (GPU) & 0.0584 & 0.925 & 0 & 291,839 & 1216.00 & 1.0$\times$ (ref) & 1.0$\times$ (ref) \\
+    puffer-ball & SCCD (CPU) & 1.77e-05 & 0.000315 & 0 & 439,132 & 1829.72 & 0.63$\times$ & 3,302$\times$ \\
+     & SCCD (GPU) & 1.95e-05 & 0.000315 & 0 & 19,225 & 80.10 & 14.42$\times$ & 3,005$\times$ \\
+     & Scalable CCD (GPU) & 0.0584 & 0.925 & 0 & 277,300 & 1155.42 & 1.0$\times$ (ref) & 1.0$\times$ (ref) \\
     \midrule
-    rod-twist & SCCD (CPU) & 7.32e-05 & 0.286 & 0 & 57,741 & 12.63 & 2.72$\times$ & 282$\times$ \\
-     & SCCD (GPU) & 7.31e-05 & 0.286 & 0 & 25,368 & 5.55 & 6.18$\times$ & 282$\times$ \\
-     & Scalable CCD (GPU) & 0.0206 & 0.706 & 26 & 156,806 & 34.30 & 1.0$\times$ (ref) & 1.0$\times$ (ref) \\
+    rod-twist & SCCD (CPU) & 7.32e-05 & 0.286 & 0 & 57,657 & 12.61 & 2.41$\times$ & 279$\times$ \\
+     & SCCD (GPU) & 7.24e-05 & 0.286 & 0 & 25,422 & 5.56 & 5.46$\times$ & 282$\times$ \\
+     & Scalable CCD (GPU) & 0.0204 & 0.706 & 28 & 138,831 & 30.37 & 1.0$\times$ (ref) & 1.0$\times$ (ref) \\
     \bottomrule
   \end{tabular}}
   \par\smallskip\footnotesize Scalable CCD's narrow phase is CUDA only, so it has

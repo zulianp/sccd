@@ -294,11 +294,12 @@ def pair_table(data):
                 tighter = ("late" if s["med"] is not None and s["med"] < 0
                            else "1.0$\\times$ (ref)")
             else:
-                # Additive CCD's total over ours: above one is our lead. Reported
-                # the other way round it read as a slowdown, and every value came
-                # out below one, so the column and its caption each asserted the
-                # opposite of the measurement.
-                cost = f"{them['total'] / s['total']:.1f}$\\times$"
+                # Ours over additive CCD's: above one is what the tighter answer
+                # costs us. This is the original orientation, and it was right --
+                # it only looked inverted because additive CCD was being measured
+                # on one core, so a name encoding the direction went wrong twice.
+                # "rel. cost" stays readable whichever way the ratio falls.
+                cost = f"{s['total'] / them['total']:.1f}$\\times$"
                 tighter = ratio(s["med"], them["med"])
             lines.append(
                 f"    {PRETTY[scene] if label.startswith('SCCD (CPU)') else ''} & {label} & "
@@ -314,25 +315,30 @@ def pair_table(data):
     return f"""\\begin{{table}}[htbp]
   \\centering
   \\caption{{NP per-pair, against additive CCD~\\citep{{li2021codim}} as the
-    IPC toolkit implements it. Both narrow phases are timed over the same
-    broad-phase candidates -- additive CCD answers one pair at a time and carries
-    no parallelism of its own, so it is driven by the parallel loop the toolkit's
-    own stepsize query uses, on the same $72$ threads -- and both are scored on
-    every curated query at the coordinates its exact root was computed for.
+    IPC toolkit implements it, at minimum separation $\\xi = 0$, which is the
+    setting that asks it for the same answer we report. Both narrow phases are
+    timed over the same broad-phase candidates -- additive CCD answers one pair at
+    a time and carries no parallelism of its own, so it is driven by the parallel
+    loop the toolkit's own stepsize query uses -- and both are scored on every
+    curated query at the coordinates its exact root was computed for. Each library
+    is given one Grace and the thread controls its own runtime reads: $72$ threads
+    under \\texttt{{numactl}} for both, with \\texttt{{OMP\\_PROC\\_BIND}} and
+    \\texttt{{OMP\\_PLACES}} for ours alone, since oneTBB inherits that affinity
+    and would otherwise run additive CCD's loop on one core.
     \\emph{{f.p.}} and \\emph{{missed}} are counts per pass over the case list.
     \\emph{{earliness}} is the query's exact root minus the time of impact
     reported for it, so a positive value is conservative, and {late_note}
     \\emph{{total}} is NP per-pair over the whole scene, summed over every case with the median
     over repeats taken first, and \\emph{{avg}} divides it by the candidates it
-    was handed. \\emph{{our lead}} is additive CCD's total over ours, so above one
-    is how many times cheaper the tighter answer is here, and \\emph{{tighter}} is its median
+    was handed. \\emph{{rel.\\ cost}} is our total over additive CCD's, so above one
+    is what the tighter answer costs, and \\emph{{tighter}} is its median
     earliness over ours, so above one is how many times further from the root its
     median answer sits.}}
   \\label{{tab:competitor-pair}}
   \\fittable{{%
 \\begin{{tabular}}{{llrrrrrrrr}}
     \\toprule
-    scene & library & f.p. & missed & earl.\\ med. & earl.\\ max & total (ms) & avg (ns/pair) & our lead & tighter \\\\
+    scene & library & f.p. & missed & earl.\\ med. & earl.\\ max & total (ms) & avg (ns/pair) & rel.\\ cost & tighter \\\\
     \\midrule
 {chr(10).join(lines)}
     \\bottomrule
