@@ -334,20 +334,23 @@ looser answer, against our device by $50.7\times$ on cloth-ball, $281\times$ on
 rod-twist and $2{,}844\times$ on puffer-ball.
 
 Additive CCD advances conservatively until contact without isolating a root, and
-is the cheaper narrow phase on every scene: by $2.03\times$ per candidate on
-cloth-funnel, between $3.37\times$ and $5.38\times$ on armadillo-rollers,
-cloth-ball, n-body and puffer-ball, and $11.91\times$ on rod-twist, against
-\textsc{Tight} on the host. The cost of that speed is the answer. Its median
-earliness runs from $8.6\times10^{-3}$ to $1.1\times10^{-1}$ where
-\textsc{Tight}'s runs from $3.0\times10^{-8}$ to $2.8\times10^{-4}$, which
-\cref{fig:toierr} shows as a separation of between $1.6$ and $4.8$ decades, and
-its worst case gives up almost the entire step on every scene, between $0.897$
-and $0.996$. The same gap appears in the false positives, $444$ against $24$ on
-armadillo-rollers and $27{,}374$ against $536$ on puffer-ball; that last figure
-sits about where our own \textsc{Relaxed} lands on the same scene,
-$27{,}380$. Neither library misses a contact anywhere and neither answers after
-a root, as \cref{thm:conservative} and the construction of the method each
-guarantee. A solver pays for the gap with a shortened step.
+it is the cheaper narrow phase per candidate: by $7.1\times$ on rod-twist,
+$4.9\times$ on armadillo-rollers, $2.7\times$ on cloth-funnel and $2.3\times$ on
+cloth-ball, against \textsc{Tight} on the host. The margin closes as the problem
+grows, and on the two scenes carrying the most candidate pairs the two meet, at
+$1.0\times$ on n-body and $1.1\times$ on puffer-ball, where billions of
+candidates keep every lane of the host busy.
+
+The cost of that speed is the answer. Its median earliness runs from
+$2.3\times10^{-2}$ to $1.1\times10^{-1}$ where \textsc{Tight}'s runs from
+$3.0\times10^{-8}$ to $3.2\times10^{-4}$, which \cref{fig:toierr} shows as a
+separation of between $1.9$ and $6.3$ decades, and its worst case gives up almost
+the entire step on every scene, between $0.897$ and $0.996$. The false positives
+follow: $444$ against $24$ on armadillo-rollers and $27{,}374$ against $536$ on
+puffer-ball, that last figure about where our own \textsc{Relaxed} lands on the
+same scene, $27{,}380$. Neither library misses a contact anywhere and neither
+answers after a root, as \cref{thm:conservative} and the construction of the
+method each guarantee. A solver pays for the gap with a shortened step.
 
 \subsection{Scaling with element count}
 \label{sec:results:scaling}

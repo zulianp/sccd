@@ -173,6 +173,16 @@ PROSE_CLAIMS = [
     ("1422.2", "tab-scaling"),
     ("2993.0", "tab-scaling"),
     ("130.8", "tab-scaling"),
+    # The per-candidate ratios against additive CCD, and the false-positive
+    # counts beside them. The paragraph quoting these had to be rewritten once
+    # because additive CCD was measured on one core, so they are guarded now.
+    ("7.1", "tab-competitor-pair"),
+    ("4.9", "tab-competitor-pair"),
+    ("2.7", "tab-competitor-pair"),
+    ("2.3", "tab-competitor-pair"),
+    # Thousands-separated values are not guardable this way: the prose writes
+    # 27{,}374 and the table 27,374, so no single needle matches both.
+    ("536", "tab-competitor-pair"),
 ]
 
 # Totals the prose states that are sums of a generated table's columns rather
