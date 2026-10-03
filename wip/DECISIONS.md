@@ -17,7 +17,8 @@ every one of these was believed at the time on evidence that looked sufficient.
   spill" — see below
 - Corrected: "Scalable CCD misses 74% of curated contacts" and its timings — see
   section 8
-- Withdrawn, then withdrawn again: the per-pair comparison with Additive CCD —
+- Withdrawn, then wrongly reinstated, then confirmed: additive CCD is about five
+  times cheaper per collision pair —
   see section 9
 - Demoted: a centroid-binned cell list, at one level and at two — see below
 - Corrected twice: "binning self pairs at the minimum corner loses pairs", then
@@ -352,40 +353,56 @@ method. The check that would have caught it is the one that caught the second
 fault: assert that the candidate counts agree case by case, and ask what hardware
 each number was produced on.
 
-### Withdrawn in turn: "per pair additive CCD is about five times cheaper"
+### Reinstated: "per pair additive CCD is about five times cheaper"
 
-That `9.2` ns per candidate is itself a units error, and the correction above is
-wrong in the direction it corrected.
+The correction above stands, and the section that withdrew it -- written on the
+regenerated comparison, which put additive CCD at `338.18` ns per candidate
+against SCCD's `32.07` -- was wrong. Additive CCD was running on one core.
 
-The harness times additive CCD twice. `narrow_ms` is its pass over the
-broad-phase candidates, and `query_narrow_ms` its pass over the curated queries,
-which for armadillo-rollers are `85,296,282` and `131,441` -- six hundred times
-apart. `9.2` is the second divided by the first's denominator. Dividing
-`query_narrow_ms` by the candidate count today gives `4.03` ns, the same order,
-on a chunk of the scene; dividing `narrow_ms` by it gives `338.18`.
+`OMP_PROC_BIND` and `OMP_PLACES` were exported for the whole comparison script,
+because SCCD's OpenMP narrow phase needs them. They pin the master thread, and
+oneTBB creates its workers against the inherited affinity mask, so additive
+CCD's `tbb::parallel_for` ran on one core however many CPUs the job had. Under
+`numactl --cpunodebind=0 --membind=0` with 72 CPUs:
 
-Measured over the whole of armadillo-rollers, both libraries answering one time
-of impact per candidate over a candidate list that agrees case by case on all
-`6,394` cases of the benchmark, on the same 72 threads:
-
-| | ns per candidate |
+| additive CCD, armadillo-rollers edge-edge | ns per candidate |
 |---|---|
-| SCCD Tight, `narrow_ms_s1` | **32.07** |
-| additive CCD, `narrow_ms` | **338.18** |
+| no `OMP_PROC_BIND`, no `OMP_PLACES` | **5.4** |
+| `OMP_PROC_BIND=close OMP_PLACES=cores` | **130.3** |
+| `OMP_PROC_BIND=false` | 4.0 |
+| `OMP_PROC_BIND=close`, `OMP_NUM_THREADS=1` | 130.0 |
 
-So per pair SCCD is about ten times cheaper, and the trade against additive CCD
-is not speed against tightness: SCCD is ahead on both, its median earliness
-`3.39e-06` against `0.0286`. Additive CCD's cost is also insensitive to the
-thread binding -- 131.7, 130.9 and 131.4 ns per candidate unbound, under
-`numactl --cpunodebind=0` and under `taskset -c 0-71` -- so the original serial
-reading of `332` was a serial loop and nothing else.
+The last row is the control: the thread count makes no difference, so the cost is
+the binding. And the loop scales -- 131.5, 33.0, 9.3 and 3.7 ns per candidate at
+1, 4, 16 and 72 CPUs, which is 35.5x over 72 -- so there was never anything wrong
+with the parallel form, only with the affinity it inherited.
 
-Two things follow for the harness. The `queries` column is the candidate count,
-so any per-pair figure has to come from a column measured over candidates:
-`narrow_ms_s1` for SCCD, `narrow_ms` for additive CCD. And SCCD's
-`query_narrow_ms` is not a per-query cost at all -- `8413.8` ms over `131,441`
-curated queries is `64` microseconds each, `10.8` ms per case over 781 cases,
-which is per-case buffer setup rather than search.
+Measured with each library given the controls its own runtime reads, on one Grace:
+
+| armadillo-rollers edge-edge, 72 CPUs | ns per candidate |
+|---|---|
+| additive CCD | **3.7** |
+| SCCD Tight, per pair | **20.0** |
+
+So per pair additive CCD is about five times cheaper, which is what section 9
+said. The trade against it is tightness: median earliness `3.39e-06` against
+`0.0286`.
+
+**What let this through twice.** The probe that was supposed to clear the binding
+reported `131.7`, `130.9` and `131.4` ns per candidate unbound, under `numactl`
+and under `taskset`, and three figures agreeing to within a percent were read as
+robustness. They agree because all three were single-core: `OMP_PROC_BIND` was
+exported in the probe as well, so the variable under test was never the one that
+mattered. A measurement that does not change when the thing being varied changes
+is evidence that the thing being varied is not in the path, and the next question
+is what else is.
+
+Two further points for the harness. Thread controls are per runtime -- OpenMP's
+affinity variables say nothing to oneTBB and silently damage it -- so a
+comparison applies each library's own and records them. And additive CCD is run
+at `min_distance = 0`, its slowest configuration, while the table's caption
+claims the configuration the IPC toolkit uses and no column records the value;
+a number from a positive `xi` answers a different question and has to say which.
 
 ## 10. Explaining an artefact instead of removing it
 
