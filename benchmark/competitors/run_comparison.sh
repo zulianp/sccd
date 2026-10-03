@@ -50,19 +50,27 @@ B=${SCCD_COMPETITOR_BUILD:-$SCRATCH/sccd/build-comp-f64}
 # be bound to one Grace (--cpus-per-task=72). The line records what the chunk
 # actually had.
 export OMP_NUM_THREADS=72
-# --cpus-per-task alone does not pin: measured on a compute node, a task with
-# --cpus-per-task=72 still reported an affinity list of 0-287, so SCCD's threads
-# spread over four Grace modules while oneTBB followed the mask and took all of
-# them. That makes the host comparison wrong in the other library's favour, which
-# is the direction least likely to be questioned. Bound the same way sweep.sh
-# binds its timing chunks.
-export OMP_PROC_BIND=close OMP_PLACES=cores
+# One Grace for every library, and the thread controls each one's own runtime
+# reads -- which are not the same controls.
+#
+# numactl gives all of them the same 72 CPUs and local memory. --cpus-per-task
+# alone does not: measured on a compute node, a task with --cpus-per-task=72
+# still reported an affinity list of 0-287.
+#
+# OMP_PROC_BIND and OMP_PLACES go to SCCD alone. They pin the master thread, and
+# oneTBB creates its workers against the inherited mask, so additive CCD's
+# parallel_for ran on one core and cost 130.3 ns per candidate where it costs 5.4
+# without them -- 24 times, measured, with OMP_NUM_THREADS=1 giving the same
+# 130.0 and so ruling out the thread count. Exporting them globally therefore
+# published additive CCD's single-core cost as its cost.
 if command -v numactl > /dev/null 2>&1; then
     SCCD_BIND="numactl --cpunodebind=0 --membind=0"
 else
     SCCD_BIND="taskset -c 0-71"
 fi
 export SCCD_BIND
+# Applied per library below, never to the whole script.
+SCCD_OMP_AFFINITY=(OMP_PROC_BIND=close OMP_PLACES=cores)
 echo "$(hostname) cpus=$(nproc) OMP_NUM_THREADS=$OMP_NUM_THREADS GPU=${CUDA_VISIBLE_DEVICES:-unset} $scene [$begin,$end)"
 
 tmp="${out}.partial"
@@ -90,7 +98,7 @@ run() {  # $1 label  $2.. command
 
 for space in device host; do
     for mode in 0 2; do
-        run "sccd-$space-m$mode" env "${range[@]}" \
+        run "sccd-$space-m$mode" env "${range[@]}" "${SCCD_OMP_AFFINITY[@]}" \
             SCCD_BENCH_EXECUTION_SPACE=$space SCCD_NARROWPHASE_MODE=$mode SCCD_BROADPHASE=sweep \
             "$B/sccd_bench" "$D" "$scene"
     done
@@ -103,7 +111,7 @@ done
 # the candidates the host produces, and changing them would change that
 # comparison rather than this one.
 for mode in 0 2; do
-    run "sccd-device-cell2dminfv-m$mode" env "${range[@]}" \
+    run "sccd-device-cell2dminfv-m$mode" env "${range[@]}" "${SCCD_OMP_AFFINITY[@]}" \
         SCCD_BENCH_EXECUTION_SPACE=device SCCD_NARROWPHASE_MODE=$mode SCCD_BROADPHASE=cell2dminfv \
         "$B/sccd_bench" "$D" "$scene"
 done
