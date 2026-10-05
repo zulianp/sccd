@@ -268,9 +268,9 @@ and no number reported here is placed beside one from a different allocation. ..
   - [x] §§ Scaling with thread count (2) (Make it self contained and more concise, do not cite the suplemental material, reintroduce the plot instead)
     - [x] ¶32  the structure build is the Amdahl bottleneck at 72 cores, with the plot (30) ·N ()
     - [x] ◧ fig:strong  strong scaling of the host pipeline by phase (8) (moved up from the supplement)
-  - [x] §§ Trading accuracy for speed (2) ()
-    - [x] ¶33  Relaxed is safe and looser; the false-positive cost is substantial (11) ·N ()
-    - [x] ¶34  the accuracy cost is unconditional, the speed gain conditional (5) ()
+  - [x] §§ Trading accuracy for speed --- REMOVED with 05's second acceptance
+        test, which it was the evaluation of. Two sentences elsewhere still
+        described that mode without introducing it; they are gone too.
 
 ## 09 · Limitations and threats to validity — REMOVED
 
@@ -336,8 +336,7 @@ the first two are now said nowhere.
   `make check` recomputes the span from `tab-reference` and fails if the
   abstract, the conclusion or the results section stops stating it.
 
-  `Trading accuracy for speed` still argues "each mode is therefore reported in
-  its own table" while inputting no table at all; the whole `-relaxed` family is
-  still orphaned.
+  The `-relaxed` family of tables is orphaned for good now: the subsection that
+  would have shown them went with 05's second acceptance test.
 - `results.tex` is 437 lines, a quarter of the article's prose, and holds 34 of its
   121 body paragraphs.
