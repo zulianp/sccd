@@ -15,7 +15,10 @@
 % the caption carries the meaning.
 %
 % One scale throughout. A thread cell is \cell wide and a block eight of them
-% across; the queue is as wide as the three blocks together, its left half
+% across, and every one of them is drawn the same because every one of them is
+% the same thing: one thread, holding one box in its registers. An earlier
+% version alternated two fills down the row, which asserted a pattern of idle
+% threads that nothing in the kernel produces; the queue is as wide as the three blocks together, its left half
 % written by this launch and its right half by the next. The shared stack is
 % drawn narrower than the thread row on purpose, so the spill arrow out of
 % block 1 passes it rather than crossing it.
@@ -27,7 +30,6 @@
   fld/.style={font=\tiny, text=sccdInk!85, inner sep=0.6pt},
   card/.style={draw=sccdGrid, line width=0.6pt, rounded corners=1.5pt},
   live/.style={draw=sccdTeal!55, line width=0.4pt, fill=sccdTeal!16},
-  idle/.style={draw=sccdInk!25, line width=0.4pt, fill=white},
   held/.style={draw=sccdPlum!60, line width=0.4pt, fill=sccdPlum!20},
   free/.style={draw=sccdInk!22, line width=0.3pt, fill=white},
   gone/.style={draw=sccdInk!18, line width=0.3pt, fill=sccdInk!4},
@@ -54,11 +56,7 @@
       \ifnum\i=#2\relax
         \draw[trace] ({\i*\cell},0.72) rectangle ({(\i+1)*\cell},{0.72+\cell});
       \else
-        \ifodd\i
-          \draw[live] ({\i*\cell},0.72) rectangle ({(\i+1)*\cell},{0.72+\cell});
-        \else
-          \draw[idle] ({\i*\cell},0.72) rectangle ({(\i+1)*\cell},{0.72+\cell});
-        \fi
+        \draw[live] ({\i*\cell},0.72) rectangle ({(\i+1)*\cell},{0.72+\cell});
       \fi}
     \foreach \i in {0,...,11} {
       \ifnum\i<#3\relax
@@ -119,11 +117,7 @@
       \ifnum\i=#2\relax
         \draw[trace] ({\i*\cell},0) rectangle ({(\i+1)*\cell},\cell);
       \else
-        \ifodd\i
-          \draw[live] ({\i*\cell},0) rectangle ({(\i+1)*\cell},\cell);
-        \else
-          \draw[idle] ({\i*\cell},0) rectangle ({(\i+1)*\cell},\cell);
-        \fi
+        \draw[live] ({\i*\cell},0) rectangle ({(\i+1)*\cell},\cell);
       \fi}
   \end{scope}}
 
