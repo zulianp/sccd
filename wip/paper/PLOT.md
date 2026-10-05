@@ -170,7 +170,14 @@ the device had the stretched tail.
     - [x] ¶10  overflow is counted and dropped; why that is sound; grow and retry (14) ()
     - [x] ¶11  sizing the queue from the depth cap (6) ·N ()
     - [x] ¶12  the device broad phase is a conventional port (5) ()
-    - [x] ◧ fig:gpu-workflow  redrawn: where a box lives, no prose inside (12) ·TIKZ (Make the figure look more modern, less text overall, clear and concise. )
+    - [x] ◧ fig:gpu-workflow  redrawn twice: where a box GOES, not where it lives (13) ·TIKZ (Make the figure look more modern, less text overall, clear and concise. / Needs some more work. It is unclear what goes into the global queue, show the full stack for the second thread group, and exactly how it places the entries in the global queue from the thread registers without the generic arrows. Remove the launch k, and threads, and add thread-block 0 1 2 labels. The yellow blocks, what are they?)
+          Second pass: the slot being written is drawn as itself, enlarged in
+          place, with the eight values an entry holds; block 1's stack is drawn
+          full, which is why it is the one that spills; every arrow runs from a
+          named thread to a named slot; `launch k` and `threads` are gone and the
+          blocks are labelled; and amber now means one box, followed from the
+          thread that set it aside to the thread of another block that resumes
+          it.
     - [x] ⟐ alg:device  the device kernel and its relaunching host loop (46) ()
   - [x] §§ Precision (2) ()
     - [x] ¶13  double internally is a requirement; single violates the definition (6) ·N ()

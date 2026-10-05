@@ -1,103 +1,142 @@
-% Where a box lives in the device narrow phase: a small per-block stack in
-% shared memory, and the half of a double-buffered global queue that the current
-% launch writes.
+% Where a box goes in the device narrow phase: out of the thread that split it,
+% into its own block's shared stack, and -- only once that stack is full -- into
+% the half of the global queue the current launch writes.
 %
-% No prose inside the drawing, following tikz/cellmin.tex: what the picture means
-% belongs in the caption, where it can be read at caption size and does not
-% compete with the marks. Labels here are one or two words and name parts, not
-% behaviour.
+% One box is followed in amber, from the thread that set it aside, to the slot it
+% is written into, to the thread of a different block that takes it in the next
+% launch. Every step happens at the slot it happens to, so no arrow in the
+% picture stands for "and then somehow".
 %
-% The geometry is one scale: a thread or a stack entry is \cell wide, a block is
-% eight threads across, and the queue is as wide as the three blocks together, so
-% the spill arrows land inside the half they write and the picture needs no
-% nudging by hand.
+% The slot the spill lands in is drawn as itself, enlarged in place rather than
+% called out beside the queue, with the eight fields it holds: the box in
+% (t, u, v), its depth in the search tree, and the query it belongs to.
+%
+% No prose inside the drawing, following tikz/cellmin.tex: labels name parts and
+% the caption carries the meaning.
+%
+% One scale throughout. A thread cell is \cell wide and a block eight of them
+% across; the queue is as wide as the three blocks together, its left half
+% written by this launch and its right half by the next. The shared stack is
+% drawn narrower than the thread row on purpose, so the spill arrow out of
+% block 1 passes it rather than crossing it.
 \begin{tikzpicture}[
   font=\scriptsize,
   >={Stealth[length=1.6mm, width=1.3mm]},
   lbl/.style={font=\scriptsize, text=sccdInk, inner sep=1.2pt},
   tag/.style={font=\scriptsize\itshape, text=sccdInk!75, inner sep=1.2pt},
-  card/.style={draw=sccdGrid, line width=0.6pt, rounded corners=1.5pt,
-               fill=sccdInk!3},
-  thread/.style={draw=sccdTeal!55, line width=0.4pt, fill=sccdTeal!14},
-  busy/.style={draw=sccdAmber, line width=0.6pt, fill=sccdAmber!35},
-  slot/.style={draw=sccdInk!30, line width=0.4pt, fill=white},
-  held/.style={draw=sccdPlum!60, line width=0.4pt, fill=sccdPlum!22},
-  flow/.style={->, draw=sccdInk!65, line width=0.6pt,
+  fld/.style={font=\tiny, text=sccdInk!85, inner sep=0.6pt},
+  card/.style={draw=sccdGrid, line width=0.6pt, rounded corners=1.5pt},
+  live/.style={draw=sccdTeal!55, line width=0.4pt, fill=sccdTeal!16},
+  idle/.style={draw=sccdInk!25, line width=0.4pt, fill=white},
+  held/.style={draw=sccdPlum!60, line width=0.4pt, fill=sccdPlum!20},
+  free/.style={draw=sccdInk!22, line width=0.3pt, fill=white},
+  gone/.style={draw=sccdInk!18, line width=0.3pt, fill=sccdInk!4},
+  trace/.style={draw=sccdAmber, line width=0.7pt, fill=sccdAmber!35},
+  push/.style={->, draw=sccdPlum, line width=0.7pt,
                shorten >=1pt, shorten <=1pt},
-  spill/.style={->, draw=sccdPlum, line width=0.7pt,
+  spill/.style={->, draw=sccdAmber!80!black, line width=0.8pt,
                 shorten >=1pt, shorten <=1pt},
   take/.style={->, draw=sccdMoss, line width=0.7pt,
                shorten >=1pt, shorten <=1pt},
 ]
 
-\def\cell{0.28}
-\def\blockw{2.24}   % 8 cells
-\def\gap{0.62}
-\def\pad{0.14}
-\def\qw{7.96}      % 3*\blockw + 2*\gap: the queue is as wide as the blocks
+\def\cell{0.26}       % one thread
+\def\sw{0.13}         % one stack slot
+\def\bw{2.08}         % a block: eight threads
+\def\tw{7.74}         % three blocks and two gaps of 0.75
 
-% One block card: #1 x of its left edge, #2 y of its baseline, #3 the thread
-% index drawn as busy (-1 for none), #4 how many stack entries are held.
-\newcommand{\blockcard}[4]{%
-  \begin{scope}[shift={(#1,#2)}]
-    \draw[card] (-\pad,-0.30-\pad) rectangle (\blockw+\pad,\cell+0.34+\pad);
+% A block card: #1 x of its left edge, #2 the amber thread (-1 for none),
+% #3 how many of the twelve drawn stack slots are held.
+\newcommand{\blockcard}[3]{%
+  \begin{scope}[shift={(#1,0)}]
+    \draw[card] (-0.14,-0.13) rectangle (\bw+0.14,1.12);
     \foreach \i in {0,...,7} {
-      \ifnum\i=#3\relax
-        \draw[busy] ({\i*\cell},0.34) rectangle ({(\i+1)*\cell},{0.34+\cell});
+      \ifnum\i=#2\relax
+        \draw[trace] ({\i*\cell},0.72) rectangle ({(\i+1)*\cell},{0.72+\cell});
       \else
-        \draw[thread] ({\i*\cell},0.34) rectangle ({(\i+1)*\cell},{0.34+\cell});
+        \ifodd\i
+          \draw[live] ({\i*\cell},0.72) rectangle ({(\i+1)*\cell},{0.72+\cell});
+        \else
+          \draw[idle] ({\i*\cell},0.72) rectangle ({(\i+1)*\cell},{0.72+\cell});
+        \fi
       \fi}
-    \foreach \i in {0,...,7} {
-      \ifnum\i<#4\relax
-        \draw[held] ({\i*\cell},0) rectangle ({(\i+1)*\cell},{0.26});
+    \foreach \i in {0,...,11} {
+      \ifnum\i<#3\relax
+        \draw[held] ({\i*\sw},0) rectangle ({(\i+1)*\sw},0.24);
       \else
-        \draw[slot] ({\i*\cell},0) rectangle ({(\i+1)*\cell},{0.26});
+        \draw[free] ({\i*\sw},0) rectangle ({(\i+1)*\sw},0.24);
       \fi}
   \end{scope}}
 
-% ---------------------------------------------------------------- launch k
-\blockcard{0}{0}{-1}{3}
-\blockcard{\blockw+\gap}{0}{4}{8}
-\blockcard{2*\blockw+2*\gap}{0}{-1}{2}
+\blockcard{0}{-1}{4}
+\blockcard{2.83}{7}{12}
+\blockcard{5.66}{-1}{2}
 
-\coordinate (ktl) at (-\pad,{\cell+0.34+\pad});
-\coordinate (ktr) at ({3*\blockw+2*\gap+\pad},{\cell+0.34+\pad});
-\node[lbl, anchor=south west] at ([yshift=0.6mm]ktl) {launch $k$};
-\node[tag, anchor=south east] at ([yshift=0.6mm]ktr) {threads};
-\node[tag, anchor=west] at ({3*\blockw+2*\gap+\pad+0.1},0.13)
-  {shared stack, $64$};
+\foreach \b/\x in {0/0, 1/2.83, 2/5.66}
+  \node[lbl, anchor=south west] at ({\x-0.14},1.15) {thread-block \b};
+\node[tag, anchor=west] at ({\tw+0.22},0.12) {shared stack};
 
-% Spill out of each block's stack into the half the launch writes. The three
-% arrows land inside $A$, since that is the half being written; spacing them
-% across it is what makes that legible without a word.
-\foreach \b in {0,1,2} {
-  \coordinate (sp\b) at ({\b*(\blockw+\gap)+\blockw/2},-0.30-\pad);
-  \coordinate (sq\b) at ({\qw/8+\b*\qw/8+0.25},-1.18);
-  \draw[spill] (sp\b) -- (sq\b);}
+% The ordinary path: a thread of block 0 sets a child aside and it lands in the
+% first free slot of its own block's stack.
+\draw[push] (0.65,0.72) .. controls (0.65,0.50) and (0.59,0.46) .. (0.585,0.26);
 
-% ---------------------------------------------------------------- the queue
-\begin{scope}[shift={(0,-1.62)}]
-  \draw[card, fill=white] (-\pad,-\pad) rectangle (\qw+\pad,{0.44+\pad});
-  \draw[draw=sccdPlum!55, line width=0.6pt, fill=sccdPlum!10]
-    (0,0) rectangle ({\qw/2},0.44);
-  \draw[draw=sccdInk!25, line width=0.6pt, fill=sccdInk!3]
-    ({\qw/2},0) rectangle (\qw,0.44);
-  \node[lbl, text=sccdPlum] at ({\qw/4},0.22) {$A$};
-  \node[lbl, text=sccdInk!55] at ({3*\qw/4},0.22) {$B$};
-  \node[tag, anchor=west] at (\qw+\pad+0.1,0.22) {global queue};
-\end{scope}
+% The spill: block 1's stack is full, so the thread writes its box into the slot
+% the queue's write cursor hands it, and that slot is drawn below as itself.
+\draw[spill] (4.78,0.72) -- (4.78,-0.30) -- (2.25,-0.30) -- (2.25,-0.50);
 
-% ------------------------------------------------------------- launch k+1
-\blockcard{0}{-3.0}{2}{1}
-\blockcard{\blockw+\gap}{-3.0}{5}{1}
-\blockcard{2*\blockw+2*\gap}{-3.0}{1}{1}
+% ------------------------------------------------------------ global queue
+% Left half, written by this launch: twelve slots already filled, then the slot
+% being written now, enlarged in place and showing what an entry holds.
+\draw[card] (-0.14,-1.12) rectangle (\tw+0.14,-0.42);
+\foreach \i in {0,...,6}
+  \draw[held] ({\i*0.0829},-0.95) rectangle ({(\i+1)*0.0829},-0.65);
+\draw[free] (3.78,-0.95) rectangle (3.87,-0.65);
+\foreach \i in {0,...,43}
+  \draw[gone] ({3.87+\i*0.08795},-0.95) rectangle ({3.87+(\i+1)*0.08795},-0.65);
+\draw[draw=sccdInk!45, line width=0.6pt] (3.87,-1.12) -- (3.87,-0.42);
 
-\foreach \b in {0,1,2} {
-  \coordinate (ra\b) at ({\qw/4+(\b-1)*0.52},-1.62);
-  \coordinate (rb\b) at ({\b*(\blockw+\gap)+\blockw/2},{-3.0+\cell+0.34+\pad});
-  \draw[take] (ra\b) -- (rb\b);}
+% The slot being written, drawn as itself at many times the width of its
+% neighbours, with the eight values an entry holds.
+\draw[trace] (0.58,-1.03) rectangle (3.78,-0.51);
+\foreach \i/\t in {0/$t_{\ell}$, 1/$t_{h}$, 2/$u_{\ell}$, 3/$u_{h}$,
+                   4/$v_{\ell}$, 5/$v_{h}$} {
+  \draw[draw=sccdAmber!55, line width=0.3pt]
+    ({0.58+(\i+1)*0.30},-1.03) -- ({0.58+(\i+1)*0.30},-0.51);
+  \node[fld] at ({0.58+(\i+0.5)*0.30},-0.77) {\t};}
+\draw[draw=sccdAmber!55, line width=0.3pt] (3.08,-1.03) -- (3.08,-0.51);
+\node[fld] at (2.730,-0.77) {depth};
+\node[fld] at (3.430,-0.77) {query};
 
-\node[lbl, anchor=north west] at (-\pad,-3.0-0.30-\pad-0.06)
-  {launch $k{+}1$, writing $B$};
+\node[lbl, anchor=south west] at (-0.10,-0.41) {$A$};
+\node[lbl, anchor=south east, text=sccdInk!55] at (7.84,-0.41) {$B$};
+\node[tag, anchor=west] at ({\tw+0.22},-0.77) {global queue};
+
+% ------------------------------------------------------- the next launch
+\newcommand{\threadrow}[2]{%
+  \begin{scope}[shift={(#1,-2.20)}]
+    \draw[card] (-0.14,-0.13) rectangle (\bw+0.14,{\cell+0.13});
+    \foreach \i in {0,...,7} {
+      \ifnum\i=#2\relax
+        \draw[trace] ({\i*\cell},0) rectangle ({(\i+1)*\cell},\cell);
+      \else
+        \ifodd\i
+          \draw[live] ({\i*\cell},0) rectangle ({(\i+1)*\cell},\cell);
+        \else
+          \draw[idle] ({\i*\cell},0) rectangle ({(\i+1)*\cell},\cell);
+        \fi
+      \fi}
+  \end{scope}}
+
+\threadrow{0}{-1}
+\threadrow{2.83}{-1}
+\threadrow{5.66}{3}
+
+\draw[take] (0.17,-0.96) .. controls (0.17,-1.70) and (1.43,-1.55)
+                         .. (1.43,-1.95);
+\draw[take] (0.42,-0.96) .. controls (0.42,-1.70) and (3.87,-1.55)
+                         .. (3.87,-1.95);
+\draw[spill] (2.25,-1.04) .. controls (2.25,-1.70) and (6.57,-1.55)
+                          .. (6.57,-1.95);
+\node[tag, anchor=west] at ({\tw+0.22},-2.07) {next launch};
 
 \end{tikzpicture}

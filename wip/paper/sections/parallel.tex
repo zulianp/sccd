@@ -201,13 +201,20 @@ because no part of it walks a window sequentially.
 \begin{figure}[htbp]
   \centering
   \resizebox{0.86\linewidth}{!}{\input{tikz/gpu-workflow}}
-  \caption{Where a box lives in the device narrow phase. Each block keeps a
-    $64$-entry stack in shared memory, visible only to its own threads, and
-    spills beyond that into the half of the global queue that the current launch
-    writes. The launch that follows reads that half and writes the other, so a
-    producer and its consumer are never in the same launch and nothing spins. A
-    subtree that crosses into the queue becomes available to every block, where
-    a larger shared stack would have kept it inside the block that seeded it.}
+  \caption{Where a box goes in the device narrow phase. A thread that splits
+    its box descends into one child and sets the other aside; the box set aside
+    goes into its own block's stack in shared memory, which holds $64$ entries
+    and no other block can read (thread-block $0$). When that stack is full, as
+    in thread-block $1$, the thread claims a slot in the half of the global
+    queue this launch writes --- by an atomic increment of that half's write
+    cursor --- and copies the box there from its registers. One entry is the box
+    itself, as three intervals, together with its depth in the search tree and
+    the query it belongs to; the slot being written is drawn at many times the
+    width of its neighbours to show them. The next launch reads that half and
+    writes the other, so a producer and its consumer are never in the same
+    launch and nothing spins, and the entry is taken by whichever block's thread
+    claims it. In amber, one box followed from the thread that set it aside to
+    the thread of another block that resumes it.}
   \label{fig:gpu-workflow}
 \end{figure}
 
