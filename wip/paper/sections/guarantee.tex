@@ -53,9 +53,9 @@ sooner, so it accepts an \emph{ancestor} of the box a tighter test would have
 accepted. An ancestor's lower bound in $t$ is at or before its descendant's, so
 the looser test reports at or earlier than the tighter one, which costs accuracy
 and produces false positives while remaining unable to produce a late answer or
-a miss. \textsc{Relaxed} and \textsc{Tight} therefore differ in accuracy and
-speed and not in safety, and the two can be compared on accuracy with no safety
-caveat attached.
+a miss. Two acceptance tests therefore differ in accuracy and speed and
+not in safety, and either can be compared with the other on accuracy with no
+safety caveat attached.
 
 \paragraph{A depth or stack cap is an accuracy limit, not a safety one.} By
 (iii) exhaustion accepts at the box's $t$ lower bound. An undersized cap

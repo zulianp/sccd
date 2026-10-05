@@ -21,7 +21,7 @@ which \cref{sec:results:proc} makes under controlled conditions.
 \begin{table}[htbp]
   \centering
   \caption{Boxes required per query on cloth-funnel over all $881{,}694$ queries
-    of the scene, \textsc{Tight}. In the host column most queries are settled by
+    of the scene. In the host column most queries are settled by
     a single box and a handful need tens of thousands, four orders of magnitude
     apart; the device column indicates the tail a work list has to absorb, with
     \cref{sec:results:proc} making the like-for-like comparison. It was measured
@@ -102,7 +102,7 @@ which \cref{sec:results:proc} makes under controlled conditions.
 \end{algorithm}
 
 By \cref{tab:difficulty}, a per-query SIMD kernel would leave most lanes idle, so
-the \textsc{Tight} host kernel of \cref{alg:host} takes the \emph{box} as the
+the host kernel of \cref{alg:host} takes the \emph{box} as the
 unit of work across a vector of $V$ lanes ($V=8$ on AVX-512 and AVX2, $4$ on
 NEON). A lane holds a box that may belong to any query and is refilled from a
 shared stack once its box is decided, reloading geometry only on a query change;

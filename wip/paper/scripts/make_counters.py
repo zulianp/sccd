@@ -108,8 +108,8 @@ def device_table() -> str:
     body = "\n".join("    " + r for r in rows)
     return rf"""\begin{{table}}[!tb]
   \centering
-  \caption{{Nsight Compute counters for the device narrow-phase kernel, \op{{Tight}}
-    mode, at the shipped parameters. \emph{{DRAM}} is read and write together for
+  \caption{{Nsight Compute counters for the device narrow-phase kernel,
+    at the shipped parameters. \emph{{DRAM}} is read and write together for
     one launch and the share of sustained peak bandwidth it represents;
     \emph{{lanes}} is how many of a warp's $32$ are doing useful work when an
     instruction issues; \emph{{issue}} is instructions per scheduler cycle out of a

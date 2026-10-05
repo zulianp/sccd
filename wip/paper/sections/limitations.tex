@@ -26,8 +26,8 @@ $4.6\times10^{-5}$. An accuracy claim tighter than that, made on the mesh path,
 measures the rounding and not the search.
 
 Deliberately inflicting that rounding shows the size of its effect. On the same
-$98{,}757$ armadillo-rollers edge-edge queries, \textsc{Tight} reports nothing
-missed and nothing late on the shipped double-precision geometry, and $4$ missed
+$98{,}757$ armadillo-rollers edge-edge queries, the narrow phase reports
+nothing missed and nothing late on the shipped double-precision geometry, and $4$ missed
 and $25{,}485$ late once the input is first rounded through single precision. A
 control settles where the fault lies: a host kernel bit-identical to
 TightInclusion, already computing in double, reports $4{,}543$ late under the
@@ -46,10 +46,10 @@ pins a time of impact to better than about $10^{-6}$ will be flaky. The same
 applies to the quad path.
 
 Non-determinism of that kind can also hide a defect. During this evaluation one
-repeat of one scene showed the device \textsc{Relaxed} kernel missing $2$
-collisions and reporting $5$ late of $15{,}957$ queries. The next repeat over
-identical input was clean, as were the other five scenes and the other three
-modes across the remaining $65{,}079{,}040$ checks of that run. The cause was a
+repeat of one scene showed a device kernel missing $2$ collisions and reporting
+$5$ late of $15{,}957$ queries. The next repeat over identical input was clean,
+as were the other five scenes across the remaining $65{,}079{,}040$ checks of
+that run. The cause was a
 single index, which pruned the root box against the first query's answer in
 place of its own. This occurs only when the first query reports exactly zero, so
 whether a collision was missed depended on block scheduling. Twelve repeats of

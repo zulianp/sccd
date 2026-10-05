@@ -336,19 +336,18 @@ rod-twist and $2{,}844\times$ on puffer-ball.
 Additive CCD advances conservatively until contact without isolating a root, and
 it is the cheaper narrow phase per candidate: by $7.1\times$ on rod-twist,
 $4.9\times$ on armadillo-rollers, $2.7\times$ on cloth-funnel and $2.3\times$ on
-cloth-ball, against \textsc{Tight} on the host. The margin closes as the problem
+cloth-ball, against our narrow phase on the host. The margin closes as the problem
 grows, and on the two scenes carrying the most candidate pairs the two meet, at
 $1.0\times$ on n-body and $1.1\times$ on puffer-ball, where billions of
 candidates keep every lane of the host busy.
 
 The cost of that speed is the answer. Its median earliness runs from
-$2.3\times10^{-2}$ to $1.1\times10^{-1}$ where \textsc{Tight}'s runs from
+$2.3\times10^{-2}$ to $1.1\times10^{-1}$ where ours runs from
 $3.0\times10^{-8}$ to $3.2\times10^{-4}$, which \cref{fig:toierr} shows as a
 separation of between $1.9$ and $6.3$ decades, and its worst case gives up almost
 the entire step on every scene, between $0.897$ and $0.996$. The false positives
 follow: $444$ against $24$ on armadillo-rollers and $27{,}374$ against $536$ on
-puffer-ball, that last figure about where our own \textsc{Relaxed} lands on the
-same scene, $27{,}380$. Neither library misses a contact anywhere and neither
+puffer-ball. Neither library misses a contact anywhere and neither
 answers after a root, as \cref{thm:conservative} and the construction of the
 method each guarantee. A solver pays for the gap with a shortened step.
 
@@ -414,24 +413,3 @@ it at seventy-two and holds the whole pipeline to between $13.2\times$ and
 $24.0\times$. Three reductions and histograms over every box account for the
 plateau, and what remains once they are parallel is a fixed cost per call rather
 than a share of the work. \Supp{} gives the curves and the per-phase figures.
-
-\subsection{Trading accuracy for speed}
-\label{sec:results:relaxed}
-
-\textsc{Relaxed} accepts a box sooner (\cref{sec:np:modes}). It is as
-conservative as \textsc{Tight}, with zero missed and zero late, since by
-\cref{thm:conservative} a looser acceptance test reports earlier and never
-later, but it is looser at the median earliness by $27\times$ on
-armadillo-rollers, $9.21\times10^{-5}$ against $3.41\times10^{-6}$, and the
-false-positive cost is substantial: on rod-twist it reports $244{,}973$ contacts
-that do not exist against \textsc{Tight}'s $1{,}245$, on $285{,}431$ queries
-carrying an exact root, and on puffer-ball $27{,}380$ against $558$. A solver
-pays for each with a shortened step, so on those two scenes \textsc{Relaxed} is
-both slower on the host and less useful; it earns its place on the device and on
-scenes whose contact set is small.
-
-The speed it buys is uneven, since accepting a box sooner also hands the next
-query a looser shared bound, so the search prunes less and on the host that can
-cost more than the earlier acceptance saves. The accuracy cost is unconditional
-while the speed gain is conditional, and each mode is therefore reported in its
-own table.

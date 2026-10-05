@@ -45,12 +45,10 @@ On acceptance \cref{alg:np} reports the box's \emph{lower} bound in $t$, never i
 midpoint or upper bound, and every exit that is not a rejection accepts; these two
 facts constitute the safety argument \cref{sec:guarantee} makes precise.
 
-\subsection{Two acceptance tests}
+\subsection{The acceptance test}
 \label{sec:np:modes}
 
-Both instantiations of \op{Accept} and \op{Split} are conservative, differing in
-how tight an answer they return and in how long they take to return it. The
-first, \textsc{Tight}, is TightInclusion's test transcribed:
+\op{Accept} and \op{Split} are TightInclusion's test transcribed:
 \begin{equation} \label{eq:accept-tight} \textsc{Accept}(\dom) \;=\;
 \underbrace{\bigl(\forall d:\ [\underline{F}_{d},\overline{F}_{d}] \subseteq
 [-\epsilon_{d},\epsilon_{d}]\bigr)}_{\text{function box inside the error box}}
@@ -62,39 +60,10 @@ a dyadic rational, exact in binary floating point while the depth stays below th
 significand's width; the implementation relies on none of this, checking that the
 midpoint separates the endpoints and accepting the box when it does not.
 
-The second, \textsc{Relaxed}, accepts on a \emph{codomain} width measured against
-a \emph{domain} tolerance, $\forall d: \overline{F}_{d}-\underline{F}_{d} \le
-\tau_{d}$, plus the same error-box condition and two degenerate cases. Comparing
-quantities of different units makes the test loose, so it accepts earlier and
-reports a time of impact further before the true one, a trade
-\cref{sec:results:relaxed} quantifies and which does not run one way. Both tests
-also require $\dom.t_{\ell} > 0$, refusing a contact at exactly $t=0$ that would
-otherwise stall a solver using $\toi$ as a step length; measured against the exact
-roots it costs nothing, missing no collision and reporting no late time of impact.
-
-\subsection{The adaptive splitter, and what measuring it showed}
-\label{sec:np:split}
-
-\textsc{Relaxed} and the quad kernel split an axis several ways at once, cutting
-it at $N=2$ interior points into three children, each point a one-dimensional
-Gauss--Newton step against the linearisation of $\Fdiff$ along the axis, clamped
-to within $0.45h$ of its nominal position for uniform spacing $h$. It is about
-$1.6\times$ faster than a uniform grid, which needs five sub-intervals where this
-uses three, and measurement establishes three further properties. It adapts only
-marginally, the nominal point cancelling exactly from the Gauss--Newton step, so
-all $N$ splitters solve for the same least-squares point and $95.9\%$ are pinned
-at their clamp; the clamp, not the Newton step, is what makes each child a bounded
-fraction of its parent, and an unclamped version fails to terminate. Placement
-cannot affect correctness, since the children tile the parent and every child is
-still tested, so the splitter governs performance alone. And a principled
-alternative performs worse: a chord-based splitter aimed at the largest root-free
-region ran $2.7\times$ slower and isolated \emph{less} dead volume, $56.7\%$
-against $61.1\%$, because what is dead and what is rejectable do not match ---
-rejecting a child needs a \emph{single} component to exclude the origin over the
-whole child, and only about $58\%$ of the axis is rejectable that way against
-$68.4\%$ that is root-free pointwise. A multi-way split does better because
-different children may die by different components, an advantage a single
-well-placed cut lacks.
+The test also requires $\dom.t_{\ell} > 0$, refusing a contact at exactly $t=0$
+that would otherwise stall a solver using $\toi$ as a step length; measured
+against the exact roots it costs nothing, missing no collision and reporting no
+late time of impact.
 
 \subsection{Order independence}
 \label{sec:np:order}
@@ -168,7 +137,9 @@ from the triangle kernel, which is built end to end around a four-point query
 packed into one vector register on a barycentric domain --- a vertex-quad query
 has five points on an independent domain, so the load, the tolerances, the error
 bound, the corner evaluation, the domain test and the split would all have to
-change at once. The path is \emph{not evaluated} in this paper, since every scene
+change at once. That kernel cuts an axis at two interior points into three
+children at once, each clamped to within a bounded fraction of its nominal
+position, where the triangle kernel halves one axis. The path is \emph{not evaluated} in this paper, since every scene
 in \cref{sec:results} is a triangle mesh and the error constant of
 \cref{sec:prelim:err} for the bilinear form is uncertified; what follows is a
 design verified for correctness against a densely sampled reference root, and not
