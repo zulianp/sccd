@@ -41,9 +41,29 @@ across queries when the caller asks only for the earliest impact.}
 \end{algorithmic}
 \end{algorithm}
 
-On acceptance \cref{alg:np} reports the box's \emph{lower} bound in $t$, never its
-midpoint or upper bound, and every exit that is not a rejection accepts; these two
-facts constitute the safety argument \cref{sec:guarantee} makes precise.
+Two properties of \cref{alg:np} are what make it conservative, and both are
+inherited from \citet{wang2021tight} rather than established here. The rejection
+on line~7 is the only step that can discard a box, and it is padded by the
+certified bound $\epsilon$ of \cref{eq:err}: since the computed hull differs from
+the exact one by at most $\epsilon$ componentwise, a box whose widened hull
+excludes the origin contains no root, so no box containing a root is ever
+discarded. Every other exit --- the acceptance test, the depth cap, a box the
+arithmetic can no longer bisect, a work list with no room left --- accepts the box
+and reports its \emph{lower} bound in $t$, never its midpoint or upper bound.
+Because \op{Split} tiles a parent with its children, some box on the chain
+holding the earliest root survives to such an exit, and the value reported there
+is at or before that root. Hence $\toi \le \toitrue$, with $\toi < \infty$
+whenever a contact occurs, and pruning against the running minimum cannot raise
+it (\cref{prop:order}).
+
+Everything else about the search is therefore free of safety consequences, and
+two of those consequences are used repeatedly below. A looser acceptance test
+stops refining sooner and so accepts an \emph{ancestor} of the box a tighter test
+would have accepted; an ancestor's $t$ lower bound is at or before its
+descendant's, so a looser test reports earlier and produces more false positives
+while remaining unable to report late or to miss. And a cap --- on depth, on a
+stack, on a queue --- is an accuracy limit and not a safety one, because
+exhaustion accepts.
 
 \subsection{The acceptance test}
 \label{sec:np:modes}
@@ -64,6 +84,25 @@ The test also requires $\dom.t_{\ell} > 0$, refusing a contact at exactly $t=0$
 that would otherwise stall a solver using $\toi$ as a step length; measured
 against the exact roots it costs nothing, missing no collision and reporting no
 late time of impact.
+
+Since rejection is the only unsound step, it is also the only place an
+implementation can lose a root, and it fails in one way: padding the
+origin-containment test by something that merely resembles the certified bound.
+Two substitutions occur in practice and both are silent. The first pads by the
+caller's distance tolerance $\tau$ in place of $\epsilon$. In double precision
+$\epsilon$ is at most $6.7\times10^{-15}$ against a typical tolerance of
+$3\times10^{-8}$, so the substitution changes no answer on any realistic input and
+no benchmark detects it, while leaving the search unsound for the caller who asks
+for a tolerance below the error bound --- the caller who most needs the
+guarantee. Padding by $\max(\tau,\epsilon)$ removes the dependence on what the
+caller passes, and is what the device kernels use. The second substitution pads
+by the machine epsilon itself, which for a bilinear query is about $30\times$ too
+small. A third failure belongs to the exits rather than to the rejection, and its
+symptom is counter-intuitive: a depth cap that \emph{drops} an exhausted box
+instead of accepting it misses a vertex falling straight through a stationary
+triangle in \emph{double} precision, on a query the same search resolves in
+single, because in double the box goes on subdividing until the cap fires and the
+cap then discards it.
 
 \subsection{Order independence}
 \label{sec:np:order}

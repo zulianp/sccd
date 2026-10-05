@@ -23,6 +23,7 @@ supplemental_material.pdf: supplemental_material.tex preamble.tex main.pdf \
 inputs:
 	$(PYTHON) scripts/make_inputs.py
 	$(PYTHON) scripts/make_counters.py
+	$(PYTHON) scripts/make_difficulty.py
 	$(PYTHON) scripts/make_symbols.py
 	$(PYTHON) scripts/make_competitors.py
 

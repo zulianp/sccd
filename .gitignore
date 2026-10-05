@@ -64,8 +64,10 @@ benchmark/sweep/
 !benchmark/assessment/*.csv
 # The sweep a published table was computed from. docs/BENCHMARKS.md names the
 # file each of its tables came from, and the claim that a number is reproducible
-# is only worth making if the rows behind it are in the repository.
+# is only worth making if the rows behind it are in the repository. The same
+# applies one level down, where the per-query box counts live.
 !benchmark/results/*.csv
+!benchmark/results/boxes/*.csv
 !spikes/research/**/*.csv
 *.pdf
 *.aux

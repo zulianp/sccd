@@ -1,51 +1,81 @@
 \section{Parallel implementation}
 \label{sec:parallel}
 
-\Cref{prop:order} lets the search be explored in any order, and the two
-narrow-phase implementations use that freedom in opposite directions: on the
-host, vector lanes are filled with work from unrelated queries
-(\cref{alg:host}); on the device, work is moved \emph{out} of the block that
-generated it (\cref{alg:device}). The broad phase needs no equivalent treatment,
-since its parallelism is already the outermost loop of
-\cref{alg:cell,alg:cellmin} and its count-then-fill output carries no
-contention. Both narrow-phase designs answer the same property of the problem:
-CCD query cost is heavy-tailed. \Cref{tab:difficulty} counts, for one scene, the
-boxes each query needed; most are decided by a single box and a few need
-millions, so any design that pins a query to a fixed execution resource is
-load-imbalanced by construction, and not by a factor of two. The design responds
-to the host column; the device column sets the size of the tail a work list must
-survive (\cref{sec:parallel:device}), but it predates that redesign and
-aggregates two code paths, so it supports no host-versus-device conclusion,
-which \cref{sec:results:proc} makes under controlled conditions.
+\Cref{prop:order} says the search tree may be explored in any order, which
+leaves the traversal free to be organised around the processor rather than
+around the query. Both implementations use that freedom, and they use it in
+opposite directions. The host kernel fills the lanes of one vector register with
+boxes drawn from different queries, so a lane never idles while its neighbours
+work (\cref{sec:parallel:host}). The device kernel does the reverse: it moves
+boxes \emph{out} of the block that produced them, into a queue that the next
+launch spreads over the whole device (\cref{sec:parallel:device}). The broad
+phase needs no such treatment, since its parallelism is already the outermost
+loop of \cref{alg:cell,alg:cellmin} and its count-then-fill output carries no
+contention.
 
-\begin{table}[htbp]
-  \centering
-  \caption{Boxes required per query on cloth-funnel over all $881{,}694$ queries
-    of the scene. In the host column most queries are settled by
-    a single box and a handful need tens of thousands, four orders of magnitude
-    apart; the device column indicates the tail a work list has to absorb, with
-    \cref{sec:results:proc} making the like-for-like comparison. It was measured
-    before the redesign of \cref{sec:parallel:device} and aggregates two device
-    code paths, of which $274$ queries on one account for $88\%$ of the boxes.}
-  \label{tab:difficulty}
-  \begin{tabular}{lrr}
-    \toprule
-    boxes needed & host queries & device queries \\
-    \midrule
-    $0$--$1$              & 617,471 & 587,953 \\
-    $\ge 8$               &  42,406 & 103,502 \\
-    $\ge 64$              &   1,073 &  33,902 \\
-    $\ge 1{,}024$         &     164 &  11,581 \\
-    $\ge 16{,}384$        &       3 &   1,386 \\
-    $\ge 1{,}048{,}576$   &       0 &     208 \\
-    \midrule
-    worst single query    &  48,561 & 19,737,992 \\
-    \bottomrule
-  \end{tabular}
-\end{table}
+What both designs answer is a single property of the problem: the cost of a CCD
+query is heavy-tailed. Most candidate pairs are settled by the first box the
+search looks at, while a few require tens of thousands or more
+(\cref{tab:difficulty}, at the end of this section). A design that pins one
+query to one execution resource --- a lane, a thread, a block --- is therefore
+load-imbalanced by construction, and not by a factor of two. The remainder of
+this section presents the two kernels and the parameters they were measured at;
+\cref{sec:parallel:why} returns to the measurement and to what the two
+distributions say about where the work goes.
 
-\subsection{Host: packing lanes across queries}
+\subsection{Host: lanes packed across queries}
 \label{sec:parallel:host}
+
+The unit of work on the host is the \emph{box}, not the query. A vector of $V$
+lanes ($V=8$ on AVX-512 and AVX2, $4$ on NEON) holds $V$ boxes that may belong
+to $V$ different queries, and the kernel advances all of them through one
+iteration of \cref{alg:np} together. Queries are processed in blocks of $V$
+consecutive candidates, one block per task of the parallel loop; a block's
+geometry, per-axis tolerances and certified error bound are computed once on
+entry, and each query contributes the root box $[0,\toi]\times[0,1]^{2}$ to a
+work list private to the block. A lane that decides its box takes the next box
+off that list, whichever query it belongs to, and the lane's geometry is
+reloaded only when the query actually changes. \Cref{prop:order} is what makes
+this legal: the answer does not depend on the order in which boxes are visited,
+so interleaving unrelated queries in one register cannot change it.
+
+One iteration proceeds in three phases, and the division is what allows a single
+flat vector sweep to serve lanes that are doing different things.
+
+\emph{Classify} decides the fate of every lane from quantities it already
+carries. Each box stores the value of $\Fdiff$ at its eight corners, so the
+componentwise hull of \cref{eq:hull} is a min and a max over stored values, taken
+across all lanes at once, and no function evaluation occurs in this phase at all.
+A lane whose hull excludes the origin by more than the certified bound is
+rejected and goes idle; a lane that the acceptance test of
+\cref{eq:accept-tight} accepts, or that has reached the depth cap, or whose box
+can no longer be bisected in floating point, lowers its query's running minimum
+to the box's $t$ lower bound and goes idle. Every remaining lane chooses its
+split axis, the one furthest past its own tolerance, and the midpoint of that
+axis.
+
+\emph{Evaluate} is the only phase that computes $\Fdiff$. A bisection cuts the
+parent at a mid-face, so the two children share that face and each inherits its
+outer face from the parent: the four corner values of the mid-face are all that
+the split needs. Those four parameter triples are laid out for every splitting
+lane and evaluated in one vector sweep, even though the lanes are splitting
+different axes --- the axis enters only through which parent coordinates are
+written into the sweep's input, so the arithmetic is identical across lanes.
+Lanes that are not splitting ride along and their results are discarded, which
+is cheaper than branching inside the loop.
+
+\emph{Assemble} forms the two children from the parent's corners and the newly
+evaluated mid-face. The upper child goes to the work list; the lower child stays
+in the lane, overwriting its parent in place. Keeping the lower child is what
+makes each lane depth-first in $t$: the child that may contain an earlier impact
+is examined first, so the running minimum falls sooner and prunes harder, the
+work list carries half the traffic, and the lane needs no refill and no geometry
+reload. Either child is dropped before it is written if the running minimum has
+already passed its $t$ lower bound, or --- for a vertex-face query, whose domain
+is the triangle $u+v\le1$ rather than the unit square --- if the child lies
+outside that domain. When the block is exhausted, its per-query minima are either
+written out per pair or folded into the shared minimum by compare-and-swap,
+according to what the caller asked for.
 
 \begin{algorithm}[!tb]
 \caption{Host narrow phase. Lanes hold boxes from different queries, which
@@ -55,34 +85,34 @@ which \cref{sec:results:proc} makes under controlled conditions.
 \begin{algorithmic}[1]
 \Function{HostNarrowPhase}{candidates $\Cand$}
   \ForAll{blocks $Q$ of $V$ consecutive queries \textbf{in parallel}}
-    \State load geometry, $\tau$, $\epsilon$ per query;\;
-           $\toi_{q} \gets$ shared minimum
-    \State $S \gets$ stack holding the root box of each query of $Q$; all $V$
-           lanes idle
+    \State load geometry, $\tau$ and $\epsilon$ per query;\;
+           $\toi_{q} \gets$ shared minimum, or $1$ when the caller wants one
+           answer per pair
+    \State $S \gets$ work list holding each query's root box with its $8$
+           corner values
+    \State all $V$ lanes idle
     \While{true}
       \ForAll{idle lanes $l$}
+        \Comment{refill}
         \State pop $\dom$ from $S$, discarding any with
                $\dom.t_{\ell} \ge \toi_{\dom.q}$
-          \Comment{refill}
         \State bind $\dom$ to lane $l$, reloading lane geometry only if
                $\dom.q$ changed
       \EndFor
-      \State \textbf{if} no lane is live \textbf{then break}
+      \State \textbf{if} no lane holds a box \textbf{then break}
       \State $[\underline{F},\overline{F}] \gets$ hull of the $8$ stored
              corners, per component, all lanes at once
-      \ForAll{live lanes $l$}
+      \ForAll{lanes $l$ holding a box}
         \Comment{phase 1: classify, evaluating nothing}
         \If{$\dom_{l}$ is rejected by the test of \cref{eq:err}}
           \State lane $l \gets$ idle
-        \ElsIf{\Call{Accept}{$\dom_{l}$} \textbf{or} $\mathrm{depth}_{l} \ge D$}
+        \ElsIf{\Call{Accept}{$\dom_{l}$} \textbf{or} $\mathrm{depth}_{l} \ge D$
+               \textbf{or} $\dom_{l}$ cannot be bisected}
           \State $\toi_{q_{l}} \gets \min(\toi_{q_{l}},\ \dom_{l}.t_{\ell})$;\;
                  lane $l \gets$ idle
         \Else
           \State $a_{l} \gets \arg\max_{k} \dom_{l}.w_{k}/\tau_{k}$;\;
                  $m_{l} \gets$ midpoint of axis $a_{l}$
-          \State \textbf{if} $m_{l}$ does not separate the endpoints
-                 \textbf{then} accept and idle lane $l$
-          \State \textbf{else} mark $l$ as splitting
         \EndIf
       \EndFor
       \State lay out the $4$ mid-face corner parameters of every splitting lane
@@ -90,164 +120,153 @@ which \cref{sec:results:proc} makes under controlled conditions.
         \Comment{phase 2}
       \ForAll{splitting lanes $l$}
         \Comment{phase 3: assemble}
-        \State push the upper child: the parent's outer face, the new mid face
+        \State push the upper child onto $S$: the parent's outer face, the new
+               mid face
         \State keep the lower child in lane $l$, overwritten in place
           \Comment{depth-first in $t$}
+        \State discard either child whose $t$ lower bound has passed
+               $\toi_{q_{l}}$, or which leaves the query's domain
       \EndFor
     \EndWhile
-    \State write $\toi_{q}$ out and lower the shared minimum by compare-and-swap
+    \State write $\toi_{q}$ out, or lower the shared minimum by
+           compare-and-swap
   \EndFor
 \EndFunction
 \end{algorithmic}
 \end{algorithm}
 
-By \cref{tab:difficulty}, a per-query SIMD kernel would leave most lanes idle, so
-the host kernel of \cref{alg:host} takes the \emph{box} as the
-unit of work across a vector of $V$ lanes ($V=8$ on AVX-512 and AVX2, $4$ on
-NEON). A lane holds a box that may belong to any query and is refilled from a
-shared stack once its box is decided, reloading geometry only on a query change;
-\cref{prop:order} makes this legal, since the answer is independent of the walk
-order. Two design decisions carry most of the performance.
-
-\emph{Each box stores the value of $\Fdiff$ at its eight corners.} A bisection
-splits at a mid-face, so the children share that face and each inherits its
-outer face from the parent: a split evaluates four corners where one without
-inheritance evaluates eight per child, a fourfold reduction in the operation
-that dominates the kernel, for a cheap $3\times8$ scalars carried per live box.
-
-\emph{Geometry is replicated per lane.} Since lanes hold different queries,
-indexing geometry by a lane's query would make every corner evaluation a gather;
-copying the $30$ values a lane needs on refill gives contiguous loads, and a
-refill costs far less than the $24$ corner evaluations it feeds.
-
-The iteration has three phases. \emph{Classify} decides every lane's fate from
-bounds it already carries and evaluates nothing. \emph{Evaluate} lays out every
-lane's mid-face corner parameters and performs one flat vector sweep even though
-lanes split different axes, predicating out those not splitting; about half
-split per iteration, so this removes roughly a quarter of the kernel's total
-work. \emph{Assemble} pushes the upper child to the stack and keeps the
-\emph{lower} child in the lane, so each lane is depth-first in $t$: the running
-minimum converges sooner and prunes harder, stack traffic halves, and a refill
-is skipped.
-
-The two query types peak at different lane widths, since a vertex-face corner
-costs one more multiply-add and one more subtraction than an edge-edge corner,
-so its sweeps take longer to amortise the per-lane scalar work between them. On
-NEON, over the whole scene, narrowing vertex-face from four lanes to two moves
-it from $297.7$ to $246.0\,\mathrm{ms}$ and widening edge-edge from two to four
-moves it from $599.9$ to $494.6\,\mathrm{ms}$, while eight and sixteen lanes are
-worse for both; the x86 widths above follow from the same operation count and
-have not been measured. A caveat generalises beyond this kernel: the two types
-must be timed in separate processes, since timed together the edge-edge figure
-varies by about $20\%$ with the lane width chosen for the \emph{vertex-face}
-instantiation, which the measurement never executes. The effect is one of code
-layout, not of work, and is large enough to manufacture or conceal a difference
-of the size reported here.
-
 \subsection{Device: a small stack, and a queue that redistributes}
 \label{sec:parallel:device}
 
+The device kernel runs one thread per query and one launch per round of work. A
+launch is given a set of boxes, searches them to completion without ever waiting
+for another launch, and writes the boxes it could not keep into a queue in global
+memory; the host then relaunches the same kernel on that queue. Within a launch
+the unit of work is again the box: a thread that finishes its own query's subtree
+takes a box belonging to any query from a stack its block shares, and reloads
+geometry only if the query changed. \Cref{fig:gpu-workflow} shows the two levels
+of storage and \cref{alg:device} gives both the kernel and the host loop around
+it.
+
+The per-block stack lives in shared memory and holds $64$ entries, which is
+small on purpose. The stack is where a query's subtree accumulates, so its
+capacity decides how long a block keeps a heavy query to itself: with room for a
+thousand boxes a single block grinds through a query of tens of thousands
+(\cref{tab:difficulty}) while its neighbours finish and idle, and no other block
+can help, because nothing the block holds is visible outside it. Spilling after $64$ entries pushes that
+subtree into the global queue instead, where the next launch distributes it over
+every block on the device. The effect is large and it is a scheduling effect, not
+a pruning one: the false positives and the reported times of impact are identical
+at every capacity (\cref{sec:parallel:tuning}).
+
+The global queue is double buffered. A launch reads one half and writes the
+other, never both, so a producer and its consumer are always in different
+launches and no thread ever waits on another thread's progress. This is the
+reason the queue is organised in rounds at all rather than as a single shared
+work pool: a pool whose writers spin on a compare-and-swap until a reader frees a
+slot deadlocks as soon as the queue is driven hard, which is precisely the
+condition that redistributing work creates. The host loop therefore alternates:
+it reads the write cursor after each launch and relaunches on what that launch
+produced, swapping the roles of the two halves, until a round produces nothing.
+
+A box that does not fit in the write buffer is counted and discarded. Discarding
+is sound rather than merely convenient: every exit from the search other than a
+rejection accepts the box at its $t$ lower bound, so a box never examined can
+only leave the reported time of impact earlier than the truth, never later
+(\cref{sec:np}) --- the failure direction that matters is closed by
+construction, and what an undersized queue costs is accuracy. The host reads the
+deficit, enlarges the queue by exactly that many entries and reruns the batch
+from its seeds, keeping the times of impact already found so that the rerun
+prunes harder. Growth is by the deficit rather than geometric because every call
+clears the queue it is given, so an oversized queue is paid for on every
+subsequent call and not once; the retry is bounded at $32$ rounds, after which
+the kernel reports the shortfall and stops, since giving up is conservative and
+spinning is not finite.
+
+A work list that is meant never to overflow can be sized from the search rather
+than from a measurement, which is what the vertex-quad kernel does with its
+per-thread stack: a pop pushes at most $k$ children, so a depth-$D$ search needs
+at most $1+kD$ entries for one query, and the headroom is nearly free --- a
+$257$-entry frame is $14.7\,\mathrm{KB}$ of which only the first few entries are
+ever touched, and register count and spill are unchanged between capacities $4$
+and $513$. The shared stack above is the opposite case and is sized against that
+rule on purpose: it is not meant to hold a query's frontier, only to pass it on.
+
+The device broad phase is a more conventional port of \cref{alg:cell,alg:cellmin}:
+count, prefix sum and scatter, with a radix sort and a device scan from
+CUB~\citep{cub} in place of their host equivalents, one box per thread, and a
+scalar inner loop where the host uses its $32$-lane mask. Its shape suits a GPU
+because no part of it walks a window sequentially.
+
 \begin{figure}[htbp]
   \centering
-  \resizebox{0.82\linewidth}{!}{\input{tikz/gpu-workflow}}
-  \caption{The device narrow phase. Each block keeps a small stack in shared
-    memory and spills the rest into one half of a double-buffered global queue;
-    a launch writes one half and reads the other, so a producer and its consumer
-    always sit in different launches. At the buffer swap the subtree of a
-    pathological query becomes available to every block, where a large shared
-    stack would have kept it inside the block that seeded it.}
+  \resizebox{0.86\linewidth}{!}{\input{tikz/gpu-workflow}}
+  \caption{Where a box lives in the device narrow phase. Each block keeps a
+    $64$-entry stack in shared memory, visible only to its own threads, and
+    spills beyond that into the half of the global queue that the current launch
+    writes. The launch that follows reads that half and writes the other, so a
+    producer and its consumer are never in the same launch and nothing spins. A
+    subtree that crosses into the queue becomes available to every block, where
+    a larger shared stack would have kept it inside the block that seeded it.}
   \label{fig:gpu-workflow}
 \end{figure}
 
 \begin{algorithm}[!tb]
 \caption{Device narrow phase: a kernel that runs to completion on the work it
-was given, and a host loop that relaunches it on what it spilled. $S$ is the per-block shared stack ($64$ entries) and $G$ the
-double-buffered global queue.}
+was given, and a host loop that relaunches it on what it spilled. $S$ is the
+per-block shared stack ($64$ entries) and $G$ the double-buffered global queue.}
 \label{alg:device}
 \footnotesize
 \begin{algorithmic}[1]
 \Function{Kernel}{read buffer $G_{\mathrm{in}}$, write buffer $G_{\mathrm{out}}$}
   \State thread $t$ takes one box: its own query's root, or one entry of
          $G_{\mathrm{in}}$
-  \While{any thread of the block is live \textbf{or} $S \ne \emptyset$}
+  \While{any thread of the block holds a box \textbf{or} $S \ne \emptyset$}
     \State refresh the block's bound from the global minimum
-      \Comment{every iteration; see text}
+      \Comment{every iteration; \cref{sec:parallel:tuning}}
     \State \textbf{if} $\dom.t_{\ell} \ge$ bound \textbf{then} idle this thread
-    \If{$\mathrm{depth} \ge D$ \textbf{or} $\dom$ cannot be split}
+    \If{$\mathrm{depth} \ge D$ \textbf{or} $\dom$ cannot be bisected}
       \State lower $\toi$ to $\dom.t_{\ell}$; idle this thread
         \Comment{exhaustion accepts}
     \Else
+      \State $\dom.t_{h} \gets \min(\dom.t_{h},\ \mathrm{bound})$
       \State $(\dom^{-},\dom^{+}) \gets$ \Call{Split}{$\dom$}
       \State evaluate \textbf{all $8$ corners of each child}
         \Comment{all eight; \cref{alg:host} inherits four}
-      \State keep those that contain the origin and can still improve the bound
-      \State \textbf{if} both survive \textbf{then} descend into the smaller
-             $t_{\ell}$, set the other aside
-      \State \textbf{else if} one survives \textbf{then} descend into it
+      \State discard a child the bound has passed or which leaves the domain
+      \State \textbf{if} \Call{Accept}{} holds for a child \textbf{then} lower
+             $\toi$ to its $t_{\ell}$ and discard it
+      \State \textbf{if} both children remain \textbf{then} descend into the
+             smaller $t_{\ell}$ and set the other aside
+      \State \textbf{else if} one remains \textbf{then} descend into it
              \textbf{else} idle this thread
     \EndIf
-    \If{a box is set aside}
+    \If{a box was set aside}
       \State claim a slot in $S$; if $S$ is full, bump-allocate in
              $G_{\mathrm{out}}$
-      \State if $G_{\mathrm{out}}$ is full, count the deficit and \textbf{drop}
-        \Comment{safe, \cref{sec:guarantee}}
+      \State if $G_{\mathrm{out}}$ is full, add to the deficit and
+             \textbf{discard}
+        \Comment{reports early, never late}
     \EndIf
-    \State idle threads claim from $S$ by compare-and-swap, reloading on a
-           query change
+    \State idle threads claim from $S$ by compare-and-swap, reloading geometry
+           on a query change
   \EndWhile
 \EndFunction
 \Statex
 \Function{Host}{candidates $\Cand$}
-  \State \Call{Kernel}{seeds, $A$};\quad $r \gets 0$
-  \While{the buffer just written is non-empty \textbf{and} $r < 32$}
-    \State \Call{Kernel}{it, the other one}; swap; $r \gets r+1$
-      \Comment{reader and writer never meet}
-  \EndWhile
-  \State \textbf{if} the deficit is non-zero \textbf{then} grow $G$ and rerun,
-         keeping the times of impact
+  \Repeat
+    \State \Call{Kernel}{seeds, $A$}
+      \Comment{one thread per query}
+    \While{the buffer just written is non-empty}
+      \State \Call{Kernel}{it, the other one}; swap the two
+        \Comment{reader and writer never meet}
+    \EndWhile
+  \Until{the deficit is zero \textbf{or} $32$ rounds have been spent}
+  \State between rounds: grow $G$ by the deficit, keeping the times of impact
+         found so far
 \EndFunction
 \end{algorithmic}
 \end{algorithm}
-
-The device kernel runs one thread per query, with its shape in
-\cref{fig:gpu-workflow} and its full form in \cref{alg:device}. In each of the
-three decisions below the straightforward alternative fails.
-
-\paragraph{The global queue.} The queue is double-buffered: a launch reads one
-buffer and writes the other, never both, so there is no producer--consumer
-handshake and nothing spins. A single shared buffer, whose writers spin on a
-compare-and-swap until a reader releases the slot, \emph{hangs the kernel} once
-the queue is driven hard, which is exactly the condition load balancing creates.
-
-\paragraph{The shared stack.} The shared stack is deliberately small, since it
-is where a query's subtree lives and a large one keeps a heavy query inside the
-block that seeded it: by \cref{tab:difficulty}, one block can work through a
-$19.7$-million-box query while its neighbours finish and idle. Spilling early
-hands those boxes to the global queue for the next launch to spread over every
-block. \Supp{} measures the effect: on cloth-funnel the device narrow phase
-falls from $4059.2$ to $37.2\,\mathrm{ms}$ as the per-block capacity drops from
-$1024$ to $64$ entries, with false positives and negatives identical at every
-capacity, so this is a scheduling result.
-
-\paragraph{Overflow handling.} A box that does not fit in the global queue is
-counted and discarded, which is safe since dropping a box can only leave the
-reported time of impact earlier than the truth, never later
-(\cref{sec:guarantee}). The host reads the deficit, grows the queue and re-runs
-the batch, keeping the times of impact found so far so later attempts prune
-harder; the retry is bounded at $32$ rounds, since giving up stays conservative
-whereas spinning is not finite.
-
-Two smaller decisions were settled by measurement: the running minimum is
-re-read from global memory on \emph{every} iteration, since refreshing less
-often was monotonically worse on all three scenes tested, the pruning a fresh
-bound buys exceeding what the atomic costs; and the unit of work is one thread
-per query, which beat one block per query by between $2.76\times$ and
-$4.43\times$, because the block-per-query kernel was bound by \emph{scheduling
-blocks} and not by the search. The device broad phase is a more conventional
-port: count, prefix sum and scatter, with a radix sort and a device scan from
-CUB~\citep{cub} for their host equivalents, one box per thread, and a scalar
-inner loop where the host uses its $32$-lane mask. Its shape suits a GPU, since
-no part of it walks a window sequentially.
 
 \subsection{Precision}
 \label{sec:parallel:precision}
@@ -266,29 +285,102 @@ computed time of impact back to float is not: round-to-nearest can round
 narrowing rounds toward $-\infty$. Reporting earlier is always safe; reporting
 later is the failure the whole design exists to prevent.
 
+\subsection{Parameters settled by measurement}
+\label{sec:parallel:tuning}
+
+Five quantities above are constants chosen by measurement rather than by
+derivation. They are collected here so that the two kernels can be read without
+them, and reported because a reimplementation has to choose them too.
+
+\emph{Vector width.} The two query types peak at different widths, since a
+vertex-face corner costs one more multiply-add and one more subtraction than an
+edge-edge corner and its sweeps therefore take longer to amortise the per-lane
+scalar work between them. On NEON, over cloth-funnel, narrowing vertex-face from
+four lanes to two moves it from $297.7$ to $246.0\,\mathrm{ms}$, and widening
+edge-edge from two to four moves it from $599.9$ to $494.6\,\mathrm{ms}$; eight
+and sixteen lanes are worse for both. The x86 widths quoted in
+\cref{sec:parallel:host} follow from the same operation count and have not been
+measured. One caveat generalises beyond this kernel: the two types must be timed
+in separate processes, because timed together the edge-edge figure varies by
+about $20\%$ with the lane width chosen for the \emph{vertex-face}
+instantiation, which the measurement never executes. That is an effect of code
+layout rather than of work, and it is large enough to manufacture or to conceal
+a difference of the size reported here.
+
+\emph{Shared-stack capacity.} Reducing the per-block capacity from $1024$
+entries to $64$ moves the device narrow phase from $4059.2$ to
+$37.2\,\mathrm{ms}$ on cloth-funnel, from $3133.7$ to $75.8\,\mathrm{ms}$ on
+armadillo-rollers and from $129.8$ to $105.9\,\mathrm{ms}$ on cloth-ball, with
+$256$ entries lying between. False positives and reported times of impact are
+identical at every capacity, which is what identifies the effect as
+redistribution and not pruning; the Relaxed mode, which averages fewer than four
+boxes per query and so never fills even a small stack, is unaffected.
+
+\emph{Bound refresh interval.} The running minimum is re-read from global memory
+on \emph{every} iteration of the device loop. Refreshing every $4$th, $16$th,
+$64$th or $256$th iteration instead was monotonically worse on all three scenes
+tested --- on cloth-funnel, $638.7\,\mathrm{ms}$ at every iteration against
+$3377.5\,\mathrm{ms}$ at every $256$th --- because the pruning a fresh bound buys
+exceeds what the atomic costs.
+
+\emph{Unit of work per query.} One thread per query beat one block per query by
+between $2.76\times$ and $4.47\times$ on the three scenes, with identical false
+positives and no missed collision, because the block-per-query kernel was bound
+by \emph{scheduling blocks} and not by the search: cloth-funnel issues $843{,}414$
+of them, each classifying $63$ boxes across $128$ threads.
+
+\emph{Work-list capacity.} This is the one of the five that shows up as a loss
+of accuracy rather than as a slowdown, and it is worth separating because the
+symptom misleads. A capacity sized from the mean is far too small for the tail. The host explores about $1.2$ boxes
+per query when a shared bound is pruning and about $11$ when it is not, which
+suggests a stack of a few dozen entries. On a vertex-quad query whose exact
+answer is $2/3$, a $32$-entry stack reports $0.6655369599$ where $128$ and $512$
+entries both report $0.6666666238$: the answer falls $1.13\times10^{-3}$ before
+the true value where the triangle path reaches $3.0\times10^{-7}$. All three
+values are early, so the guarantee holds throughout and only the step a solver
+can take is lost --- but read as a conservativeness failure it sends an
+implementer to the acceptance test, where the fault is not.
+
 \subsection{Why the work divides the way it does}
 \label{sec:parallel:why}
 
-\Cref{tab:difficulty} shows the device exploring many more boxes than the host on
-the same queries, and \cref{sec:results:proc} shows the device narrow phase
-losing to the host on four of six scenes. Both have the same two structural
-causes, neither a property of the hardware. The device re-evaluates all eight
-corners of both children at every split, where the host inherits four from the
-parent (\cref{sec:parallel:host}), a factor on the dominant operation paid on
-every box.
+\Cref{tab:difficulty} counts, for every candidate pair of one scene, the boxes
+each narrow phase examined before it answered. Both distributions are
+heavy-tailed, which is the premise both kernels were built on: seven queries in
+ten are settled by one box or none, while a few need tens of thousands and the
+worst needs millions. The two differ in where the weight sits, and the
+difference runs in opposite directions at the two ends of the distribution.
 
-The bound a box is pruned against is also probably sharper on the host at the
-moment it is needed, a candidate explanation and not an established one: host
-lanes descend depth-first in $t$ and publish continuously, so a query benefits
-from its neighbours' progress almost immediately, whereas the device walks a far
-wider frontier at any instant. The alternatives are easier to rule out than this
-explanation is to confirm, since the seeding would show on the easy queries too,
-and the acceptance test, the tolerances and the split rule are all transcribed
-from the host and would shift the whole distribution uniformly, whereas the
-measurement shows a stretched tail. Establishing the remaining explanation
-requires a single hard query traced box by box, which we have not done.
+In total the device examines $4.8\times$ as many boxes as the host,
+$106.9$ million against $22.2$, and the excess is in the \emph{middle} of the
+distribution rather than in the tail: $1.33$ million device queries need at
+least eight boxes against $0.82$ million host queries, and the ratio is similar
+at $64$ and at $1{,}024$. A per-box factor of this kind is what
+\cref{alg:host,alg:device} predict, since the device re-evaluates all eight
+corners of both children at every split where the host inherits four of each
+child's eight from its parent (\cref{sec:parallel:host}). That factor falls on
+the operation which dominates both kernels and is paid on every box.
+
+At the far end of the distribution the ordering reverses, and it is the host that
+owns the tail. Six host queries examine more than a million boxes and its worst
+examines $4{,}591{,}271$; no device query reaches a million and its worst
+examines $101{,}246$, $45\times$ fewer. This is the bound schedule rather than
+the search. A host block is seeded with the shared minimum as it stands when that
+block starts, so a block the scheduler runs early searches a window in $t$ that
+no other block has yet narrowed, and a hard query landing in such a block is
+searched almost unpruned. The device issues every query of the batch in one
+launch, so the minimum collapses while the hard queries are still being searched,
+and spilling bounds how long any one block can be held by a single query.
+
+Neither effect is a property of the hardware, and the second of them is the
+reason the device wins the narrow phase on the scenes with the most candidate
+pairs while losing it on the smallest (\cref{sec:results:proc}): the collapse of
+the shared bound within a launch is worth more the more queries the launch
+carries.
 
 The broad phase inverts both arguments, having no sequential dependence and no
 shared bound to lose. The GPU accordingly wins that phase on all six scenes, and
 the pipeline wins end to end on four of them despite losing the narrow phase on
 four. \Cref{sec:results} measures all of it.
+
+\input{generated/tables/tab-difficulty}

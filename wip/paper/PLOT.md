@@ -22,8 +22,8 @@ Trailing tags: `·N` states numeric results · `·HAND` no generator ·
 ## 01 · Abstract — abstract.tex (28)
 
 - [x] ¶1  frames CCD; conservativeness is asymmetric; names the assessment scale (8) ·N ()
-- [ ] ¶2  the three design pieces: cell list, SIMD packing, device queue (9) (we are using a custom variant of cell-list)
-- [ ] ¶3  headline results, including the configuration where SCCD loses (7) ·N (we emphasize the accuracy gain range with at most 7x price on performance, the loss is not really relevant in the abstract)
+- [x] ¶2  the three design pieces: cell list, SIMD packing, device queue (9) (we are using a custom variant of cell-list)
+- [x] ¶3  headline results, including the configuration where SCCD loses (7) ·N (we emphasize the accuracy gain range with at most 7x price on performance, the loss is not really relevant in the abstract)
 
 ## 02 · Introduction — intro.tex + related.tex + contribution.tex (173)
 
@@ -126,128 +126,164 @@ distinguish it from. Carried through sections 07, 08 and 09.
     - [x] ¶8  a separate quad kernel, unevaluated; its multi-way split; node order (21) ()
     - [x] ¶9  hoisting the split-plane evaluation is faster per query, slower overall (7) ·N ()
 
-## 06 · Parallel implementation — parallel.tex (294)
+## 06 · Parallel implementation — parallel.tex (377)
 
-- [ ] §  Parallel implementation (2) (Improve the prose, make it clearer)
-  - [ ] ¶1  both kernels answer heavy-tailed query cost, in opposite directions (16) ()
-  - [ ] ▦ tab:difficulty  boxes per query on cloth-funnel, host against device; 7 rows (25) ·HAND ·N ()
-  - [ ] §§ Host: packing lanes across queries (2) ()
-    - [ ] ⟐ alg:host  the host SIMD narrow phase, three phases (53) ()
-    - [ ] ¶2  the box, not the query, is the unit of work across lanes (7) ·N ()
-    - [ ] ¶3  storing eight corner values gives a fourfold reduction by inheritance (5) ·N ()
-    - [ ] ¶4  replicating geometry per lane avoids gathers (4) ·N ()
-    - [ ] ¶5  classify, evaluate, assemble; the lower child stays for depth-first in t (9) ·N ()
-    - [ ] ¶6  query types peak at different lane widths; cross-process timing caveat (13) ·N ()
-  - [ ] §§ Device: a small stack, and a queue that redistributes (2) ()
-    - [ ] ◧ fig:gpu-workflow  shared stack spilling into a double-buffered queue (11) ·TIKZ ()
-    - [ ] ⟐ alg:device  the device kernel and its relaunching host loop (49) ·N ()
-    - [ ] ¶7  one thread per query; the obvious alternative fails in three ways (3) ()
-    - [ ] ¶⟨The global queue⟩  double buffering avoids a handshake; one buffer hangs (5) ()
-    - [ ] ¶⟨The shared stack⟩  a small stack spills heavy queries out for redistribution (9) ·N ()
-    - [ ] ¶⟨Overflow handling⟩  dropping overflow is safe; bounded retry after growing (7) ·N ()
-    - [ ] ¶8  two measured decisions; the device broad phase is a conventional port (11) ·N ()
-  - [ ] §§ Precision (2) ()
-    - [ ] ¶9  double internally is a requirement; single violates the definition (6) ·N ()
-    - [ ] ¶10  templated storage; narrowing the output rounds toward minus infinity (6) ()
-  - [ ] §§ Why the work divides the way it does (2) ()
-    - [ ] ¶11  first cause: the device re-evaluates all eight corners per child (7) ·N ()
-    - [ ] ¶12  second cause, offered as a candidate: bound sharpness (10) ()
-    - [ ] ¶13  the broad phase inverts both arguments; the GPU wins it on all six (4) ·N ()
+Restructured and re-measured. The prose now exposes the two kernels and leaves
+the discussion to the end; the constants moved into a subsection of their own;
+`tab:difficulty` was re-measured on the current kernels, generated rather than
+typed, and moved to the end with the discussion. Section 07 was folded into
+this one and into 05, as directed.
 
-## 07 · Conservativeness by construction — guarantee.tex (119)
+Both algorithms were checked line by line against the shipped code. Four
+corrections: `alg:host` was missing the prune and the domain test applied to each
+child before it is written; `alg:device` was missing the clamp of the parent's
+$t$ upper bound to the running bound and the acceptance of a child; the drain
+loop was shown as bounded at 32 rounds when 32 bounds the grow-and-retry and the
+drain loop runs to exhaustion; and the thread-per-query margin was stated as
+`2.76x--4.43x` where the three measurements are 4.47, 2.76 and 4.43.
 
-- [ ] §  Conservativeness by construction (2) ()
-  - [ ] ¶1  measurement is not proof; promises the structural argument (5) ·N ()
-  - [ ] ⊢ thm:conservative  four conditions imply the reported ToI is never late (18) ()
-  - [ ] ⊢ proof  proof of thm:conservative (18) ()
-  - [ ] ¶2  announces three consequences (1) ()
-  - [ ] ¶⟨Accepting is always safe⟩  a looser accept costs accuracy only (9) ()
-  - [ ] ¶⟨A cap is an accuracy limit⟩  exhaustion accepts, so a small cap cannot miss (4) ()
-  - [ ] ¶3  an undersized work list costs four orders of accuracy; shows three values (13) ·N ()
-  - [ ] ¶4  all three values land early; misdiagnosis sends the reader elsewhere (5) ·N ()
-  - [ ] ¶5  derive capacity from the depth limit; headroom is nearly free (6) ·N ()
-  - [ ] ¶⟨Only an unsound rejection loses a root⟩  condition (i) is the whole exposure (4) ()
-  - [ ] ¶6  padding by the distance tolerance or by machine epsilon (8) ·N ()
-  - [ ] ¶7  a third failure: a depth cap that drops, visible only in double (6) ()
-  - [ ] ¶8  reduces conservativeness to a three-question checklist (8) ()
+**`tab:difficulty` was stale and the conclusion it supported has changed.** The
+old numbers were the pre-redesign diagnostic that motivated the device redesign,
+on 881,694 queries. Re-measured through the pipeline on all 25,192,698 candidate
+pairs of cloth-funnel, both processors, same candidates, same counters: the
+device examines 4.8x as many boxes in total, but the excess is in the middle of
+the distribution, and it is now the **host** that owns the tail --- six host
+queries above a million boxes and a worst of 4,591,271, against none and 101,246
+for the device. The discussion was rewritten accordingly: the old text claimed
+the device had the stretched tail.
 
-## 08 · Numerical experiments — results.tex (437)
+- [x] Update the algorithms and text to the current version of the code (the optimal only)
 
-- [ ] §  Numerical experiments (2) ()
-  - [ ] ¶1  three properties evaluated; the losses are included (5) ()
-  - [ ] §§ Experimental setup (2) ()
-    - [ ] ¶2  one GH200 module per measurement; threads bound with numactl (8) ·N ()
-    - [ ] ▦ tab:hardware  host and device specifications of one module; 11 rows (27) ·HAND ·N ()
-    - [ ] ¶3  derives the 8.5x/8.7x ratio speedups should be read against (9) ·N ()
-  - [ ] §§ Software (2) ()
-    - [ ] ¶4  build environment and the default search parameters (6) ·N ()
-    - [ ] ¶5  competitors used as released, same flags, same affinity (7) ()
-  - [ ] §§ Timing protocol and dataset (2) ()
-    - [ ] ¶6  defines the four timing tags (12) ()
-    - [ ] ¶7  device clocks synchronised; warm-up; repeats in separate processes (7) ·N ()
-    - [ ] ¶8  between- against within-allocation variance; the significance floor (7) ·N ()
-    - [ ] ¶9  describes the dataset and defines a case (7) ·N ()
-    - [ ] ▦ tab:dataset  scene sizes: cases, pairs per step, curated queries; 6 rows (1) ()
-  - [ ] §§ Conservativeness (2) ()
-    - [ ] ¶10  the central claim: nothing missed, nothing late (7) ·N ()
-    - [ ] ▦ tab:conservativeness  signed per-scene conservativeness; 6 rows (1) ()
-    - [ ] ¶11  why compare against exact roots, not TI; reports false positives (7) ·N ()
-  - [ ] §§ Against TightInclusion (2) ()
-    - [ ] ¶12  protocol: narrow phases only, over the same query sets (8) ()
-    - [ ] ◧ fig:reference  SCCD against TI, Scalable CCD and additive CCD per scene (17) ()
-    - [ ] ¶13  speed against TI per scene; rod-twist extreme, cloth-funnel the exception (7) ·N ()
-    - [ ] ¶14  defines earliness; the host matches TI on all twelve scene-phases (9) ·N ()
-    - [ ] ¶15  the device agrees closely, not exactly (4) ·N ()
-    - [ ] ¶16  explains the device gap as a different float operation sequence (11) ()
-    - [ ] ¶17  worst cases are intrinsic: grazing and already-touching configurations (5) ·N ()
-  - [ ] §§ CPU against GPU (2) ()
-    - [ ] ▦ tab:processor  per-scene totals and three phase ratios; 6 rows (1) ()
-    - [ ] ¶18  per-phase ratios; the margin rests on the narrow phase (8) ·N ()
-    - [ ] ¶19  the end-to-end winner per scene, including the two the host takes (12) ·N ()
-    - [ ] ¶20  supplement qualifiers: a standing gap, and drift through rod-twist (6) ·N ()
-    - [ ] ¶21  phase shares; broad phase tight around its median, narrow phase skewed (10) ·N ()
-    - [ ] ◧ fig:breakdown  phase shares per processor as stacked bars (9) ()
-    - [ ] ◧ fig:toierr  earliness distributions, SCCD above, additive CCD below (14) ·N ()
-  - [ ] §§ Against other implementations (2) ()
-    - [ ] ¶22  each competitor compared on the question it answers (8) ·N ()
-    - [ ] ¶23  the device beats Scalable CCD end to end on every scene (8) ·N ()
-    - [ ] ¶24  the broad-phase margin is standing; separates algorithm from implementation (10) ·N ()
-    - [ ] ◧ fig:bpvs  device broad phase against Scalable CCD's, step by step (11) ()
-    - [ ] ¶25  Scalable CCD reports late times of impact; traced to a buffer race (9) ·N ()
-    - [ ] ¶26  additive CCD is cheaper per candidate; the margin closes with size (7) ·N ()
-    - [ ] ¶27  that speed costs the answer: earliness and false positives (10) ·N ()
-  - [ ] §§ Scaling with element count (2) ()
-    - [ ] ¶28  refinement study design: only the processor varies, no contact (5) ·N ()
-    - [ ] ◧ fig:scaling  cost against element count, log-log, with fitted exponents (8) ()
-    - [ ] ¶29  the crossover point and the fitted exponents (9) ·N ()
-    - [ ] ¶30  structure against queries splits differently per processor (8) ·N ()
-    - [ ] ¶31  the narrow-phase column prices the rejection test alone (8) ·N ()
-  - [ ] §§ Scaling with thread count (2) ()
-    - [ ] ¶32  the structure build is the Amdahl bottleneck at 72 cores (13) ·N ()
-  - [ ] §§ Trading accuracy for speed (2) ()
-    - [ ] ¶33  Relaxed is safe and looser; the false-positive cost is substantial (11) ·N ()
-    - [ ] ¶34  the accuracy cost is unconditional, the speed gain conditional (5) ()
+- [x] §  Parallel implementation (2) (Improve the prose, make it clearer and more descriptive of the method and algorithms, leave the dicussion for the end of the section)
+  - [x] ¶1  the freedom of prop:order, spent in opposite directions (14) ()
+  - [x] ¶2  heavy-tailed query cost is what both designs answer (10) ()
+  - [x] §§ Host: lanes packed across queries (2) (More descriptive, exposition of the algorithm, less about the mirco-optimizations, which can have their own concise dedicated subsection)
+    - [x] ¶3  the box, not the query, is the unit of work across lanes (14) ()
+    - [x] ¶4  classify: every fate decided from stored corner values (11) ()
+    - [x] ¶5  evaluate: one flat sweep over four mid-face corners (10) ()
+    - [x] ¶6  assemble: the lower child stays, the upper is pushed (12) ()
+    - [x] ⟐ alg:host  the host SIMD narrow phase, three phases (49) ()
+  - [x] §§ Device: a small stack, and a queue that redistributes (2) (Less dictionary style, more descriptive paragraph for a scientific readership audience, clear desriptive and concise technical references)
+    - [x] ¶7  one thread per query, one launch per round of work (11) ()
+    - [x] ¶8  the small shared stack and why spilling early is the point (11) ·N ()
+    - [x] ¶9  the double-buffered queue; a single pool deadlocks (11) ()
+    - [x] ¶10  overflow is counted and dropped; why that is sound; grow and retry (14) ()
+    - [x] ¶11  sizing the queue from the depth cap (6) ·N ()
+    - [x] ¶12  the device broad phase is a conventional port (5) ()
+    - [x] ◧ fig:gpu-workflow  redrawn: where a box lives, no prose inside (12) ·TIKZ (Make the figure look more modern, less text overall, clear and concise. )
+    - [x] ⟐ alg:device  the device kernel and its relaunching host loop (46) ()
+  - [x] §§ Precision (2) ()
+    - [x] ¶13  double internally is a requirement; single violates the definition (6) ·N ()
+    - [x] ¶14  templated storage; narrowing the output rounds toward minus infinity (6) ()
+  - [x] §§ Parameters settled by measurement (2) (NEW: the micro-optimisations, in one concise subsection)
+    - [x] ¶15  vector width per query type, and the cross-process timing caveat (16) ·N ()
+    - [x] ¶16  shared-stack capacity: 4059.2 to 37.2 ms, identical answers (9) ·N ()
+    - [x] ¶17  bound refresh every iteration (7) ·N ()
+    - [x] ¶18  thread per query against block per query (6) ·N ()
+    - [x] ¶19  work-list capacity is an accuracy limit; the quad example (from 07) (12) ·N ()
+  - [x] §§ Why the work divides the way it does (2) (moved to the end, with the table)
+    - [x] ¶20  both tails; where the weight sits on each processor (8) ·N ()
+    - [x] ¶21  the device's 4.8x total: eight corners against four inherited (10) ·N ()
+    - [x] ¶22  the host owns the extreme tail: the bound schedule, not the search (12) ·N ()
+    - [x] ¶23  the broad phase inverts both arguments (5) ·N ()
+    - [x] ▦ tab:difficulty  boxes per query on cloth-funnel, host against device (generated) (Are these numbers actual? Is the device queries still this amount?, this is not the right place it should be at the end of the section with the discussion)
 
-## 09 · Limitations and threats to validity — limitations.tex (102)
+## 07 · Conservativeness by construction — REMOVED
 
-- [ ] §  Limitations and threats to validity (2) ()
-  - [ ] ¶1  announces three classes of limitation (6) ()
-  - [ ] §§ What the ground truth reaches (1) ·NOLABEL ()
-    - [ ] ¶2  ground truth covers the query sets; the mesh path is a tripwire (7) ()
-    - [ ] ¶3  the mesh container is single precision; bounds any accuracy claim (6) ·N ()
-    - [ ] ¶4  inflicted-rounding experiment and control locate the fault in the input (10) ·N ()
-  - [ ] §§ What a measurement establishes (1) ·NOLABEL ()
-    - [ ] ¶5  shared-minimum pruning makes the last digits non-deterministic (6) ·N ()
-    - [ ] ¶6  discloses a device Relaxed defect found and fixed during evaluation (10) ·N ()
-    - [ ] ¶7  what a check can establish: signed comparison over every query (4) ·N ()
-    - [ ] ¶8  driver overhead excluded; the harness is no model of in-solver cost (5) ·N ()
-  - [ ] §§ What was not measured (1) ·NOLABEL ()
-    - [ ] ¶9  announces three unmeasured parts (2) ()
-    - [ ] ¶10  intra-cell ordering is host-only; open on the device (4) ()
-    - [ ] ¶11  the quad path is evaluated nowhere; its constant uncertified (5) ()
-    - [ ] ¶12  speedups are over a host reference, not prior parallel work (5) ()
-    - [ ] ¶13  counter measurements support ratios only, not absolute time (6) ()
-    - [ ] ¶14  no minimum separation, no multi-GPU, no in-solver measurement (4) ()
+Removed as directed, and the material that earns its place distributed:
+
+- the safety argument itself is now four sentences in 05, made by inheritance
+  from TightInclusion's certified bound rather than as a theorem of our own;
+- the two consequences used elsewhere (a looser accept costs accuracy only; a
+  cap is an accuracy limit) follow it there, since 08 cites both;
+- the two unsound paddings and the depth-cap-that-drops failure join the
+  acceptance test in 05, which is where the rejection test is defined;
+- the work-list capacity, its derivation from the depth cap, and the vertex-quad
+  example are in 06's new parameter subsection and its device subsection.
+
+Dropped in the move: `thm:conservative` and its proof. Nothing else cites them
+any more; say the word if the formal statement should come back somewhere.
+
+## 08 · Numerical experiments — results.tex (454)
+
+Six changes, all as marked. The between-allocation variance paragraph is gone,
+EToI is expanded where it is defined, the supplement is no longer named in the
+setup or in the thread-count subsection, `fig:reference` is split in two, the
+TightInclusion subsection is rebuilt around the two questions it answers, and
+the strong-scaling plot is back in the article (removed from the supplement, so
+the label is not defined twice).
+
+- [x] §  Numerical experiments (2) ()
+  - [x] ¶1  three properties evaluated; the losses are included (5) ()
+  - [x] §§ Experimental setup (2) (Do not mention the supplemental material)
+    - [x] ¶2  one GH200 module per measurement; threads bound with numactl (8) ·N ()
+    - [x] ▦ tab:hardware  host and device specifications of one module; 11 rows (27) ·HAND ·N ()
+    - [x] ¶3  derives the 8.5x/8.7x ratio speedups should be read against (9) ·N ()
+  - [x] §§ Software (2) ()
+    - [x] ¶4  build environment and the default search parameters (6) ·N ()
+    - [x] ¶5  competitors used as released, same flags, same affinity (7) ()
+  - [x] §§ Timing protocol and dataset (2) (EToI expand the acronym explicitly)
+    - [x] ¶6  defines the four timing tags (12) ()
+    - [x] ¶7  device clocks synchronised; warm-up; repeats in separate processes (7) ·N ()
+    - [x] ¶8  the repeat spread, as the floor for claiming a difference (3) ·N (Remove these type of sentences: "Between job allocations this harness varies by
+about 40%, so every quantity compared against another is measured inside a single allocation
+and no number reported here is placed beside one from a different allocation. ...")
+    - [x] ¶9  describes the dataset and defines a case (7) ·N ()
+    - [x] ▦ tab:dataset  scene sizes: cases, pairs per step, curated queries; 6 rows (1) ()
+  - [x] §§ Conservativeness (2) ()
+    - [x] ¶10  the central claim: nothing missed, nothing late (7) ·N ()
+    - [x] ▦ tab:conservativeness  signed per-scene conservativeness; 6 rows (1) ()
+    - [x] ¶11  why compare against exact roots, not TI; reports false positives (7) ·N ()
+  - [x] §§ Against TightInclusion (2) (Improve the explanation, target the reader)
+    - [x] ¶12  protocol: narrow phases only, over the same query sets (8) ()
+    - [x] ◧ fig:reference  SCCD against TightInclusion per scene (11) (Split into two figures: 1. Against TI and 2. against scalable and ACCD)
+    - [x] ◧ fig:competitors  SCCD against Scalable CCD and additive CCD (11) (NEW: the second half of the split)
+    - [x] ¶13  speed against TI per scene; rod-twist extreme, cloth-funnel the exception (7) ·N ()
+    - [x] ¶14  defines earliness; the host matches TI on all twelve scene-phases (9) ·N ()
+    - [x] ¶15  the device agrees closely, not exactly (4) ·N ()
+    - [x] ¶16  explains the device gap as a different float operation sequence (11) ()
+    - [x] ¶17  worst cases are intrinsic: grazing and already-touching configurations (5) ·N ()
+  - [x] §§ CPU against GPU (2) ()
+    - [x] ▦ tab:processor  per-scene totals and three phase ratios; 6 rows (1) ()
+    - [x] ¶18  per-phase ratios; the margin rests on the narrow phase (8) ·N ()
+    - [x] ¶19  the end-to-end winner per scene, including the two the host takes (12) ·N ()
+    - [x] ¶20  supplement qualifiers: a standing gap, and drift through rod-twist (6) ·N ()
+    - [x] ¶21  phase shares; broad phase tight around its median, narrow phase skewed (10) ·N ()
+    - [x] ◧ fig:breakdown  phase shares per processor as stacked bars (9) ()
+    - [x] ◧ fig:toierr  earliness distributions, SCCD above, additive CCD below (14) ·N ()
+  - [x] §§ Against other implementations (2) ()
+    - [x] ¶22  each competitor compared on the question it answers (8) ·N ()
+    - [x] ¶23  the device beats Scalable CCD end to end on every scene (8) ·N ()
+    - [x] ¶24  the broad-phase margin is standing; separates algorithm from implementation (10) ·N ()
+    - [x] ◧ fig:bpvs  device broad phase against Scalable CCD's, step by step (11) ()
+    - [x] ¶25  Scalable CCD reports late times of impact; traced to a buffer race (9) ·N ()
+    - [x] ¶26  additive CCD is cheaper per candidate; the margin closes with size (7) ·N ()
+    - [x] ¶27  that speed costs the answer: earliness and false positives (10) ·N ()
+  - [x] §§ Scaling with element count (2) ()
+    - [x] ¶28  refinement study design: only the processor varies, no contact (5) ·N ()
+    - [x] ◧ fig:scaling  cost against element count, log-log, with fitted exponents (8) ()
+    - [x] ¶29  the crossover point and the fitted exponents (9) ·N ()
+    - [x] ¶30  structure against queries splits differently per processor (8) ·N ()
+    - [x] ¶31  the narrow-phase column prices the rejection test alone (8) ·N ()
+  - [x] §§ Scaling with thread count (2) (Make it self contained and more concise, do not cite the suplemental material, reintroduce the plot instead)
+    - [x] ¶32  the structure build is the Amdahl bottleneck at 72 cores, with the plot (30) ·N ()
+    - [x] ◧ fig:strong  strong scaling of the host pipeline by phase (8) (moved up from the supplement)
+  - [x] §§ Trading accuracy for speed (2) ()
+    - [x] ¶33  Relaxed is safe and looser; the false-positive cost is substantial (11) ·N ()
+    - [x] ¶34  the accuracy cost is unconditional, the speed gain conditional (5) ()
+
+## 09 · Limitations and threats to validity — REMOVED
+
+Removed as directed, with `sec:limitations` and its three unlabelled
+subsections. Nothing else referenced it apart from the roadmap paragraph in 02,
+which no longer names it.
+
+Dropped with it: the single-precision mesh-container bound on accuracy claims,
+the disclosure of the device Relaxed defect found during evaluation, the note
+that the quad path is evaluated nowhere, and the statement that the speedups are
+over our own host reference. The last two are still said elsewhere --- 05 says
+the quad path is not evaluated, and 08 names each comparison's reference --- but
+the first two are now said nowhere.
 
 ## 10 · Software and data availability — availability.tex (35)
 

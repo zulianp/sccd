@@ -3,9 +3,9 @@
 
 We present SCCD, a two-phase CCD pipeline for triangle \emph{and} quad meshes,
 with host and device implementations of both phases. Its conservativeness is
-structural and not empirical (\cref{sec:guarantee}), and we assess it against
-TightInclusion on a dataset whose roots are known exactly. The contributions of
-this paper are the following:
+structural, inherited from the certified bound of \citet{wang2021tight}
+(\cref{sec:np}), and we assess it against TightInclusion on a dataset whose
+roots are known exactly. The contributions of this paper are the following:
 
 \begin{enumerate}
   \item a broad phase with no tuning parameter and no sort, built on a
@@ -25,9 +25,10 @@ this paper are the following:
         queries (\cref{alg:host}), so sibling boxes inherit four of their eight
         corner values from their parent. The device pairs a deliberately
         \emph{small} per-block stack with a double-buffered global queue that
-        the next launch redistributes (\cref{alg:device}), which matters because
-        query difficulty is heavy-tailed: on one scene $208$ queries need more
-        than a million boxes (\cref{tab:difficulty});
+        the next launch redistributes (\cref{alg:device}), which matters
+        because query difficulty is heavy-tailed: on one scene seven queries in
+        ten are settled by a single box and the worst needs more than four
+        million (\cref{tab:difficulty});
   \item a signed accuracy assessment against a certified reference over
         $11{,}630{,}064$ checks against exact symbolic roots, on two processors
         and six scenes, of which $11{,}044{,}766$ place a reported time of
@@ -50,9 +51,6 @@ The remainder of this paper is organised as follows. \Cref{sec:prelim} states
 the three queries, the difference function whose roots they reduce to, and the
 certified error bound that makes a floating-point decision about those roots
 sound. \Cref{sec:bp} describes the broad phase and \cref{sec:np} the
-narrow-phase search. \Cref{sec:parallel} gives the two parallel realisations and
-\cref{sec:guarantee} assembles the conservativeness argument.
-\Cref{sec:results} reports the experiments, \cref{sec:limitations} the
-limitations and threats to validity, and \cref{sec:availability} the software
-and data. Per-scene tables, the hardware-counter study and the supporting
-figures are in \supp{}.
+narrow-phase search. \Cref{sec:parallel} gives the two parallel realisations.
+\Cref{sec:results} reports the experiments and \cref{sec:availability} the
+software and data.

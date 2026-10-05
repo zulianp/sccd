@@ -1,72 +1,103 @@
-% The device narrow phase's work flow: a small per-block shared stack that spills
-% early into a double-buffered global queue, which the next launch redistributes.
+% Where a box lives in the device narrow phase: a small per-block stack in
+% shared memory, and the half of a double-buffered global queue that the current
+% launch writes.
 %
-% Every node carries an explicit inner sep so its text keeps a margin from its
-% frame, group labels are placed outside the group they name, and arrows are
-% shortened at both ends so no head or tail lands on a border.
+% No prose inside the drawing, following tikz/cellmin.tex: what the picture means
+% belongs in the caption, where it can be read at caption size and does not
+% compete with the marks. Labels here are one or two words and name parts, not
+% behaviour.
+%
+% The geometry is one scale: a thread or a stack entry is \cell wide, a block is
+% eight threads across, and the queue is as wide as the three blocks together, so
+% the spill arrows land inside the half they write and the picture needs no
+% nudging by hand.
 \begin{tikzpicture}[
-  font=\footnotesize,
-  >={Stealth[length=2mm]},
-  every edge/.append style={shorten >=1.5pt, shorten <=1.5pt},
-  blk/.style={draw=sccdInk, rounded corners=1pt, minimum width=19mm,
-              minimum height=7mm, align=center, fill=white,
-              inner xsep=6pt, inner ysep=4pt},
-  stk/.style={draw=sccdTeal, fill=sccdTeal!8, rounded corners=1pt,
-              minimum width=19mm, minimum height=8mm, align=center,
-              inner xsep=6pt, inner ysep=4pt},
-  buf/.style={draw=sccdPlum, fill=sccdPlum!8, rounded corners=1pt,
-              minimum width=32mm, minimum height=9mm, align=center,
-              inner xsep=7pt, inner ysep=5pt},
-  lbl/.style={font=\scriptsize\itshape, text=sccdInk, align=left, inner sep=1pt},
-  grp/.style={draw=sccdGrid, rounded corners=2pt, inner sep=4.5mm},
-  flow/.style={->, shorten >=1.5pt, shorten <=1.5pt},
+  font=\scriptsize,
+  >={Stealth[length=1.6mm, width=1.3mm]},
+  lbl/.style={font=\scriptsize, text=sccdInk, inner sep=1.2pt},
+  tag/.style={font=\scriptsize\itshape, text=sccdInk!75, inner sep=1.2pt},
+  card/.style={draw=sccdGrid, line width=0.6pt, rounded corners=1.5pt,
+               fill=sccdInk!3},
+  thread/.style={draw=sccdTeal!55, line width=0.4pt, fill=sccdTeal!14},
+  busy/.style={draw=sccdAmber, line width=0.6pt, fill=sccdAmber!35},
+  slot/.style={draw=sccdInk!30, line width=0.4pt, fill=white},
+  held/.style={draw=sccdPlum!60, line width=0.4pt, fill=sccdPlum!22},
+  flow/.style={->, draw=sccdInk!65, line width=0.6pt,
+               shorten >=1pt, shorten <=1pt},
+  spill/.style={->, draw=sccdPlum, line width=0.7pt,
+                shorten >=1pt, shorten <=1pt},
+  take/.style={->, draw=sccdMoss, line width=0.7pt,
+               shorten >=1pt, shorten <=1pt},
 ]
 
-% ======================= launch k =======================================
-\foreach \i/\x in {0/0, 1/2.4, 2/4.8} {
-  \node[blk] (b\i) at (\x,1.9) {block \i};
-  \node[stk] (s\i) at (\x,0.85) {shared stack\\[1pt]\scriptsize 64 entries};
-  \draw[flow, draw=sccdInk] (b\i) -- (s\i);
-}
-\node[grp, fit=(b0)(s2)] (g1) {};
-\node[lbl, anchor=south west] at ([yshift=1.2mm]g1.north west) {launch $k$};
+\def\cell{0.28}
+\def\blockw{2.24}   % 8 cells
+\def\gap{0.62}
+\def\pad{0.14}
+\def\qw{7.96}      % 3*\blockw + 2*\gap: the queue is as wide as the blocks
 
-% The pathological query arrives from outside the group.
-\node[lbl, text=sccdAmber, align=center, anchor=south]
-  (heavy) at ([yshift=1.2mm]g1.north) {a query needing $>10^{6}$ boxes};
-\draw[flow, draw=sccdAmber, thick] (heavy.south) -- (b1.north);
+% One block card: #1 x of its left edge, #2 y of its baseline, #3 the thread
+% index drawn as busy (-1 for none), #4 how many stack entries are held.
+\newcommand{\blockcard}[4]{%
+  \begin{scope}[shift={(#1,#2)}]
+    \draw[card] (-\pad,-0.30-\pad) rectangle (\blockw+\pad,\cell+0.34+\pad);
+    \foreach \i in {0,...,7} {
+      \ifnum\i=#3\relax
+        \draw[busy] ({\i*\cell},0.34) rectangle ({(\i+1)*\cell},{0.34+\cell});
+      \else
+        \draw[thread] ({\i*\cell},0.34) rectangle ({(\i+1)*\cell},{0.34+\cell});
+      \fi}
+    \foreach \i in {0,...,7} {
+      \ifnum\i<#4\relax
+        \draw[held] ({\i*\cell},0) rectangle ({(\i+1)*\cell},{0.26});
+      \else
+        \draw[slot] ({\i*\cell},0) rectangle ({(\i+1)*\cell},{0.26});
+      \fi}
+  \end{scope}}
 
-% ======================= spill ==========================================
-\node[buf] (wbuf) at (2.4,-0.75)
-  {global queue, buffer $A$\\[1pt]\scriptsize launch $k$ \emph{writes} it};
-\foreach \i in {0,1,2} {
-  \draw[flow, draw=sccdPlum, dashed] (s\i) -- (wbuf);
-}
-\node[lbl, text=sccdPlum, anchor=west] at ([xshift=5mm]wbuf.east)
-  {spill when full;\\overflow is counted,\\not written};
+% ---------------------------------------------------------------- launch k
+\blockcard{0}{0}{-1}{3}
+\blockcard{\blockw+\gap}{0}{4}{8}
+\blockcard{2*\blockw+2*\gap}{0}{-1}{2}
 
-% ======================= swap ===========================================
-\node[buf, draw=sccdMoss, fill=sccdMoss!8] (rbuf) at (2.4,-2.45)
-  {the same buffer $A$\\[1pt]\scriptsize launch $k{+}1$ \emph{reads} it};
-\draw[flow, draw=sccdInk, thick] (wbuf) -- (rbuf);
-\node[lbl, anchor=west] at ([xshift=2mm]$(wbuf.south)!0.5!(rbuf.north)$)
-  {launch $k$ ends; the buffers swap roles};
+\coordinate (ktl) at (-\pad,{\cell+0.34+\pad});
+\coordinate (ktr) at ({3*\blockw+2*\gap+\pad},{\cell+0.34+\pad});
+\node[lbl, anchor=south west] at ([yshift=0.6mm]ktl) {launch $k$};
+\node[tag, anchor=south east] at ([yshift=0.6mm]ktr) {threads};
+\node[tag, anchor=west] at ({3*\blockw+2*\gap+\pad+0.1},0.13)
+  {shared stack, $64$};
 
-% ======================= launch k+1 =====================================
-\foreach \i/\x in {0/0, 1/2.4, 2/4.8} {
-  \node[blk] (c\i) at (\x,-4.3) {block \i};
-  \draw[flow, draw=sccdMoss] (rbuf) -- (c\i);
-}
-\node[grp, fit=(c0)(c2)] (g2) {};
-\node[lbl, anchor=north west] at ([yshift=-1.2mm]g2.south west)
-  {launch $k{+}1$};
-\node[lbl, text=sccdMoss, anchor=west] at ([xshift=5mm]g2.east)
-  {the heavy query's subtree\\is now spread over\\every block};
-\node[lbl, anchor=west] at ([xshift=5mm]rbuf.east)
-  {and writes buffer $B$,\\which launch $k{+}2$ reads:\\the two never meet};
+% Spill out of each block's stack into the half the launch writes. The three
+% arrows land inside $A$, since that is the half being written; spacing them
+% across it is what makes that legible without a word.
+\foreach \b in {0,1,2} {
+  \coordinate (sp\b) at ({\b*(\blockw+\gap)+\blockw/2},-0.30-\pad);
+  \coordinate (sq\b) at ({\qw/8+\b*\qw/8+0.25},-1.18);
+  \draw[spill] (sp\b) -- (sq\b);}
 
-\begin{scope}[on background layer]
-  \node[grp, fit=(b0)(s2)] {};
-  \node[grp, fit=(c0)(c2)] {};
+% ---------------------------------------------------------------- the queue
+\begin{scope}[shift={(0,-1.62)}]
+  \draw[card, fill=white] (-\pad,-\pad) rectangle (\qw+\pad,{0.44+\pad});
+  \draw[draw=sccdPlum!55, line width=0.6pt, fill=sccdPlum!10]
+    (0,0) rectangle ({\qw/2},0.44);
+  \draw[draw=sccdInk!25, line width=0.6pt, fill=sccdInk!3]
+    ({\qw/2},0) rectangle (\qw,0.44);
+  \node[lbl, text=sccdPlum] at ({\qw/4},0.22) {$A$};
+  \node[lbl, text=sccdInk!55] at ({3*\qw/4},0.22) {$B$};
+  \node[tag, anchor=west] at (\qw+\pad+0.1,0.22) {global queue};
 \end{scope}
+
+% ------------------------------------------------------------- launch k+1
+\blockcard{0}{-3.0}{2}{1}
+\blockcard{\blockw+\gap}{-3.0}{5}{1}
+\blockcard{2*\blockw+2*\gap}{-3.0}{1}{1}
+
+\foreach \b in {0,1,2} {
+  \coordinate (ra\b) at ({\qw/4+(\b-1)*0.52},-1.62);
+  \coordinate (rb\b) at ({\b*(\blockw+\gap)+\blockw/2},{-3.0+\cell+0.34+\pad});
+  \draw[take] (ra\b) -- (rb\b);}
+
+\node[lbl, anchor=north west] at (-\pad,-3.0-0.30-\pad-0.06)
+  {launch $k{+}1$, writing $B$};
+
 \end{tikzpicture}

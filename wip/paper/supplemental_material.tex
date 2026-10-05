@@ -118,7 +118,8 @@ against problem size.
 \section{Scaling with thread count}
 \label{sec:supp:threads}
 
-\Cref{fig:strong} runs the same four cases at one to seventy-two Grace cores.
+The curves are plotted in \cref{fig:strong} of the article; this section gives
+them scene by scene, over the same four cases at one to seventy-two Grace cores.
 The queries scale well on both scenes, reaching $32.0\times$ on cloth-funnel and
 $30.8\times$ on armadillo-rollers at seventy-two cores, as does the narrow
 phase, at $17.0\times$ and $40.4\times$. Building the acceleration structure
@@ -141,16 +142,6 @@ Between sixty-four and seventy-two cores the curves are flat, the queries and
 the structure pass losing a few percent and the narrow phase gaining a little on
 both scenes, so the figures above do not depend on which of the two thread
 counts they are quoted at.
-
-\begin{figure}[htbp]
-  \centering
-  \includegraphics[width=\linewidth]{figures/strong-scaling.pdf}
-  \caption{Strong scaling of the host pipeline, by phase, as whole-scene totals
-    against the perfect line. The narrow phase tracks it closely; the structure
-    the broad phase builds leaves it early and plateaus around thirty-two
-    cores.}
-  \label{fig:strong}
-\end{figure}
 
 \section{The competitor comparisons, per scene}
 \label{sec:supp:competitors}

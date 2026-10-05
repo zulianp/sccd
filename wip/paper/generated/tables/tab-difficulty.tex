@@ -1,0 +1,33 @@
+\begin{table}[htbp]
+  \centering
+  \caption{Boxes examined per query on cloth-funnel, over every one of the
+    $25{,}192{,}698$ candidate pairs the broad phase produced in the
+    scene's $577$ steps. Both processors are handed the same
+    candidates and asked for one earliest time of impact per step, so both
+    prune against a shared running minimum. Each narrow phase counts its own
+    boxes per query and buckets them by $\lfloor\log_{2}\rfloor$ with the same
+    code, so the two columns measure the same quantity; the device's count also
+    includes boxes it evaluated and then discarded because the bound had already
+    passed them, which the host discards before counting, and which is
+    $0.06\%$ of the device total here. Timings are not reported from this
+    run: the counters serialise the device kernel.}
+  \label{tab:difficulty}
+  \begin{tabular}{lrr}
+    \toprule
+    boxes examined & host queries & device queries \\
+    \midrule
+    $0$--$1$                 & $18{,}852{,}925$ & $17{,}220{,}209$ \\
+    $\ge 8$                  & $817{,}187$ & $1{,}332{,}867$ \\
+    $\ge 64$                 & $23{,}035$ & $43{,}243$ \\
+    $\ge 1{,}024$            & $2{,}046$ & $6{,}383$ \\
+    $\ge 16{,}384$           & $92$ & $61$ \\
+    $\ge 1{,}048{,}576$      & $6$ & $0$ \\
+    \midrule
+    worst single query       & $4{,}591{,}271$ & $101{,}246$ \\
+    \midrule
+    boxes in total           & $22{,}195{,}731$ & $106{,}911{,}080$ \\
+    mean per query           & $0.88$ & $4.24$ \\
+    \bottomrule
+  \end{tabular}
+  \par\smallskip\footnotesize Source: \texttt{benchmark/results/boxes/}
+\end{table}

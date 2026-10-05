@@ -104,6 +104,23 @@ if(TARGET TBB::tbb)
   target_link_libraries(sccd PUBLIC TBB::tbb)
 endif()
 
+# Per-query box counts in both narrow phases, host and device.
+#
+# PUBLIC rather than PRIVATE because the counters live in headers the drivers
+# include, so a library compiled with them and a driver compiled without them
+# disagree about whether the counts exist and the driver reports zero. Passed as
+# a bare -D on the command line it reached neither: nothing declared it, so CMake
+# stored it as an unused UNINITIALIZED cache entry and sccd_np_trace printed
+# "built without -DSCCD_NP_COUNT_BOXES" against a cache that said ON.
+#
+# The counters are a diagnostic and change what they measure -- a global atomic
+# on the device's hot path serialises the kernel -- so an instrumented build's
+# timings mean nothing and only its counts do.
+option(SCCD_NP_COUNT_BOXES "Count narrow-phase boxes per query (diagnostic; distorts timings)" OFF)
+if(SCCD_NP_COUNT_BOXES)
+  target_compile_definitions(sccd PUBLIC SCCD_NP_COUNT_BOXES)
+endif()
+
 if(SCCD_ENABLE_CUDA)
   target_compile_definitions(sccd PUBLIC SCCD_ENABLE_CUDA)
 
@@ -435,7 +452,8 @@ endif()
 # Per-query box counts, host and device, one query at a time. Needs neither smesh
 # nor TightInclusion -- it reads the datasets' query CSVs directly -- so it builds
 # in the default configuration and is the tool to reach for when a box count needs
-# explaining. Build it with -DSCCD_NP_COUNT_BOXES for the counts to exist.
+# explaining. Configure with -DSCCD_NP_COUNT_BOXES=ON for the counts to exist;
+# without it the driver still runs and reports times of impact, and says so.
 add_executable(sccd_np_trace "${CMAKE_CURRENT_SOURCE_DIR}/benchmark/np_trace.exe.cpp")
 target_link_libraries(sccd_np_trace PRIVATE sccd)
 if(SCCD_ENABLE_CUDA)
