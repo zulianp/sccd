@@ -24,6 +24,7 @@ inputs:
 	$(PYTHON) scripts/make_inputs.py
 	$(PYTHON) scripts/make_counters.py
 	$(PYTHON) scripts/make_difficulty.py
+	$(PYTHON) scripts/make_hardware.py
 	$(PYTHON) scripts/make_symbols.py
 	$(PYTHON) scripts/make_competitors.py
 

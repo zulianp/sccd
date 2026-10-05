@@ -40,33 +40,6 @@ recorded in its availability section.
 
 \input{sections/supp-counters}
 
-\section{Device stack capacity}
-\label{sec:supp:stackcap}
-
-The per-block shared stack of \cref{alg:device} is deliberately small, so that
-a heavy query spills early into the global queue and the next launch spreads it
-over every block. \Cref{tab:stackcap} measures the effect.
-
-\begin{table}[htbp]
-  \centering
-  \caption{Device narrow-phase time against per-block shared stack capacity,
-    \textsc{Tight}, summed over $16$ cases per scene on \textsc{GH200}. False positives and
-    false negatives are identical at every capacity, so this is a scheduling
-    result. At $64$ entries the stack is $3{,}584$ bytes per block
-    against $57{,}376$ at $1024$. The kernel is register-limited to two blocks
-    per multiprocessor at both capacities, so the smaller stack buys balance.}
-  \label{tab:stackcap}
-  \begin{tabular}{lrrr}
-    \toprule
-    scene & cap $1024$ & cap $256$ & cap $64$ \\
-    \midrule
-    cloth-funnel      & 4059.2 ms & 198.2 ms & \textbf{37.2 ms} \\
-    armadillo-rollers & 3133.7 ms & 277.2 ms & \textbf{75.8 ms} \\
-    cloth-ball        &  129.8 ms & 110.2 ms & \textbf{105.9 ms} \\
-    \bottomrule
-  \end{tabular}
-\end{table}
-
 \section{Per-scene cost}
 \label{sec:supp:cost}
 
@@ -142,6 +115,22 @@ Between sixty-four and seventy-two cores the curves are flat, the queries and
 the structure pass losing a few percent and the narrow phase gaining a little on
 both scenes, so the figures above do not depend on which of the two thread
 counts they are quoted at.
+
+\section{The TightInclusion comparison, per scene}
+\label{sec:supp:reference}
+
+\Cref{tab:reference} carries the per-scene-phase form of the comparison the
+article summarises per scene: queries, hits and time for each processor beside
+the reference. \Cref{tab:earliness-ref} is the accuracy half, the earliness
+statistics the article reports as identical on the host and close on the device.
+Read per scene-phase the cost spans a wider range than the article's per-scene
+totals do, from $1.7\times$ to $4.9\times$ on the host and $2.5\times$ to
+$26.6\times$ on the device, since the two query types of one scene can differ by
+more than the scenes do.
+
+\input{generated/tables/tab-reference}
+
+\input{generated/tables/tab-earliness-ref}
 
 \section{The competitor comparisons, per scene}
 \label{sec:supp:competitors}

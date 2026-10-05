@@ -308,13 +308,17 @@ layout rather than of work, and it is large enough to manufacture or to conceal
 a difference of the size reported here.
 
 \emph{Shared-stack capacity.} Reducing the per-block capacity from $1024$
-entries to $64$ moves the device narrow phase from $4059.2$ to
-$37.2\,\mathrm{ms}$ on cloth-funnel, from $3133.7$ to $75.8\,\mathrm{ms}$ on
-armadillo-rollers and from $129.8$ to $105.9\,\mathrm{ms}$ on cloth-ball, with
-$256$ entries lying between. False positives and reported times of impact are
-identical at every capacity, which is what identifies the effect as
-redistribution and not pruning; the Relaxed mode, which averages fewer than four
-boxes per query and so never fills even a small stack, is unaffected.
+entries to $256$ and then to $64$ moves the device narrow phase from $4059.2$ to
+$198.2$ and then to $37.2\,\mathrm{ms}$ on cloth-funnel, from $3133.7$ to
+$277.2$ and $75.8\,\mathrm{ms}$ on armadillo-rollers, and from $129.8$ to
+$110.2$ and $105.9\,\mathrm{ms}$ on cloth-ball. False positives and reported
+times of impact are identical at every capacity, which is what identifies the
+effect as redistribution and not pruning; the mode that trades accuracy for
+speed, which averages fewer than four boxes per query and so never fills even a
+small stack, is unaffected. The smaller stack costs nothing to hold: $3{,}584$
+bytes per block against $57{,}376$ at $1024$, and the kernel is register-limited
+to two blocks per multiprocessor at either capacity, so what the reduction buys
+is balance and not occupancy.
 
 \emph{Bound refresh interval.} The running minimum is re-read from global memory
 on \emph{every} iteration of the device loop. Refreshing every $4$th, $16$th,

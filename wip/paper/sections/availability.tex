@@ -18,11 +18,12 @@ oracle are opt-in CMake options; the oracle is a validation tool and not a
 performance option.
 
 Every table and figure in \cref{sec:results} is generated from a published
-measurement file by a published script, from the same code that produces the
-software's own benchmark reports, so each figure has a single origin. The
-regeneration command is recorded next to the tables, and a \verb|--check| mode
-re-derives the documents from the data and returns non-zero if they no longer
-match. The hardware counters reported in \supp{} are collected by
+measurement file by a published script, and \verb|make inputs| runs all of them;
+each table names its own source file beneath it. The tables the article shares
+with the library's own benchmark documentation are produced by the same code, so
+a number in the two documents has one origin, and a \verb|--check| mode
+re-derives the figures the prose quotes from the data and returns non-zero when
+they no longer agree. The hardware counters reported in \supp{} are collected by
 \texttt{benchmark/scripts/profile.sbatch.sh} and their raw output is published
 under \texttt{benchmark/results/profile/}, so no counter is transcribed by hand.
 

@@ -1,0 +1,31 @@
+\begin{table}[htbp]
+  \centering
+  \caption{The two processors of one \textsc{GH200} module, as reported by the
+    operating system and the CUDA device properties on the compute nodes used.
+    Peak \textsc{fp64} is derived from those clocks and the per-unit counts of
+    the two architectures~\citep{arm2022neoversev2,nvidia2022hopper}: $4$
+    $128$-bit SVE2 operations per cycle on a core and $64$
+    double-precision units on a multiprocessor, each a fused multiply-add. The
+    bandwidth row is the best of ten \textsc{stream} triad passes.}
+  \label{tab:hardware}
+  \fittable{%
+  \begin{tabular}{lll}
+    \toprule
+     & Grace (host) & Hopper (device) \\
+    \midrule
+    architecture & Arm Neoverse V2 & NVIDIA Hopper, sm\_90 \\
+    parallel units & $72$ cores & $132$ multiprocessors \\
+    maximum clock & $3.42$ GHz & $1.98$ GHz \\
+    vector width & $128$-bit SVE2 & $32$-thread warp \\
+    threads in flight & $72$ & $270{,}336$ \\
+    L1 / shared memory & $64$ KiB per core & $228$ KiB per multiprocessor \\
+    L2 cache & $1$ MiB per core & $60$ MiB \\
+    L3 cache & $114$ MiB & -- \\
+    memory & $119$ GiB LPDDR5X & $95$ GiB HBM3 \\
+    peak \textsc{fp64} & $3.9$ TFLOP/s & $33.5$ TFLOP/s \\
+    triad bandwidth & $429$ GB/s & $3{,}738$ GB/s \\
+    \bottomrule
+  \end{tabular}}
+  \par\smallskip\footnotesize Source:
+  \texttt{benchmark/results/hardware-gh200.txt}
+\end{table}

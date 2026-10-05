@@ -5,9 +5,9 @@ We have presented a continuous collision detection pipeline that is conservative
 by construction on two very different processors, and measured it against a
 certified reference on a dataset with exact roots. On the host, the median and
 worst-case error match TightInclusion's on all twelve scene-phases to every
-printed digit at between $1.7\times$ and $4.9\times$ its speed, so the pipeline
-reproduces the reference exactly; on the device, faster again by $2.5\times$ to
-$26.6\times$, the two agree to within a few percent.
+printed digit at between $2.1\times$ and $3.5\times$ its speed, so the pipeline
+reproduces the reference exactly; on the device, faster again by $2.6\times$ to
+$20.9\times$, the two agree to within a few percent.
 
 The design result generalises beyond this problem. A branch-and-bound search
 becomes order-independent once it keeps a minimum over all accepted leaves, in

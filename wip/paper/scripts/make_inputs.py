@@ -194,6 +194,62 @@ COLUMN_TOTALS = [
 ]
 
 
+# The three files that state the speedup over TightInclusion. Each must state it
+# as the same span, because an aggregation that differs between them reads as a
+# contradiction: the abstract and the conclusion once kept the per scene-phase
+# span after the results section had moved to per-scene totals.
+REFERENCE_SPAN_FILES = ("abstract", "conclusion", "results")
+
+
+def _check_reference_span(gen: Path) -> int:
+    """Smallest and largest per-scene speedup over TightInclusion, each processor.
+
+    tab-reference holds one row per scene, query type and implementation. The
+    article quotes the span of the per-scene ratios, so they are recomputed here
+    from the same cells and looked for in each file that states them -- per file,
+    since a needle found anywhere in the article would be satisfied by whichever
+    section still happened to be right.
+    """
+    path = gen / "tab-reference.tex"
+    if not path.is_file():
+        return 0
+    rows: dict[tuple[str, str, str], int] = {}
+    pattern = re.compile(
+        r"^\s*([\w-]+) & (EE|VF) & (GPU|CPU|TightInclusion) & [\d,]+ & [\d,]+ & (\d+) / ",
+        re.M)
+    for m in pattern.finditer(path.read_text()):
+        rows[(m.group(1), m.group(2), m.group(3))] = int(m.group(4))
+    scenes = sorted({k[0] for k in rows})
+    if not scenes:
+        print("error: tab-reference.tex parsed to no rows", file=sys.stderr)
+        return 1
+
+    wanted: list[tuple[str, str]] = []
+    for mode, label in (("CPU", "host"), ("GPU", "device")):
+        ratios = []
+        for scene in scenes:
+            try:
+                ours = sum(rows[(scene, ph, mode)] for ph in ("EE", "VF"))
+                ref = sum(rows[(scene, ph, "TightInclusion")] for ph in ("EE", "VF"))
+            except KeyError:
+                continue
+            ratios.append(ref / ours)
+        if ratios:
+            wanted.append((label, f"{min(ratios):.1f}\\times"))
+            wanted.append((label, f"{max(ratios):.1f}\\times"))
+
+    status = 0
+    for name in REFERENCE_SPAN_FILES:
+        text = (PAPER / "sections" / f"{name}.tex").read_text()
+        for label, needle in wanted:
+            if needle not in text:
+                print(f"error: {name}.tex does not state ${needle}$, which is an "
+                      f"end of the {label} speedup over TightInclusion computed "
+                      f"per scene from tab-reference", file=sys.stderr)
+                status = 1
+    return status
+
+
 def _check() -> int:
     gen = PAPER / "generated" / "tables"
     if not gen.is_dir():
@@ -244,6 +300,14 @@ def _check() -> int:
             if not any(w.replace(",", "{,}") in prose for w in wanted):
                 print(f"note: neither {expected:,} nor {2 * expected:,} appears "
                       f"in the prose", file=sys.stderr)
+
+    # The TightInclusion speedups. These are not cells of any table: they are the
+    # smallest and largest per-scene ratios over tab-reference, which sums the two
+    # query types. Unguarded, the abstract and the conclusion kept the per
+    # scene-phase span (1.7x to 4.9x on the host, 2.5x to 26.6x on the device)
+    # after the results section moved to per-scene totals, and the article stated
+    # two different ranges for the same comparison.
+    status |= _check_reference_span(gen)
 
     # The article's tables and the library's documentation must be the same tables.
     # This is a stronger statement than "both were generated from the same CSV",

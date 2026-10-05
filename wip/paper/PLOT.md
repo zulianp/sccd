@@ -320,13 +320,24 @@ the first two are now said nowhere.
 - Five units carry no label and so cannot be `\cref`-ed: both subsubsections of
   `related.tex`, all three subsections of `limitations.tex`, and the
   Generative AI disclosure heading.
-- Three tables are hand-typed with no generator and no `Source:` line:
-  `tab:hardware`, `tab:difficulty`, and `tab:stackcap` in the supplement.
-  `tab:difficulty`'s own caption flags it as pre-redesign and as aggregating two
-  device code paths.
-- 18 of 30 generated tables and 2 figures are committed but included nowhere. The
-  abstract's `26.6x` is backed only by `tab-reference`, an orphan.
-  `Trading accuracy for speed` argues "each mode is therefore reported in its own
-  table" and inputs no table at all; the whole `-relaxed` family is orphaned.
+- ~~Three tables are hand-typed with no generator and no `Source:` line.~~ Done:
+  `tab:difficulty` and `tab:hardware` are generated now, by
+  `scripts/make_difficulty.py` and `scripts/make_hardware.py`, and `tab:stackcap`
+  is gone --- the article states the stack-capacity result in prose, so the
+  supplement no longer repeats it. No table in either document is typed by hand.
+- 18 of 30 generated tables and 2 figures are committed but included nowhere.
+  `tab-reference` and `tab-earliness-ref` are no longer among them: they are in
+  the supplement, under a section of their own.
+
+  The abstract's `26.6x` was the per scene-phase span while the results section
+  quoted the per-scene one (`20.9x`), so the article stated two ranges for one
+  comparison. Both are correct aggregations; the article now uses per-scene
+  totals throughout, the supplement gives the per scene-phase form, and
+  `make check` recomputes the span from `tab-reference` and fails if the
+  abstract, the conclusion or the results section stops stating it.
+
+  `Trading accuracy for speed` still argues "each mode is therefore reported in
+  its own table" while inputting no table at all; the whole `-relaxed` family is
+  still orphaned.
 - `results.tex` is 437 lines, a quarter of the article's prose, and holds 34 of its
   121 body paragraphs.
