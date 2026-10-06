@@ -62,10 +62,9 @@ benchmark/sweep/
 # oracle's query sets, and the measurement tables their write-ups cite.
 !benchmark/oracle/*.csv
 !benchmark/assessment/*.csv
-# The sweep a published table was computed from. docs/BENCHMARKS.md names the
-# file each of its tables came from, and the claim that a number is reproducible
-# is only worth making if the rows behind it are in the repository. The same
-# applies one level down, where the per-query box counts live.
+# The small tables a published number was computed from. docs/BENCHMARKS.md
+# names the file each of its tables came from; files of a megabyte or more stay
+# on the machines that produced them and are listed at the end of this file.
 !benchmark/results/*.csv
 !benchmark/results/boxes/*.csv
 !spikes/research/**/*.csv
@@ -160,11 +159,18 @@ wip/paper/*.blg
 wip/paper/*.out
 wip/paper/*.toc
 # Hardware-counter output behind the performance analysis. Same rule as the
-# benchmark CSVs: the numbers a document cites are only reproducible if the rows
-# behind them are in the repository.
+# benchmark CSVs: small tables are tracked, large ones stay local.
 !benchmark/results/profile/
 !benchmark/results/profile/*.csv
 !benchmark/results/profile/*.txt
 
 # Thread-count sweep behind the strong-scaling figure.
 !benchmark/results/profile/strong-*.csv
+
+# Measurement data of a megabyte or more is never committed: it stays on the
+# machine that produced it. These rules come last so that they override the
+# re-includes above.
+benchmark/results/sweep-gh200*.csv
+benchmark/results/profile/strong-*.csv
+benchmark/assessment/broadphase-cell2dmin*.csv
+benchmark/competitors/results/*.csv.gz
