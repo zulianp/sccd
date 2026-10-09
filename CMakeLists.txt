@@ -300,99 +300,101 @@ install(
 # install(FILES sccd.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/sccd RENAME sccd.hpp)
 
 
-# Demos that need nothing but the library itself build in every configuration --
-# they are what a reader checks the API against, so gating them on an optional
-# dependency would defeat the point.
-add_executable(sccd_minimal "${CMAKE_CURRENT_SOURCE_DIR}/demo/sccd_minimal.exe.cpp")
-target_link_libraries(sccd_minimal PRIVATE sccd)
-add_test(NAME sccd_minimal COMMAND $<TARGET_FILE:sccd_minimal>)
+if(SCCD_ENABLE_EXECUTABLES)
+  # Demos that need nothing but the library itself build in every configuration --
+  # they are what a reader checks the API against, so gating them on an optional
+  # dependency would defeat the point.
+  add_executable(sccd_minimal "${CMAKE_CURRENT_SOURCE_DIR}/demo/sccd_minimal.exe.cpp")
+  target_link_libraries(sccd_minimal PRIVATE sccd)
+  add_test(NAME sccd_minimal COMMAND $<TARGET_FILE:sccd_minimal>)
 
-# The same pipeline on the GPU. Gated on CUDA and nothing else: like its host
-# counterpart it needs the library alone, so it is not filed with the demos that
-# require smesh. It exits 0 with a message when no device is present, so it is
-# registered as a test on any CUDA build rather than only where a GPU is
-# attached.
-if(SCCD_ENABLE_CUDA)
-  add_executable(sccd_minimal_cuda
-                 "${CMAKE_CURRENT_SOURCE_DIR}/demo/cuda/sccd_minimal_cuda.exe.cpp")
-  target_link_libraries(sccd_minimal_cuda PRIVATE sccd)
-  add_test(NAME sccd_minimal_cuda COMMAND $<TARGET_FILE:sccd_minimal_cuda>)
-endif()
-
-# The ctypes binding is installed as public surface, so it is tested like public
-# surface. It needs nothing but the standard library -- no NumPy, no SymPy -- so
-# any python3 on PATH will do, and the test is simply skipped when there is none.
-find_package(Python3 COMPONENTS Interpreter QUIET)
-# A sanitizer build cannot be dlopen'd by an uninstrumented interpreter: the
-# runtime has to be loaded before main, and ctypes loads it after. That is a
-# property of the sanitizer, not of the binding, so the test is not registered
-# there rather than failing there.
-string(FIND "${CMAKE_CXX_FLAGS}" "-fsanitize" _sccd_sanitized)
-if(NOT Python3_Interpreter_FOUND)
-  message(STATUS "No python3 interpreter: skipping sccd_binding_test")
-elseif(NOT _sccd_sanitized EQUAL -1)
-  message(STATUS "Sanitizer build: skipping sccd_binding_test (ctypes cannot dlopen it)")
-else()
-  add_test(NAME sccd_binding_test
-           COMMAND "${Python3_EXECUTABLE}"
-                   "${CMAKE_CURRENT_SOURCE_DIR}/python/sccd_binding_test.py")
-  set_tests_properties(sccd_binding_test PROPERTIES
-    ENVIRONMENT "SCCD_LIB_PATH=$<TARGET_FILE_DIR:sccd>")
-endif()
-
-if(SCCD_ENABLE_SMESH)
-  file(GLOB DEMO_DRIVERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/demo/*.exe.cpp")
-  list(FILTER DEMO_DRIVERS EXCLUDE REGEX "sccd_minimal\\.exe\\.cpp$")
-  foreach(DEMO_DRIVER ${DEMO_DRIVERS})
-    get_filename_component(DEMO_TARGET ${DEMO_DRIVER} NAME_WE)
-    string(REGEX REPLACE "\\.exe$" "" DEMO_TARGET "${DEMO_TARGET}")
-    add_executable(${DEMO_TARGET} ${DEMO_DRIVER})
-    target_link_libraries(${DEMO_TARGET} PRIVATE sccd)
-  endforeach()
-
+  # The same pipeline on the GPU. Gated on CUDA and nothing else: like its host
+  # counterpart it needs the library alone, so it is not filed with the demos that
+  # require smesh. It exits 0 with a message when no device is present, so it is
+  # registered as a test on any CUDA build rather than only where a GPU is
+  # attached.
   if(SCCD_ENABLE_CUDA)
-    file(GLOB_RECURSE SCCD_CUDA_DEMOS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/demo/cuda/*.exe.cpp")
-    # Registered above, on CUDA alone; it must not be defined twice.
-    list(FILTER SCCD_CUDA_DEMOS EXCLUDE REGEX "sccd_minimal_cuda\\.exe\\.cpp$")
-    foreach(SCCD_CUDA_DEMO ${SCCD_CUDA_DEMOS})
-      get_filename_component(SCCD_CUDA_DEMO_TARGET ${SCCD_CUDA_DEMO} NAME_WE)
-      string(REGEX REPLACE "\\.exe$" "" SCCD_CUDA_DEMO_TARGET "${SCCD_CUDA_DEMO_TARGET}")
-      add_executable(${SCCD_CUDA_DEMO_TARGET} ${SCCD_CUDA_DEMO})
-      target_link_libraries(${SCCD_CUDA_DEMO_TARGET} PRIVATE sccd)
+    add_executable(sccd_minimal_cuda
+                   "${CMAKE_CURRENT_SOURCE_DIR}/demo/cuda/sccd_minimal_cuda.exe.cpp")
+    target_link_libraries(sccd_minimal_cuda PRIVATE sccd)
+    add_test(NAME sccd_minimal_cuda COMMAND $<TARGET_FILE:sccd_minimal_cuda>)
+  endif()
+
+  # The ctypes binding is installed as public surface, so it is tested like public
+  # surface. It needs nothing but the standard library -- no NumPy, no SymPy -- so
+  # any python3 on PATH will do, and the test is simply skipped when there is none.
+  find_package(Python3 COMPONENTS Interpreter QUIET)
+  # A sanitizer build cannot be dlopen'd by an uninstrumented interpreter: the
+  # runtime has to be loaded before main, and ctypes loads it after. That is a
+  # property of the sanitizer, not of the binding, so the test is not registered
+  # there rather than failing there.
+  string(FIND "${CMAKE_CXX_FLAGS}" "-fsanitize" _sccd_sanitized)
+  if(NOT Python3_Interpreter_FOUND)
+    message(STATUS "No python3 interpreter: skipping sccd_binding_test")
+  elseif(NOT _sccd_sanitized EQUAL -1)
+    message(STATUS "Sanitizer build: skipping sccd_binding_test (ctypes cannot dlopen it)")
+  else()
+    add_test(NAME sccd_binding_test
+             COMMAND "${Python3_EXECUTABLE}"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/python/sccd_binding_test.py")
+    set_tests_properties(sccd_binding_test PROPERTIES
+      ENVIRONMENT "SCCD_LIB_PATH=$<TARGET_FILE_DIR:sccd>")
+  endif()
+
+  if(SCCD_ENABLE_SMESH)
+    file(GLOB DEMO_DRIVERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/demo/*.exe.cpp")
+    list(FILTER DEMO_DRIVERS EXCLUDE REGEX "sccd_minimal\\.exe\\.cpp$")
+    foreach(DEMO_DRIVER ${DEMO_DRIVERS})
+      get_filename_component(DEMO_TARGET ${DEMO_DRIVER} NAME_WE)
+      string(REGEX REPLACE "\\.exe$" "" DEMO_TARGET "${DEMO_TARGET}")
+      add_executable(${DEMO_TARGET} ${DEMO_DRIVER})
+      target_link_libraries(${DEMO_TARGET} PRIVATE sccd)
     endforeach()
+
+    if(SCCD_ENABLE_CUDA)
+      file(GLOB_RECURSE SCCD_CUDA_DEMOS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/demo/cuda/*.exe.cpp")
+      # Registered above, on CUDA alone; it must not be defined twice.
+      list(FILTER SCCD_CUDA_DEMOS EXCLUDE REGEX "sccd_minimal_cuda\\.exe\\.cpp$")
+      foreach(SCCD_CUDA_DEMO ${SCCD_CUDA_DEMOS})
+        get_filename_component(SCCD_CUDA_DEMO_TARGET ${SCCD_CUDA_DEMO} NAME_WE)
+        string(REGEX REPLACE "\\.exe$" "" SCCD_CUDA_DEMO_TARGET "${SCCD_CUDA_DEMO_TARGET}")
+        add_executable(${SCCD_CUDA_DEMO_TARGET} ${SCCD_CUDA_DEMO})
+        target_link_libraries(${SCCD_CUDA_DEMO_TARGET} PRIVATE sccd)
+      endforeach()
+    endif()
+
+    add_executable(sccd_bench "${CMAKE_CURRENT_SOURCE_DIR}/benchmark/bench.exe.cpp")
+    target_link_libraries(sccd_bench PRIVATE sccd)
+
+    # Scaling study over surface refinement. Needs smesh for the mesh, refine and
+    # skin operations, so it lives with the other smesh-gated targets.
+    add_executable(sccd_refine_scaling "${CMAKE_CURRENT_SOURCE_DIR}/benchmark/refine_scaling.exe.cpp")
+    target_link_libraries(sccd_refine_scaling PRIVATE sccd)
   endif()
 
-  add_executable(sccd_bench "${CMAKE_CURRENT_SOURCE_DIR}/benchmark/bench.exe.cpp")
-  target_link_libraries(sccd_bench PRIVATE sccd)
-
-  # Scaling study over surface refinement. Needs smesh for the mesh, refine and
-  # skin operations, so it lives with the other smesh-gated targets.
-  add_executable(sccd_refine_scaling "${CMAKE_CURRENT_SOURCE_DIR}/benchmark/refine_scaling.exe.cpp")
-  target_link_libraries(sccd_refine_scaling PRIVATE sccd)
-endif()
-
-# Per-query box counts, host and device, one query at a time. Needs neither smesh
-# nor TightInclusion -- it reads the datasets' query CSVs directly -- so it builds
-# in the default configuration and is the tool to reach for when a box count needs
-# explaining. Build it with -DSCCD_NP_COUNT_BOXES for the counts to exist.
-add_executable(sccd_np_trace "${CMAKE_CURRENT_SOURCE_DIR}/benchmark/np_trace.exe.cpp")
-target_link_libraries(sccd_np_trace PRIVATE sccd)
-if(SCCD_ENABLE_CUDA)
-  target_link_libraries(sccd_np_trace PRIVATE CUDA::cudart)
-endif()
-
-# Accuracy oracle: compares every narrow-phase mode against TightInclusion on the
-# CCD benchmark query sets. Needs TightInclusion but deliberately not smesh, so
-# it can be built and run without the mesh stack.
-if(SCCD_ENABLE_TIGHT_INCLUSION)
-  add_executable(ti_oracle "${CMAKE_CURRENT_SOURCE_DIR}/benchmark/ti_oracle.exe.cpp")
-  target_link_libraries(ti_oracle PRIVATE sccd)
+  # Per-query box counts, host and device, one query at a time. Needs neither smesh
+  # nor TightInclusion -- it reads the datasets' query CSVs directly -- so it builds
+  # in the default configuration and is the tool to reach for when a box count needs
+  # explaining. Build it with -DSCCD_NP_COUNT_BOXES for the counts to exist.
+  add_executable(sccd_np_trace "${CMAKE_CURRENT_SOURCE_DIR}/benchmark/np_trace.exe.cpp")
+  target_link_libraries(sccd_np_trace PRIVATE sccd)
   if(SCCD_ENABLE_CUDA)
-    # The oracle stays a plain C++ translation unit -- it only calls the host-side
-    # narrow_phase_* entry points -- but it needs cuda_runtime.h for the buffer
-    # management and libcudart to link.
-    target_link_libraries(ti_oracle PRIVATE CUDA::cudart)
+    target_link_libraries(sccd_np_trace PRIVATE CUDA::cudart)
   endif()
-endif()
 
-include(SCCDTests)
+  # Accuracy oracle: compares every narrow-phase mode against TightInclusion on the
+  # CCD benchmark query sets. Needs TightInclusion but deliberately not smesh, so
+  # it can be built and run without the mesh stack.
+  if(SCCD_ENABLE_TIGHT_INCLUSION)
+    add_executable(ti_oracle "${CMAKE_CURRENT_SOURCE_DIR}/benchmark/ti_oracle.exe.cpp")
+    target_link_libraries(ti_oracle PRIVATE sccd)
+    if(SCCD_ENABLE_CUDA)
+      # The oracle stays a plain C++ translation unit -- it only calls the host-side
+      # narrow_phase_* entry points -- but it needs cuda_runtime.h for the buffer
+      # management and libcudart to link.
+      target_link_libraries(ti_oracle PRIVATE CUDA::cudart)
+    endif()
+  endif()
+
+  include(SCCDTests)
+endif()
