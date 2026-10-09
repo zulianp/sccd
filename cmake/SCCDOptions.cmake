@@ -12,6 +12,7 @@ option(SCCD_ENABLE_NATIVE_ARCH "Build for the host CPU (-march=native); required
 option(SCCD_ENABLE_SPIKES "Build demoted code under spikes/ (not installed, not tested)" OFF)
 option(SCCD_ENABLE_SMESH "Enable smesh and demos" OFF)
 option(SCCD_ENABLE_TIGHT_INCLUSION "Enable Tight Inclusion" OFF)
+option(SCCD_ENABLE_EXECUTABLES "Build the demos, benchmarks and tests" ON)
 # Without an explicit build type CMake passes no optimization flags at all, which
 # for this library means an -O0 build that looks like a normal one.
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
