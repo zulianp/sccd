@@ -329,8 +329,12 @@ if(SCCD_ENABLE_EXECUTABLES)
   # property of the sanitizer, not of the binding, so the test is not registered
   # there rather than failing there.
   string(FIND "${CMAKE_CXX_FLAGS}" "-fsanitize" _sccd_sanitized)
+  # ctypes loads a shared library only; a static build has nothing for it to open.
+  get_target_property(_sccd_type sccd TYPE)
   if(NOT Python3_Interpreter_FOUND)
     message(STATUS "No python3 interpreter: skipping sccd_binding_test")
+  elseif(NOT _sccd_type STREQUAL "SHARED_LIBRARY")
+    message(STATUS "Static SCCD: skipping sccd_binding_test (ctypes cannot load it)")
   elseif(NOT _sccd_sanitized EQUAL -1)
     message(STATUS "Sanitizer build: skipping sccd_binding_test (ctypes cannot dlopen it)")
   else()
