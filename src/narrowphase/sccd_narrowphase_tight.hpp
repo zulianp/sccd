@@ -677,6 +677,12 @@ namespace sccd {
                             corner[d][c][l] = T_HP(0);
                         }
                     }
+                    // Lanes that do not split still ride through tight_eval_mid_face.
+                    for (int k = 0; k < 4; ++k) {
+                        mt[k][l] = T_HP(0);
+                        mu[k][l] = T_HP(0);
+                        mv[k][l] = T_HP(0);
+                    }
                     split_axis[l] = 0;
                     split_mid[l] = T_HP(0);
                     will_split[l] = 0;
