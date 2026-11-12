@@ -34,8 +34,8 @@ namespace sccd {
 
             // The grid is passed to kernels by value but is also built and
             // queried from host code, including from tests compiled as plain C++,
-            // so the qualifiers only exist when nvcc is the compiler.
-#ifdef __CUDACC__
+            // so the qualifiers only exist when nvcc or hipcc is the compiler.
+#if defined(__CUDACC__) || defined(__HIPCC__)
             __host__ __device__
 #endif
                 ptrdiff_t

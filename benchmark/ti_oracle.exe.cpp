@@ -29,7 +29,7 @@
 #ifdef SCCD_ENABLE_CUDA
 #include "sccd_narrowphase.cuh"
 
-#include <cuda_runtime.h>
+#include "sccd_gpu_runtime.h"
 #endif
 
 #include <algorithm>

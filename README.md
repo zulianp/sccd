@@ -36,6 +36,7 @@ all flat, see [`docs/API.md`](docs/API.md).
 | `SCCD_ENABLE_OPENMP` | `ON` | Parallelise host loops. |
 | `SCCD_ENABLE_TBB` | `OFF` | TBB instead of OpenMP. |
 | `SCCD_ENABLE_CUDA` | `OFF` | Device kernels. Set `SCCD_CUDA_ARCHITECTURES` for your GPU; it defaults to `90`. |
+| `SCCD_ENABLE_HIP` | `OFF` | With `SCCD_ENABLE_CUDA`, builds the device kernels with HIP for AMD GPUs. Set `SCCD_HIP_ARCHITECTURES` (default `gfx942`) and `SCCD_HIP_WAVEFRONT_SIZE` (default `64`). See [`docs/CUDA.md`](docs/CUDA.md). |
 | `SCCD_ENABLE_SMESH` | `OFF` | The `CCD<T>` mesh interface and demos. Needs [smesh](https://github.com/zulianp/smesh). |
 | `SCCD_ENABLE_TIGHT_INCLUSION` | `OFF` | Validation only — builds the accuracy oracle. Not a performance option. |
 | `SCCD_ENABLE_SPIKES` | `OFF` | Demoted and dead code under `spikes/`. Not installed. |

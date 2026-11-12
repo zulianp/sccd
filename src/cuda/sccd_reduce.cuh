@@ -18,15 +18,14 @@ namespace sccd {
             __host__ __device__ __forceinline__ T operator()(const T& a, const T& b) const { return a > b ? a : b; }
         };
 
+        // Butterfly sum over the warp: after it every lane holds the total.
         template <typename T>
-        __device__ T warp_reduce_32(const T in) {
-            static_assert(SCCD_WARP_SIZE == 32, "Only implemented for CUDA with warp size of 32!");
+        __device__ T warp_reduce(const T in) {
             T out = in;
-            out += __shfl_xor_sync(SCCD_WARP_FULL_MASK, out, 16, SCCD_WARP_SIZE);  // 0-16, 1-17, ..., 15-31
-            out += __shfl_xor_sync(SCCD_WARP_FULL_MASK, out, 8, SCCD_WARP_SIZE);   // 0-8, ..., 1-7, ..., 23-31
-            out += __shfl_xor_sync(SCCD_WARP_FULL_MASK, out, 4, SCCD_WARP_SIZE);
-            out += __shfl_xor_sync(SCCD_WARP_FULL_MASK, out, 2, SCCD_WARP_SIZE);
-            out += __shfl_xor_sync(SCCD_WARP_FULL_MASK, out, 1, SCCD_WARP_SIZE);
+#pragma unroll
+            for (int offset = SCCD_WARP_SIZE / 2; offset > 0; offset >>= 1) {
+                out += warp_shfl_xor(out, offset);  // 0-16, 1-17, ..., then 0-8, ... on 32 lanes
+            }
             return out;
         }
 
@@ -48,7 +47,7 @@ namespace sccd {
         __device__ void block_reduce_to_gmem(const T val,
                                              T* const SCCD_RESTRICT block_accumulator,
                                              T* const SCCD_RESTRICT result) {
-            T acc = warp_reduce_32(val);
+            T acc = warp_reduce(val);
             const unsigned int warp_id = threadIdx.x / SCCD_WARP_SIZE;
             const unsigned int lid = lane_id();
             const unsigned int n_warps = (blockDim.x + SCCD_WARP_SIZE - 1) / SCCD_WARP_SIZE;
@@ -62,7 +61,7 @@ namespace sccd {
             if (!warp_id) {
                 assert(warp_id < n_warps);
                 acc = lid < n_warps ? block_accumulator[lid] : 0;
-                acc = warp_reduce_32(acc);
+                acc = warp_reduce(acc);
 
                 if (!threadIdx.x) {
                     assert(acc == acc);

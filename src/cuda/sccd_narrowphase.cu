@@ -85,7 +85,10 @@
 // budget down would trade a visible occupancy number for invisible local-memory
 // spills. Set SCCD_NP_MIN_BLOCKS_PER_SM only against a measured -Xptxas -v run
 // on the target architecture (see SCCD_CUDA_VERBOSE_PTXAS).
-#ifdef SCCD_NP_MIN_BLOCKS_PER_SM
+//
+// HIP reads a second argument as a minimum number of waves per execution unit,
+// which is a different quantity, so it is not passed there.
+#if defined(SCCD_NP_MIN_BLOCKS_PER_SM) && !defined(SCCD_ENABLE_HIP)
 #define SCCD_NP_LAUNCH_BOUNDS(N) __launch_bounds__(N, SCCD_NP_MIN_BLOCKS_PER_SM)
 #else
 #define SCCD_NP_LAUNCH_BOUNDS(N) __launch_bounds__(N)
@@ -1001,6 +1004,15 @@ namespace sccd {
             if (i < toi_n) toi[i] = max_toi;
         }
 
+        // How a block of N threads divides into warps. A block narrower than a
+        // warp -- 32 threads on a 64-wide AMD wavefront -- is a single partial
+        // warp, and its warp reductions span only the N lanes that exist.
+        template <int N>
+        struct BlockWarps {
+            static constexpr int lanes = N < SCCD_WARP_SIZE ? N : SCCD_WARP_SIZE;
+            static constexpr int count = (N + SCCD_WARP_SIZE - 1) / SCCD_WARP_SIZE;
+        };
+
         template <int N>
         struct DfsSplit;
 
@@ -1085,24 +1097,24 @@ namespace sccd {
                 }
             }
 
-            const int lane = threadIdx.x & 31;
-            for (int o = 16; o > 0; o >>= 1) {
-                const TC other_t = __shfl_xor_sync(0xffffffffu, best_t, o);
-                const int other = __shfl_xor_sync(0xffffffffu, best, o);
+            const int lane = threadIdx.x & (SCCD_WARP_SIZE - 1);
+            for (int o = BlockWarps<N>::lanes / 2; o > 0; o >>= 1) {
+                const TC other_t = device::warp_shfl_xor(best_t, o);
+                const int other = device::warp_shfl_xor(best, o);
                 if (other >= 0 && (best < 0 || other_t < best_t || (other_t == best_t && other < best))) {
                     best = other;
                     best_t = other_t;
                 }
             }
-            // warp_sums doubles as the cross-warp scratch; it is sized N/32 and is
-            // free at this point in the loop.
-            const int warp = threadIdx.x >> 5;
+            // warp_sums doubles as the cross-warp scratch; it has one entry per
+            // warp and is free at this point in the loop.
+            const int warp = threadIdx.x / SCCD_WARP_SIZE;
             if (lane == 0) warp_sums[warp] = best;
             __syncthreads();
             if (threadIdx.x == 0) {
                 int win = -1;
                 TC win_t = TC(0);
-                for (int w = 0; w < (N >> 5); ++w) {
+                for (int w = 0; w < BlockWarps<N>::count; ++w) {
                     const int cand = warp_sums[w];
                     if (cand < 0) continue;
                     const TC t = s_tlower[cand];
@@ -1130,18 +1142,18 @@ namespace sccd {
 
         template <int N>
         static inline __device__ int block_popc(const int pred, int* SCCD_RESTRICT warp_sums) {
-            const int lane = threadIdx.x & 31;
-            const int warp = threadIdx.x >> 5;
+            const int lane = threadIdx.x & (SCCD_WARP_SIZE - 1);
+            const int warp = threadIdx.x / SCCD_WARP_SIZE;
             int v = pred;
-            for (int o = 16; o > 0; o >>= 1) {
-                v += __shfl_xor_sync(0xffffffffu, v, o);
+            for (int o = BlockWarps<N>::lanes / 2; o > 0; o >>= 1) {
+                v += device::warp_shfl_xor(v, o);
             }
             if (lane == 0) warp_sums[warp] = v;
             __syncthreads();
             if (warp == 0) {
-                v = (lane < (N >> 5)) ? warp_sums[lane] : 0;
-                for (int o = 16; o > 0; o >>= 1) {
-                    v += __shfl_xor_sync(0xffffffffu, v, o);
+                v = (lane < BlockWarps<N>::count) ? warp_sums[lane] : 0;
+                for (int o = BlockWarps<N>::lanes / 2; o > 0; o >>= 1) {
+                    v += device::warp_shfl_xor(v, o);
                 }
                 if (lane == 0) warp_sums[0] = v;
             }
@@ -1550,7 +1562,7 @@ namespace sccd {
             __shared__ int s_qid[S_CAP];
             __shared__ int s_top;
             __shared__ TC s_toi;
-            __shared__ int warp_sums[N >> 5];
+            __shared__ int warp_sums[BlockWarps<N>::count];
 
             const int tid = threadIdx.x;
 
@@ -1960,7 +1972,7 @@ namespace sccd {
             __shared__ int s_hard;
             __shared__ int s_defer_base;
             __shared__ int s_defer_cursor;
-            __shared__ int warp_sums[N >> 5];
+            __shared__ int warp_sums[BlockWarps<N>::count];
             __shared__ int s_root_live;
 
             // Was `qid * toi_stride`, which is where that name came from: the int

@@ -6,7 +6,7 @@
 #include <cstddef>
 #include <cstdio>
 
-#include <cuda_runtime.h>
+#include "sccd_gpu_runtime.h"
 
 #ifndef SCCD_MIN
 #define SCCD_MIN(a, b) ((a) < (b) ? (a) : (b))
@@ -15,11 +15,78 @@
 #define SCCD_MAX(a, b) ((a) > (b) ? (a) : (b))
 #endif
 
+// Threads per warp -- per wavefront on AMD. Launch grids are sized with it on
+// the host, so it has to be a compile-time constant in both compilation passes,
+// and on HIP the build supplies it for the target architecture: 64 on the CDNA
+// parts (MI200, MI300), 32 on RDNA.
+#if defined(SCCD_ENABLE_HIP)
+#ifndef SCCD_HIP_WAVEFRONT_SIZE
+#error "SCCD_HIP_WAVEFRONT_SIZE must be set for a HIP build (CMake sets it from SCCD_HIP_WAVEFRONT_SIZE)"
+#endif
+#define SCCD_WARP_SIZE SCCD_HIP_WAVEFRONT_SIZE
+#if defined(__HIP_DEVICE_COMPILE__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-pragma"
+static_assert(__AMDGCN_WAVEFRONT_SIZE == SCCD_WARP_SIZE,
+              "SCCD_HIP_WAVEFRONT_SIZE does not match the target's wavefront size");
+#pragma clang diagnostic pop
+#endif
+#else
 #define SCCD_WARP_SIZE 32
+#endif
 #define SCCD_WARP_FULL_MASK 0xffffffff
 
 namespace sccd {
     namespace device {
+
+        // One bit per lane of a warp.
+#if defined(SCCD_ENABLE_HIP)
+        using lane_mask_t = unsigned long long;
+#else
+        using lane_mask_t = unsigned;
+#endif
+
+        // Warp-wide primitives over every lane of the warp. CUDA needs the
+        // explicit full mask; an AMD wavefront executes in lockstep, so HIP's
+        // unmasked forms are the same operation over all SCCD_WARP_SIZE lanes.
+        static inline __device__ lane_mask_t warp_ballot(const int predicate) {
+#if defined(SCCD_ENABLE_HIP)
+            return __ballot(predicate);
+#else
+            return __ballot_sync(SCCD_WARP_FULL_MASK, predicate);
+#endif
+        }
+
+        static inline __device__ int warp_popc(const lane_mask_t mask) {
+#if defined(SCCD_ENABLE_HIP)
+            return __popcll(mask);
+#else
+            return __popc(mask);
+#endif
+        }
+
+        // The lanes strictly below `lane`, as a mask.
+        static inline __device__ lane_mask_t lanes_below(const unsigned lane) {
+            return (lane_mask_t(1) << lane) - lane_mask_t(1);
+        }
+
+        template <typename T>
+        static inline __device__ T warp_shfl_xor(const T value, const int lane_mask) {
+#if defined(SCCD_ENABLE_HIP)
+            return __shfl_xor(value, lane_mask, SCCD_WARP_SIZE);
+#else
+            return __shfl_xor_sync(SCCD_WARP_FULL_MASK, value, lane_mask, SCCD_WARP_SIZE);
+#endif
+        }
+
+        template <typename T>
+        static inline __device__ T warp_shfl_down(const T value, const unsigned delta) {
+#if defined(SCCD_ENABLE_HIP)
+            return __shfl_down(value, delta, SCCD_WARP_SIZE);
+#else
+            return __shfl_down_sync(SCCD_WARP_FULL_MASK, value, delta, SCCD_WARP_SIZE);
+#endif
+        }
 
         static void cuda_check(const cudaError_t error) {
             if (error != cudaSuccess) {

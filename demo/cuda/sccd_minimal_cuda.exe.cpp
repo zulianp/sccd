@@ -40,7 +40,7 @@
 #include "sccd_narrowphase_mode.hpp"
 #include "sccd_vaabb.cuh"
 
-#include <cuda_runtime.h>
+#include "sccd_gpu_runtime.h"
 
 #include <algorithm>
 #include <cstddef>

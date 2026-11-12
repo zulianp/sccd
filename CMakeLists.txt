@@ -30,6 +30,9 @@ if(SCCD_ENABLE_CUDA)
   # A backup kept next to the translation unit it was copied from still ends in
   # .cu, so the glob compiles both and the linker sees every symbol twice.
   list(FILTER SCCD_CUDA_SOURCES EXCLUDE REGEX "\\.bkp\\.cu$")
+  if(SCCD_ENABLE_HIP)
+    set_source_files_properties(${SCCD_CUDA_SOURCES} PROPERTIES LANGUAGE HIP)
+  endif()
   list(APPEND SCCD_SOURCES ${SCCD_CUDA_SOURCES})
   list(APPEND SCCD_HEADERS ${SCCD_CUDA_HEADERS})
 
@@ -123,6 +126,16 @@ endif()
 
 if(SCCD_ENABLE_CUDA)
   target_compile_definitions(sccd PUBLIC SCCD_ENABLE_CUDA)
+  if(SCCD_ENABLE_HIP)
+    target_compile_definitions(sccd PUBLIC SCCD_ENABLE_HIP
+                                           SCCD_HIP_WAVEFRONT_SIZE=${SCCD_HIP_WAVEFRONT_SIZE})
+    # hipCUB, rocPRIM and rocThrust headers, for the .cu files only (see
+    # SCCDDependencies.cmake for why the targets are not linked).
+    foreach(_sccd_hip_hdr_target hip::hipcub roc::rocprim roc::rocthrust)
+      target_include_directories(sccd PRIVATE
+        "$<$<COMPILE_LANGUAGE:HIP>:$<TARGET_PROPERTY:${_sccd_hip_hdr_target},INTERFACE_INCLUDE_DIRECTORIES>>")
+    endforeach()
+  endif()
 
   # The narrow-phase DFS kernels are register-bound: they carry a box, a set of
   # corner values and the per-query geometry live across the whole loop, and the
@@ -162,10 +175,10 @@ if(SCCD_ENABLE_CUDA)
     # into runtime failures. Pair it with SCCD_CUDA_SYNC_CHECKS when chasing a
     # device memory fault: the assert says which invariant broke and the
     # synchronize says which launch broke it.
-    target_compile_options(sccd PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-UNDEBUG>)
+    target_compile_options(sccd PRIVATE $<$<COMPILE_LANGUAGE:CUDA,HIP>:-UNDEBUG>)
   else()
     target_compile_options(sccd PRIVATE
-      $<$<COMPILE_LANGUAGE:CUDA>:$<$<NOT:$<CONFIG:Debug>>:-DNDEBUG>>)
+      $<$<COMPILE_LANGUAGE:CUDA,HIP>:$<$<NOT:$<CONFIG:Debug>>:-DNDEBUG>>)
   endif()
 
   # Device optimisation, stated rather than inherited.
@@ -186,6 +199,12 @@ if(SCCD_ENABLE_CUDA)
   # search reject a box that holds a root -- a missed collision, which is the one
   # failure the library exists to prevent. The default the build relies on is
   # visible in nvcc's fatbinary line: -ftz=0 -prec_div=1 -prec_sqrt=1 -fmad=1.
+  #
+  # The HIP compiler's defaults are the same -- IEEE division and square root,
+  # contraction into fused multiply-adds -- except that flushing subnormals is a
+  # per-target choice, so keeping them is stated rather than inherited.
+  target_compile_options(sccd PRIVATE
+    $<$<COMPILE_LANGUAGE:HIP>:-fno-gpu-flush-denormals-to-zero>)
 
   # The host half of a .cu compiles like any other host translation unit, and it
   # was getting none of the architecture flags above, which are scoped to CXX and
@@ -313,6 +332,7 @@ set(SCCD_PUBLIC_CUDA_HEADERS
   src/cuda/sccd_broadphase.cuh
   src/cuda/sccd_cell2d_broadphase.cuh
   src/cuda/sccd_vaabb.cuh
+  src/cuda/sccd_gpu_runtime.h
 )
 
 # Implementation headers for the device kernels. Included only by .cu files
@@ -323,6 +343,7 @@ set(SCCD_INTERNAL_HEADERS
   src/cuda/sccd_reduce.cuh
   src/cuda/sccd_device_workspace.cuh
   src/cuda/sccd_device_dfs_stack.cuh
+  src/cuda/sccd_gpu_cub.cuh
 )
 
 if(SCCD_ENABLE_SMESH)
@@ -461,7 +482,7 @@ if(SCCD_ENABLE_EXECUTABLES)
   # without it the driver still runs and reports times of impact, and says so.
   add_executable(sccd_np_trace "${CMAKE_CURRENT_SOURCE_DIR}/benchmark/np_trace.exe.cpp")
   target_link_libraries(sccd_np_trace PRIVATE sccd)
-  if(SCCD_ENABLE_CUDA)
+  if(SCCD_ENABLE_CUDA AND NOT SCCD_ENABLE_HIP)
     target_link_libraries(sccd_np_trace PRIVATE CUDA::cudart)
   endif()
 
@@ -471,10 +492,10 @@ if(SCCD_ENABLE_EXECUTABLES)
   if(SCCD_ENABLE_TIGHT_INCLUSION)
     add_executable(ti_oracle "${CMAKE_CURRENT_SOURCE_DIR}/benchmark/ti_oracle.exe.cpp")
     target_link_libraries(ti_oracle PRIVATE sccd)
-    if(SCCD_ENABLE_CUDA)
+    if(SCCD_ENABLE_CUDA AND NOT SCCD_ENABLE_HIP)
       # The oracle stays a plain C++ translation unit -- it only calls the host-side
       # narrow_phase_* entry points -- but it needs cuda_runtime.h for the buffer
-      # management and libcudart to link.
+      # management and libcudart to link. Under HIP, hip::host arrives with sccd.
       target_link_libraries(ti_oracle PRIVATE CUDA::cudart)
     endif()
   endif()

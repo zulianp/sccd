@@ -6,8 +6,7 @@
 #include <cstdio>
 #include <cstdlib>
 
-#include <cub/device/device_radix_sort.cuh>
-#include <cub/device/device_scan.cuh>
+#include "sccd_gpu_cub.cuh"
 
 #include "sccd_base.hpp"
 #include "sccd_cuda_base.cuh"
@@ -172,8 +171,8 @@ namespace sccd {
                 fprintf(stderr, "cudaPointerGetAttributes failed: %s\n", cudaGetErrorString(err));
             }
 
-#if CUDART_VERSION >= 10000
-            // CUDA 10.0 and newer
+#if defined(SCCD_ENABLE_HIP) || CUDART_VERSION >= 10000
+            // CUDA 10.0 and newer, and HIP
             return attributes.type == cudaMemoryTypeDevice;
 #else
             return attributes.memoryType == cudaMemoryTypeDevice;

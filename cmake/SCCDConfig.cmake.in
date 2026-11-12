@@ -6,6 +6,7 @@ set(_sccd_enable_openmp "@SCCD_ENABLE_OPENMP@")
 set(_sccd_enable_tbb "@SCCD_ENABLE_TBB@")
 set(_sccd_enable_smesh "@SCCD_ENABLE_SMESH@")
 set(_sccd_enable_cuda "@SCCD_ENABLE_CUDA@")
+set(_sccd_enable_hip "@SCCD_ENABLE_HIP@")
 
 if(_sccd_enable_openmp)
   find_dependency(OpenMP)
@@ -19,9 +20,11 @@ if(_sccd_enable_smesh)
   find_dependency(smesh)
 endif()
 
-# The exported target links CUDA::cudart, so the consumer needs the toolkit's
-# imported targets defined before SCCDTargets.cmake is read.
-if(_sccd_enable_cuda)
+# The exported target links CUDA::cudart, or hip::host in a HIP build, so the
+# consumer needs those imported targets defined before SCCDTargets.cmake is read.
+if(_sccd_enable_cuda AND _sccd_enable_hip)
+  find_dependency(hip)
+elseif(_sccd_enable_cuda)
   find_dependency(CUDAToolkit)
 endif()
 

@@ -13,7 +13,7 @@
 #include "sccd_broadphase.cuh"
 #include "sccd_cell2d_broadphase.cuh"
 
-#include <cuda_runtime.h>
+#include "sccd_gpu_runtime.h"
 
 #include <algorithm>
 #include <cstdint>

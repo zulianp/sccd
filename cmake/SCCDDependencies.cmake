@@ -6,7 +6,43 @@ if(SCCD_ENABLE_TBB)
   find_package(TBB REQUIRED)
 endif()
 
-if(SCCD_ENABLE_CUDA)
+if(SCCD_ENABLE_HIP AND NOT SCCD_ENABLE_CUDA)
+    message(FATAL_ERROR "SCCD_ENABLE_HIP=ON selects the backend of the device path, "
+                        "which SCCD_ENABLE_CUDA=ON turns on: set both.")
+endif()
+if(SCCD_ENABLE_HIP AND SCCD_ENABLE_SMESH)
+    message(FATAL_ERROR "SCCD_ENABLE_HIP=ON with SCCD_ENABLE_SMESH=ON is not supported: "
+                        "smesh's device execution space is CUDA.")
+endif()
+
+if(SCCD_ENABLE_CUDA AND SCCD_ENABLE_HIP)
+    # The device sources are compiled as HIP. Like the CUDA architectures below,
+    # this must precede enable_language.
+    if(NOT DEFINED CMAKE_HIP_ARCHITECTURES)
+      set(CMAKE_HIP_ARCHITECTURES "${SCCD_HIP_ARCHITECTURES}")
+    endif()
+
+    enable_language(HIP)
+    message(STATUS "SCCD: building the device path with HIP for ${CMAKE_HIP_ARCHITECTURES}, "
+                   "wavefront size ${SCCD_HIP_WAVEFRONT_SIZE}")
+
+    if(NOT DEFINED CMAKE_HIP_STANDARD)
+      set(CMAKE_HIP_STANDARD 17)
+      set(CMAKE_HIP_STANDARD_REQUIRED ON)
+    endif()
+
+    find_package(hip REQUIRED)
+    find_package(hipcub REQUIRED)
+    find_package(rocthrust REQUIRED)
+
+    # hip::host carries the runtime and the platform define that host code
+    # including sccd_gpu_runtime.h needs, so it is public. hipCUB and rocThrust
+    # are header-only and used inside the .cu files only; their targets are not
+    # linked, because through rocprim they bring hip::device, which compiles every
+    # C++ source of the library as HIP. CMakeLists.txt adds their include
+    # directories to the HIP sources instead.
+    list(APPEND SCCD_DEP_LIBRARIES hip::host)
+elseif(SCCD_ENABLE_CUDA)
     # Must precede enable_language(CUDA): CMake fixes the default architecture
     # while enabling the language, and a later assignment is ignored for the
     # compiler test.
