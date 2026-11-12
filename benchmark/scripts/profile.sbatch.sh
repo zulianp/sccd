@@ -9,7 +9,7 @@
 #   sbatch benchmark/scripts/profile.sbatch.sh
 #
 # Writes benchmark/results/profile/ as one text file per measurement, which is
-# the directory wip/paper/scripts/make_inputs.py would read.
+# the directory the article's generators read (zulianp/uvic_papers, sccd/scripts/).
 #
 #SBATCH --account=c40
 #SBATCH --partition=normal

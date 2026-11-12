@@ -242,10 +242,11 @@ Its answer lands after the true root on three scenes -- 269 of
 armadillo-rollers' 394 contact-carrying steps, 31 of rod-twist's 2,481 and 9 of
 cloth-funnel's 363 -- and the cause is a race in the overflow check of its
 subdivision buffer, which tests that the buffer is full and then advances the
-tail as two separate operations. `wip/paper/supplemental_material.tex` section 6
+tail as two separate operations. `sccd/supplemental_material.tex` section 6 in
+zulianp/uvic_papers
 records the three observations that identify it.
 
 The paper reports the library as published. Fix it upstream and send a patch to
 the authors' repository; the paper's `\silentoverflow` macro in
-`wip/paper/preamble.tex` is the one place its description will want revising once
+`sccd/preamble.tex` (zulianp/uvic_papers) is the one place its description will want revising once
 that lands.

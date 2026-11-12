@@ -33,18 +33,26 @@ $PY -m report "$BENCH" /tmp/report-relaxed \
 
 echo "== figures =="
 # `python3 -m report` writes figures under its out-dir; the committed copies in
-# docs/figures and the paper have to be refreshed from there, or the tables move
+# docs/figures and the article have to be refreshed from there, or the tables move
 # and the plots stay behind. This is the step that was missing.
 cp /tmp/report-tight/figures/*.pdf /tmp/report-tight/figures/*.png docs/figures/
 cp /tmp/report-relaxed/figures/*.pdf /tmp/report-relaxed/figures/*.png docs/figures/
-# toi-error is not in this list: the article draws its own two-row version,
-# with additive CCD beneath ours, from the competitor run.
-for f in narrow-per-case reference-speedup refine-scaling results-grid \
-         runtime-breakdown; do
-    cp docs/figures/$f.pdf wip/paper/figures/$f.pdf
-done
-# The two the paper draws itself, from the profile data.
-( cd wip/paper && ../../.venv/bin/python scripts/make_figures.py )
+# The article lives in zulianp/uvic_papers, under sccd/. Its figures are refreshed
+# when a checkout of it is found -- PAPER_DIR, or beside this repository -- and
+# skipped otherwise; the documents above do not depend on it.
+PAPER_DIR="${PAPER_DIR:-../uvic_papers/sccd}"
+if [ -d "$PAPER_DIR/figures" ]; then
+    # toi-error is not in this list: the article draws its own two-row version,
+    # with additive CCD beneath ours, from the competitor run.
+    for f in narrow-per-case reference-speedup refine-scaling results-grid \
+             runtime-breakdown; do
+        cp docs/figures/$f.pdf "$PAPER_DIR/figures/$f.pdf"
+    done
+    # The two the paper draws itself, from the profile data.
+    SCCD_ROOT="$PWD" "$PY" "$PAPER_DIR/scripts/make_figures.py"
+else
+    echo "regenerate_reports: no article checkout at $PAPER_DIR; its figures are not refreshed" >&2
+fi
 
 echo "== check both =="
 $PY -m report "$BENCH" /tmp/report-tight \
