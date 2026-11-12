@@ -51,8 +51,9 @@ cmake --build build -j
 per wavefront — 64 on CDNA (MI200, MI300), 32 on RDNA — and the build stops if it
 does not match the architecture. It needs HIP, hipCUB and rocThrust. The entry
 points and their arguments are the ones this document describes; `cuda*` calls
-in your own code map to `hip*` as usual. The smesh interface does not support
-HIP.
+in your own code map to `hip*` as usual. The smesh interface needs smesh built
+the same way, with `-DSMESH_ENABLE_CUDA=ON -DSMESH_ENABLE_HIP=ON`; configuring
+SCCD against an smesh of the other backend stops with an error.
 
 ## What an optimised build compiles
 

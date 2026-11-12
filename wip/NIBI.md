@@ -52,6 +52,29 @@ cmake --build build-hip -j 16
 `SCCD_HIP_ARCHITECTURES` defaults to `gfx942` and `SCCD_HIP_WAVEFRONT_SIZE` to
 64, which is MI300A.
 
+### With smesh
+
+SCCD's mesh path (`SCCD_ENABLE_SMESH`) needs smesh built for the same backend:
+`-DSMESH_ENABLE_CUDA=ON -DSMESH_ENABLE_HIP=ON`, from smesh's `hip-port` branch
+until it is merged. Configuring SCCD against an smesh of the other backend stops
+with an error. Benchmarks and accuracy checks need it at `geom_t=double`:
+
+```sh
+cmake -S smesh -B smesh/build -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_CXX_COMPILER=$(which g++) -DCMAKE_C_COMPILER=$(which gcc) \
+      -DCMAKE_HIP_COMPILER=$(which clang++) \
+      -DSMESH_ENABLE_CUDA=ON -DSMESH_ENABLE_HIP=ON \
+      -DSMESH_GEOM_TYPE=float64 -DSMESH_REAL_TYPE=float64 \
+      -DSMESH_SCALAR_TYPE=float64 -DSMESH_ACCUMULATOR_TYPE=float64 \
+      -DSMESH_ENABLE_OPENMP=ON -DSMESH_ENABLE_MPI=OFF -DSMESH_ENABLE_MPISORT=OFF \
+      -DSMESH_ENABLE_DEMO=OFF -DSMESH_ENABLE_RYAML=OFF -DSMESH_ENABLE_DEV_MODE=OFF \
+      -DCMAKE_INSTALL_PREFIX=$SCRATCH/smesh-f64-hip
+cmake --build smesh/build -j 16 && cmake --install smesh/build
+```
+
+then add `-DSCCD_ENABLE_SMESH=ON -Dsmesh_DIR=$SCRATCH/smesh-f64-hip/lib64/cmake/smesh`
+to the SCCD configure line above. `$SCRATCH/build-smesh-hip.sh` on Nibi does both.
+
 ## Running
 
 The MI300A nodes sit in the general GPU partitions with GRES `gpu:mi300a:4`
@@ -85,3 +108,16 @@ Built with `-DSCCD_ENABLE_TIGHT_INCLUSION=ON`, on one MI300A:
   differ, as they do between two runs on the GH200.
 
 The other five scenes have not been run on AMD.
+
+With smesh (`hip-port` branch, `geom_t=double`), on one MI300A:
+
+- smesh's 22 tests pass. They run its host paths only: `smesh_hierarchies_test`
+  reaches the device with `SMESH_EXECUTION_SPACE=device`, but that branch is
+  unfinished (a `TODO` where the prolongation belongs, then host functions handed
+  device pointers) and fails on the GH200 as well, by segmentation fault. So no
+  test covers smesh's own device kernels on either vendor.
+- SCCD's tests pass, and `sccd_mesh_cuda_test` on cloth-funnel frames 100-101
+  and 220-221 (converted to float64) prints the same as on the GH200: identical
+  broad-phase pairs on CPU and GPU, Tight times of impact within 1e-2 of the CPU,
+  and in Relaxed two edge-edge pairs where the GPU is earlier (0.64 against
+  0.852, 0 against 0.191). `$SCRATCH/run-hip-smesh-checks.sh` is the batch job.
