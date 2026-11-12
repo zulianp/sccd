@@ -177,8 +177,8 @@ def table(runs: list[ScalingRun], source: str):
                "phase has almost no work to do and its column is dominated by "
                "noise rather than by element count; what this measures is the "
                "broad phase and the preparation that feeds it. Narrow-phase cost "
-               "against problem size is in the per-case figure, over cases that "
-               "do collide. Where the exponent is below 1 it is because the fixed "
+               "is measured over the benchmark's own cases, which do collide. "
+               "Where the exponent is below 1 it is because the fixed "
                "cost visible at the smallest size is amortised as the mesh "
                "grows."),
     )

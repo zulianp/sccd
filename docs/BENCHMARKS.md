@@ -136,9 +136,54 @@ TightInclusion runs on the host, so the **CPU** row is the like-for-like
 comparison and the **GPU** row is what the same search costs on the other
 processor.
 
-![SCCD against TightInclusion](figures/reference-speedup.png)
+<!-- sccd:begin reference -->
 
-Each bar is one processor's whole narrow phase over the same queries, stacked into its vertex-face and edge-edge work, with the total and the speedup over TightInclusion above it. Query counts are in the dataset table and hit agreement in the conservativeness table, so neither is repeated here.
+| scene             | phase | mode           |   queries |      hits |         time ms |     vs. TI |
+|-------------------|-------|----------------|----------:|----------:|----------------:|-----------:|
+| armadillo-rollers | EE    | GPU            |    99,104 |    98,761 |     2345 / 2361 |       4.3× |
+| armadillo-rollers | EE    | CPU            |    99,104 |    98,761 |     5865 / 5870 |       1.7× |
+| armadillo-rollers | EE    | TightInclusion |    99,104 |    98,761 |   10113 / 10133 | 1.0× (ref) |
+| armadillo-rollers | VF    | GPU            |    32,337 |    32,122 |     1626 / 1635 |       4.4× |
+| armadillo-rollers | VF    | CPU            |    32,337 |    32,122 |     2473 / 2483 |       2.9× |
+| armadillo-rollers | VF    | TightInclusion |    32,337 |    32,122 |     7231 / 7231 | 1.0× (ref) |
+| cloth-ball        | EE    | GPU            |   557,683 |   557,668 |       491 / 495 |       5.4× |
+| cloth-ball        | EE    | CPU            |   557,683 |   557,668 |     1037 / 1038 |       2.6× |
+| cloth-ball        | EE    | TightInclusion |   557,683 |   557,668 |     2655 / 2655 | 1.0× (ref) |
+| cloth-ball        | VF    | GPU            |   107,257 |   107,252 |       341 / 342 |       3.8× |
+| cloth-ball        | VF    | CPU            |   107,257 |   107,252 |       399 / 400 |       3.2× |
+| cloth-ball        | VF    | TightInclusion |   107,257 |   107,252 |     1280 / 1281 | 1.0× (ref) |
+| cloth-funnel      | EE    | GPU            |     6,751 |     6,259 |     1135 / 1149 |       2.5× |
+| cloth-funnel      | EE    | CPU            |     6,751 |     6,259 |     1262 / 1286 |       2.3× |
+| cloth-funnel      | EE    | TightInclusion |     6,751 |     6,259 |     2874 / 2935 | 1.0× (ref) |
+| cloth-funnel      | VF    | GPU            |       801 |       529 |       416 / 421 |       2.9× |
+| cloth-funnel      | VF    | CPU            |       801 |       529 |       243 / 244 |       4.9× |
+| cloth-funnel      | VF    | TightInclusion |       801 |       529 |     1197 / 1199 | 1.0× (ref) |
+| n-body            | EE    | GPU            | 2,399,812 | 2,399,746 |       877 / 879 |       5.8× |
+| n-body            | EE    | CPU            | 2,399,812 | 2,399,746 |     1501 / 1504 |       3.4× |
+| n-body            | EE    | TightInclusion | 2,399,812 | 2,399,746 |     5094 / 5111 | 1.0× (ref) |
+| n-body            | VF    | GPU            |   547,907 |   547,874 |       631 / 645 |       3.0× |
+| n-body            | VF    | CPU            |   547,907 |   547,873 |       479 / 479 |       4.0× |
+| n-body            | VF    | TightInclusion |   547,907 |   547,873 |     1911 / 1914 | 1.0× (ref) |
+| puffer-ball       | EE    | GPU            | 1,206,952 | 1,187,650 |       919 / 922 |       4.3× |
+| puffer-ball       | EE    | CPU            | 1,206,952 | 1,187,650 |     1713 / 1737 |       2.3× |
+| puffer-ball       | EE    | TightInclusion | 1,206,952 | 1,187,650 |     3958 / 3998 | 1.0× (ref) |
+| puffer-ball       | VF    | GPU            |   307,220 |   299,698 |       625 / 626 |       2.8× |
+| puffer-ball       | VF    | CPU            |   307,220 |   299,676 |       543 / 547 |       3.2× |
+| puffer-ball       | VF    | TightInclusion |   307,220 |   299,676 |     1733 / 1747 | 1.0× (ref) |
+| rod-twist         | EE    | GPU            |   492,120 |   246,132 |   16253 / 16296 |      26.6× |
+| rod-twist         | EE    | CPU            |   492,120 |   246,132 | 202624 / 202792 |       2.1× |
+| rod-twist         | EE    | TightInclusion |   492,120 |   246,132 | 432019 / 432263 | 1.0× (ref) |
+| rod-twist         | VF    | GPU            |    57,088 |    40,544 |     8038 / 8137 |       9.4× |
+| rod-twist         | VF    | CPU            |    57,088 |    40,542 |   18672 / 18773 |       4.1× |
+| rod-twist         | VF    | TightInclusion |    57,088 |    40,542 |   75762 / 75815 | 1.0× (ref) |
+
+Source: `benchmark/results/oracle-gh200-all.csv`
+
+<!-- sccd:end reference -->
+
+Each time is one processor's whole narrow phase over the scene's queries of
+that kind, in milliseconds, as median / maximum over the repeats; *vs. TI* is
+TightInclusion's median over this row's. Query counts and hits are per scene.
 
 ### Accuracy
 
@@ -323,7 +368,7 @@ to 94.4 million.
 |           |     4 | 23,610,880 |       6,402,081 |         13.8 |        329.7 |    343.5 |       4.9 |      |
 |           |     5 | 94,443,520 |      25,824,702 |         50.4 |       1422.2 |   1472.5 |       9.2 |      |
 
-The two frames used here do not come into contact, so the narrow phase has almost no work to do and its column is dominated by noise rather than by element count; what this measures is the broad phase and the preparation that feeds it. Narrow-phase cost against problem size is in the per-case figure, over cases that do collide. Where the exponent is below 1 it is because the fixed cost visible at the smallest size is amortised as the mesh grows.
+The two frames used here do not come into contact, so the narrow phase has almost no work to do and its column is dominated by noise rather than by element count; what this measures is the broad phase and the preparation that feeds it. Narrow-phase cost is measured over the benchmark's own cases, which do collide. Where the exponent is below 1 it is because the fixed cost visible at the smallest size is amortised as the mesh grows.
 
 Source: `benchmark/results/scaling/host-cell2dminfv-mode2.txt, benchmark/results/scaling/device-cell2dminfv-mode2.txt`
 
@@ -352,46 +397,14 @@ so no root is isolated and the column prices the rejection test alone, over
 candidates that all fail it. That work is uniform, and the device holds it
 between 1.6 ms and 7.6 ms across the six refinements while the host climbs from
 0.4 ms to 118.2 ms. A GPU suits the case where every candidate costs the same;
-the divergent case is the per-case figure, over cases that do collide.
+the CPU-against-GPU table in section 5 measures the divergent case, over cases
+that do collide.
 
 Between the host strategies the cost divides oppositely: the sweep builds more
 cheaply at the coarsest sizes, the cell list traverses far better, and traversal
 is what grows — 89,521.1 ms against 3,596.4 ms at the largest size.
 
-## 8. Figures
-
-Presentation follows the dataset paper (Belgrod et al., *TOI dataset for CCD and
-a scalable conservative algorithm*) over the same six scenes: scenes across the
-columns, one quantity per row, distributions over cases as box plots on
-logarithmic axes.
-
-![Per-case results over the six scenes](figures/results-grid.png)
-
-**Figure 1.** Per-case distributions over the six scenes: broad-phase time,
-narrow-phase time, and error against the exact root. Each box spans the first to
-the third quartile with the median inside, whiskers reach the furthest case
-within 1.5 interquartile ranges, and cases beyond are drawn individually.
-
-![Runtime split by phase](figures/runtime-breakdown.png)
-
-**Figure 2.** Runtime split into *prep*, *broad* and *narrow*. Preparation dominates
-on the host; on the GPU the narrow phase does.
-
-![Error against the symbolic ground truth](figures/toi-error.png)
-
-**Figure 3.** Error against the exact symbolic roots, log axis. One-sided by
-construction — it is how far *before* the true root the answer falls — so every
-value shown is on the safe side, and nothing falls off the axis on the late side
-because no such case exists. The device curve is dashed because the
-two coincide.
-
-![Cost against element count](figures/refine-scaling.png)
-
-**Figure 4.** Broad- and narrow-phase cost against element count, log-log. The
-fitted exponent is on the broad phase; the narrow-phase series is flat and noisy
-because these two frames do not come into contact.
-
-## 9. Provenance
+## 8. Provenance
 
 <!-- sccd:begin provenance -->
 

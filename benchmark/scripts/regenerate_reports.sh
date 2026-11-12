@@ -1,5 +1,5 @@
 #!/bin/bash
-# Regenerate every document and paper input from the committed data.
+# Regenerate the benchmark documents and the article's figures from the committed data.
 # Run from the repository root with the analysis venv present.
 set -euo pipefail
 PY="${PY:-./.venv/bin/python}"
@@ -32,26 +32,18 @@ $PY -m report "$BENCH" /tmp/report-relaxed \
     --figure-prefix=relaxed- --embed=docs/BENCHMARKS_RELAXED.md
 
 echo "== figures =="
-# `python3 -m report` writes figures under its out-dir; the committed copies in
-# docs/figures and the article have to be refreshed from there, or the tables move
-# and the plots stay behind. This is the step that was missing.
-cp /tmp/report-tight/figures/*.pdf /tmp/report-tight/figures/*.png docs/figures/
-cp /tmp/report-relaxed/figures/*.pdf /tmp/report-relaxed/figures/*.png docs/figures/
-# The article lives in zulianp/uvic_papers, under sccd/. Its figures are refreshed
-# when a checkout of it is found -- PAPER_DIR, or beside this repository -- and
-# skipped otherwise; the documents above do not depend on it.
+# The documents carry tables only; every figure lives with the article, in
+# zulianp/uvic_papers under sccd/figures/. `python3 -m report` draws its figures
+# under its out-dir, and they are copied there from it, or the tables move and the
+# plots stay behind. The checkout is PAPER_DIR, or beside this repository; without
+# one the figures stay under /tmp and the documents above are unaffected.
 PAPER_DIR="${PAPER_DIR:-../uvic_papers/sccd}"
 if [ -d "$PAPER_DIR/figures" ]; then
-    # toi-error is not in this list: the article draws its own two-row version,
-    # with additive CCD beneath ours, from the competitor run.
-    for f in narrow-per-case reference-speedup refine-scaling results-grid \
-             runtime-breakdown; do
-        cp docs/figures/$f.pdf "$PAPER_DIR/figures/$f.pdf"
-    done
-    # The two the paper draws itself, from the profile data.
+    cp /tmp/report-tight/figures/*.pdf /tmp/report-relaxed/figures/*.pdf "$PAPER_DIR/figures/"
+    # The figures the article draws itself, from the profile and competitor data.
     SCCD_ROOT="$PWD" "$PY" "$PAPER_DIR/scripts/make_figures.py"
 else
-    echo "regenerate_reports: no article checkout at $PAPER_DIR; its figures are not refreshed" >&2
+    echo "regenerate_reports: no article checkout at $PAPER_DIR; figures left in /tmp/report-*/figures" >&2
 fi
 
 echo "== check both =="

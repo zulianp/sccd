@@ -9,7 +9,7 @@ generated without them, and each adds its own tables or figure when given.
 
 Writes, under <out-dir>:
     figures/*.pdf   figures for LaTeX
-    figures/*.png   the same figures for Markdown
+    figures/*.png   the same figures as raster images
     figures.tex     \\includegraphics with a caption and label for each
     tables.tex      booktabs tables
     tables.md       the same tables as Markdown
@@ -212,6 +212,12 @@ def main(argv: list[str]) -> int:
                        "geometry, so the exact roots are not a reference for the "
                        "mesh path.")
     }
+    if oracle_rows:
+        # The comparison against TightInclusion as a table: the documents carry
+        # no figures -- those live with the article -- so the speedups are stated
+        # here in numbers.
+        blocks_extra["reference"] = tables.render_markdown(
+            oracle_mod.reference_table(oracle_rows, oracle_source))
 
     late = sum(s.toi_late for s in scenes.values())
     late += oracle_mod.violations(oracle_rows) if oracle_rows else 0
