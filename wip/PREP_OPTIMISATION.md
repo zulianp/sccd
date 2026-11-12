@@ -232,7 +232,7 @@ missing. Host combinations were untouched, which is what made the pattern
 legible: they match the committed row counts exactly, combination for
 combination.
 
-The committed `sweep-gh200-bp.csv` is not affected. Checked the same way, every
+The earlier `sweep-gh200-bp.csv` run is not affected. Checked the same way, every
 one of its (scene, mode, broad phase) combinations carries identical counts
 across all four mode-and-space pairs. The defect was latent there and this run
 is what triggered it.

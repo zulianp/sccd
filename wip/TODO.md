@@ -85,8 +85,12 @@ that ref and running `git gc --prune=now` took the local store from 4.56 GiB to
 **24.03 MiB** with every branch intact — no rewrite, no force-push, nothing for
 anyone else to re-clone.
 
-What remains on the remote is 4 `csv/` blobs in no branch tip, worth perhaps 10 MB
-of a 24 MB clone. Not worth a force-push across 12 branches, and not planned.
+History was rewritten on 2026-11-12, once a clone of the URL measured 58 MB: the
+old `csv/` tables, the `benchmark/results/sweep-gh200*.csv` sweeps (ignored since
+198d70b) and `wip/paper/` (moved to zulianp/uvic_papers) were removed from every
+branch, which took a fresh clone to 19 MB. Only main, benchmark-quality and
+tight-api changed. The pre-rewrite branches are kept as a git bundle outside the
+repository; GitHub's `refs/pull/*` still reference the old commits.
 
 **The lesson, since it cost a planned history rewrite:** `git count-objects`
 measures a local object store, not a repository. Before proposing surgery on
