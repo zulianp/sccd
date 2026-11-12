@@ -69,7 +69,9 @@ if(SCCD_ENABLE_CUDA)
 endif()
 
 if(SCCD_ENABLE_SMESH)
-  find_package(smesh REQUIRED)
+  if(NOT TARGET smesh::smesh)
+    find_package(smesh REQUIRED)
+  endif()
 endif()
 
 
