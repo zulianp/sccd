@@ -88,9 +88,11 @@ anyone else to re-clone.
 History was rewritten on 2026-11-12, once a clone of the URL measured 58 MB: the
 old `csv/` tables, the `benchmark/results/sweep-gh200*.csv` sweeps (ignored since
 198d70b) and `wip/paper/` (moved to zulianp/uvic_papers) were removed from every
-branch, which took a fresh clone to 19 MB. Only main, benchmark-quality and
-tight-api changed. The pre-rewrite branches are kept as a git bundle outside the
-repository; GitHub's `refs/pull/*` still reference the old commits.
+branch, which took a fresh clone to 19 MB. A second rewrite the same day removed
+`docs/figures/`, whose figures now live with the article, and took it to 3 MB.
+Both times only main, benchmark-quality and tight-api changed. The pre-rewrite
+branches are kept as git bundles outside the repository; GitHub's `refs/pull/*`
+still reference the old commits.
 
 **The lesson, since it cost a planned history rewrite:** `git count-objects`
 measures a local object store, not a repository. Before proposing surgery on
