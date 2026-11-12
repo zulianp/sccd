@@ -124,6 +124,13 @@ static int test_cuda_broadphase_matches_cpu() {
     std::sort(cpu_ee_pairs.begin(), cpu_ee_pairs.end());
     std::sort(gpu_ee_pairs.begin(), gpu_ee_pairs.end());
 
+    // A comparison of two empty sets passes too; say what was compared.
+    printf("vertex-face pairs: CPU %zu, GPU %zu; edge-edge pairs: CPU %zu, GPU %zu\n",
+           cpu_vf_pairs.size(),
+           gpu_vf_pairs.size(),
+           cpu_ee_pairs.size(),
+           gpu_ee_pairs.size());
+
     SMESH_TEST_EQ(cpu_vf_pairs.size(), gpu_vf_pairs.size());
     SMESH_TEST_EQ(cpu_ee_pairs.size(), gpu_ee_pairs.size());
     SMESH_TEST_ASSERT(cpu_vf_pairs == gpu_vf_pairs);
@@ -152,6 +159,11 @@ static int test_cuda_narrowphase_stride_one_matches_cpu() {
 
     SMESH_TEST_EQ(cpu_vf.size(), gpu_vf.size());
     SMESH_TEST_EQ(cpu_ee.size(), gpu_ee.size());
+
+    size_t vf_hits = 0, ee_hits = 0;
+    for (const auto& q : cpu_vf) vf_hits += std::get<2>(q) < 1;
+    for (const auto& q : cpu_ee) ee_hits += std::get<2>(q) < 1;
+    printf("pairs with a time of impact below 1 (CPU): vertex-face %zu, edge-edge %zu\n", vf_hits, ee_hits);
 
     constexpr double toi_tol = 1e-2;
     for (size_t i = 0; i < cpu_vf.size(); ++i) {
@@ -199,9 +211,24 @@ int main(int argc, char** argv) {
             return SMESH_TEST_FAILURE;
         }
 
-        SMESH_RUN_TEST(test_cuda_broadphase_matches_cpu);
-        SMESH_RUN_TEST(test_cuda_narrowphase_stride_one_matches_cpu);
+        // Not SMESH_RUN_TEST: it reads every command-line argument as the name of a
+        // test to run, so given the two mesh paths it ran neither test and passed.
+        const std::pair<const char*, int (*)()> tests[] = {
+            {"test_cuda_broadphase_matches_cpu", test_cuda_broadphase_matches_cpu},
+            {"test_cuda_narrowphase_stride_one_matches_cpu", test_cuda_narrowphase_stride_one_matches_cpu},
+        };
+        for (const auto& [name, test] : tests) {
+            if (test() != SMESH_TEST_SUCCESS) {
+                fprintf(stderr, "TEST: %s failed!\n", name);
+                err += 1;
+            }
+        }
     }
+
+    // The meshes hold device buffers: free them while the runtime is still up, not
+    // during static destruction, where the free fails and exits nonzero.
+    g_t0.reset();
+    g_t1.reset();
 
     SMESH_UNIT_TEST_FINALIZE();
     return SMESH_UNIT_TEST_ERR();
