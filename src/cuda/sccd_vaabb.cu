@@ -44,30 +44,41 @@ namespace sccd {
             ptrdiff_t e = blockIdx.x * blockDim.x + threadIdx.x;
             if (e >= n_elements) return;
 
+            // Reduce over the element's vertices in registers and write each
+            // bound once. Accumulating through aabbs[d][e] instead costs two
+            // global reads and two global writes per vertex per dimension --
+            // about thirty memory operations for a triangle where six writes
+            // do -- and the row pointers themselves live in device memory, so
+            // aabbs[d] is another load every time it is named.
+            //
+            // Rounding outward once at the end gives the same box as rounding
+            // every vertex: dnextafter_down and dnextafter_up are monotone, so
+            // the minimum of the rounded values is the rounded minimum. The box
+            // is therefore identical, not merely close, which is what the
+            // conservativeness argument needs.
             for (int d = 0; d < SCCD_DIM; d++) {
-                const idx_t ii = elements[0][e];
-                const geom_t p0 = points0[d][ii];
-                const geom_t p1 = points1[d][ii];
+                const geom_t* const SCCD_RESTRICT p0d = points0[d];
+                const geom_t* const SCCD_RESTRICT p1d = points1[d];
 
-                if (rounding == BoxRounding::OutwardUlp) {
-                    aabbs[d][e] = dnextafter_down(dmin<geom_t>(p0, p1));
-                    aabbs[SCCD_DIM + d][e] = dnextafter_up(dmax<geom_t>(p0, p1));
-                } else {
-                    aabbs[d][e] = dmin<geom_t>(p0, p1);
-                    aabbs[SCCD_DIM + d][e] = dmax<geom_t>(p0, p1);
-                }
+                const idx_t i0 = elements[0][e];
+                aabb_t e_min = aabb_t(dmin<geom_t>(p0d[i0], p1d[i0]));
+                aabb_t e_max = aabb_t(dmax<geom_t>(p0d[i0], p1d[i0]));
 
                 for (int v = 1; v < nxe; v++) {
                     const idx_t ii = elements[v][e];
-                    const geom_t p0 = points0[d][ii];
-                    const geom_t p1 = points1[d][ii];
-                    const aabb_t p_min =
-                        (rounding == sccd::BoxRounding::OutwardUlp) ? dnextafter_down(dmin<geom_t>(p0, p1)) : dmin<geom_t>(p0, p1);
-                    const aabb_t p_max =
-                        (rounding == sccd::BoxRounding::OutwardUlp) ? dnextafter_up(dmax<geom_t>(p0, p1)) : dmax<geom_t>(p0, p1);
-                    aabbs[d][e] = dmin<aabb_t>(aabbs[d][e], p_min);
-                    aabbs[SCCD_DIM + d][e] = dmax<aabb_t>(aabbs[SCCD_DIM + d][e], p_max);
+                    const geom_t q0 = p0d[ii];
+                    const geom_t q1 = p1d[ii];
+                    e_min = dmin<aabb_t>(e_min, aabb_t(dmin<geom_t>(q0, q1)));
+                    e_max = dmax<aabb_t>(e_max, aabb_t(dmax<geom_t>(q0, q1)));
                 }
+
+                if (rounding == BoxRounding::OutwardUlp) {
+                    e_min = dnextafter_down(e_min);
+                    e_max = dnextafter_up(e_max);
+                }
+
+                aabbs[d][e] = e_min;
+                aabbs[SCCD_DIM + d][e] = e_max;
             }
         }
 
@@ -116,13 +127,14 @@ namespace sccd {
             for (int d = 0; d < SCCD_DIM; d++) {
                 const geom_t p0 = points0[d][n];
                 const geom_t p1 = points1[d][n];
+                aabb_t p_min = aabb_t(dmin<geom_t>(p0, p1));
+                aabb_t p_max = aabb_t(dmax<geom_t>(p0, p1));
                 if (rounding == BoxRounding::OutwardUlp) {
-                    aabbs[d][n] = dnextafter_down(dmin<geom_t>(p0, p1));
-                    aabbs[SCCD_DIM + d][n] = dnextafter_up(dmax<geom_t>(p0, p1));
-                } else {
-                    aabbs[d][n] = dmin<geom_t>(p0, p1);
-                    aabbs[SCCD_DIM + d][n] = dmax<geom_t>(p0, p1);
+                    p_min = dnextafter_down(p_min);
+                    p_max = dnextafter_up(p_max);
                 }
+                aabbs[d][n] = p_min;
+                aabbs[SCCD_DIM + d][n] = p_max;
             }
         }
 

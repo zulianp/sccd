@@ -1,0 +1,136 @@
+#!/bin/bash
+# One comparison chunk: every library over one case range of one scene, once.
+#
+#   run_comparison.sh <scene> <begin> <end> <out.csv>
+#
+# `sweep_comparison.sh` calls this inside a Slurm job and owns the chunking; it
+# can also be run by hand inside an allocation. Every binary reads the same
+# case-range variables and prints the same schema, so the chunk is one CSV. Each
+# library runs in its own process, so one allocator's and cache's state cannot
+# colour the next one's timings.
+#
+# What each run contributes:
+#
+#   sccd_bench           both processors, Relaxed (0) and Tight (2). The host runs
+#                        the sweep broad phase; the device runs both strategies,
+#                        so they and Scalable CCD's are in one allocation.
+#                        `narrow_ms` is the earliest-time-of-impact path,
+#                        `narrow_ms_s1` the per-pair path, and the accuracy
+#                        columns score the curated queries.
+#   scalable_ccd_bench   its earliest-time-of-impact pipeline per case, as
+#                        shipped. Device only: its narrow phase is CUDA, so it
+#                        has no host pipeline to compare.
+#   accd_bench           per pair over SCCD's host sweep candidates, and scored on
+#                        the curated queries.
+#
+# The CSV is written through a temporary file and renamed, so an existing
+# <out.csv> is a chunk that finished. Any library exiting non-zero leaves the
+# chunk unfinished: a partial chunk merges silently and thins one library.
+set -u
+set -o pipefail
+
+if [[ $# -ne 4 ]]; then
+    echo "usage: $0 <scene> <begin> <end> <out.csv>" >&2
+    exit 2
+fi
+scene="$1" begin="$2" end="$3" out="$4"
+
+SCRATCH=${SCRATCH:-/ritom/scratch/cscs/zulianp}
+# The smesh whose geom_t the build and the prepared data agree on. These
+# benchmarks want the double one: the dataset's exact roots belong to the
+# rational query geometry, and a float32 mesh answers about a different geometry,
+# which shows up as times of impact that look late and are not.
+SMESH_PREFIX=${SCCD_SMESH_PREFIX:-$SCRATCH/installations/smesh-f64}
+export PATH=$SMESH_PREFIX/bin:$PATH
+D=${SCCD_DATA_DIR:-$SCRATCH/sccd-data}
+B=${SCCD_COMPETITOR_BUILD:-$SCRATCH/sccd/build-comp-f64}
+
+# One Grace, 72 threads. OMP_NUM_THREADS covers SCCD; additive CCD is driven
+# through oneTBB, which follows the CPU affinity mask instead, so the job has to
+# be bound to one Grace (--cpus-per-task=72). The line records what the chunk
+# actually had.
+export OMP_NUM_THREADS=72
+# One Grace for every library, and the thread controls each one's own runtime
+# reads -- which are not the same controls.
+#
+# numactl gives all of them the same 72 CPUs and local memory. --cpus-per-task
+# alone does not: measured on a compute node, a task with --cpus-per-task=72
+# still reported an affinity list of 0-287.
+#
+# OMP_PROC_BIND and OMP_PLACES go to SCCD alone. They pin the master thread, and
+# oneTBB creates its workers against the inherited mask, so additive CCD's
+# parallel_for ran on one core and cost 130.3 ns per candidate where it costs 5.4
+# without them -- 24 times, measured, with OMP_NUM_THREADS=1 giving the same
+# 130.0 and so ruling out the thread count. Exporting them globally therefore
+# published additive CCD's single-core cost as its cost.
+if command -v numactl > /dev/null 2>&1; then
+    SCCD_BIND="numactl --cpunodebind=0 --membind=0"
+else
+    SCCD_BIND="taskset -c 0-71"
+fi
+export SCCD_BIND
+# Applied per library below, never to the whole script.
+SCCD_OMP_AFFINITY=(OMP_PROC_BIND=close OMP_PLACES=cores)
+echo "$(hostname) cpus=$(nproc) OMP_NUM_THREADS=$OMP_NUM_THREADS GPU=${CUDA_VISIBLE_DEVICES:-unset} $scene [$begin,$end)"
+
+tmp="${out}.partial"
+mkdir -p "$(dirname "$out")"
+"$B/sccd_bench" --header > "$tmp" || { echo "error: sccd_bench printed no header" >&2; exit 1; }
+
+range=(SCCD_BENCH_CASE_BEGIN="$begin" SCCD_BENCH_CASE_END="$end")
+
+run() {  # $1 label  $2.. command
+    local label="$1"; shift
+    local t0 rc
+    t0=$(date +%s)
+    # Every library through the same binding, so the comparison is between the
+    # libraries and not between their thread placements.
+    ${SCCD_BIND:-} "$@" 2>"${tmp%.partial}.$label.err" | tail -n +2 >> "$tmp"
+    rc=$?
+    printf '  %-26s exit=%-3d %5ds\n' "$label" "$rc" "$(( $(date +%s) - t0 ))"
+    if [[ $rc -ne 0 ]]; then
+        head -5 "${tmp%.partial}.$label.err" >&2
+        echo "error: $label failed; leaving $out unfinished" >&2
+        rm -f "$tmp"
+        exit 1
+    fi
+}
+
+for space in device host; do
+    for mode in 0 2; do
+        run "sccd-$space-m$mode" env "${range[@]}" "${SCCD_OMP_AFFINITY[@]}" \
+            SCCD_BENCH_EXECUTION_SPACE=$space SCCD_NARROWPHASE_MODE=$mode SCCD_BROADPHASE=sweep \
+            "$B/sccd_bench" "$D" "$scene"
+    done
+done
+
+# The device again over the cell list, so our two broad-phase strategies and
+# Scalable CCD's sit in one allocation and can be put on one axis. Between
+# allocations this harness varies by about 40%, which is far more than the
+# differences being compared. The host stays on the sweep: additive CCD is handed
+# the candidates the host produces, and changing them would change that
+# comparison rather than this one.
+for mode in 0 2; do
+    run "sccd-device-cell2dminfv-m$mode" env "${range[@]}" "${SCCD_OMP_AFFINITY[@]}" \
+        SCCD_BENCH_EXECUTION_SPACE=device SCCD_NARROWPHASE_MODE=$mode SCCD_BROADPHASE=cell2dminfv \
+        "$B/sccd_bench" "$D" "$scene"
+done
+
+# The device only. Scalable CCD's narrow phase is CUDA, so its host side is a
+# broad phase with no pipeline behind it -- not something anyone runs end to end,
+# and not what the library offers. Its device pipeline is the subject.
+run "scalable-device" env "${range[@]}" SCCD_BENCH_EXECUTION_SPACE=device \
+    "$B/benchmark/competitors/scalable_ccd_bench" "$D" "$scene"
+
+# The same sweep broad phase the SCCD rows use, so both per-pair narrow phases
+# are handed the same candidates.
+run "accd" env "${range[@]}" SCCD_BROADPHASE=sweep \
+    "$B/benchmark/competitors/accd_bench" "$D" "$scene"
+
+if [[ "$(wc -l < "$tmp")" -le 1 ]]; then
+    echo "error: $out produced no rows; leaving it unfinished" >&2
+    rm -f "$tmp"
+    exit 1
+fi
+mv "$tmp" "$out"
+echo "done $out ($(( $(wc -l < "$out") - 1 )) rows)"

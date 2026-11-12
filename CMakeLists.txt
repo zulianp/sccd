@@ -104,6 +104,23 @@ if(TARGET TBB::tbb)
   target_link_libraries(sccd PUBLIC TBB::tbb)
 endif()
 
+# Per-query box counts in both narrow phases, host and device.
+#
+# PUBLIC rather than PRIVATE because the counters live in headers the drivers
+# include, so a library compiled with them and a driver compiled without them
+# disagree about whether the counts exist and the driver reports zero. Passed as
+# a bare -D on the command line it reached neither: nothing declared it, so CMake
+# stored it as an unused UNINITIALIZED cache entry and sccd_np_trace printed
+# "built without -DSCCD_NP_COUNT_BOXES" against a cache that said ON.
+#
+# The counters are a diagnostic and change what they measure -- a global atomic
+# on the device's hot path serialises the kernel -- so an instrumented build's
+# timings mean nothing and only its counts do.
+option(SCCD_NP_COUNT_BOXES "Count narrow-phase boxes per query (diagnostic; distorts timings)" OFF)
+if(SCCD_NP_COUNT_BOXES)
+  target_compile_definitions(sccd PUBLIC SCCD_NP_COUNT_BOXES)
+endif()
+
 if(SCCD_ENABLE_CUDA)
   target_compile_definitions(sccd PUBLIC SCCD_ENABLE_CUDA)
 
@@ -115,6 +132,67 @@ if(SCCD_ENABLE_CUDA)
   option(SCCD_CUDA_VERBOSE_PTXAS "Print per-kernel register and spill counts" OFF)
   if(SCCD_CUDA_VERBOSE_PTXAS)
     target_compile_options(sccd PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xptxas=-v,-warn-spills>)
+  endif()
+
+  # Kernels launch asynchronously, so a release build reports a memory fault at
+  # whichever API call next returns a status -- typically a stage or two after
+  # the launch that caused it. This puts a device synchronize back into every
+  # SCCD_CHECK_CUDA, which names the offending launch. It costs a full device
+  # stall per launch, which on the narrow phase's drain loop doubles the
+  # per-round cost, so it is a diagnostic switch and not a default.
+  option(SCCD_CUDA_SYNC_CHECKS "Synchronize the device inside every CUDA error check" OFF)
+  if(SCCD_CUDA_SYNC_CHECKS)
+    target_compile_definitions(sccd PUBLIC SCCD_CUDA_SYNC_CHECKS)
+    target_compile_options(sccd PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>)
+  endif()
+
+  # Device asserts are off in every configuration but Debug.
+  #
+  # An assert inside a kernel is not a cheap check. It puts a trap path and a
+  # call to __assertfail into the kernel, which holds registers live across it,
+  # and the narrow-phase search kernels above are already at the edge of
+  # spilling. NDEBUG does arrive with CMAKE_CUDA_FLAGS_<CONFIG> for the optimised
+  # configurations, but that is a default a consumer can replace wholesale and
+  # the loss would be silent, so name it here as well. Target options are
+  # appended after CMAKE_CUDA_FLAGS_<CONFIG>, and the last -D or -U on the
+  # command line is the one that counts, which also makes the switch below work.
+  option(SCCD_CUDA_DEVICE_ASSERTS "Keep assert() live inside CUDA kernels" OFF)
+  if(SCCD_CUDA_DEVICE_ASSERTS)
+    # Turns the range and two-pass count checks the kernels already carry back
+    # into runtime failures. Pair it with SCCD_CUDA_SYNC_CHECKS when chasing a
+    # device memory fault: the assert says which invariant broke and the
+    # synchronize says which launch broke it.
+    target_compile_options(sccd PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-UNDEBUG>)
+  else()
+    target_compile_options(sccd PRIVATE
+      $<$<COMPILE_LANGUAGE:CUDA>:$<$<NOT:$<CONFIG:Debug>>:-DNDEBUG>>)
+  endif()
+
+  # Device optimisation, stated rather than inherited.
+  #
+  # nvcc's own -O sets the level for the *host* half of a .cu; the device back
+  # end is ptxas, whose default happens to be -O3. Naming it keeps a toolchain
+  # whose default moves from quietly halving device performance. Measured on
+  # this build, the default and -Xptxas=-O3 produce byte-identical cubins, and
+  # -O0 produces one 2.6 times larger.
+  target_compile_options(sccd PRIVATE
+    $<$<COMPILE_LANGUAGE:CUDA>:$<$<NOT:$<CONFIG:Debug>>:-Xptxas=-O3>>)
+
+  # No fast-math, ever.
+  #
+  # --use_fast_math implies -ftz=true, -prec-div=false and -prec-sqrt=false. The
+  # narrow phase's guarantee rests on a certified error bound around exact IEEE
+  # arithmetic, so flushing subnormals or approximating a division would let the
+  # search reject a box that holds a root -- a missed collision, which is the one
+  # failure the library exists to prevent. The default the build relies on is
+  # visible in nvcc's fatbinary line: -ftz=0 -prec_div=1 -prec_sqrt=1 -fmad=1.
+
+  # The host half of a .cu compiles like any other host translation unit, and it
+  # was getting none of the architecture flags above, which are scoped to CXX and
+  # so skip CUDA entirely. nvcc rejects -march=native as its own option, so it
+  # goes through -Xcompiler.
+  if(SCCD_ENABLE_NATIVE_ARCH AND SCCD_HAS_MARCH_NATIVE)
+    target_compile_options(sccd PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-march=native>)
   endif()
 endif()
 
@@ -379,7 +457,8 @@ if(SCCD_ENABLE_EXECUTABLES)
   # Per-query box counts, host and device, one query at a time. Needs neither smesh
   # nor TightInclusion -- it reads the datasets' query CSVs directly -- so it builds
   # in the default configuration and is the tool to reach for when a box count needs
-  # explaining. Build it with -DSCCD_NP_COUNT_BOXES for the counts to exist.
+  # explaining. Configure with -DSCCD_NP_COUNT_BOXES=ON for the counts to exist;
+  # without it the driver still runs and reports times of impact, and says so.
   add_executable(sccd_np_trace "${CMAKE_CURRENT_SOURCE_DIR}/benchmark/np_trace.exe.cpp")
   target_link_libraries(sccd_np_trace PRIVATE sccd)
   if(SCCD_ENABLE_CUDA)
@@ -401,4 +480,22 @@ if(SCCD_ENABLE_EXECUTABLES)
   endif()
 
   include(SCCDTests)
+endif()
+
+# Third-party CCD run over the same benchmark, for the comparison table. Off by
+# default: these pull dependencies the shipped library does not have, and
+# benchmark/competitors/README.md states the rules such a comparison follows.
+#
+# The harnesses are benchmarks, so they build only with SCCD_ENABLE_EXECUTABLES.
+# They come after SCCDTests, which is where enable_testing() lives: the harnesses
+# register a test that their CSV schema still matches sccd_bench's, and an add_test
+# before enable_testing is silently dropped.
+option(SCCD_ENABLE_COMPETITORS "Build the competitor benchmark harnesses" OFF)
+if(SCCD_ENABLE_COMPETITORS)
+  if(NOT SCCD_ENABLE_EXECUTABLES)
+    message(FATAL_ERROR
+      "SCCD_ENABLE_COMPETITORS=ON needs SCCD_ENABLE_EXECUTABLES=ON: the harnesses "
+      "compare against sccd_bench and register tests.")
+  endif()
+  add_subdirectory(benchmark/competitors)
 endif()

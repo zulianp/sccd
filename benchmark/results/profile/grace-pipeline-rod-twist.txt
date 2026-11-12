@@ -1,0 +1,19 @@
+
+ Performance counter stats for '/capstor/scratch/cscs/zulianp/sccd-assess/build-grace/sccd_bench /capstor/scratch/cscs/zulianp/sccd-assess/data rod-twist':
+
+       36466482383      cycles                                                                  (76.54%)
+      114080498096      instructions                     #    3.13  insn per cycle              (76.47%)
+         309826815      branch-misses                                                           (78.12%)
+       48257579494      cache-references                                                        (78.20%)
+         103193397      cache-misses                     #    0.21% of all cache refs           (77.90%)
+       48969362204      L1-dcache-loads                                                         (77.35%)
+         113715311      L1-dcache-load-misses            #    0.23% of all L1-dcache accesses   (78.07%)
+          94731101      LLC-loads                                                               (67.98%)
+          28331816      LLC-load-misses                  #   29.91% of all LL-cache accesses    (65.92%)
+
+       9.424472064 seconds time elapsed
+
+       9.313220000 seconds user
+       2.150427000 seconds sys
+
+

@@ -9,7 +9,7 @@ supported configuration.
 | Variable | Values | Default | Effect |
 |---|---|---|---|
 | `SCCD_NARROWPHASE_MODE` | `0`, `2` | `0` | Narrow-phase kernel: `0` `Relaxed`, `2` `Tight`. Any other value warns and runs `0`. **Ignored for quads**, which have one root-finder variant. |
-| `SCCD_BROADPHASE` | `sweep`, `cell2d` | auto | Forces a broad phase instead of letting `BroadPhaseAutoTuner` race the two and keep the winner. Both produce identical pair sets, so this only changes speed. |
+| `SCCD_BROADPHASE` | `sweep`, `cell2d`, `cell2dmin`, `cell2dminsort`, `cell2dseg`, `cell2dminfv` | auto | Names the broad phase. Unset, both processors run `cell2dminfv`, which is the fastest over the benchmark on every scene of it. Every choice produces the same pair set except `cell2dseg`, which emits fewer face-vertex pairs and is equally conservative, so this only changes speed. `cell2dminsort` and `cell2dseg` are host only and report an error on the device. A name this build does not know is reported on stderr and the shipped strategy runs. |
 | `SCCD_USE_TI` | `0`, `1` | `0` | Calls TightInclusion directly. Requires a TightInclusion build. Oracle use only. |
 
 ### Getting TightInclusion's answer
@@ -86,6 +86,7 @@ only the counts do.
 
 | Variable | Type | Effect |
 |---|---|---|
+| `SCCD_BIND` | a command prefix | Prepended to the benchmark binary by `benchmark/scripts/sweep.sh`, which sets it to `numactl --cpunodebind=0 --membind=0` so a host run stays on one Grace. A GH200 node has four NUMA domains of 72 CPUs and a job holding the node is handed all of them, so the thread count alone does not pin the run. |
 | `SCCD_BROADPHASE_VERBOSE` | set | Logs the chosen broad phase and the shape statistics behind the choice. |
 | `SCCD_NP_WORST_CSV` | path | The device narrow phase writes its costliest queries here, in the query-CSV format `sccd_np_trace` reads, so the same query can be run on both machines and diffed box by box. Needs a `SCCD_NP_COUNT_BOXES` build. |
 | `SCCD_NP_WORST_N` | int (`4`) | How many queries `SCCD_NP_WORST_CSV` writes. |

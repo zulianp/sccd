@@ -100,7 +100,8 @@ point of the guarantee.
 
 To go from a mesh to candidate pairs, compute swept AABBs and run one of the two
 broad phases. Both produce identical pair sets; `sccd_broadphase_strategy.hpp`
-picks between them at run time, and `SCCD_BROADPHASE=sweep|cell2d` forces one.
+runs `cell2dmin` on both processors, and `SCCD_BROADPHASE` names another:
+`sweep`, `cell2d`, `cell2dmin`, `cell2dminsort` or `cell2dseg`.
 The demo above uses the sweep, in full.
 
 Both are count-then-fill: `count_overlaps` writes prefix offsets, so the exact

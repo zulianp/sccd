@@ -82,7 +82,7 @@ def narrow_phase_per_case(case_series: dict, out_dir: Path) -> Figure:
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_xlabel("candidate pairs in the case")
-    ax.set_ylabel("narrow phase (ms)")
+    ax.set_ylabel("NP EToI (ms)")
     ax.grid(True, which="both", axis="both")
     ax.legend(loc="upper left")
     fig.tight_layout()
@@ -124,31 +124,53 @@ def results_grid(case_series: dict, out_dir: Path) -> Figure:
     # box collapses onto the axis and the panel spends a quarter of the figure
     # saying nothing; the count per scene is in the conservativeness table,
     # which is the right place for a number that is usually the same number.
-    rows = [("broad_ms", "broad phase (ms)"),
-            ("narrow_ms", "narrow phase (ms)"),
-            ("toi_max_early", "error")]
+    # BP full and not BP queries: the structure is where the two strategies
+    # differ most, so a row that leaves it out describes neither the cost a
+    # caller pays nor the thing the broad-phase study is about. Named columns
+    # are summed per repeat before the median, so the box is over whole broad
+    # phases and not over a median of one part added to a median of another.
+    # Error is not a row here. Its distribution is the subject of its own
+    # figure, on a log axis with the sign of the deviation made explicit, and
+    # here it came out indistinguishable across all six scenes and both
+    # processors -- a third of the figure spent saying that a quantity does not
+    # vary, next to two rows whose whole point is that theirs do.
+    rows = [(("prep_ms", "broad_ms"), "BP full (ms)"),
+            (("narrow_ms",), "NP EToI (ms)")]
 
+    # sharey by row, which is what the hidden y labels below already imply.
+    # Without it each panel carries its own scale and a box at the same height
+    # means a different time in the panel beside it, which is the one reading a
+    # grid like this invites.
     fig, axes = plt.subplots(len(rows), len(scenes), squeeze=False,
-                             figsize=(FULL_WIDTH_IN, 1.35 * len(rows) + 0.9),
-                             sharex="col")
+                             figsize=(FULL_WIDTH_IN, 1.55 * len(rows) + 0.9),
+                             sharex="col", sharey="row")
 
     for c, scene in enumerate(scenes):
         axes[0][c].set_title(SCENE_LABEL.get(scene, scene), fontsize=7, pad=3)
-        for r, (column, ylabel) in enumerate(rows):
+        for r, (columns, ylabel) in enumerate(rows):
             ax = axes[r][c]
+            column = columns[0]
             data, colours = [], []
             for mode in modes:
                 vals = []
                 for s in case_series.values():
                     if s.dataset != scene or s.mode != mode:
                         continue
-                    stat = (s.timings if column in s.timings else s.accuracy).get(column)
+                    parts = [(s.timings if col in s.timings else s.accuracy).get(col)
+                             for col in columns]
+                    if any(q is None or not q.n for q in parts):
+                        continue
+                    if len(parts) == 1:
+                        stat = parts[0]
+                    else:
+                        stat = Stat()
+                        for i in range(min(q.n for q in parts)):
+                            stat.add(sum(q.values[i] for q in parts))
                     # A count of zero is a result -- this mode reported no false
                     # positive on that case -- so counts keep their zeros and are
                     # drawn on a symmetric-log axis, which has room for them.
                     floor = -1.0 if column == "fp" else 0.0
-                    if stat is not None and stat.n and math.isfinite(stat.median) \
-                            and stat.median > floor:
+                    if stat.n and math.isfinite(stat.median) and stat.median > floor:
                         vals.append(stat.median)
                 data.append(np.asarray(vals) if vals else np.asarray([np.nan]))
                 colours.append(mode_color(mode))
@@ -198,13 +220,13 @@ def results_grid(case_series: dict, out_dir: Path) -> Figure:
 
     return Figure(
         _stem("results-grid"), "fig:results",
-        "Per-case distributions for every mode over the six scenes (columns). "
-        "Rows are broad-phase time, narrow-phase time, and error against "
-        "the exact root. $*$ marks a parallel CPU mode, $\\dagger$ a GPU one. "
-        "Each box spans the first to "
-        "the third quartile with the median inside it, the whiskers reach the "
-        "furthest case within 1.5 interquartile ranges, and cases beyond that "
-        "are drawn individually. All axes are logarithmic.",
+        "Per-case distributions for every mode over the six scenes (columns), "
+        "broad-phase time above and narrow-phase time below. Each row shares one "
+        "logarithmic scale, so a box is comparable across scenes as well as "
+        "within one. $*$ marks a parallel CPU mode, $\\dagger$ a GPU one. Each "
+        "box spans the first to the third quartile with the median inside it, "
+        "the whiskers reach the furthest case within 1.5 interquartile ranges, "
+        "and cases beyond that are drawn individually.",
         FULL_WIDTH_IN)
 
 
@@ -229,7 +251,11 @@ def runtime_breakdown(summaries: dict[tuple[str, str], SceneSummary],
         return Figure(
         _stem("runtime-breakdown"), "fig:breakdown", "no data", FULL_WIDTH_IN)
 
-    parts = [("prep_ms", "prep"), ("broad_ms", "broad"), ("narrow_ms", "narrow")]
+    # The broad phase is one bar: building the acceleration structure and
+    # traversing it. Its two halves are shaded apart so the split stays
+    # readable, and the narrow phase is the second bar.
+    parts = [("prep_ms", "BP prep"), ("broad_ms", "BP queries"),
+             ("narrow_ms", "NP EToI")]
     part_ink = [SERIES[3], SERIES[0], SERIES[2]]
 
     fig, axes = plt.subplots(1, len(scenes), squeeze=False,

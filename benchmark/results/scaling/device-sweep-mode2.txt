@@ -1,0 +1,8 @@
+# mode=tight max_depth=69 tol=3e-08 scale=-0.5 space=device base_topology=TRI3 broadphase=sweep t0=/ritom/scratch/cscs/zulianp/sccd-data/cloth-ball/frames_raw/cloth_ball0 t1=/ritom/scratch/cscs/zulianp/sccd-data/cloth-ball/frames_raw/cloth_ball1
+level      faces     vf_pairs     ee_pairs   prep_ms  bp_fv_ms  bp_ee_ms bp_total_ms  narrow_ms    ns/pair            toi
+    0      92230         1299        16683      4.44      0.99      2.88      8.31       1.85      102.8   1.0000000000
+    1     368920         5196        82575     29.86      2.79      8.77     41.42       1.83       20.9   1.0000000000
+    2    1475680        20784       359034    111.33     10.35     40.21    161.89       2.38        6.3   1.0000000000
+    3    5902720        83136      1490605    452.53     55.32    299.62    807.46       5.40        3.4   1.0000000000
+    4   23610880       332800      6069281   1962.59    904.54   2488.18   5355.30       6.63        1.0   1.0000000000
+    5   94443520      1331200     24493502  15523.29   4094.49  22610.55  42228.33      38.89        1.5   1.0000000000

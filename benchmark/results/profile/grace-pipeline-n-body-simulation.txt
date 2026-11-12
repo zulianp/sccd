@@ -1,0 +1,19 @@
+
+ Performance counter stats for '/capstor/scratch/cscs/zulianp/sccd-assess/build-grace/sccd_bench /capstor/scratch/cscs/zulianp/sccd-assess/data n-body-simulation':
+
+      192578403986      cycles                                                                  (77.76%)
+      551148134846      instructions                     #    2.86  insn per cycle              (78.00%)
+        1502678792      branch-misses                                                           (78.13%)
+      189561299576      cache-references                                                        (78.10%)
+        1493735725      cache-misses                     #    0.79% of all cache refs           (77.93%)
+      189191878869      L1-dcache-loads                                                         (77.57%)
+        1440526085      L1-dcache-load-misses            #    0.76% of all L1-dcache accesses   (77.44%)
+        1061251112      LLC-loads                                                               (66.33%)
+         464144611      LLC-load-misses                  #   43.74% of all LL-cache accesses    (66.50%)
+
+      18.487878338 seconds time elapsed
+
+      58.085711000 seconds user
+       0.928394000 seconds sys
+
+

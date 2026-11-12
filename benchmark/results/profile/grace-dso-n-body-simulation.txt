@@ -1,0 +1,21 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 9K of event 'cycles:P'
+# Event count (approx.): 132484999408
+#
+# Overhead  Shared Object      
+# ........  ...................
+#
+    78.26%  sccd_bench         
+    10.74%  libm.so.6          
+     8.39%  libc.so.6          
+     1.49%  libgomp.so.1.0.0   
+     0.90%  [unknown]          
+
+
+#
+# (Cannot load tips.txt file, please install perf!)
+#

@@ -36,11 +36,15 @@ namespace sccd {
         //
         // Small on purpose. The block-local stack is where a query's subtree
         // lives, so a large one keeps a heavy query inside the block that seeded
-        // it: measured per query on cloth-funnel, the conservative search needs
-        // one box for most queries and over a million for 208 of them, and at
-        // 1024 entries per block 99% of pushes never reach the global queue at
-        // all. One block then grinds through a 19.7-million-box query while its
-        // neighbours finish and idle.
+        // it: measured per query over all 25,192,698 candidate pairs of
+        // cloth-funnel, the conservative search needs one box or none for seven
+        // queries in ten and over sixteen thousand for 61 of them, with a worst
+        // of 101,246; at 1024 entries per block 99% of pushes never reach the
+        // global queue at all, so one block grinds through such a query while
+        // its neighbours finish and idle. (An earlier count here read "over a
+        // million for 208 of them" with a worst of 19.7 million. That was the
+        // pre-redesign kernel, and it is what this capacity and the global queue
+        // were changed to fix.)
         //
         // Spilling early hands those boxes to the global queue, which the next
         // drain round redistributes across every block. Measured on GH200, mode 2,
@@ -126,7 +130,11 @@ namespace sccd {
                                                   const int level,
                                                   const int qid) {
             const int slot = atomicAdd(out.top, 1);
-            if (slot >= out.capacity) {
+            // A dropped push still bumps the cursor, so this counts attempts, not
+            // residents, and a launch that attempts more than 2^31 pushes wraps it
+            // negative. Reject a negative slot for the same reason an oversized
+            // one is rejected: both are outside the buffer.
+            if (slot < 0 || slot >= out.capacity) {
                 atomicAdd(out.request, 1);
                 return;
             }
@@ -153,7 +161,10 @@ namespace sccd {
                                                 int& qid) {
             if (in.count <= 0) return 0;
             const int slot = atomicAdd(in.top, 1);
-            if (slot >= in.count) return 0;
+            // Claims past the end keep bumping the cursor, so it can wrap negative
+            // on a long drain round. An exhausted buffer and a wrapped one are the
+            // same answer: nothing left to take.
+            if (slot < 0 || slot >= in.count) return 0;
 
             d.tlower = in.tlower[slot];
             d.tupper = in.tupper[slot];

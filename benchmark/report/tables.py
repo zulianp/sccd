@@ -10,11 +10,22 @@ article can be traced to the run that produced it.
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .data import SceneSummary, Stat, separable
 from .style import SCENE_LABEL, mode_label
+
+# The phase tags every caption uses, so "broad" never has to be guessed
+# at: it meant the traversal alone in one table and the whole phase in
+# another, and a reader had no way to tell which.
+TAGS = ("\\emph{BP full} is the whole broad phase, the acceleration structure "
+        "plus the queries over it; \\emph{BP prep} is the structure alone and "
+        "\\emph{BP queries} the queries alone. The narrow phase is named by the "
+        "answer it is asked for: \\emph{NP EToI} returns one earliest time of "
+        "impact for the step, so every query prunes against the running minimum, "
+        "and \\emph{NP per-pair} returns one per candidate with no shared bound. ")
 
 
 @dataclass
@@ -59,8 +70,18 @@ def render_tex(table: Table) -> str:
     lines = [
         r"\begin{table}[htbp]",
         r"  \centering",
-        f"  \\caption{{{_tex_escape(table.caption)}}}",
+        # The caption and the notes are authored prose and carry their own
+        # markup -- \emph, \cref -- so they go through as written. Only the
+        # cells and the headers, which are data, are escaped.
+        f"  \\caption{{{table.caption}}}",
         f"  \\label{{{table.label}}}",
+    ]
+    # Every table goes through \fittable, which scales one down only when it
+    # would otherwise run into the margin and leaves the rest at the body font.
+    # Applying it everywhere keeps the decision with the macro, where the page
+    # geometry is known, so no generator has to guess from the column count.
+    lines.append(r"  \fittable{%")
+    lines += [
         f"  \\begin{{tabular}}{{{spec}}}",
         r"    \toprule",
         "    " + " & ".join(c.tex() for c in table.columns) + r" \\",
@@ -68,9 +89,13 @@ def render_tex(table: Table) -> str:
     ]
     for row in table.rows:
         lines.append("    " + " & ".join(_tex_escape(c) for c in row) + r" \\")
-    lines += [r"    \bottomrule", r"  \end{tabular}"]
+    lines += [r"    \bottomrule", r"  \end{tabular}}"]
     if table.notes:
-        lines.append(f"  \\par\\smallskip\\footnotesize {_tex_escape(table.notes)}")
+        # A note's backticks are its author's code voice. A bare backtick sets
+        # an opening single quote in LaTeX, so give it \texttt here and let the
+        # markdown renderer keep the backticks it was written with.
+        notes = re.sub(r"`([^`]+)`", r"\\texttt{\1}", table.notes)
+        lines.append(f"  \\par\\smallskip\\footnotesize {notes}")
     if table.source:
         lines.append(f"  \\par\\smallskip\\footnotesize Source: "
                      f"\\texttt{{{_tex_escape(table.source)}}}")
@@ -138,7 +163,9 @@ def dataset_table(summaries: dict[tuple[str, str], SceneSummary],
         caption=("The benchmark problems. \\emph{cases} is simulation steps with "
                  "a runnable query set, \\emph{candidate pairs} the mean number "
                  "the broad phase produces per step, and \\emph{queries} the "
-                 "curated per-step query sets that carry exact symbolic roots."),
+                 "curated per-step query sets that carry exact symbolic roots. Cases and "
+                 "queries are counts over the whole scene; candidate pairs is a "
+                 "per-step mean."),
         columns=[Column("scene", "l"), Column("cases"),
                  Column("candidate pairs/step", tex_header=r"pairs/step"),
                  Column("queries"), Column("with a root", tex_header=r"w/ root")],
@@ -183,15 +210,21 @@ def throughput_table(summaries: dict[tuple[str, str], SceneSummary], source: str
     table = Table(
         label="tab:throughput",
         caption=("Broad- and narrow-phase throughput in candidate pairs per "
-                 "second, median over repeats. Unlike a whole-scene time this is "
-                 "comparable between scenes of very different size."),
+                 "second, median over repeats. A rate, so it is directly "
+                 "comparable between scenes of very different size: a rate, so it is "
+                 "neither a whole-scene total nor a per-step figure. " + TAGS),
         columns=[Column("scene", "l"), Column("mode", "l"),
-                 Column("broad Mpair/s", tex_header=r"broad (Mpair/s)"),
-                 Column("narrow Mpair/s", tex_header=r"narrow (Mpair/s)")],
+                 Column("broad Mpair/s", tex_header=r"BP full (Mpair/s)"),
+                 Column("narrow Mpair/s", tex_header=r"NP EToI (Mpair/s)")],
         source=source,
     )
     for (scene, mode), s in sorted(summaries.items()):
-        b, n = s.totals["broad_ms"], s.totals["narrow_ms"]
+        # Pairs per second of the whole broad phase, structure included.
+        prep_s, trav = s.totals["prep_ms"], s.totals["broad_ms"]
+        b = Stat()
+        for i in range(min(prep_s.n, trav.n)):
+            b.add(prep_s.values[i] + trav.values[i])
+        n = s.totals["narrow_ms"]
         def rate(stat):
             m = stat.median
             if not stat.n or not math.isfinite(m) or m <= 0 or not s.queries:
@@ -204,22 +237,17 @@ def throughput_table(summaries: dict[tuple[str, str], SceneSummary], source: str
 def timing_table(summaries: dict[tuple[str, str], SceneSummary], source: str) -> Table:
     table = Table(
         label="tab:timing",
-        caption=("Wall-clock time per scene and narrow-phase mode, summed over "
-                 "every case in the scene, median over independent repeats with "
-                 "reported as median / slowest over those repeats. "
-                 "\\emph{prep} is broad-phase preparation, \\emph{broad} the "
-                 "overlap query itself. The two narrow-phase columns are the two "
-                 "output modes: \\emph{earliest} returns one time of impact for "
-                 "the step, so every query prunes against the running minimum, "
-                 "while \\emph{per-pair} returns one per candidate with no "
-                 "shared bound. \\emph{total} is prep + broad + earliest."),
+        caption=("Wall-clock time per scene and narrow-phase mode, as a "
+                 "whole-scene total in milliseconds summed over every case in "
+                 "the scene, given as median / slowest over independent "
+                 "repeats. " + TAGS +
+                 "\\emph{total} is BP full + NP EToI."),
         columns=[
             Column("scene", "l"), Column("mode", "l"), Column("cases"),
             Column("pairs"), Column("rep"),
-            Column("prep ms", tex_header=r"prep (ms)"),
-            Column("broad ms", tex_header=r"broad (ms)"),
-            Column("earliest ms", tex_header=r"earliest (ms)"),
-            Column("per-pair ms", tex_header=r"per-pair (ms)"),
+            Column("broad ms", tex_header=r"BP full (ms)"),
+            Column("earliest ms", tex_header=r"NP EToI (ms)"),
+            Column("per-pair ms", tex_header=r"NP per-pair (ms)"),
             Column("total ms", tex_header=r"total (ms)"),
         ],
         source=source,
@@ -231,18 +259,19 @@ def timing_table(summaries: dict[tuple[str, str], SceneSummary], source: str) ->
     )
     for (scene, mode), s in sorted(summaries.items()):
         prep = s.totals["prep_ms"]
-        broad, narrow = s.totals["broad_ms"], s.totals["narrow_ms"]
+        traversal, narrow = s.totals["broad_ms"], s.totals["narrow_ms"]
         per_pair = s.totals["narrow_ms_s1"]
-        # Total the phases a caller actually pays for, within a repeat and only
-        # then across them. Preparation is part of that: on rod-twist it is
-        # larger than the broad and narrow phases together, so a "total" that
-        # leaves it out understates the pipeline by more than half.
-        total = Stat()
-        for i in range(min(prep.n, broad.n, narrow.n)):
-            total.add(prep.values[i] + broad.values[i] + narrow.values[i])
+        # The acceleration structure belongs to the broad phase, so add it in
+        # within a repeat and only then across repeats. On rod-twist it is
+        # larger than the traversal and the narrow phase together, so a broad
+        # phase reported without it understates the pipeline by more than half.
+        broad, total = Stat(), Stat()
+        for i in range(min(prep.n, traversal.n, narrow.n)):
+            broad.add(prep.values[i] + traversal.values[i])
+            total.add(prep.values[i] + traversal.values[i] + narrow.values[i])
         table.add(SCENE_LABEL.get(scene, scene), mode_label(mode),
                   f"{s.cases}", f"{s.queries:,}", f"{s.repeats}",
-                  _ms(prep), _ms(broad), _ms(narrow), _ms(per_pair), _ms(total))
+                  _ms(broad), _ms(narrow), _ms(per_pair), _ms(total))
     return table
 
 
@@ -250,7 +279,8 @@ def conservativeness_table(summaries: dict[tuple[str, str], SceneSummary],
                            source: str) -> Table:
     table = Table(
         label="tab:conservativeness",
-        caption=("Conservativeness against the dataset's exact roots. "
+        caption=("Conservativeness against the dataset's exact roots, as counts over "
+                 "the whole scene summed across its cases. "
                  "\\emph{late} counts queries whose reported time of impact "
                  "falls after the true one; it must be zero, because a late "
                  "time of impact lets a simulation step through the contact, "
@@ -259,9 +289,11 @@ def conservativeness_table(summaries: dict[tuple[str, str], SceneSummary],
                  "\\emph{queries} is how many carry ground-truth data at all, "
                  "no-collision cases included; \\emph{toi compared} is how many "
                  "times of impact were actually placed beside an exact root, "
-                 "which is what the claim rests on."),
+                 "which is what the claim rests on. One row per scene: the two "
+                 "processors agree except on false positives, where the host's "
+                 "count is given first and the device's in parentheses."),
         columns=[
-            Column("scene", "l"), Column("mode", "l"),
+            Column("scene", "l"),
             Column("queries", tex_header=r"queries"),
             Column("toi compared", tex_header=r"toi compared"),
             Column("late"), Column("false pos."), Column("false neg."),
@@ -272,10 +304,28 @@ def conservativeness_table(summaries: dict[tuple[str, str], SceneSummary],
                "lower bound on the truth, so comparing against it over-reports "
                "lateness."),
     )
+    # One row per scene. The processors agree on every column but the false
+    # positives, and there only on three scenes, so a row each would repeat
+    # itself twelve times to show four differing numbers. Where they differ the
+    # host's count is given with the device's in parentheses.
+    def cell(values: list[str]) -> str:
+        first = values[0]
+        rest = [v for v in values[1:] if v != first]
+        return first if not rest else f"{first} ({', '.join(rest)})"
+
+    by_scene: dict[str, list[tuple[str, SceneSummary]]] = {}
     for (scene, mode), s in sorted(summaries.items()):
-        table.add(SCENE_LABEL.get(scene, scene), mode_label(mode),
-                  f"{s.gt_queries:,}", f"{s.toi_compared:,}",
-                  f"{s.toi_late}", f"{s.fp:,}", f"{s.fn}")
+        by_scene.setdefault(scene, []).append((mode, s))
+
+    for scene, entries in by_scene.items():
+        # Host first, so the parenthesised value is always the device's.
+        entries.sort(key=lambda e: e[0].startswith("device-"))
+        cols = [[f"{s.gt_queries:,}" for _, s in entries],
+                [f"{s.toi_compared:,}" for _, s in entries],
+                [f"{s.toi_late}" for _, s in entries],
+                [f"{s.fp:,}" for _, s in entries],
+                [f"{s.fn}" for _, s in entries]]
+        table.add(SCENE_LABEL.get(scene, scene), *(cell(c) for c in cols))
     return table
 
 
@@ -376,49 +426,57 @@ def write_tables(tables: list[Table], out_dir: Path, stem: str = "tables") -> di
 def broadphase_table(per_strategy: dict[str, dict[tuple[str, str], SceneSummary]],
                      source: str) -> Table:
     """
-    The two broad-phase strategies over the same scenes.
+    The broad-phase strategies over the same scenes.
 
     They return identical pair sets, so whichever is faster on a given geometry
-    is simply the right one -- which is what the shipped default races for, per
-    scene, rather than fixing a winner. This table is that race run offline over
-    the whole benchmark, with the preparation split out from the traversal
-    because that is where the two differ: the sweep builds its sorted intervals
-    more cheaply, the cell list traverses its grid more cheaply.
+    is simply the right one, and both processors fix that choice from this
+    measurement rather than racing for it. The preparation is split out from the
+    traversal because that is where the strategies differ: the sweep builds its
+    sorted intervals more cheaply and the cell list traverses its grid more
+    cheaply.
+
+    A strategy missing from a processor drops that processor's rows, so pass only
+    strategies measured on both.
     """
     names = sorted(per_strategy)
     table = Table(
         label="tab:broadphase",
-        caption=("Broad-phase strategies over the same cases on the host, "
-                 "median over repeats. \\emph{prep} builds the acceleration "
-                 "structure and \\emph{broad} is the whole broad phase "
-                 "including it. Both strategies report identical candidate "
-                 "pairs, so the difference is entirely in how they are found. "
-                 "The device is not listed: its broad phase does not implement "
-                 "the choice."),
+        caption=("Broad-phase strategies over the same cases, "
+                 "as whole-scene totals in milliseconds, "
+                 "median over repeats. " + TAGS +
+                 "The two columns per strategy are BP prep, building the sorted "
+                 "intervals or the grid, and BP queries over it; BP full is the "
+                 "two added, which is what the \\emph{faster} verdict ranks. "
+                 "Every strategy reports identical "
+                 "candidate pairs, so the difference is entirely in how they "
+                 "are found."),
         columns=([Column("scene", "l"), Column("mode", "l")]
-                 + [Column(f"{n} prep ms", tex_header=f"{n} prep") for n in names]
-                 + [Column(f"{n} broad ms", tex_header=f"{n} broad") for n in names]
+                 + [Column(f"{n} structure ms", tex_header=f"{n} BP prep") for n in names]
+                 + [Column(f"{n} broad ms", tex_header=f"{n} BP queries") for n in names]
                  + [Column("faster", "l")]),
         source=source,
         notes=("`faster` names the winning strategy and by how much on the whole "
-               "broad phase. A margin inside the run-to-run spread is reported "
-               "as a tie rather than a winner."),
+               "broad phase. A margin inside the run-to-run spread is a tie."),
     )
-    # Host modes only. `use_cell2d_` is read in broad_phase_prep_host_,
-    # broad_phase_fv_step_host_ and broad_phase_ee_step_host_ and nowhere else:
-    # the device steps have no branch on it, so SCCD_BROADPHASE does not reach
-    # them and a GPU row here would compare one implementation against itself.
-    # Measured, they come out as ties to within a millisecond, which is the
-    # evidence for the statement rather than an interesting result.
-    keys = sorted({k for s in per_strategy.values() for k in s
-                   if not k[1].startswith("device-")})
+    # Both processors. `use_cell2d_` is read by the prep and by both steps on
+    # each of them, so SCCD_BROADPHASE selects a real implementation either way
+    # and a GPU row compares two of them rather than one against itself.
+    keys = sorted({k for s in per_strategy.values() for k in s})
     for scene, mode in keys:
-        prep, broad, spreads = {}, {}, {}
+        structure, broad, spreads = {}, {}, {}
         for n in names:
             s = per_strategy[n].get((scene, mode))
-            prep[n] = s.totals["prep_ms"] if s else Stat()
-            broad[n] = s.totals["broad_ms"] if s else Stat()
-            spreads[n] = broad[n].spread if broad[n].n else 0.0
+            structure[n] = s.totals["prep_ms"] if s else Stat()
+            traversal = s.totals["broad_ms"] if s else Stat()
+            # The strategies are ranked on the whole broad phase, structure
+            # included. Ranking on the traversal alone picks the sweep on most
+            # scenes and the cell list on most whole phases, because the sort
+            # the sweep saves in traversal it pays for in structure.
+            whole = Stat()
+            for i in range(min(structure[n].n, traversal.n)):
+                whole.add(structure[n].values[i] + traversal.values[i])
+            broad[n] = whole
+            spreads[n] = whole.spread if whole.n else 0.0
         if not all(broad[n].n for n in names):
             continue
         ranked = sorted(names, key=lambda n: broad[n].median)
@@ -429,11 +487,73 @@ def broadphase_table(per_strategy: dict[str, dict[tuple[str, str], SceneSummary]
         noise = 1.0 + max(spreads[best], spreads[worst])
         verdict = f"{best} {gap:.2f}x" if gap > noise else "tie"
         table.add(SCENE_LABEL.get(scene, scene), mode_label(mode),
-                  *[f"{prep[n].median:.0f}" for n in names],
+                  *[f"{structure[n].median:.0f}" for n in names],
                   *[f"{broad[n].median:.0f}" for n in names],
                   verdict)
     return table
 
+
+def broadphase_variant_table(per_strategy: dict[str, dict[tuple[str, str], SceneSummary]],
+                             source: str) -> Table:
+    """
+    The edge-edge queries against each other, on the host.
+
+    A separate question from `broadphase_table`, which asks whether to sort or to
+    bin and answers it for both processors. This one takes binning as settled and
+    asks which query to run over the cells: every cell a box touches, or the one
+    cell its minimum corner is in, with or without each cell ordered on the axis
+    the grid does not use. Only the host is asked, because that is where all of
+    them exist.
+
+    One column per strategy, the whole broad phase rather than its two halves,
+    because the halves trade against each other -- ordering a cell is
+    preparation bought back in traversal -- and the sum is what a caller pays.
+    """
+    names = [n for n in ("sweep", "cell2d", "cell2dmin", "cell2dminsort") if n in per_strategy]
+    table = Table(
+        label="tab:bpvariant",
+        caption=("Edge-edge queries over the same cases on the host, as "
+                 "whole-scene totals in milliseconds, median over repeats. "
+                 "Every column is BP full, the acceleration structure and the "
+                 "queries over it added, because ordering a cell's entries is "
+                 "preparation bought back in traversal and only the sum is "
+                 "comparable. All of them report identical candidate pairs."),
+        columns=([Column("scene", "l")]
+                 + [Column(f"{n} BP full ms", tex_header=f"{n} BP full") for n in names]
+                 + [Column("fastest", "l")]),
+        source=source,
+        notes=("`fastest` names the winning strategy and by how much against the "
+               "slowest. A margin inside the run-to-run spread is a tie."),
+    )
+    keys = sorted({k for s in per_strategy.values() for k in s if not k[1].startswith("device-")})
+    totals = {n: 0.0 for n in names}
+    for scene, mode in keys:
+        broad, spreads = {}, {}
+        for n in names:
+            s_ = per_strategy[n].get((scene, mode))
+            structure = s_.totals["prep_ms"] if s_ else Stat()
+            traversal = s_.totals["broad_ms"] if s_ else Stat()
+            whole = Stat()
+            for i in range(min(structure.n, traversal.n)):
+                whole.add(structure.values[i] + traversal.values[i])
+            broad[n] = whole
+            spreads[n] = whole.spread if whole.n else 0.0
+        if not all(broad[n].n for n in names):
+            continue
+        ranked = sorted(names, key=lambda n: broad[n].median)
+        best, worst = ranked[0], ranked[-1]
+        for n in names:
+            totals[n] += broad[n].median
+        gap = broad[worst].median / broad[best].median if broad[best].median else 0.0
+        noise = 1.0 + max(spreads[best], spreads[worst])
+        verdict = f"{best} {gap:.2f}x" if gap > noise else "tie"
+        table.add(SCENE_LABEL.get(scene, scene),
+                  *[f"{broad[n].median:.0f}" for n in names], verdict)
+    if any(totals.values()):
+        best = min(names, key=lambda n: totals[n])
+        gap = max(totals.values()) / totals[best] if totals[best] else 0.0
+        table.add("all scenes", *[f"{totals[n]:.0f}" for n in names], f"{best} {gap:.2f}x")
+    return table
 
 def processor_table(summaries: dict[tuple[str, str], SceneSummary],
                     mode: str, source: str) -> Table:
@@ -449,12 +569,14 @@ def processor_table(summaries: dict[tuple[str, str], SceneSummary],
     table = Table(
         label="tab:processor",
         caption=("Host against device for the same mode and the same cases. "
-                 "\\emph{total} is prep, broad and narrow together, median over "
-                 "repeats. A ratio above one means the GPU is faster."),
+                 "Every time is a whole-scene total in milliseconds, summed over "
+                 "every case of the scene. " + TAGS +
+                 "\\emph{total} is BP full + NP EToI, median "
+                 "over repeats. A ratio above one means the GPU is faster."),
         columns=[Column("scene", "l"), Column("CPU ms"), Column("GPU ms"),
                  Column("total", tex_header=r"total$\times$"),
-                 Column("broad", tex_header=r"broad$\times$"),
-                 Column("narrow", tex_header=r"narrow$\times$")],
+                 Column("broad", tex_header=r"BP full$\times$"),
+                 Column("narrow", tex_header=r"NP EToI$\times$")],
         source=source,
         notes=("A ratio is the host median over the device median, so 2.0 means "
                "the device takes half the time. Ratios below 1.0 are the cases "
@@ -472,7 +594,9 @@ def processor_table(summaries: dict[tuple[str, str], SceneSummary],
         parts = ("prep_ms", "broad_ms", "narrow_ms")
         h_tot = sum(med(host, c) for c in parts)
         d_tot = sum(med(dev, c) for c in parts)
-        h_b, d_b = med(host, "broad_ms"), med(dev, "broad_ms")
+        # Broad phase means the structure and the traversal over it.
+        h_b = med(host, "prep_ms") + med(host, "broad_ms")
+        d_b = med(dev, "prep_ms") + med(dev, "broad_ms")
         h_n, d_n = med(host, "narrow_ms"), med(dev, "narrow_ms")
         ratio = lambda a, b: f"{a / b:.2f}x" if b else "--"
         table.add(SCENE_LABEL.get(scene, scene),
@@ -496,12 +620,10 @@ def per_frame_table(summaries: dict[tuple[str, str], SceneSummary],
         caption=("Mean time for one simulation step: the scene total, median "
                  "over repeats, divided by the number of frames. A step runs "
                  "both query types, so this is the cost of the vertex-face and "
-                 "edge-edge work of that frame together. \\emph{prep} "
-                 "builds the swept boxes and the acceleration structure, "
-                 "\\emph{broad} finds the candidate pairs, \\emph{narrow} turns "
-                 "them into a time of impact."),
+                 "edge-edge work of that frame together. " + TAGS +
+                 "BP full here includes building the swept boxes."),
         columns=[Column("scene", "l"), Column("frames"), Column("mode", "l"),
-                 Column("prep ms"), Column("broad ms"), Column("narrow ms"),
+                 Column("broad ms", tex_header=r"BP full (ms)"), Column("narrow ms", tex_header=r"NP EToI (ms)"),
                  Column("total ms")],
         source=source,
         notes=("A mean rather than a median over steps: the scene total is what "
@@ -517,8 +639,12 @@ def per_frame_table(summaries: dict[tuple[str, str], SceneSummary],
             stat = s.totals.get(col)
             return (stat.median / s.frames) if stat is not None and stat.n else 0.0
 
-        prep, broad, narrow = per("prep_ms"), per("broad_ms"), per("narrow_ms")
+        # The acceleration structure is part of the broad phase, not a phase
+        # beside it. The reference study reports one broad-phase time per
+        # method for exactly this reason: the thirteen methods it compares
+        # build different structures, so only the whole phase is comparable.
+        broad = per("prep_ms") + per("broad_ms")
+        narrow = per("narrow_ms")
         table.add(SCENE_LABEL.get(scene, scene), f"{s.frames:,}", mode_label(mode),
-                  f"{prep:.2f}", f"{broad:.2f}", f"{narrow:.2f}",
-                  f"{prep + broad + narrow:.2f}")
+                  f"{broad:.2f}", f"{narrow:.2f}", f"{broad + narrow:.2f}")
     return table

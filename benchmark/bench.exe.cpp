@@ -35,6 +35,11 @@ namespace {
     int narrowphase_max_depth = 69;
     scalar_t narrowphase_tol = scalar_t(3e-8);
 
+    // Set when any case reports a missed pair or a missed collision. The
+    // project treats those as illegal rather than as data, so the run fails even
+    // though every row is still written and still counted.
+    bool g_missed_collision = false;
+
     struct CaseFile {
         fs::path dir;
         std::string key;
@@ -216,14 +221,50 @@ namespace {
         // on the same cases within one allocation, so it needs a bounded, evenly
         // spread subsample rather than a prefix. SCCD_BENCH_MAX_CASES picks that
         // many cases spread across the trajectory; unset, everything runs.
+        //
+        // The spread runs over each query type separately, and the subset holds
+        // the two in the proportion the dataset does. Striding over the combined
+        // list samples the type as well as the trajectory: keys end in "ee" or
+        // "vf", so a scene with equal counts of each sorts into interleaved pairs
+        // with edge-edge on every even index. Puffer-ball has exactly 240 such
+        // cases, so a cap of 60 strides by 4 and returns edge-edge alone, leaving
+        // the vertex-face half of a broad-phase comparison unmeasured while the
+        // scene still appears in the table.
         int SCCD_BENCH_MAX_CASES = 0;
         SCCD_READ_ENV(SCCD_BENCH_MAX_CASES, atoi);
         if (SCCD_BENCH_MAX_CASES > 0 && (int)cases.size() > SCCD_BENCH_MAX_CASES) {
-            std::vector<CaseFile> subset;
-            subset.reserve(SCCD_BENCH_MAX_CASES);
-            for (int k = 0; k < SCCD_BENCH_MAX_CASES; ++k) {
-                subset.push_back(cases[(std::size_t)((double)k * cases.size() / SCCD_BENCH_MAX_CASES)]);
+            std::vector<CaseFile> by_type[2];
+            for (const CaseFile& c : cases) {
+                by_type[c.is_vf ? 1 : 0].push_back(c);
             }
+
+            // Rounded to nearest so the smaller type is not starved, and clamped
+            // so a type the dataset has is always represented and neither share
+            // exceeds what that type holds.
+            const std::size_t total = cases.size();
+            int want[2];
+            want[1] = (int)((by_type[1].size() * (std::size_t)SCCD_BENCH_MAX_CASES + total / 2) / total);
+            want[0] = SCCD_BENCH_MAX_CASES - want[1];
+            for (int t = 0; t < 2; ++t) {
+                const int have = (int)by_type[t].size();
+                if (want[t] > have) {
+                    want[1 - t] += want[t] - have;
+                    want[t] = have;
+                } else if (want[t] == 0 && have > 0 && want[1 - t] > 1) {
+                    want[t] = 1;
+                    want[1 - t] -= 1;
+                }
+            }
+
+            std::vector<CaseFile> subset;
+            subset.reserve((std::size_t)SCCD_BENCH_MAX_CASES);
+            for (int t = 0; t < 2; ++t) {
+                for (int k = 0; k < want[t]; ++k) {
+                    subset.push_back(by_type[t][(std::size_t)((double)k * by_type[t].size() / want[t])]);
+                }
+            }
+            std::sort(subset.begin(), subset.end(),
+                      [](const CaseFile& a, const CaseFile& b) { return a.key < b.key; });
             cases.swap(subset);
         }
 
@@ -716,27 +757,60 @@ namespace {
             run.points0 = smesh::to_device(run.points0);
             run.points1 = smesh::to_device(run.points1);
         }
+        // The edge graph and the working buffers are a function of the mesh, so
+        // a simulation pays for them once and every step after the first pays
+        // nothing. This driver builds a CCD per case, so without this call they
+        // would land inside the first timed prep of every case and the prep
+        // column would report a per-mesh cost as a per-step one.
+        run.ccd->initialize();
         return run;
+    }
+
+
+    /**
+     * \brief Wait for the device before stopping a clock.
+     *
+     * A device phase ends with a kernel launch, which returns to the host long
+     * before the kernel finishes. Stopping the clock there bills the tail of the
+     * phase to whichever later call happens to synchronise -- the broad phase
+     * looks cheaper than it is and the narrow phase dearer. Scalable CCD's
+     * harness synchronises before each of its timers, so a comparison against it
+     * has to do the same or it is not measuring the same thing.
+     *
+     * It is called before a clock starts as well as before it stops. Uploads and
+     * the previous phase's kernels are queued device work, and a clock started
+     * while they are in flight charges them to whatever it is timing.
+     */
+    void finish_device_work() {
+#if defined(SCCD_ENABLE_CUDA)
+        if (benchmark_execution_space() != smesh::EXECUTION_SPACE_HOST) {
+            cudaDeviceSynchronize();
+        }
+#endif
     }
 
     BroadphaseResult run_broadphase(const bool is_vf, CCDRun& ccd_run) {
         SMESH_TRACE_SCOPE("benchmark broadphase");
 
         BroadphaseResult result;
+        finish_device_work();
         auto start = std::chrono::steady_clock::now();
         result.err = ccd_run.ccd->broad_phase_prep(ccd_run.points0, ccd_run.points1);
+        finish_device_work();
         auto stop = std::chrono::steady_clock::now();
         result.prep_elapsed_ms = std::chrono::duration<double, std::milli>(stop - start).count();
         if (result.err != SCCD_SUCCESS) {
             return result;
         }
 
+        finish_device_work();
         start = std::chrono::steady_clock::now();
         if (is_vf) {
             result.err = ccd_run.ccd->broad_phase_fv_step(result.v_overlap, result.f_overlap);
         } else {
             result.err = ccd_run.ccd->broad_phase_ee_step(result.e0_overlap, result.e1_overlap);
         }
+        finish_device_work();
         stop = std::chrono::steady_clock::now();
         result.elapsed_ms = std::chrono::duration<double, std::milli>(stop - start).count();
 
@@ -817,12 +891,14 @@ namespace {
         smesh::SharedBuffer<scalar_t> vf_tois;
         smesh::SharedBuffer<scalar_t> ee_tois;
 
+        finish_device_work();
         const auto start = std::chrono::steady_clock::now();
         if (is_vf) {
             err = ccd_run.ccd->narrow_phase_vf(toi, vf_tois, narrowphase_max_depth, narrowphase_tol, sccd::ToiOutput::PerPair);
         } else {
             err = ccd_run.ccd->narrow_phase_ee(toi, ee_tois, narrowphase_max_depth, narrowphase_tol, sccd::ToiOutput::PerPair);
         }
+        finish_device_work();
         const auto stop = std::chrono::steady_clock::now();
         static volatile scalar_t toi_sink;
         toi_sink = toi;
@@ -834,12 +910,14 @@ namespace {
         smesh::SharedBuffer<scalar_t> vf_tois;
         smesh::SharedBuffer<scalar_t> ee_tois;
 
+        finish_device_work();
         const auto start = std::chrono::steady_clock::now();
         if (is_vf) {
             err = ccd_run.ccd->narrow_phase_vf(toi, vf_tois, narrowphase_max_depth, narrowphase_tol, sccd::ToiOutput::Earliest);
         } else {
             err = ccd_run.ccd->narrow_phase_ee(toi, ee_tois, narrowphase_max_depth, narrowphase_tol, sccd::ToiOutput::Earliest);
         }
+        finish_device_work();
         const auto stop = std::chrono::steady_clock::now();
         if (out_toi != nullptr) {
             // From the buffer, not the parameter: the two entry points disagreed
@@ -896,6 +974,7 @@ namespace {
 
             if (is_vf) {
                 smesh::SharedBuffer<idx_t*> faces = make_2d_buffer(query_geometry.faces, execution_space);
+                finish_device_work();
                 const auto start = std::chrono::steady_clock::now();
                 sccd::device::narrow_phase_vf(query_geometry.q0.size(),
                                                  q0->data(),
@@ -909,10 +988,12 @@ namespace {
                                                  narrowphase_max_depth,
                                                  narrowphase_tol,
                                                  sccd::ToiOutput::PerPair);
+                finish_device_work();
                 const auto stop = std::chrono::steady_clock::now();
                 query_narrow_ms = std::chrono::duration<double, std::milli>(stop - start).count();
             } else {
                 smesh::SharedBuffer<idx_t*> edges = make_2d_buffer(query_geometry.edges, execution_space);
+                finish_device_work();
                 const auto start = std::chrono::steady_clock::now();
                 sccd::device::narrow_phase_ee(query_geometry.q0.size(),
                                               q0->data(),
@@ -925,6 +1006,7 @@ namespace {
                                               toi->data(),
                                               narrowphase_max_depth,
                                               narrowphase_tol, sccd::ToiOutput::PerPair);
+                finish_device_work();
                 const auto stop = std::chrono::steady_clock::now();
                 query_narrow_ms = std::chrono::duration<double, std::milli>(stop - start).count();
             }
@@ -1102,9 +1184,17 @@ namespace {
                            write_raw(roots_dir / "sccd_fn_broad_c0.int32", fn_broad_c0) &&
                            write_raw(roots_dir / "sccd_fn_broad_c1.int32", fn_broad_c1);
         if (fn_count != 0 || broad_fn_count != 0) {
-            std::cerr << "warning: false negatives in " << dataset << "/" << case_file.key << ": fn=" << fn_count
+            std::cerr << "error: false negatives in " << dataset << "/" << case_file.key << ": fn=" << fn_count
                       << " broad_fn=" << broad_fn_count << "\n";
-            return wrote && append_missing_pairs_report(dataset_dir, dataset, case_file, c0, c1, fn, fn_broad);
+            (void)append_missing_pairs_report(dataset_dir, dataset, case_file, c0, c1, fn, fn_broad);
+            // The row is still written and the case still enters the timing
+            // population. Returning here dropped both, and the cases that miss a
+            // contact are the hardest ones, so every median and maximum was taken
+            // over a sample biased towards the cases that worked -- invisibly,
+            // since an absent row looks like a case the range never selected.
+            // A missed collision is illegal rather than a data point, so this
+            // also fails the run instead of warning on stderr.
+            g_missed_collision = true;
         }
 
         timings_ms.push_back(narrow_ms);
@@ -1147,7 +1237,7 @@ namespace {
                   // The broad phase is part of what produced the row. Without it
                   // a sweep that varies the strategy cannot be told apart, and
                   // the default is not self-evident.
-                  << sccd::broadphase_strategy_name(sccd::broadphase_strategy_setting()) << ','
+                  << sccd::broadphase_strategy_name(sccd::broadphase_strategy_resolved()) << ','
                   << case_file.key << ',' << (case_file.is_vf ? "vf" : "ee") << ',' << narrow_queries
                   << ',' << prep_ms << ',' << broad_ms << ',' << narrow_ms << ',' << query_narrow_ms << ','
                   << fp_count << ',' << fn_count << ',' << broadphase.false_positives << ',' << broad_fn_count
@@ -1331,5 +1421,9 @@ int main(int argc, char** argv) {
         ok = write_raw(out_dir / (dataset + "-ee.float64"), ee_timings) && ok;
     }
 
-    return ok ? EXIT_SUCCESS : EXIT_FAILURE;
+    if (g_missed_collision) {
+        std::cerr << "error: at least one case reported a missed pair or a missed "
+                     "collision; see the warnings above and the missing-pairs report\n";
+    }
+    return (ok && !g_missed_collision) ? EXIT_SUCCESS : EXIT_FAILURE;
 }

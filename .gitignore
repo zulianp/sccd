@@ -62,10 +62,11 @@ benchmark/sweep/
 # oracle's query sets, and the measurement tables their write-ups cite.
 !benchmark/oracle/*.csv
 !benchmark/assessment/*.csv
-# The sweep a published table was computed from. docs/BENCHMARKS.md names the
-# file each of its tables came from, and the claim that a number is reproducible
-# is only worth making if the rows behind it are in the repository.
+# The small tables a published number was computed from. docs/BENCHMARKS.md
+# names the file each of its tables came from; files of a megabyte or more stay
+# on the machines that produced them and are listed at the end of this file.
 !benchmark/results/*.csv
+!benchmark/results/boxes/*.csv
 !spikes/research/**/*.csv
 *.pdf
 *.aux
@@ -73,13 +74,9 @@ benchmark/sweep/
 *.tar.gz
 
 # docs/ holds both written documentation and rendered output; keep the writing.
+# Figures live with the article in zulianp/uvic_papers, not here.
 docs/*
 !docs/*.md
-# ...and the figures BENCHMARKS.md embeds, which are part of the document rather
-# than leavings. The directory has to be re-included before anything in it can
-# be: git does not descend into an excluded directory to rescue its contents,
-# which is why a `!docs/figures/**` further up did nothing.
-!docs/figures/
 
 # Python bytecode and macOS directory metadata.
 __pycache__/
@@ -125,12 +122,24 @@ build*/
 /*.tar.gz
 .DS_Store
 
-# The figures docs/BENCHMARKS.md embeds are part of the document, not leavings,
-# so they are re-included last: git takes the final matching rule, and the
-# blanket *.png and *.pdf rules above would otherwise win.
-!docs/figures/*.png
-!docs/figures/*.pdf
 # The stylesheet for the rendered documents is source, not output. The HTML it
 # renders is output and stays ignored.
 !docs/assets/
 !docs/assets/*.css
+
+# Hardware-counter output behind the performance analysis. Same rule as the
+# benchmark CSVs: small tables are tracked, large ones stay local.
+!benchmark/results/profile/
+!benchmark/results/profile/*.csv
+!benchmark/results/profile/*.txt
+
+# Thread-count sweep behind the strong-scaling figure.
+!benchmark/results/profile/strong-*.csv
+
+# Measurement data of a megabyte or more is never committed: it stays on the
+# machine that produced it. These rules come last so that they override the
+# re-includes above.
+benchmark/results/sweep-gh200*.csv
+benchmark/results/profile/strong-*.csv
+benchmark/assessment/broadphase-cell2dmin*.csv
+benchmark/competitors/results/*.csv.gz

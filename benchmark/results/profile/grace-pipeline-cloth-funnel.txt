@@ -1,0 +1,19 @@
+
+ Performance counter stats for '/capstor/scratch/cscs/zulianp/sccd-assess/build-grace/sccd_bench /capstor/scratch/cscs/zulianp/sccd-assess/data cloth-funnel':
+
+        4387188041      cycles                                                                  (58.84%)
+       14694268236      instructions                     #    3.35  insn per cycle              (84.28%)
+          36584146      branch-misses                                                           (93.98%)
+        3704820622      cache-references                                                        (94.85%)
+          49065811      cache-misses                     #    1.32% of all cache refs           (95.69%)
+        3691475089      L1-dcache-loads                                                         (95.92%)
+          48516407      L1-dcache-load-misses            #    1.31% of all L1-dcache accesses   (95.06%)
+          39810410      LLC-loads                                                               (24.95%)
+          14430104      LLC-load-misses                  #   36.25% of all LL-cache accesses    (15.27%)
+
+       2.918155510 seconds time elapsed
+
+       1.190101000 seconds user
+       0.392192000 seconds sys
+
+

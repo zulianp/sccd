@@ -85,8 +85,14 @@ that ref and running `git gc --prune=now` took the local store from 4.56 GiB to
 **24.03 MiB** with every branch intact — no rewrite, no force-push, nothing for
 anyone else to re-clone.
 
-What remains on the remote is 4 `csv/` blobs in no branch tip, worth perhaps 10 MB
-of a 24 MB clone. Not worth a force-push across 12 branches, and not planned.
+History was rewritten on 2026-11-12, once a clone of the URL measured 58 MB: the
+old `csv/` tables, the `benchmark/results/sweep-gh200*.csv` sweeps (ignored since
+198d70b) and `wip/paper/` (moved to zulianp/uvic_papers) were removed from every
+branch, which took a fresh clone to 19 MB. A second rewrite the same day removed
+`docs/figures/`, whose figures now live with the article, and took it to 3 MB.
+Both times only main, benchmark-quality and tight-api changed. The pre-rewrite
+branches are kept as git bundles outside the repository; GitHub's `refs/pull/*`
+still reference the old commits.
 
 **The lesson, since it cost a planned history rewrite:** `git count-objects`
 measures a local object store, not a repository. Before proposing surgery on
@@ -235,3 +241,18 @@ The refinement scaling study in `docs/BENCHMARKS.md` uses two cloth-ball frames
 that do not come into contact, so it measures the broad phase and its
 preparation. A pair that collides at every refinement level would let it measure
 the narrow phase against element count too.
+
+## Patch the overflow check in Scalable CCD's subdivision buffer
+
+Its answer lands after the true root on three scenes -- 269 of
+armadillo-rollers' 394 contact-carrying steps, 31 of rod-twist's 2,481 and 9 of
+cloth-funnel's 363 -- and the cause is a race in the overflow check of its
+subdivision buffer, which tests that the buffer is full and then advances the
+tail as two separate operations. `sccd/supplemental_material.tex` section 6 in
+zulianp/uvic_papers
+records the three observations that identify it.
+
+The paper reports the library as published. Fix it upstream and send a patch to
+the authors' repository; the paper's `\silentoverflow` macro in
+`sccd/preamble.tex` (zulianp/uvic_papers) is the one place its description will want revising once
+that lands.

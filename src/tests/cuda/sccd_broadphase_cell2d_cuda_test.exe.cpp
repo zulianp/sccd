@@ -46,11 +46,15 @@ namespace {
         return d;
     }
 
+    // Four nodes an element, not three: quads are a supported face type, so a
+    // test that cannot hold one cannot check the shared-vertex filter on it.
+    static constexpr int kMaxNxe = 4;
+
     struct DeviceBoxes {
         std::vector<scalar_t> h[6];
-        std::vector<idx_t> h_elem[3];
+        std::vector<idx_t> h_elem[kMaxNxe];
         scalar_t* rows[6] = {};
-        idx_t* elem_rows[3] = {};
+        idx_t* elem_rows[kMaxNxe] = {};
         scalar_t** aabbs = nullptr;
         idx_t** elements = nullptr;
         idx_t* idx = nullptr;
@@ -64,7 +68,7 @@ namespace {
             SCCD_CUDA_CHECK(cudaMemcpy(aabbs, rows, sizeof(scalar_t*) * 6, cudaMemcpyHostToDevice));
 
             for (int v = 0; v < nxe; ++v) elem_rows[v] = dup(h_elem[v]);
-            SCCD_CUDA_CHECK(cudaMalloc(&elements, sizeof(idx_t*) * 3));
+            SCCD_CUDA_CHECK(cudaMalloc(&elements, sizeof(idx_t*) * kMaxNxe));
             SCCD_CUDA_CHECK(cudaMemcpy(elements, elem_rows, sizeof(idx_t*) * (size_t)nxe, cudaMemcpyHostToDevice));
 
             std::vector<idx_t> ids(n);
@@ -173,6 +177,117 @@ namespace {
         return st;
     }
 
+
+    // ---------------------------------------------------------------- isolate ---
+    /**
+     * \brief Drive the binning passes alone, over boxes dumped from a real run.
+     *
+     * The pipeline offers no way to see which of the two passes is wrong, so
+     * this recomputes the per-cell counts on the host from the same boxes and
+     * the same grid, and compares them with the row pointer the device scan
+     * produced. Whatever disagrees is named.
+     */
+    int cell0_host(const sccd::device::Cell2DGridD<scalar_t>& g, const scalar_t v) {
+        const scalar_t f = (v - g.min0) * g.inv0;
+        if (!(f > scalar_t(0))) return 0;
+        const int c = (int)f;
+        return c >= g.n0 ? g.n0 - 1 : c;
+    }
+    int cell1_host(const sccd::device::Cell2DGridD<scalar_t>& g, const scalar_t v) {
+        const scalar_t f = (v - g.min1) * g.inv1;
+        if (!(f > scalar_t(0))) return 0;
+        const int c = (int)f;
+        return c >= g.n1 ? g.n1 - 1 : c;
+    }
+
+    int run_from_dump(const char* path, const int repeats) {
+        std::FILE* f = std::fopen(path, "rb");
+        if (!f) {
+            std::fprintf(stderr, "cannot open %s\n", path);
+            return 2;
+        }
+        long n = 0;
+        if (std::fread(&n, sizeof(n), 1, f) != 1 || n <= 0) {
+            std::fprintf(stderr, "bad dump %s\n", path);
+            return 2;
+        }
+        DeviceBoxes b;
+        b.n = n;
+        b.nxe = 2;
+        for (int d = 0; d < 6; ++d) {
+            b.h[d].resize((size_t)n);
+            if (std::fread(b.h[d].data(), sizeof(scalar_t), (size_t)n, f) != (size_t)n) {
+                std::fprintf(stderr, "short dump %s\n", path);
+                return 2;
+            }
+        }
+        std::fclose(f);
+        for (int v = 0; v < b.nxe; ++v) b.h_elem[v].assign((size_t)n, 0);
+        b.upload();
+        std::printf("loaded %ld boxes from %s\n", n, path);
+
+        int failures = 0;
+        for (int rep = 0; rep < repeats; ++rep) {
+            sccd::device::Cell2DGridD<scalar_t> grid;
+            ptrdiff_t spans = 0;
+            ptrdiff_t* cellptr = nullptr;
+            SCCD_CUDA_CHECK(cudaMalloc(&cellptr, sizeof(ptrdiff_t) * (size_t)(4 * n + 2)));
+            int* ranges = nullptr;
+            SCCD_CUDA_CHECK(cudaMalloc(&ranges, sizeof(int) * (size_t)(4 * n + 4)));
+            sccd::device::cell2d_setup_and_count<scalar_t, idx_t>(n, b.aabbs, grid, cellptr, ranges, &spans);
+
+            const ptrdiff_t ncells = grid.ncells();
+
+            // What the boxes imply, computed here.
+            std::vector<ptrdiff_t> want((size_t)ncells + 1, 0);
+            for (long i = 0; i < n; ++i) {
+                const int a = cell0_host(grid, b.h[grid.axis0][(size_t)i]);
+                const int bb = cell0_host(grid, b.h[3 + grid.axis0][(size_t)i]);
+                const int c = cell1_host(grid, b.h[grid.axis1][(size_t)i]);
+                const int d = cell1_host(grid, b.h[3 + grid.axis1][(size_t)i]);
+                for (int j = c; j <= d; ++j) {
+                    for (int k = a; k <= bb; ++k) want[(size_t)((ptrdiff_t)j * grid.n0 + k) + 1]++;
+                }
+            }
+            for (ptrdiff_t c = 0; c < ncells; ++c) want[(size_t)c + 1] += want[(size_t)c];
+
+            std::vector<ptrdiff_t> got((size_t)ncells + 1, -1);
+            SCCD_CUDA_CHECK(cudaMemcpy(got.data(), cellptr,
+                                       sizeof(ptrdiff_t) * (size_t)(ncells + 1), cudaMemcpyDeviceToHost));
+            ptrdiff_t off = 0, first = -1;
+            for (ptrdiff_t c = 0; c <= ncells; ++c) {
+                if (got[(size_t)c] != want[(size_t)c]) {
+                    if (first < 0) first = c;
+                    ++off;
+                }
+            }
+
+            idx_t* cellidx = nullptr;
+            ptrdiff_t* cursor = nullptr;
+            SCCD_CUDA_CHECK(cudaMalloc(&cellidx, sizeof(idx_t) * (size_t)(spans > 0 ? spans : 1)));
+            SCCD_CUDA_CHECK(cudaMalloc(&cursor, sizeof(ptrdiff_t) * (size_t)(ncells + 1)));
+            ptrdiff_t rejected = 0;
+            sccd::device::cell2d_fill<scalar_t, idx_t>(
+                n, b.aabbs, grid, cellptr, ranges, cellidx, spans > 0 ? spans : 1, cursor, &rejected);
+            SCCD_CUDA_CHECK(cudaDeviceSynchronize());
+
+            std::printf("rep %d: grid %dx%d axes %d,%d spans=%ld host_total=%ld "
+                        "cellptr_wrong=%ld (first cell %ld) rejected=%ld\n",
+                        rep, grid.n0, grid.n1, grid.axis0, grid.axis1, (long)spans,
+                        (long)want[(size_t)ncells], (long)off, (long)first, (long)rejected);
+            if (off || rejected) ++failures;
+
+            cudaFree(cellptr);
+            cudaFree(cellidx);
+            cudaFree(cursor);
+            cudaFree(ranges);
+        }
+        b.free_all();
+        std::printf(failures ? "FAIL: %d of %d reps disagreed\n" : "OK: %d of %d reps disagreed\n",
+                    failures, repeats);
+        return failures ? 1 : 0;
+    }
+
     using PairSet = std::set<std::pair<idx_t, idx_t>>;
 
     PairSet download(idx_t* a, idx_t* b, const ptrdiff_t n) {
@@ -193,13 +308,21 @@ namespace {
         // ncells is not known until setup picks the axes, so size generously and
         // let setup memset what it needs; 4n is the cap setup itself enforces.
         SCCD_CUDA_CHECK(cudaMalloc(&cellptr, sizeof(ptrdiff_t) * (size_t)(4 * e.n + 2)));
-        sccd::device::cell2d_setup_and_count<scalar_t, idx_t>(e.n, e.aabbs, grid, cellptr, &spans);
+        int* ranges = nullptr;
+        SCCD_CUDA_CHECK(cudaMalloc(&ranges, sizeof(int) * (size_t)(4 * e.n + 4)));
+        sccd::device::cell2d_setup_and_count<scalar_t, idx_t>(e.n, e.aabbs, grid, cellptr, ranges, &spans);
 
         idx_t* cellidx = nullptr;
         ptrdiff_t* cursor = nullptr;
         SCCD_CUDA_CHECK(cudaMalloc(&cellidx, sizeof(idx_t) * (size_t)(spans > 0 ? spans : 1)));
         SCCD_CUDA_CHECK(cudaMalloc(&cursor, sizeof(ptrdiff_t) * (size_t)(grid.ncells() + 1)));
-        sccd::device::cell2d_fill<scalar_t, idx_t>(e.n, e.aabbs, grid, cellptr, cellidx, cursor);
+        ptrdiff_t rejected = 0;
+        sccd::device::cell2d_fill<scalar_t, idx_t>(
+            e.n, e.aabbs, grid, cellptr, ranges, cellidx, spans > 0 ? spans : 1, cursor, &rejected);
+        if (rejected) {
+            fprintf(stderr, "cell2d_fill rejected %ld of %ld spans\n", (long)rejected, (long)spans);
+            std::exit(1);
+        }
 
         ptrdiff_t* ccdptr = nullptr;
         SCCD_CUDA_CHECK(cudaMalloc(&ccdptr, sizeof(ptrdiff_t) * (size_t)(e.n + 1)));
@@ -220,10 +343,193 @@ namespace {
         cudaFree(cellptr);
         cudaFree(cellidx);
         cudaFree(cursor);
+        cudaFree(ranges);
         cudaFree(ccdptr);
         cudaFree(o0);
         cudaFree(o1);
         return out;
+    }
+
+    /**
+     * \brief The shipped vertex-face query: vertices binned by extent, one
+     *        thread to a face.
+     */
+    template <int NXE>
+    PairSet cell2d_vf(DeviceBoxes& faces, DeviceBoxes& verts) {
+        sccd::device::Cell2DGridD<scalar_t> grid;
+        ptrdiff_t spans = 0;
+        ptrdiff_t* cellptr = nullptr;
+        SCCD_CUDA_CHECK(cudaMalloc(&cellptr, sizeof(ptrdiff_t) * (size_t)(4 * verts.n + 2)));
+        int* ranges = nullptr;
+        SCCD_CUDA_CHECK(cudaMalloc(&ranges, sizeof(int) * (size_t)(4 * verts.n + 4)));
+        sccd::device::cell2d_setup_and_count<scalar_t, idx_t>(
+            verts.n, verts.aabbs, grid, cellptr, ranges, &spans);
+
+        idx_t* cellidx = nullptr;
+        ptrdiff_t* cursor = nullptr;
+        SCCD_CUDA_CHECK(cudaMalloc(&cellidx, sizeof(idx_t) * (size_t)(spans > 0 ? spans : 1)));
+        SCCD_CUDA_CHECK(cudaMalloc(&cursor, sizeof(ptrdiff_t) * (size_t)(grid.ncells() + 1)));
+        ptrdiff_t rejected = 0;
+        sccd::device::cell2d_fill<scalar_t, idx_t>(verts.n, verts.aabbs, grid, cellptr, ranges,
+                                                   cellidx, spans > 0 ? spans : 1, cursor, &rejected);
+        if (rejected) {
+            std::fprintf(stderr, "cell2d_fill rejected %ld spans\n", (long)rejected);
+            std::exit(1);
+        }
+
+        ptrdiff_t* ccdptr = nullptr;
+        SCCD_CUDA_CHECK(cudaMalloc(&ccdptr, sizeof(ptrdiff_t) * (size_t)(faces.n + 1)));
+        sccd::device::cell2d_count_overlaps<NXE, 1, scalar_t, idx_t>(
+            faces.n, faces.aabbs, faces.idx, 1, faces.elements, verts.aabbs, verts.idx, 0,
+            (idx_t**)nullptr, grid, cellptr, cellidx, ccdptr);
+
+        ptrdiff_t total = 0;
+        SCCD_CUDA_CHECK(cudaMemcpy(&total, ccdptr + faces.n, sizeof(ptrdiff_t), cudaMemcpyDeviceToHost));
+
+        idx_t *o0 = nullptr, *o1 = nullptr;
+        SCCD_CUDA_CHECK(cudaMalloc(&o0, sizeof(idx_t) * (size_t)(total > 0 ? total : 1)));
+        SCCD_CUDA_CHECK(cudaMalloc(&o1, sizeof(idx_t) * (size_t)(total > 0 ? total : 1)));
+        if (total > 0) {
+            sccd::device::cell2d_collect_overlaps<NXE, 1, scalar_t, idx_t>(
+                faces.n, faces.aabbs, faces.idx, 1, faces.elements, verts.aabbs, verts.idx, 0,
+                (idx_t**)nullptr, grid, cellptr, cellidx, ccdptr, o0, o1);
+        }
+        SCCD_CUDA_CHECK(cudaDeviceSynchronize());
+
+        PairSet out = download(o0, o1, total);
+        cudaFree(cellptr);
+        cudaFree(cellidx);
+        cudaFree(cursor);
+        cudaFree(ranges);
+        cudaFree(ccdptr);
+        cudaFree(o0);
+        cudaFree(o1);
+        return out;
+    }
+
+    /**
+     * \brief The minimum-corner vertex-face query: faces binned at their
+     *        minimum corner, one warp to a vertex.
+     *
+     * It must return the same set as \ref cell2d_vf, pair for pair. The two
+     * differ in which list is indexed and in how the walk is bounded, not in
+     * which pairs exist, so any difference here is a defect rather than a
+     * tightening.
+     */
+    template <int NXE>
+    PairSet cell2dmin_vf(DeviceBoxes& faces, DeviceBoxes& verts) {
+        sccd::device::Cell2DGridD<scalar_t> grid;
+        ptrdiff_t* cellptr = nullptr;
+        SCCD_CUDA_CHECK(cudaMalloc(&cellptr, sizeof(ptrdiff_t) * (size_t)(4 * faces.n + 2)));
+        sccd::device::cell2dmin_setup_and_count<scalar_t, idx_t>(faces.n, faces.aabbs, grid, cellptr);
+
+        const ptrdiff_t ncells = grid.ncells();
+        idx_t* cellidx = nullptr;
+        ptrdiff_t* cursor = nullptr;
+        scalar_t *row_prefix = nullptr, *cell_hi1 = nullptr;
+        SCCD_CUDA_CHECK(cudaMalloc(&cellidx, sizeof(idx_t) * (size_t)(faces.n > 0 ? faces.n : 1)));
+        SCCD_CUDA_CHECK(cudaMalloc(&cursor, sizeof(ptrdiff_t) * (size_t)(ncells + 1)));
+        SCCD_CUDA_CHECK(cudaMalloc(&row_prefix, sizeof(scalar_t) * (size_t)(ncells > 0 ? ncells : 1)));
+        SCCD_CUDA_CHECK(cudaMalloc(&cell_hi1, sizeof(scalar_t) * (size_t)(ncells > 0 ? ncells : 1)));
+
+        sccd::device::cell2dmin_fill<scalar_t, idx_t>(faces.n, faces.aabbs, grid, cellptr, cellidx, cursor);
+        sccd::device::cell2dmin_bounds<scalar_t, idx_t>(grid, faces.aabbs, cellptr, cellidx,
+                                                        row_prefix, cell_hi1);
+        int* krow = nullptr;
+        SCCD_CUDA_CHECK(cudaMalloc(&krow, sizeof(int)));
+        sccd::device::cell2dmin_max_row_span<scalar_t>(faces.n, faces.aabbs, grid, krow);
+
+        ptrdiff_t* ccdptr = nullptr;
+        SCCD_CUDA_CHECK(cudaMalloc(&ccdptr, sizeof(ptrdiff_t) * (size_t)(verts.n + 1)));
+        sccd::device::cell2dmin_count_vf_overlaps<NXE, scalar_t, idx_t>(
+            verts.n, verts.aabbs, verts.idx, faces.aabbs, faces.idx, 1, faces.elements, grid,
+            cellptr, cellidx, row_prefix, cell_hi1, krow, ccdptr);
+
+        ptrdiff_t total = 0;
+        SCCD_CUDA_CHECK(cudaMemcpy(&total, ccdptr + verts.n, sizeof(ptrdiff_t), cudaMemcpyDeviceToHost));
+
+        idx_t *o0 = nullptr, *o1 = nullptr;
+        SCCD_CUDA_CHECK(cudaMalloc(&o0, sizeof(idx_t) * (size_t)(total > 0 ? total : 1)));
+        SCCD_CUDA_CHECK(cudaMalloc(&o1, sizeof(idx_t) * (size_t)(total > 0 ? total : 1)));
+        if (total > 0) {
+            sccd::device::cell2dmin_collect_vf_overlaps<NXE, scalar_t, idx_t>(
+                verts.n, verts.aabbs, verts.idx, faces.aabbs, faces.idx, 1, faces.elements, grid,
+                cellptr, cellidx, row_prefix, cell_hi1, krow, ccdptr, o0, o1);
+        }
+        SCCD_CUDA_CHECK(cudaDeviceSynchronize());
+
+        PairSet out = download(o0, o1, total);
+        cudaFree(cellptr);
+        cudaFree(cellidx);
+        cudaFree(cursor);
+        cudaFree(row_prefix);
+        cudaFree(cell_hi1);
+        cudaFree(krow);
+        cudaFree(ccdptr);
+        cudaFree(o0);
+        cudaFree(o1);
+        return out;
+    }
+
+    /**
+     * \brief Vertices for a cross-list case: a point has no extent of its own,
+     *        so its box is the sweep of one point over a step.
+     */
+    DeviceBoxes make_points(std::mt19937& rng, const ptrdiff_t n, const double spread, const double step) {
+        std::uniform_real_distribution<double> pos(0.0, spread);
+        std::uniform_real_distribution<double> mov(-step, step);
+
+        DeviceBoxes b;
+        b.n = n;
+        b.nxe = 1;
+        for (int d = 0; d < 6; ++d) b.h[d].resize(n);
+        b.h_elem[0].resize(n);
+        for (ptrdiff_t i = 0; i < n; ++i) {
+            for (int d = 0; d < 3; ++d) {
+                const double p = pos(rng);
+                const double q = p + mov(rng);
+                b.h[d][i] = std::min(p, q);
+                b.h[3 + d][i] = std::max(p, q);
+            }
+            // A vertex is its own element, which is what the shared-vertex test
+            // on the other side compares a face's nodes against.
+            b.h_elem[0][i] = (idx_t)i;
+        }
+        return b;
+    }
+
+    template <int NXE>
+    int run_vf(const char* name,
+               const ptrdiff_t nf,
+               const ptrdiff_t nv,
+               const double spread,
+               const double size) {
+        std::mt19937 rng(1234);
+        DeviceBoxes faces = make(rng, nf, NXE, spread, size);
+        DeviceBoxes verts = make_points(rng, nv, spread, size * 0.25);
+        faces.upload();
+        verts.upload();
+
+        const PairSet shipped = cell2d_vf<NXE>(faces, verts);
+        const PairSet mincorner = cell2dmin_vf<NXE>(faces, verts);
+
+        const bool ok = (shipped == mincorner);
+        std::printf("%-26s nf=%-6ld nv=%-6ld shipped=%-8zu mincorner=%-8zu  %s\n",
+                    name, (long)nf, (long)nv, shipped.size(), mincorner.size(), ok ? "ok" : "MISMATCH");
+        if (!ok) {
+            ptrdiff_t only_s = 0, only_m = 0;
+            for (const auto& p : shipped) {
+                if (!mincorner.count(p)) ++only_s;
+            }
+            for (const auto& p : mincorner) {
+                if (!shipped.count(p)) ++only_m;
+            }
+            std::printf("    only in shipped: %ld   only in mincorner: %ld\n", (long)only_s, (long)only_m);
+        }
+
+        faces.free_all();
+        verts.free_all();
+        return ok ? 0 : 1;
     }
 
     PairSet sweep_self(DeviceBoxes& e) {
@@ -311,6 +617,11 @@ namespace {
 }  // namespace
 
 int main(int argc, char** argv) {
+    if (const char* dump = std::getenv("SCCD_CELL2D_BOXES")) {
+        const char* reps = std::getenv("SCCD_CELL2D_REPS");
+        return run_from_dump(dump, reps ? std::atoi(reps) : 5);
+    }
+
     int device_count = 0;
     if (cudaGetDeviceCount(&device_count) != cudaSuccess || device_count == 0) {
         std::printf("no CUDA device available, skipping\n");
@@ -324,6 +635,24 @@ int main(int argc, char** argv) {
     bad |= run("tiny spread", 700, 0.0001, 0.00001);
 
     std::printf("%s\n", bad ? "FAIL" : "OK: device cell list and device sweep agree");
+
+    // The cross-list query, both ways round. Quads as well as triangles,
+    // because the shared-vertex test is the only part that depends on the node
+    // count and it is the part a port most easily gets wrong.
+    int badvf = 0;
+    badvf |= run_vf<3>("vf tri, small boxes", 4000, 4000, 100.0, 1.0);
+    badvf |= run_vf<3>("vf tri, many cells", 2500, 2500, 100.0, 25.0);
+    badvf |= run_vf<3>("vf tri, dense", 900, 900, 1.0, 1.0);
+    badvf |= run_vf<3>("vf tri, more verts", 1000, 8000, 50.0, 4.0);
+    badvf |= run_vf<3>("vf tri, more faces", 8000, 1000, 50.0, 4.0);
+    badvf |= run_vf<3>("vf tri, tiny spread", 700, 700, 0.0001, 0.00001);
+    badvf |= run_vf<4>("vf quad, small boxes", 4000, 4000, 100.0, 1.0);
+    badvf |= run_vf<4>("vf quad, many cells", 2500, 2500, 100.0, 25.0);
+    badvf |= run_vf<4>("vf quad, dense", 900, 900, 1.0, 1.0);
+
+    std::printf("%s\n",
+                badvf ? "FAIL" : "OK: device minimum-corner vertex-face matches the shipped query");
+    bad |= badvf;
 
     if (argc > 1) {
         std::mt19937 rng(7);

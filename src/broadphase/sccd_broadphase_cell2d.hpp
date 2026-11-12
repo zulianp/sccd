@@ -5,8 +5,10 @@
 #include "sccd_parallel.hpp"
 #include "sccd_aabb.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <vector>
 
 /**
@@ -37,6 +39,32 @@
  * Both the binning and the pair collection are count-then-fill, matching the rest
  * of the broad phase: the allocation is exact and known before anything is
  * written, and the CRS output is deterministic.
+ *
+ * ## A second binning, for the self query
+ *
+ * The one list against itself -- edge against edge -- can be done more cheaply,
+ * and the `cell2dmin_` functions below do it. A box enters the **one** cell
+ * holding its minimum corner instead of every cell it touches, so the cell array
+ * holds one entry per box rather than one per covered cell, and a partner is met
+ * at most once. The duplicate rule disappears with it.
+ *
+ * **The walk has to be over a total order.** Reading the box's own footprint --
+ * its columns crossed with its rows -- loses every pair whose minimum-corner
+ * cells are *incomparable*, one box ahead on the first axis and behind on the
+ * second, because then neither footprint holds the other's cell and neither ever
+ * reads the other. Componentwise order on cells is partial. Row-major linear
+ * index is total, and over it the walk is complete: for overlapping boxes the
+ * partner's cell never passes the cell of this box's maximum corner, so whichever
+ * of the two comes first in that order holds the other in its range.
+ *
+ * **The bounds are what make it cheap.** Read literally, "forward in linear
+ * order" means whole rows. Each cell therefore carries the largest upper bound of
+ * the boxes binned in it, and each row a prefix maximum of those, so a binary
+ * search skips the columns holding nothing that reaches back to the querying box
+ * -- the sweep's running maximum, applied per row. What is left is close to the
+ * footprint again, and the measured candidate count is below what the binning
+ * above walks. A wide box is the case that separates them: it costs the extent
+ * binning a place in every cell it crosses and costs this one a single entry.
  */
 
 namespace sccd {
@@ -67,6 +95,9 @@ namespace sccd {
         }
 
         ptrdiff_t cell_of(const int c0, const int c1) const { return (ptrdiff_t)c1 * n0 + c0; }
+
+        /** \brief The axis the grid does not use, which the cell test culls on. */
+        int axis2() const { return 3 - axis0 - axis1; }
     };
 
     namespace detail {
@@ -102,6 +133,27 @@ namespace sccd {
      * every box touch a large block of cells and give the counting pass more work
      * than the query saves.
      */
+    /**
+     * \brief Shrink a grid until it holds at most `4 * n` cells.
+     *
+     * The caller sizes its cell array from this bound, so it has to hold
+     * exactly, not approximately. Both sides come in at least one, and the
+     * larger is reduced to whatever the smaller leaves room for.
+     */
+    inline void cap_cells(const ptrdiff_t n, int& n0, int& n1) {
+        const ptrdiff_t cap = sccd::max<ptrdiff_t>(4 * n, 1);
+        if (n0 < 1) n0 = 1;
+        if (n1 < 1) n1 = 1;
+        if ((ptrdiff_t)n0 > cap) n0 = (int)cap;
+        if ((ptrdiff_t)n1 > cap) n1 = (int)cap;
+        if ((ptrdiff_t)n0 * (ptrdiff_t)n1 <= cap) return;
+        if (n0 >= n1) {
+            n0 = (int)sccd::max<ptrdiff_t>(cap / (ptrdiff_t)n1, 1);
+        } else {
+            n1 = (int)sccd::max<ptrdiff_t>(cap / (ptrdiff_t)n0, 1);
+        }
+    }
+
     template <typename T>
     static void cell2d_setup(const ptrdiff_t n, T** const SCCD_RESTRICT aabb, Cell2DGrid<T>& grid) {
         detail::choose_two_axes<T>(n, aabb, grid.axis0, grid.axis1);
@@ -109,17 +161,37 @@ namespace sccd {
         const int d0 = grid.axis0;
         const int d1 = grid.axis1;
 
-        T lo0 = aabb[d0][0], hi0 = aabb[3 + d0][0];
-        T lo1 = aabb[d1][0], hi1 = aabb[3 + d1][0];
-        T sum0 = 0, sum1 = 0;
-        for (ptrdiff_t i = 0; i < n; ++i) {
-            lo0 = sccd::min<T>(lo0, aabb[d0][i]);
-            hi0 = sccd::max<T>(hi0, aabb[3 + d0][i]);
-            lo1 = sccd::min<T>(lo1, aabb[d1][i]);
-            hi1 = sccd::max<T>(hi1, aabb[3 + d1][i]);
-            sum0 += aabb[3 + d0][i] - aabb[d0][i];
-            sum1 += aabb[3 + d1][i] - aabb[d1][i];
-        }
+        struct Extent {
+            T lo0, hi0, lo1, hi1, sum0, sum1;
+        };
+
+        const Extent ext = sccd::parallel_tiled_reduce<Extent>(
+            0,
+            n,
+            [&](const ptrdiff_t begin, const ptrdiff_t end) {
+                Extent e{aabb[d0][begin], aabb[3 + d0][begin], aabb[d1][begin], aabb[3 + d1][begin], 0, 0};
+                for (ptrdiff_t i = begin; i < end; ++i) {
+                    e.lo0 = sccd::min<T>(e.lo0, aabb[d0][i]);
+                    e.hi0 = sccd::max<T>(e.hi0, aabb[3 + d0][i]);
+                    e.lo1 = sccd::min<T>(e.lo1, aabb[d1][i]);
+                    e.hi1 = sccd::max<T>(e.hi1, aabb[3 + d1][i]);
+                    e.sum0 += aabb[3 + d0][i] - aabb[d0][i];
+                    e.sum1 += aabb[3 + d1][i] - aabb[d1][i];
+                }
+                return e;
+            },
+            [](const Extent a, const Extent b) {
+                return Extent{sccd::min<T>(a.lo0, b.lo0),
+                              sccd::max<T>(a.hi0, b.hi0),
+                              sccd::min<T>(a.lo1, b.lo1),
+                              sccd::max<T>(a.hi1, b.hi1),
+                              a.sum0 + b.sum0,
+                              a.sum1 + b.sum1};
+            });
+
+        const T lo0 = ext.lo0, hi0 = ext.hi0;
+        const T lo1 = ext.lo1, hi1 = ext.hi1;
+        const T sum0 = ext.sum0, sum1 = ext.sum1;
 
         const T span0 = sccd::max<T>(hi0 - lo0, std::numeric_limits<T>::min());
         const T span1 = sccd::max<T>(hi1 - lo1, std::numeric_limits<T>::min());
@@ -144,6 +216,12 @@ namespace sccd {
 
         grid.n0 = (int)sccd::max<double>(1.0, std::floor(want0));
         grid.n1 = (int)sccd::max<double>(1.0, std::floor(want1));
+        // Scaling both sides by the same factor does not enforce the cap on a
+        // scene whose two axes differ wildly: a side scaled below one is raised
+        // back to one, and the product grows past the cap again by exactly that
+        // much. The bound is what the caller sizes its cell array from, so it is
+        // enforced here on the integers that array is sized by.
+        cap_cells(sccd::max<ptrdiff_t>(n, 1), grid.n0, grid.n1);
         grid.min0 = lo0;
         grid.min1 = lo1;
         // Nudge the span so the largest coordinate lands inside the last cell.
@@ -152,42 +230,220 @@ namespace sccd {
     }
 
     /**
+     * \brief Which boxes a block of cell rows has to look at.
+     *
+     * The histogram and the scatter both write one counter per (box, cell)
+     * incidence, so neither is safe to run box-parallel without either atomics
+     * or one private copy of the whole cell array per worker. Neither is
+     * affordable: the cell count is of the order of the box count, so private
+     * copies cost workers times that.
+     *
+     * Partitioning by cell row avoids both. A block owns a contiguous
+     * range of rows on the grid's second axis, and no two blocks own a cell, so
+     * each can write its own slice of the cell array with no synchronisation at
+     * all. A box that spans several row blocks appears in each of their lists,
+     * which is why the lists are built by the same count-then-fill pass as
+     * everything else here.
+     *
+     * Boxes stay in index order within a block's list, and blocks cover the rows
+     * in order, so both passes visit each cell's boxes in exactly the order the
+     * serial form does. The cell array and the index array that come out are
+     * therefore identical to the serial ones, not merely equivalent.
+     */
+    struct Cell2DPartition {
+        int nblocks = 1;
+        int rows_per_block = 1;
+        std::vector<ptrdiff_t> blockptr;  ///< nblocks + 1 offsets into blockbox
+        std::vector<int> blockbox;        ///< box indices, grouped by block
+        std::vector<ptrdiff_t> counts;    ///< per-chunk, per-block counters, reused across steps
+
+        /** \brief True when the two binning passes should just run serially. */
+        bool serial() const { return nblocks <= 1; }
+    };
+
+    /**
+     * \brief Below this many boxes the partition costs more than it saves.
+     *
+     * Measured on a draped sheet at ten workers, the partitioned binning is
+     * $0.42\times$ the speed of the serial one at $8{,}000$ boxes, level at
+     * $16{,}000$, $1.61\times$ at $32{,}000$ and $3.10\times$ at $256{,}000$. The
+     * threshold sits just past the crossover: a mesh small enough to be below it
+     * has a binning pass measured in tenths of a millisecond either way.
+     *
+     * A total, not a count per block. Deriving the block count from the boxes
+     * instead -- so that a wider machine asks for fewer, fatter blocks -- was
+     * four times slower on armadillo-rollers at seventy-two threads, because it
+     * capped the partition at a handful of blocks on exactly the mesh sizes
+     * preparation spends its time on.
+     */
+    static const ptrdiff_t SCCD_CELL2D_MIN_PARALLEL = 32768;
+
+    /**
+     * \brief Group \p n boxes by the block of cell rows they touch.
+     *
+     * Cheap relative to what it enables: one pass over the boxes reading two
+     * coordinates each to count, and a second to write. Both are box-parallel
+     * and neither touches the cell array.
+     */
+    template <typename T>
+    static void cell2d_partition(const ptrdiff_t n,
+                                 T** const SCCD_RESTRICT aabb,
+                                 const Cell2DGrid<T>& grid,
+                                 Cell2DPartition& part) {
+        part.blockptr.clear();
+        part.blockbox.clear();
+
+        const int max_workers = sccd::max_concurrency();
+        if (n < SCCD_CELL2D_MIN_PARALLEL || max_workers <= 1 || grid.n1 <= 1) {
+            part.nblocks = 1;
+            part.rows_per_block = grid.n1;
+            return;
+        }
+
+        // More blocks than workers so that a row band holding an unusually dense
+        // patch of the surface does not become the whole critical path.
+        const int want = sccd::min<int>(grid.n1, max_workers * 4);
+        part.nblocks = sccd::max<int>(1, want);
+        part.rows_per_block = (grid.n1 + part.nblocks - 1) / part.nblocks;
+        part.nblocks = (grid.n1 + part.rows_per_block - 1) / part.rows_per_block;
+
+        const int nblocks = part.nblocks;
+        const int rpb = part.rows_per_block;
+
+        const T* const SCCD_RESTRICT lo1 = aabb[grid.axis1];
+        const T* const SCCD_RESTRICT hi1 = aabb[3 + grid.axis1];
+
+        // Chunks of boxes, one private counter row each. The counters are over
+        // blocks and not over cells, so this is nchunks * nblocks entries and
+        // not nchunks * ncells.
+        const int nchunks = nblocks;
+        const ptrdiff_t chunk = (n + nchunks - 1) / nchunks;
+        std::vector<ptrdiff_t> &counts = part.counts;
+        counts.assign((size_t)nchunks * (size_t)nblocks, 0);
+
+        sccd::parallel_for_chunks(0, nchunks, [&](const ptrdiff_t c) {
+            ptrdiff_t* const row = counts.data() + c * (ptrdiff_t)nblocks;
+            const ptrdiff_t begin = c * chunk;
+            const ptrdiff_t end = sccd::min<ptrdiff_t>(begin + chunk, n);
+            for (ptrdiff_t i = begin; i < end; ++i) {
+                const int b0 = grid.clamp1(lo1[i]) / rpb;
+                const int b1 = grid.clamp1(hi1[i]) / rpb;
+                for (int b = b0; b <= b1; ++b) {
+                    row[b] += 1;
+                }
+            }
+        });
+
+        // Offsets, block-major so a block's list is contiguous, chunk-minor so
+        // the boxes inside it stay in index order.
+        part.blockptr.assign((size_t)nblocks + 1, 0);
+        ptrdiff_t running = 0;
+        for (int b = 0; b < nblocks; ++b) {
+            part.blockptr[(size_t)b] = running;
+            for (int c = 0; c < nchunks; ++c) {
+                ptrdiff_t& slot = counts[(size_t)c * (size_t)nblocks + (size_t)b];
+                const ptrdiff_t take = slot;
+                slot = running;
+                running += take;
+            }
+        }
+        part.blockptr[(size_t)nblocks] = running;
+
+        part.blockbox.resize((size_t)running);
+        sccd::parallel_for_chunks(0, nchunks, [&](const ptrdiff_t c) {
+            ptrdiff_t* const row = counts.data() + c * (ptrdiff_t)nblocks;
+            const ptrdiff_t begin = c * chunk;
+            const ptrdiff_t end = sccd::min<ptrdiff_t>(begin + chunk, n);
+            for (ptrdiff_t i = begin; i < end; ++i) {
+                const int b0 = grid.clamp1(lo1[i]) / rpb;
+                const int b1 = grid.clamp1(hi1[i]) / rpb;
+                for (int b = b0; b <= b1; ++b) {
+                    part.blockbox[(size_t)row[b]++] = (int)i;
+                }
+            }
+        });
+    }
+
+    namespace detail {
+
+        /**
+         * \brief Visit every (cell, box) incidence a block of rows owns.
+         *
+         * Shared by the counting and the scatter pass so that the two cannot
+         * disagree about which cells a box belongs to, which is the failure that
+         * would corrupt the cell array silently.
+         */
+        template <typename T, typename Visit>
+        static inline void for_each_incidence(T** const SCCD_RESTRICT aabb,
+                                              const Cell2DGrid<T>& grid,
+                                              const ptrdiff_t i,
+                                              const int row_begin,
+                                              const int row_end,
+                                              Visit&& visit) {
+            const int a = grid.clamp0(aabb[grid.axis0][i]);
+            const int b = grid.clamp0(aabb[3 + grid.axis0][i]);
+            const int c = sccd::max<int>(grid.clamp1(aabb[grid.axis1][i]), row_begin);
+            const int d = sccd::min<int>(grid.clamp1(aabb[3 + grid.axis1][i]), row_end - 1);
+            for (int j = c; j <= d; ++j) {
+                for (int k = a; k <= b; ++k) {
+                    visit(grid.cell_of(k, j));
+                }
+            }
+        }
+
+    }  // namespace detail
+
+    /**
      * \brief Bin \p n boxes into \p grid: count, prefix sum, then scatter.
      *
      * \p cellptr must hold ncells + 1 entries, \p cellidx the total span count
      * which is cellptr[ncells] after the prefix sum, so this is called in two
      * steps by the caller the same way the pair collection is.
+     *
+     * \p part comes from cell2d_partition on the same boxes and grid. It decides
+     * only how the work is divided; the result does not depend on it.
      */
     template <typename T>
     static void cell2d_count(const ptrdiff_t n,
                              T** const SCCD_RESTRICT aabb,
                              const Cell2DGrid<T>& grid,
+                             const Cell2DPartition& part,
                              ptrdiff_t* const SCCD_RESTRICT cellptr) {
         const ptrdiff_t ncells = grid.ncells();
-        std::memset(cellptr, 0, sizeof(ptrdiff_t) * (size_t)(ncells + 1));
 
-        const T* const SCCD_RESTRICT lo0 = aabb[grid.axis0];
-        const T* const SCCD_RESTRICT hi0 = aabb[3 + grid.axis0];
-        const T* const SCCD_RESTRICT lo1 = aabb[grid.axis1];
-        const T* const SCCD_RESTRICT hi1 = aabb[3 + grid.axis1];
-
-        // Serial: the scatter is a histogram, and at ~n cells the contention of a
-        // parallel version costs more than the pass itself.
-        for (ptrdiff_t i = 0; i < n; ++i) {
-            const int a = grid.clamp0(lo0[i]);
-            const int b = grid.clamp0(hi0[i]);
-            const int c = grid.clamp1(lo1[i]);
-            const int d = grid.clamp1(hi1[i]);
-            for (int j = c; j <= d; ++j) {
-                for (int k = a; k <= b; ++k) {
-                    cellptr[grid.cell_of(k, j) + 1] += 1;
-                }
+        if (part.serial()) {
+            std::memset(cellptr, 0, sizeof(ptrdiff_t) * (size_t)(ncells + 1));
+            for (ptrdiff_t i = 0; i < n; ++i) {
+                detail::for_each_incidence<T>(
+                    aabb, grid, i, 0, grid.n1, [&](const ptrdiff_t cell) { cellptr[cell + 1] += 1; });
             }
+            for (ptrdiff_t i = 0; i < ncells; ++i) {
+                cellptr[i + 1] += cellptr[i];
+            }
+            return;
         }
 
-        for (ptrdiff_t i = 0; i < ncells; ++i) {
-            cellptr[i + 1] += cellptr[i];
-        }
+        sccd::parallel_for_br(0, ncells + 1, [&](const ptrdiff_t begin, const ptrdiff_t end) {
+            std::memset(cellptr + begin, 0, sizeof(ptrdiff_t) * (size_t)(end - begin));
+        });
+
+        const int rpb = part.rows_per_block;
+        sccd::parallel_for_chunks(0, part.nblocks, [&](const ptrdiff_t b) {
+            const int row_begin = (int)b * rpb;
+            const int row_end = sccd::min<int>(row_begin + rpb, grid.n1);
+            const ptrdiff_t from = part.blockptr[(size_t)b];
+            const ptrdiff_t to = part.blockptr[(size_t)b + 1];
+            for (ptrdiff_t e = from; e < to; ++e) {
+                detail::for_each_incidence<T>(aabb,
+                                              grid,
+                                              (ptrdiff_t)part.blockbox[(size_t)e],
+                                              row_begin,
+                                              row_end,
+                                              [&](const ptrdiff_t cell) { cellptr[cell + 1] += 1; });
+            }
+        });
+
+        sccd::parallel_cum_sum_br(cellptr, cellptr + ncells + 1);
     }
 
     /** \brief Scatter box indices into the cells counted by cell2d_count. */
@@ -195,28 +451,73 @@ namespace sccd {
     static void cell2d_fill(const ptrdiff_t n,
                             T** const SCCD_RESTRICT aabb,
                             const Cell2DGrid<T>& grid,
+                            const Cell2DPartition& part,
                             const ptrdiff_t* const SCCD_RESTRICT cellptr,
                             I* const SCCD_RESTRICT cellidx,
                             ptrdiff_t* const SCCD_RESTRICT cursor) {
         const ptrdiff_t ncells = grid.ncells();
-        std::memcpy(cursor, cellptr, sizeof(ptrdiff_t) * (size_t)ncells);
 
-        const T* const SCCD_RESTRICT lo0 = aabb[grid.axis0];
-        const T* const SCCD_RESTRICT hi0 = aabb[3 + grid.axis0];
-        const T* const SCCD_RESTRICT lo1 = aabb[grid.axis1];
-        const T* const SCCD_RESTRICT hi1 = aabb[3 + grid.axis1];
+        if (part.serial()) {
+            std::memcpy(cursor, cellptr, sizeof(ptrdiff_t) * (size_t)ncells);
+            for (ptrdiff_t i = 0; i < n; ++i) {
+                detail::for_each_incidence<T>(aabb, grid, i, 0, grid.n1, [&](const ptrdiff_t cell) {
+                    cellidx[cursor[cell]++] = (I)i;
+                });
+            }
+            return;
+        }
 
-        for (ptrdiff_t i = 0; i < n; ++i) {
-            const int a = grid.clamp0(lo0[i]);
-            const int b = grid.clamp0(hi0[i]);
-            const int c = grid.clamp1(lo1[i]);
-            const int d = grid.clamp1(hi1[i]);
-            for (int j = c; j <= d; ++j) {
-                for (int k = a; k <= b; ++k) {
-                    cellidx[cursor[grid.cell_of(k, j)]++] = (I)i;
+        sccd::parallel_for_br(0, ncells, [&](const ptrdiff_t begin, const ptrdiff_t end) {
+            std::memcpy(cursor + begin, cellptr + begin, sizeof(ptrdiff_t) * (size_t)(end - begin));
+        });
+
+        const int rpb = part.rows_per_block;
+        sccd::parallel_for_chunks(0, part.nblocks, [&](const ptrdiff_t b_) {
+            const int row_begin = (int)b_ * rpb;
+            const int row_end = sccd::min<int>(row_begin + rpb, grid.n1);
+            const ptrdiff_t from = part.blockptr[(size_t)b_];
+            const ptrdiff_t to = part.blockptr[(size_t)b_ + 1];
+            for (ptrdiff_t e = from; e < to; ++e) {
+                const ptrdiff_t i = (ptrdiff_t)part.blockbox[(size_t)e];
+                detail::for_each_incidence<T>(aabb, grid, i, row_begin, row_end, [&](const ptrdiff_t cell) {
+                    cellidx[cursor[cell]++] = (I)i;
+                });
+            }
+        });
+    }
+
+    /**
+     * \brief Copy each cell's boxes into cell order, so a query scans them contiguously.
+     *
+     * The cell array holds indices, so a query reaches a box by gathering six
+     * coordinates through \p cellidx and nothing in a cell is consecutive in
+     * memory. This lays the same six coordinates out in the order the cells hold
+     * them, which is what lets a query test them 32 at a time with
+     * \ref vaabb_overlap_one_to_many_bits -- the kernel sweep-and-prune gets for
+     * free by sorting its boxes. The indices stay, because a surviving pair is
+     * still reported by index.
+     *
+     * It is a pass of its own and not part of the scatter in cell2d_fill, which
+     * already holds the box and already knows where the entry lands. Writing the
+     * box there costs six scattered stores per entry, one per array; writing it
+     * here costs six sequential stores and a gather, and measured on five scenes
+     * the sequential form is 1.2x to 1.4x the faster of the two.
+     */
+    template <typename T, typename I>
+    static void cell2d_pack_boxes(const Cell2DGrid<T>& grid,
+                                  T** const SCCD_RESTRICT aabb,
+                                  const ptrdiff_t* const SCCD_RESTRICT cellptr,
+                                  const I* const SCCD_RESTRICT cellidx,
+                                  T** const SCCD_RESTRICT cellbox) {
+        sccd::parallel_for_br(0, cellptr[grid.ncells()], [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+            for (int d = 0; d < 6; ++d) {
+                const T* const SCCD_RESTRICT src = aabb[d];
+                T* const SCCD_RESTRICT dst = cellbox[d];
+                for (ptrdiff_t k = rbegin; k < rend; ++k) {
+                    dst[k] = src[(ptrdiff_t)cellidx[k]];
                 }
             }
-        }
+        });
     }
 
     namespace detail {
@@ -241,6 +542,7 @@ namespace sccd {
                                                    const Cell2DGrid<T>& grid,
                                                    const ptrdiff_t* const SCCD_RESTRICT cellptr,
                                                    const I* const SCCD_RESTRICT cellidx,
+                                                   T** const SCCD_RESTRICT cellbox,
                                                    Visit&& visit) {
             const T aminx = first_aabbs[0][fi], aminy = first_aabbs[1][fi], aminz = first_aabbs[2][fi];
             const T amaxx = first_aabbs[3][fi], amaxy = first_aabbs[4][fi], amaxz = first_aabbs[5][fi];
@@ -259,52 +561,56 @@ namespace sccd {
                     const ptrdiff_t begin = cellptr[cell];
                     const ptrdiff_t end = cellptr[cell + 1];
 
-                    for (ptrdiff_t k = begin; k < end; ++k) {
-                        const ptrdiff_t j = (ptrdiff_t)cellidx[k];
+                    for (ptrdiff_t base = begin; base < end; base += SCCD_AABB_DISJOINT_CHUNK_SIZE) {
+                        const int lanes = (int)sccd::min<ptrdiff_t>(SCCD_AABB_DISJOINT_CHUNK_SIZE, end - base);
+                        uint32_t bits = sccd::vaabb_overlap_one_to_many_bits<T>(aminx,
+                                                                               aminy,
+                                                                               aminz,
+                                                                               amaxx,
+                                                                               amaxy,
+                                                                               amaxz,
+                                                                               cellbox[0] + base,
+                                                                               cellbox[1] + base,
+                                                                               cellbox[2] + base,
+                                                                               cellbox[3] + base,
+                                                                               cellbox[4] + base,
+                                                                               cellbox[5] + base,
+                                                                               lanes);
 
-                        if (sccd::disjoint<T>(aminx,
-                                              aminy,
-                                              aminz,
-                                              amaxx,
-                                              amaxy,
-                                              amaxz,
-                                              second_aabbs[0][j],
-                                              second_aabbs[1][j],
-                                              second_aabbs[2][j],
-                                              second_aabbs[3][j],
-                                              second_aabbs[4][j],
-                                              second_aabbs[5][j])) {
-                            continue;
-                        }
+                        while (bits) {
+                            const ptrdiff_t k = base + sccd::ctz32(bits);
+                            bits &= bits - 1;
+                            const ptrdiff_t j = (ptrdiff_t)cellidx[k];
 
-                        // Report only from the cell owning the overlap's min corner.
-                        const T o0 = sccd::max<T>(amin0, second_aabbs[grid.axis0][j]);
-                        const T o1 = sccd::max<T>(amin1, second_aabbs[grid.axis1][j]);
-                        if (grid.clamp0(o0) != c0 || grid.clamp1(o1) != c1) {
-                            continue;
-                        }
-
-                        bool share = false;
-                        if constexpr (S > 1) {
-                            const I jidx = second_idx[j];
-                            I sev[S];
-                            for (int v = 0; v < S; ++v) {
-                                sev[v] = second_elements[v][jidx * second_element_stride];
+                            // Report only from the cell owning the overlap's min corner.
+                            const T o0 = sccd::max<T>(amin0, cellbox[grid.axis0][k]);
+                            const T o1 = sccd::max<T>(amin1, cellbox[grid.axis1][k]);
+                            if (grid.clamp0(o0) != c0 || grid.clamp1(o1) != c1) {
+                                continue;
                             }
-                            share = sccd::detail::shares_vertex<F, S>(ev, sev);
-                        } else {
-                            for (int a = 0; a < F; ++a) {
-                                if (ev[a] == second_idx[j]) {
-                                    share = true;
-                                    break;
+
+                            bool share = false;
+                            if constexpr (S > 1) {
+                                const I jidx = second_idx[j];
+                                I sev[S];
+                                for (int v = 0; v < S; ++v) {
+                                    sev[v] = second_elements[v][jidx * second_element_stride];
+                                }
+                                share = sccd::detail::shares_vertex<F, S>(ev, sev);
+                            } else {
+                                for (int a = 0; a < F; ++a) {
+                                    if (ev[a] == second_idx[j]) {
+                                        share = true;
+                                        break;
+                                    }
                                 }
                             }
-                        }
-                        if (share) {
-                            continue;
-                        }
+                            if (share) {
+                                continue;
+                            }
 
-                        visit(j);
+                            visit(j);
+                        }
                     }
                 }
             }
@@ -329,6 +635,7 @@ namespace sccd {
                                                         const Cell2DGrid<T>& grid,
                                                         const ptrdiff_t* const SCCD_RESTRICT cellptr,
                                                         const I* const SCCD_RESTRICT cellidx,
+                                                        T** const SCCD_RESTRICT cellbox,
                                                         Visit&& visit) {
             const T aminx = aabbs[0][fi], aminy = aabbs[1][fi], aminz = aabbs[2][fi];
             const T amaxx = aabbs[3][fi], amaxy = aabbs[4][fi], amaxz = aabbs[5][fi];
@@ -347,43 +654,47 @@ namespace sccd {
                     const ptrdiff_t begin = cellptr[cell];
                     const ptrdiff_t end = cellptr[cell + 1];
 
-                    for (ptrdiff_t k = begin; k < end; ++k) {
-                        const ptrdiff_t j = (ptrdiff_t)cellidx[k];
-                        if (j <= fi) {
-                            continue;
-                        }
+                    for (ptrdiff_t base = begin; base < end; base += SCCD_AABB_DISJOINT_CHUNK_SIZE) {
+                        const int lanes = (int)sccd::min<ptrdiff_t>(SCCD_AABB_DISJOINT_CHUNK_SIZE, end - base);
+                        uint32_t bits = sccd::vaabb_overlap_one_to_many_bits<T>(aminx,
+                                                                               aminy,
+                                                                               aminz,
+                                                                               amaxx,
+                                                                               amaxy,
+                                                                               amaxz,
+                                                                               cellbox[0] + base,
+                                                                               cellbox[1] + base,
+                                                                               cellbox[2] + base,
+                                                                               cellbox[3] + base,
+                                                                               cellbox[4] + base,
+                                                                               cellbox[5] + base,
+                                                                               lanes);
 
-                        if (sccd::disjoint<T>(aminx,
-                                              aminy,
-                                              aminz,
-                                              amaxx,
-                                              amaxy,
-                                              amaxz,
-                                              aabbs[0][j],
-                                              aabbs[1][j],
-                                              aabbs[2][j],
-                                              aabbs[3][j],
-                                              aabbs[4][j],
-                                              aabbs[5][j])) {
-                            continue;
-                        }
+                        while (bits) {
+                            const ptrdiff_t k = base + sccd::ctz32(bits);
+                            bits &= bits - 1;
+                            const ptrdiff_t j = (ptrdiff_t)cellidx[k];
+                            if (j <= fi) {
+                                continue;
+                            }
 
-                        const T o0 = sccd::max<T>(amin0, aabbs[grid.axis0][j]);
-                        const T o1 = sccd::max<T>(amin1, aabbs[grid.axis1][j]);
-                        if (grid.clamp0(o0) != c0 || grid.clamp1(o1) != c1) {
-                            continue;
-                        }
+                            const T o0 = sccd::max<T>(amin0, cellbox[grid.axis0][k]);
+                            const T o1 = sccd::max<T>(amin1, cellbox[grid.axis1][k]);
+                            if (grid.clamp0(o0) != c0 || grid.clamp1(o1) != c1) {
+                                continue;
+                            }
 
-                        const I jidx = idx[j];
-                        I sev[NXE];
-                        for (int v = 0; v < NXE; ++v) {
-                            sev[v] = elements[v][jidx * element_stride];
-                        }
-                        if (sccd::detail::shares_vertex<NXE, NXE>(ev, sev)) {
-                            continue;
-                        }
+                            const I jidx = idx[j];
+                            I sev[NXE];
+                            for (int v = 0; v < NXE; ++v) {
+                                sev[v] = elements[v][jidx * element_stride];
+                            }
+                            if (sccd::detail::shares_vertex<NXE, NXE>(ev, sev)) {
+                                continue;
+                            }
 
-                        visit(j, jidx);
+                            visit(j, jidx);
+                        }
                     }
                 }
             }
@@ -401,6 +712,7 @@ namespace sccd {
                                     const Cell2DGrid<T>& grid,
                                     const ptrdiff_t* const SCCD_RESTRICT cellptr,
                                     const I* const SCCD_RESTRICT cellidx,
+                                    T** const SCCD_RESTRICT cellbox,
                                     ptrdiff_t* const SCCD_RESTRICT ccdptr) {
         ccdptr[0] = 0;
 
@@ -414,7 +726,7 @@ namespace sccd {
 
                 ptrdiff_t count = 0;
                 detail::for_each_unique_self_partner<nxe, T, I>(
-                    aabbs, fi, idx, elements, element_stride, ev, grid, cellptr, cellidx,
+                    aabbs, fi, idx, elements, element_stride, ev, grid, cellptr, cellidx, cellbox,
                     [&](const ptrdiff_t, const I) { ++count; });
                 ccdptr[fi + 1] = count;
             }
@@ -434,6 +746,7 @@ namespace sccd {
                                    const Cell2DGrid<T>& grid,
                                    const ptrdiff_t* const SCCD_RESTRICT cellptr,
                                    const I* const SCCD_RESTRICT cellidx,
+                                   T** const SCCD_RESTRICT cellbox,
                                    const ptrdiff_t* const SCCD_RESTRICT ccdptr,
                                    I* const SCCD_RESTRICT first_out,
                                    I* const SCCD_RESTRICT second_out) {
@@ -447,7 +760,7 @@ namespace sccd {
 
                 ptrdiff_t at = ccdptr[fi];
                 detail::for_each_unique_self_partner<nxe, T, I>(
-                    aabbs, fi, idx, elements, element_stride, ev, grid, cellptr, cellidx,
+                    aabbs, fi, idx, elements, element_stride, ev, grid, cellptr, cellidx, cellbox,
                     [&](const ptrdiff_t, const I jidx) {
                         first_out[at] = sccd::min<I>(idxi, jidx);
                         second_out[at] = sccd::max<I>(idxi, jidx);
@@ -471,6 +784,7 @@ namespace sccd {
                                const Cell2DGrid<T>& grid,
                                const ptrdiff_t* const SCCD_RESTRICT cellptr,
                                const I* const SCCD_RESTRICT cellidx,
+                               T** const SCCD_RESTRICT cellbox,
                                ptrdiff_t* const SCCD_RESTRICT ccdptr) {
         ccdptr[0] = 0;
 
@@ -493,6 +807,7 @@ namespace sccd {
                                                                                     grid,
                                                                                     cellptr,
                                                                                     cellidx,
+                                                                                    cellbox,
                                                                                     [&](const ptrdiff_t) { ++count; });
                 ccdptr[fi + 1] = count;
             }
@@ -516,6 +831,7 @@ namespace sccd {
                               const Cell2DGrid<T>& grid,
                               const ptrdiff_t* const SCCD_RESTRICT cellptr,
                               const I* const SCCD_RESTRICT cellidx,
+                              T** const SCCD_RESTRICT cellbox,
                               const ptrdiff_t* const SCCD_RESTRICT ccdptr,
                               I* const SCCD_RESTRICT first_out,
                               I* const SCCD_RESTRICT second_out) {
@@ -539,9 +855,1122 @@ namespace sccd {
                     grid,
                     cellptr,
                     cellidx,
+                    cellbox,
                     [&](const ptrdiff_t j) {
                         first_out[at] = first_idxi;
                         second_out[at] = second_idx[j];
+                        ++at;
+                    });
+            }
+        });
+    }
+
+    // ---------------------------------------------------------------------
+    // The face-vertex query, with the vertex as the segment it really is.
+    // ---------------------------------------------------------------------
+
+    namespace detail {
+
+        /**
+         * \brief Where a vertex's trajectory first meets a box, as a parameter on
+         * $[0,1]$.
+         *
+         * A vertex moves affinely over the step, so its swept volume is the
+         * segment from \p p0 to \p p0 + \p d and the slab test gives the
+         * parametric interval inside the box directly. A box would have to be the
+         * hull of the two endpoints, which for a diagonal move is most of a
+         * rectangle the segment only crosses, so this rejects strictly more than
+         * the box test and never less.
+         *
+         * Separation is strict, as everywhere else here: a segment grazing a face
+         * of the box is reported as meeting it.
+         *
+         * \param invd The reciprocals of \p d, which depend on the vertex and not
+         * on the box, so the caller computes them once per walk. The entry for a
+         * component of \p d that is zero is never read.
+         */
+        template <typename T>
+        static inline bool segment_box_entry(const T (&p0)[3],
+                                             const T (&d)[3],
+                                             const T (&invd)[3],
+                                             const T (&bmin)[3],
+                                             const T (&bmax)[3],
+                                             T& tenter) {
+            T t0 = 0, t1 = 1;
+            for (int a = 0; a < 3; ++a) {
+                if (d[a] == T(0)) {
+                    if (p0[a] < bmin[a] || p0[a] > bmax[a]) {
+                        return false;
+                    }
+                    continue;
+                }
+                const T inv = invd[a];
+                T lo = (bmin[a] - p0[a]) * inv;
+                T hi = (bmax[a] - p0[a]) * inv;
+                if (lo > hi) {
+                    const T swap = lo;
+                    lo = hi;
+                    hi = swap;
+                }
+                if (lo > t0) t0 = lo;
+                if (hi < t1) t1 = hi;
+                if (t0 > t1) {
+                    return false;
+                }
+            }
+            tenter = t0;
+            return true;
+        }
+
+        /**
+         * \brief Walk the cells a vertex's segment crosses, reporting each face once.
+         *
+         * The faces are binned by extent, so a face whose box holds a point of the
+         * segment is in that point's cell, and the walk visiting every cell the
+         * segment crosses therefore reaches it. The walk itself is the classical
+         * grid traversal: from the cell of one endpoint, step whichever axis the
+         * segment crosses first, which touches $1 + d_{0} + d_{1}$ cells where the
+         * segment's own box covers $(d_{0}+1)(d_{1}+1)$.
+         *
+         * A face can be met in several cells, so a pair needs an owner, and the
+         * analogue of the overlap corner of \ref for_each_unique_partner is the
+         * point where the segment enters the face's box. That point lies on the
+         * segment and inside the box, so its cell is both walked and binned, and
+         * it is unique.
+         *
+         * Inside a cell the boxes are contiguous, so the segment's own box is
+         * tested against $32$ of them at a time by the same kernel the sweep uses
+         * and the survivors are visited by a bit scan. A box meeting the segment
+         * meets the segment's hull, so that filter is exact as a first pass, and
+         * the slab test that follows -- the part that makes this query tighter
+         * than a box query -- runs only on what it leaves. The reciprocals it
+         * needs depend on the vertex alone and are computed once per walk rather
+         * than once per face.
+         */
+        template <int S, typename T, typename I, typename Visit>
+        static inline void for_each_segment_partner(const T (&p0)[3],
+                                                    const T (&d)[3],
+                                                    const I vidx,
+                                                    const I* const SCCD_RESTRICT face_idx,
+                                                    I** const SCCD_RESTRICT face_elements,
+                                                    const ptrdiff_t face_element_stride,
+                                                    const Cell2DGrid<T>& grid,
+                                                    const ptrdiff_t* const SCCD_RESTRICT cellptr,
+                                                    const I* const SCCD_RESTRICT cellidx,
+                                                    T** const SCCD_RESTRICT cellbox,
+                                                    Visit&& visit) {
+            // The segment's own hull, which is the box the broad phase would have
+            // given this vertex, and the reciprocals the slab test needs.
+            T bmin[3], bmax[3], inv[3];
+            for (int a = 0; a < 3; ++a) {
+                const T end = p0[a] + d[a];
+                bmin[a] = sccd::min<T>(p0[a], end);
+                bmax[a] = sccd::max<T>(p0[a], end);
+                inv[a] = d[a] == T(0) ? T(0) : T(1) / d[a];
+            }
+
+            const T q0 = p0[grid.axis0], q1 = p0[grid.axis1];
+            const T e0 = q0 + d[grid.axis0], e1 = q1 + d[grid.axis1];
+
+            int c0 = grid.clamp0(q0), c1 = grid.clamp1(q1);
+            const int c0end = grid.clamp0(e0), c1end = grid.clamp1(e1);
+
+            const int s0 = c0end > c0 ? 1 : (c0end < c0 ? -1 : 0);
+            const int s1 = c1end > c1 ? 1 : (c1end < c1 ? -1 : 0);
+
+            // The parameter at which the segment leaves the current cell on each
+            // axis, and the parameter one whole cell costs. Held at the largest
+            // finite value for an axis the walk never steps, so the comparison
+            // below picks the other one.
+            const T far = std::numeric_limits<T>::max();
+            const T size0 = T(1) / grid.inv0, size1 = T(1) / grid.inv1;
+            T next0 = far, next1 = far, step0 = far, step1 = far;
+            if (s0 != 0) {
+                const T edge = grid.min0 + (T)(s0 > 0 ? c0 + 1 : c0) * size0;
+                next0 = (edge - q0) * inv[grid.axis0];
+                step0 = size0 * (inv[grid.axis0] < T(0) ? -inv[grid.axis0] : inv[grid.axis0]);
+            }
+            if (s1 != 0) {
+                const T edge = grid.min1 + (T)(s1 > 0 ? c1 + 1 : c1) * size1;
+                next1 = (edge - q1) * inv[grid.axis1];
+                step1 = size1 * (inv[grid.axis1] < T(0) ? -inv[grid.axis1] : inv[grid.axis1]);
+            }
+
+            for (;;) {
+                const ptrdiff_t cell = grid.cell_of(c0, c1);
+                const ptrdiff_t begin = cellptr[cell];
+                const ptrdiff_t end = cellptr[cell + 1];
+
+                for (ptrdiff_t base = begin; base < end; base += SCCD_AABB_DISJOINT_CHUNK_SIZE) {
+                    const int count =
+                        (int)sccd::min<ptrdiff_t>(SCCD_AABB_DISJOINT_CHUNK_SIZE, end - base);
+                    uint32_t m = sccd::vaabb_overlap_one_to_many_bits<T>(bmin[0],
+                                                                        bmin[1],
+                                                                        bmin[2],
+                                                                        bmax[0],
+                                                                        bmax[1],
+                                                                        bmax[2],
+                                                                        cellbox[0] + base,
+                                                                        cellbox[1] + base,
+                                                                        cellbox[2] + base,
+                                                                        cellbox[3] + base,
+                                                                        cellbox[4] + base,
+                                                                        cellbox[5] + base,
+                                                                        count);
+
+                    while (m) {
+                        const int lane = sccd::ctz32(m);
+                        m &= m - 1;
+                        const ptrdiff_t k = base + lane;
+
+                        const T fmin[3] = {cellbox[0][k], cellbox[1][k], cellbox[2][k]};
+                        const T fmax[3] = {cellbox[3][k], cellbox[4][k], cellbox[5][k]};
+                        T tenter = 0;
+                        if (!segment_box_entry<T>(p0, d, inv, fmin, fmax, tenter)) {
+                            continue;
+                        }
+
+                        // Report only from the cell holding the point of entry.
+                        if (grid.clamp0(q0 + tenter * d[grid.axis0]) != c0 ||
+                            grid.clamp1(q1 + tenter * d[grid.axis1]) != c1) {
+                            continue;
+                        }
+
+                        const ptrdiff_t j = (ptrdiff_t)cellidx[k];
+                        const I jidx = face_idx[j];
+                        bool share = false;
+                        for (int v = 0; v < S; ++v) {
+                            if (face_elements[v][jidx * face_element_stride] == vidx) {
+                                share = true;
+                                break;
+                            }
+                        }
+                        if (share) {
+                            continue;
+                        }
+
+                        visit(j, jidx);
+                    }
+                }
+
+                if (c0 == c0end && c1 == c1end) {
+                    break;
+                }
+                // An axis that has arrived stays put, which keeps the walk inside
+                // the segment's own cells and makes the loop terminate in
+                // |c0end - c0| + |c1end - c1| steps.
+                if (c1 == c1end || (c0 != c0end && next0 <= next1)) {
+                    c0 += s0;
+                    next0 += step0;
+                } else {
+                    c1 += s1;
+                    next1 += step1;
+                }
+            }
+        }
+
+    }  // namespace detail
+
+    /**
+     * \brief Count face-vertex candidates per vertex, then prefix-sum into CRS offsets.
+     *
+     * The cell list is over the faces, built by cell2d_partition, cell2d_count and
+     * cell2d_fill on the face boxes, the last with \c pack so the boxes come out in
+     * cell order; \p points0 and \p points1 are the vertex coordinates at the two
+     * ends of the step, indexed as \p vertex_idx says.
+     */
+    template <int nxe, typename T, typename I>
+    bool cell2dseg_count_vf_overlaps(const ptrdiff_t vertex_count,
+                                     T** const SCCD_RESTRICT points0,
+                                     T** const SCCD_RESTRICT points1,
+                                     I* const SCCD_RESTRICT vertex_idx,
+                                     I* const SCCD_RESTRICT face_idx,
+                                     const ptrdiff_t face_element_stride,
+                                     I** const SCCD_RESTRICT face_elements,
+                                     const Cell2DGrid<T>& grid,
+                                     const ptrdiff_t* const SCCD_RESTRICT cellptr,
+                                     const I* const SCCD_RESTRICT cellidx,
+                                     T** const SCCD_RESTRICT cellbox,
+                                     ptrdiff_t* const SCCD_RESTRICT ccdptr) {
+        ccdptr[0] = 0;
+
+        sccd::parallel_for_br(0, vertex_count, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+            for (ptrdiff_t vi = rbegin; vi < rend; ++vi) {
+                const I vidx = vertex_idx[vi];
+                T p0[3], d[3];
+                for (int a = 0; a < 3; ++a) {
+                    p0[a] = points0[a][vidx];
+                    d[a] = points1[a][vidx] - p0[a];
+                }
+
+                ptrdiff_t count = 0;
+                detail::for_each_segment_partner<nxe, T, I>(p0,
+                                                            d,
+                                                            vidx,
+                                                            face_idx,
+                                                            face_elements,
+                                                            face_element_stride,
+                                                            grid,
+                                                            cellptr,
+                                                            cellidx,
+                                                            cellbox,
+                                                            [&](const ptrdiff_t, const I) { ++count; });
+                ccdptr[vi + 1] = count;
+            }
+        });
+
+        sccd::parallel_cum_sum_br(ccdptr, ccdptr + vertex_count + 1);
+        return ccdptr[vertex_count] > 0;
+    }
+
+    /** \brief Write the pairs counted by cell2dseg_count_vf_overlaps into the CRS arrays. */
+    template <int nxe, typename T, typename I>
+    void cell2dseg_fill_vf_overlaps(const ptrdiff_t vertex_count,
+                                    T** const SCCD_RESTRICT points0,
+                                    T** const SCCD_RESTRICT points1,
+                                    I* const SCCD_RESTRICT vertex_idx,
+                                    I* const SCCD_RESTRICT face_idx,
+                                    const ptrdiff_t face_element_stride,
+                                    I** const SCCD_RESTRICT face_elements,
+                                    const Cell2DGrid<T>& grid,
+                                    const ptrdiff_t* const SCCD_RESTRICT cellptr,
+                                    const I* const SCCD_RESTRICT cellidx,
+                                    T** const SCCD_RESTRICT cellbox,
+                                    const ptrdiff_t* const SCCD_RESTRICT ccdptr,
+                                    I* const SCCD_RESTRICT face_out,
+                                    I* const SCCD_RESTRICT vertex_out) {
+        sccd::parallel_for_br(0, vertex_count, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+            for (ptrdiff_t vi = rbegin; vi < rend; ++vi) {
+                const I vidx = vertex_idx[vi];
+                T p0[3], d[3];
+                for (int a = 0; a < 3; ++a) {
+                    p0[a] = points0[a][vidx];
+                    d[a] = points1[a][vidx] - p0[a];
+                }
+
+                ptrdiff_t at = ccdptr[vi];
+                detail::for_each_segment_partner<nxe, T, I>(p0,
+                                                            d,
+                                                            vidx,
+                                                            face_idx,
+                                                            face_elements,
+                                                            face_element_stride,
+                                                            grid,
+                                                            cellptr,
+                                                            cellidx,
+                                                            cellbox,
+                                                            [&](const ptrdiff_t, const I jidx) {
+                                                                face_out[at] = jidx;
+                                                                vertex_out[at] = vidx;
+                                                                ++at;
+                                                            });
+            }
+        });
+    }
+
+    // ---------------------------------------------------------------------
+    // The self query over a minimum-corner binning. See the \file block.
+    // ---------------------------------------------------------------------
+
+    namespace detail {
+
+        /** \brief The column of the cell holding box \p i's minimum corner. */
+        template <typename T>
+        static inline int min_col(T** const SCCD_RESTRICT aabb, const Cell2DGrid<T>& grid, const ptrdiff_t i) {
+            return grid.clamp0(aabb[grid.axis0][i]);
+        }
+
+        /** \brief The row of the cell holding box \p i's minimum corner. */
+        template <typename T>
+        static inline int min_row(T** const SCCD_RESTRICT aabb, const Cell2DGrid<T>& grid, const ptrdiff_t i) {
+            return grid.clamp1(aabb[grid.axis1][i]);
+        }
+
+    }  // namespace detail
+
+    /**
+     * \brief Group \p n boxes by the block of cell rows their minimum corner is in.
+     *
+     * The same device as cell2d_partition and for the same reason -- the counting
+     * and the scatter write per-cell counters, so they are split by cell row and
+     * no two blocks touch a cell. The difference is that a box has one cell here,
+     * so it appears in exactly one block's list and the lists *partition* the
+     * boxes rather than covering them. That also makes the per-cell bounds below
+     * safe to write from the same blocks.
+     */
+    template <typename T>
+    static void cell2dmin_partition(const ptrdiff_t n,
+                                    T** const SCCD_RESTRICT aabb,
+                                    const Cell2DGrid<T>& grid,
+                                    Cell2DPartition& part) {
+        part.blockptr.clear();
+        part.blockbox.clear();
+
+        const int max_workers = sccd::max_concurrency();
+        if (n < SCCD_CELL2D_MIN_PARALLEL || max_workers <= 1 || grid.n1 <= 1) {
+            part.nblocks = 1;
+            part.rows_per_block = grid.n1;
+            return;
+        }
+
+        const int want = sccd::min<int>(grid.n1, max_workers * 4);
+        part.nblocks = sccd::max<int>(1, want);
+        part.rows_per_block = (grid.n1 + part.nblocks - 1) / part.nblocks;
+        part.nblocks = (grid.n1 + part.rows_per_block - 1) / part.rows_per_block;
+
+        const int nblocks = part.nblocks;
+        const int rpb = part.rows_per_block;
+
+        const int nchunks = nblocks;
+        const ptrdiff_t chunk = (n + nchunks - 1) / nchunks;
+        std::vector<ptrdiff_t>& counts = part.counts;
+        counts.assign((size_t)nchunks * (size_t)nblocks, 0);
+
+        sccd::parallel_for_chunks(0, nchunks, [&](const ptrdiff_t c) {
+            ptrdiff_t* const row = counts.data() + c * (ptrdiff_t)nblocks;
+            const ptrdiff_t begin = c * chunk;
+            const ptrdiff_t end = sccd::min<ptrdiff_t>(begin + chunk, n);
+            for (ptrdiff_t i = begin; i < end; ++i) {
+                row[detail::min_row<T>(aabb, grid, i) / rpb] += 1;
+            }
+        });
+
+        // Offsets, block-major so a block's list is contiguous, chunk-minor so
+        // the boxes inside it stay in index order.
+        part.blockptr.assign((size_t)nblocks + 1, 0);
+        ptrdiff_t running = 0;
+        for (int b = 0; b < nblocks; ++b) {
+            part.blockptr[(size_t)b] = running;
+            for (int c = 0; c < nchunks; ++c) {
+                ptrdiff_t& slot = counts[(size_t)c * (size_t)nblocks + (size_t)b];
+                const ptrdiff_t take = slot;
+                slot = running;
+                running += take;
+            }
+        }
+        part.blockptr[(size_t)nblocks] = running;
+
+        part.blockbox.resize((size_t)running);
+        sccd::parallel_for_chunks(0, nchunks, [&](const ptrdiff_t c) {
+            ptrdiff_t* const row = counts.data() + c * (ptrdiff_t)nblocks;
+            const ptrdiff_t begin = c * chunk;
+            const ptrdiff_t end = sccd::min<ptrdiff_t>(begin + chunk, n);
+            for (ptrdiff_t i = begin; i < end; ++i) {
+                part.blockbox[(size_t)(row[detail::min_row<T>(aabb, grid, i) / rpb]++)] = (int)i;
+            }
+        });
+    }
+
+    /** \brief Count the boxes per cell by minimum corner, then prefix-sum into CRS offsets. */
+    template <typename T>
+    static void cell2dmin_count(const ptrdiff_t n,
+                                T** const SCCD_RESTRICT aabb,
+                                const Cell2DGrid<T>& grid,
+                                const Cell2DPartition& part,
+                                ptrdiff_t* const SCCD_RESTRICT cellptr) {
+        const ptrdiff_t ncells = grid.ncells();
+
+        if (part.serial()) {
+            std::memset(cellptr, 0, sizeof(ptrdiff_t) * (size_t)(ncells + 1));
+            for (ptrdiff_t i = 0; i < n; ++i) {
+                cellptr[grid.cell_of(detail::min_col<T>(aabb, grid, i), detail::min_row<T>(aabb, grid, i)) + 1] += 1;
+            }
+            for (ptrdiff_t i = 0; i < ncells; ++i) {
+                cellptr[i + 1] += cellptr[i];
+            }
+            return;
+        }
+
+        sccd::parallel_for_br(0, ncells + 1, [&](const ptrdiff_t begin, const ptrdiff_t end) {
+            std::memset(cellptr + begin, 0, sizeof(ptrdiff_t) * (size_t)(end - begin));
+        });
+
+        sccd::parallel_for_chunks(0, part.nblocks, [&](const ptrdiff_t b) {
+            const ptrdiff_t from = part.blockptr[(size_t)b];
+            const ptrdiff_t to = part.blockptr[(size_t)b + 1];
+            for (ptrdiff_t e = from; e < to; ++e) {
+                const ptrdiff_t i = (ptrdiff_t)part.blockbox[(size_t)e];
+                cellptr[grid.cell_of(detail::min_col<T>(aabb, grid, i), detail::min_row<T>(aabb, grid, i)) + 1] += 1;
+            }
+        });
+
+        sccd::parallel_cum_sum_br(cellptr, cellptr + ncells + 1);
+    }
+
+    /** \brief Scatter each box index into the cell its minimum corner is in. */
+    template <typename T, typename I>
+    static void cell2dmin_fill(const ptrdiff_t n,
+                               T** const SCCD_RESTRICT aabb,
+                               const Cell2DGrid<T>& grid,
+                               const Cell2DPartition& part,
+                               const ptrdiff_t* const SCCD_RESTRICT cellptr,
+                               I* const SCCD_RESTRICT cellidx,
+                               ptrdiff_t* const SCCD_RESTRICT cursor) {
+        const ptrdiff_t ncells = grid.ncells();
+
+        if (part.serial()) {
+            std::memcpy(cursor, cellptr, sizeof(ptrdiff_t) * (size_t)ncells);
+            for (ptrdiff_t i = 0; i < n; ++i) {
+                const ptrdiff_t cell =
+                    grid.cell_of(detail::min_col<T>(aabb, grid, i), detail::min_row<T>(aabb, grid, i));
+                cellidx[cursor[cell]++] = (I)i;
+            }
+            return;
+        }
+
+        sccd::parallel_for_br(0, ncells, [&](const ptrdiff_t begin, const ptrdiff_t end) {
+            std::memcpy(cursor + begin, cellptr + begin, sizeof(ptrdiff_t) * (size_t)(end - begin));
+        });
+
+        sccd::parallel_for_chunks(0, part.nblocks, [&](const ptrdiff_t b) {
+            const ptrdiff_t from = part.blockptr[(size_t)b];
+            const ptrdiff_t to = part.blockptr[(size_t)b + 1];
+            for (ptrdiff_t e = from; e < to; ++e) {
+                const ptrdiff_t i = (ptrdiff_t)part.blockbox[(size_t)e];
+                const ptrdiff_t cell =
+                    grid.cell_of(detail::min_col<T>(aabb, grid, i), detail::min_row<T>(aabb, grid, i));
+                cellidx[cursor[cell]++] = (I)i;
+            }
+        });
+    }
+
+    /**
+     * \brief The bounds that let the query skip a cell without reading it.
+     *
+     * \p row_prefix comes out as the running maximum, left to right along each
+     * row, of the largest upper bound on the first axis of the boxes binned in
+     * each cell. A binary search on it gives the first column of a row that holds
+     * anything reaching back to a given coordinate, so every column before it is
+     * skipped at once rather than one at a time. \p cell_hi1 is the same largest
+     * upper bound on the second axis, per cell, and is tested directly.
+     *
+     * A cell with no boxes carries the lowest representable value, which fails
+     * both tests, so an empty grid costs the query nothing.
+     *
+     * The maximum is written before it is scanned, and `sccd::cummax` reads
+     * `in[i]` before writing `out[i]`, so the scan runs in place over
+     * \p row_prefix and no third array is needed. Rows are independent.
+     */
+    template <typename T>
+    static void cell2dmin_bounds(const ptrdiff_t n,
+                                 T** const SCCD_RESTRICT aabb,
+                                 const Cell2DGrid<T>& grid,
+                                 const Cell2DPartition& part,
+                                 T* const SCCD_RESTRICT row_prefix,
+                                 T* const SCCD_RESTRICT cell_hi1) {
+        const ptrdiff_t ncells = grid.ncells();
+        const T floor = std::numeric_limits<T>::lowest();
+        const int d0 = grid.axis0;
+        const int d1 = grid.axis1;
+
+        sccd::parallel_for_br(0, ncells, [&](const ptrdiff_t begin, const ptrdiff_t end) {
+            for (ptrdiff_t c = begin; c < end; ++c) {
+                row_prefix[c] = floor;
+                cell_hi1[c] = floor;
+            }
+        });
+
+        // Each box writes only the cell its minimum corner is in, and the blocks
+        // own disjoint rows, so these are ordinary writes and not atomics.
+        const auto accumulate = [&](const ptrdiff_t i) {
+            const ptrdiff_t cell =
+                grid.cell_of(detail::min_col<T>(aabb, grid, i), detail::min_row<T>(aabb, grid, i));
+            row_prefix[cell] = sccd::max<T>(row_prefix[cell], aabb[3 + d0][i]);
+            cell_hi1[cell] = sccd::max<T>(cell_hi1[cell], aabb[3 + d1][i]);
+        };
+
+        if (part.serial()) {
+            for (ptrdiff_t i = 0; i < n; ++i) accumulate(i);
+        } else {
+            sccd::parallel_for_chunks(0, part.nblocks, [&](const ptrdiff_t b) {
+                const ptrdiff_t from = part.blockptr[(size_t)b];
+                const ptrdiff_t to = part.blockptr[(size_t)b + 1];
+                for (ptrdiff_t e = from; e < to; ++e) accumulate((ptrdiff_t)part.blockbox[(size_t)e]);
+            });
+        }
+
+        sccd::parallel_for_chunks(0, grid.n1, [&](const ptrdiff_t r) {
+            T* const row = row_prefix + r * (ptrdiff_t)grid.n0;
+            sccd::cummax<T>(grid.n0, row, row);
+        });
+    }
+
+    /**
+     * \brief The most rows any one box spans, for the cross-list walk's row bound.
+     *
+     * A minimum-corner binning tells a querying box nothing about how far what it
+     * finds reaches back. On the first grid axis the per-row prefix maximum
+     * answers that exactly, by binary search. On the second there is no such
+     * array, so the walk needs a bound instead: a box reaching a querying box on
+     * that axis has its maximum in a row at or above the querying box's minimum
+     * row, and spans at most this many rows, so it is binned no lower than that
+     * row less this. It is a maximum over the list, so one wide box widens the
+     * range for every query -- the probe in spikes/ measures what that costs.
+     *
+     * The self walk needs none of this: whichever of two overlapping boxes comes
+     * first in linear order holds the other in its own rows.
+     */
+    template <typename T>
+    static int cell2dmin_max_row_span(const ptrdiff_t n,
+                                      T** const SCCD_RESTRICT aabb,
+                                      const Cell2DGrid<T>& grid) {
+        if (n <= 0) {
+            return 0;
+        }
+        const T* const SCCD_RESTRICT lo = aabb[grid.axis1];
+        const T* const SCCD_RESTRICT hi = aabb[3 + grid.axis1];
+        return sccd::parallel_tiled_reduce<int>(
+            0,
+            n,
+            [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+                int acc = 0;
+                for (ptrdiff_t i = rbegin; i < rend; ++i) {
+                    const int span = grid.clamp1(hi[i]) - grid.clamp1(lo[i]);
+                    if (span > acc) {
+                        acc = span;
+                    }
+                }
+                return acc;
+            },
+            [](const int a, const int b) { return a > b ? a : b; });
+    }
+
+    /**
+     * \brief Order each cell's entries on the axis the grid does not use.
+     *
+     * The grid culls on two axes and the cell test on the third, so inside a cell
+     * the entries are in no useful order and every one of them is tested. Sorting
+     * them by their minimum on that third axis makes the scan monotone: once an
+     * entry begins past the querying box's maximum, so does every entry after it,
+     * and the scan stops. \p cell_key holds those minima in the sorted order, one
+     * per entry, so the test reads a contiguous array rather than chasing the
+     * index into the box arrays.
+     *
+     * \p cell_hi2 is the largest maximum on the same axis, per cell, which rules
+     * out a whole cell before its entries are touched at all.
+     *
+     * Cells are independent, so this is one parallel pass over them. The
+     * comparison breaks ties on the box index, which makes the order total and
+     * the result the same on every run whatever the sort does with equal keys.
+     */
+    template <typename T, typename I>
+    static void cell2dmin_sort_cells(T** const SCCD_RESTRICT aabb,
+                                     const Cell2DGrid<T>& grid,
+                                     const ptrdiff_t* const SCCD_RESTRICT cellptr,
+                                     I* const SCCD_RESTRICT cellidx,
+                                     T* const SCCD_RESTRICT cell_key,
+                                     T* const SCCD_RESTRICT cell_hi2) {
+        const int d2 = grid.axis2();
+        const T* const SCCD_RESTRICT lo2 = aabb[d2];
+        const T* const SCCD_RESTRICT hi2 = aabb[3 + d2];
+        const T floor = std::numeric_limits<T>::lowest();
+
+        sccd::parallel_for_br(0, grid.ncells(), [&](const ptrdiff_t begin, const ptrdiff_t end) {
+            for (ptrdiff_t c = begin; c < end; ++c) {
+                const ptrdiff_t from = cellptr[c];
+                const ptrdiff_t to = cellptr[c + 1];
+
+                std::sort(cellidx + from, cellidx + to, [&](const I a, const I b) {
+                    return lo2[a] != lo2[b] ? lo2[a] < lo2[b] : a < b;
+                });
+
+                T top = floor;
+                for (ptrdiff_t k = from; k < to; ++k) {
+                    const ptrdiff_t j = (ptrdiff_t)cellidx[k];
+                    cell_key[k] = lo2[j];
+                    top = sccd::max<T>(top, hi2[j]);
+                }
+                cell_hi2[c] = top;
+            }
+        });
+    }
+
+    namespace detail {
+
+        /**
+         * \brief Test one cell's entries against box \p fi.
+         *
+         * \tparam OWN The cell is the one \p fi is binned in. That is the only
+         * cell holding the box itself, and the only one whose entries share its
+         * linear index, so it is the only place an index decides which of two
+         * boxes reports the pair. Everywhere else the walk is strictly forward
+         * and the question does not arise, which is why this is a template
+         * parameter: the forward scan carries no index test at all.
+         */
+        template <int NXE, bool SORTED, bool OWN, typename T, typename I, typename Visit>
+        static inline void scan_self_cell(T** const SCCD_RESTRICT aabbs,
+                                          const ptrdiff_t fi,
+                                          I* const SCCD_RESTRICT idx,
+                                          I** const SCCD_RESTRICT elements,
+                                          const ptrdiff_t element_stride,
+                                          const I (&ev)[NXE],
+                                          const I* const SCCD_RESTRICT cellidx,
+                                          T** const SCCD_RESTRICT cellbox,
+                                          const T* const SCCD_RESTRICT cell_key,
+                                          const ptrdiff_t begin,
+                                          const ptrdiff_t end,
+                                          const T aminx,
+                                          const T aminy,
+                                          const T aminz,
+                                          const T amaxx,
+                                          const T amaxy,
+                                          const T amaxz,
+                                          const T amax2,
+                                          Visit&& visit) {
+            (void)fi;
+            (void)cell_key;
+            (void)amax2;
+
+            for (ptrdiff_t base = begin; base < end; base += SCCD_AABB_DISJOINT_CHUNK_SIZE) {
+                if constexpr (SORTED) {
+                    // Sorted ascending, so once a chunk starts past this box
+                    // every later chunk does too.
+                    if (cell_key[base] > amax2) {
+                        break;
+                    }
+                }
+
+                const int lanes = (int)sccd::min<ptrdiff_t>(SCCD_AABB_DISJOINT_CHUNK_SIZE, end - base);
+                uint32_t bits = sccd::vaabb_overlap_one_to_many_bits<T>(aminx,
+                                                                       aminy,
+                                                                       aminz,
+                                                                       amaxx,
+                                                                       amaxy,
+                                                                       amaxz,
+                                                                       cellbox[0] + base,
+                                                                       cellbox[1] + base,
+                                                                       cellbox[2] + base,
+                                                                       cellbox[3] + base,
+                                                                       cellbox[4] + base,
+                                                                       cellbox[5] + base,
+                                                                       lanes);
+
+                while (bits) {
+                    const ptrdiff_t k = base + sccd::ctz32(bits);
+                    bits &= bits - 1;
+
+                    if constexpr (SORTED) {
+                        if (cell_key[k] > amax2) {
+                            break;
+                        }
+                    }
+
+                    const ptrdiff_t j = (ptrdiff_t)cellidx[k];
+                    if constexpr (OWN) {
+                        if (j <= fi) {
+                            continue;
+                        }
+                    }
+
+                    const I jidx = idx[j];
+                    I sev[NXE];
+                    for (int v = 0; v < NXE; ++v) {
+                        sev[v] = elements[v][jidx * element_stride];
+                    }
+                    if (sccd::detail::shares_vertex<NXE, NXE>(ev, sev)) {
+                        continue;
+                    }
+
+                    visit(j, jidx);
+                }
+            }
+        }
+
+        /**
+         * \brief Walk forward in linear cell order, reporting each partner once.
+         *
+         * A box sits in the one cell holding its minimum corner, so a partner is
+         * met at most once and nothing has to be deduplicated across cells. The
+         * box's own cell is read first, where the index says which of two boxes
+         * sharing it reports the pair. The walk then goes forward and never looks
+         * back, so no cell it reads can hold this box and no cell needs an index
+         * test.
+         *
+         * The walk spans the rows the box covers, and within a row the columns
+         * from the first one holding anything that reaches back to the box, found
+         * by binary search on the row's prefix maximum, up to the column of the
+         * box's own maximum corner. A partner cannot begin past that column
+         * without beginning past the box itself.
+         *
+         * \tparam SORTED The cells are ordered on the axis the grid does not use,
+         * by cell2dmin_sort_cells. Then a whole cell can be ruled out by its
+         * largest maximum on that axis, and the scan inside one stops at the first
+         * entry that begins past this box -- every entry after it begins later
+         * still. Without it the cell is scanned whole and the ordinary box test
+         * does the culling. Both are compiled, so neither carries the other's
+         * branches.
+         */
+        template <int NXE, bool SORTED, typename T, typename I, typename Visit>
+        static inline void for_each_forward_self_partner(T** const SCCD_RESTRICT aabbs,
+                                                         const ptrdiff_t fi,
+                                                         I* const SCCD_RESTRICT idx,
+                                                         I** const SCCD_RESTRICT elements,
+                                                         const ptrdiff_t element_stride,
+                                                         const I (&ev)[NXE],
+                                                         const Cell2DGrid<T>& grid,
+                                                         const ptrdiff_t* const SCCD_RESTRICT cellptr,
+                                                         const I* const SCCD_RESTRICT cellidx,
+                                                         T** const SCCD_RESTRICT cellbox,
+                                                         const T* const SCCD_RESTRICT row_prefix,
+                                                         const T* const SCCD_RESTRICT cell_hi1,
+                                                         const T* const SCCD_RESTRICT cell_key,
+                                                         const T* const SCCD_RESTRICT cell_hi2,
+                                                         Visit&& visit) {
+            const T aminx = aabbs[0][fi], aminy = aabbs[1][fi], aminz = aabbs[2][fi];
+            const T amaxx = aabbs[3][fi], amaxy = aabbs[4][fi], amaxz = aabbs[5][fi];
+
+            const T amin0 = aabbs[grid.axis0][fi];
+            const T amin1 = aabbs[grid.axis1][fi];
+            T amin2 = 0, amax2 = 0;
+            if constexpr (SORTED) {
+                amin2 = aabbs[grid.axis2()][fi];
+                amax2 = aabbs[3 + grid.axis2()][fi];
+            }
+
+            const int c0b = grid.clamp0(amin0), c0e = grid.clamp0(aabbs[3 + grid.axis0][fi]);
+            const int c1b = grid.clamp1(amin1), c1e = grid.clamp1(aabbs[3 + grid.axis1][fi]);
+            const ptrdiff_t own = grid.cell_of(c0b, c1b);
+
+            // The box's own cell, first and on its own. Both cell bounds hold
+            // this box's own maximum, so neither can rule the cell out and
+            // neither is worth loading.
+            scan_self_cell<NXE, SORTED, true, T, I>(aabbs,
+                                                    fi,
+                                                    idx,
+                                                    elements,
+                                                    element_stride,
+                                                    ev,
+                                                    cellidx,
+                                                    cellbox,
+                                                    cell_key,
+                                                    cellptr[own],
+                                                    cellptr[own + 1],
+                                                    aminx,
+                                                    aminy,
+                                                    aminz,
+                                                    amaxx,
+                                                    amaxy,
+                                                    amaxz,
+                                                    amax2,
+                                                    visit);
+
+            for (int c1 = c1b; c1 <= c1e; ++c1) {
+                const ptrdiff_t row = (ptrdiff_t)c1 * grid.n0;
+                int c0;
+                if (c1 == c1b) {
+                    // This box's own maximum is in its row's prefix at column
+                    // c0b, so a search here can never return a later column than
+                    // the cell just read. Start after it.
+                    c0 = c0b + 1;
+                } else {
+                    const T* const pre = row_prefix + row;
+                    c0 = (int)(std::lower_bound(pre, pre + c0e + 1, amin0) - pre);
+                }
+
+                for (; c0 <= c0e; ++c0) {
+                    const ptrdiff_t cell = row + c0;
+                    if (cell_hi1[cell] < amin1) {
+                        continue;
+                    }
+                    if constexpr (SORTED) {
+                        if (cell_hi2[cell] < amin2) {
+                            continue;
+                        }
+                    }
+
+                    scan_self_cell<NXE, SORTED, false, T, I>(aabbs,
+                                                             fi,
+                                                             idx,
+                                                             elements,
+                                                             element_stride,
+                                                             ev,
+                                                             cellidx,
+                                                             cellbox,
+                                                             cell_key,
+                                                             cellptr[cell],
+                                                             cellptr[cell + 1],
+                                                             aminx,
+                                                             aminy,
+                                                             aminz,
+                                                             amaxx,
+                                                             amaxy,
+                                                             amaxz,
+                                                             amax2,
+                                                             visit);
+                }
+            }
+        }
+
+        /**
+         * \brief Walk a minimum-corner binning of the other list, once per pair.
+         *
+         * The self walk of \ref for_each_forward_self_partner leans on a symmetry
+         * two lists do not have: there, whichever of two overlapping boxes comes
+         * first in linear cell order holds the other in its own rows, so each
+         * reads only forward and only its own rows. Here the queried list never
+         * walks, so this box has to find its partners wherever they are binned,
+         * and the range is bounded from the other end.
+         *
+         * Above and to the right it is exact and needs nothing stored: a partner
+         * overlapping this box has its minimum corner at or below this box's
+         * maximum on both axes, so no cell past the maximum corner's row or
+         * column is ever read.
+         *
+         * Below and to the left the cells say how far what they hold reaches. Per
+         * row, the prefix maximum gives the first column holding anything that
+         * reaches back, by one binary search -- the same array and the same
+         * search the self walk uses. Across rows, \p krow is the most rows any
+         * partner spans (\ref cell2dmin_max_row_span), so nothing binned lower
+         * than this box's minimum row less \p krow can reach it.
+         *
+         * No duplicate rule is needed and no index test: a partner has exactly
+         * one cell, so it is met exactly once, and the two lists are distinct so
+         * a box can never meet itself.
+         */
+        template <int S, typename T, typename I, typename Visit>
+        static inline void for_each_min_corner_partner(T** const SCCD_RESTRICT aabbs,
+                                                       const ptrdiff_t fi,
+                                                       const I vidx,
+                                                       const I* const SCCD_RESTRICT second_idx,
+                                                       I** const SCCD_RESTRICT second_elements,
+                                                       const ptrdiff_t second_element_stride,
+                                                       const Cell2DGrid<T>& grid,
+                                                       const ptrdiff_t* const SCCD_RESTRICT cellptr,
+                                                       const I* const SCCD_RESTRICT cellidx,
+                                                       T** const SCCD_RESTRICT cellbox,
+                                                       const T* const SCCD_RESTRICT row_prefix,
+                                                       const T* const SCCD_RESTRICT cell_hi1,
+                                                       const int krow,
+                                                       Visit&& visit) {
+            const T aminx = aabbs[0][fi], aminy = aabbs[1][fi], aminz = aabbs[2][fi];
+            const T amaxx = aabbs[3][fi], amaxy = aabbs[4][fi], amaxz = aabbs[5][fi];
+
+            const T amin0 = aabbs[grid.axis0][fi];
+            const T amin1 = aabbs[grid.axis1][fi];
+
+            const int c0e = grid.clamp0(aabbs[3 + grid.axis0][fi]);
+            const int c1e = grid.clamp1(aabbs[3 + grid.axis1][fi]);
+            int c1b = grid.clamp1(amin1) - krow;
+            if (c1b < 0) {
+                c1b = 0;
+            }
+
+            for (int c1 = c1b; c1 <= c1e; ++c1) {
+                const ptrdiff_t row = (ptrdiff_t)c1 * grid.n0;
+                const T* const pre = row_prefix + row;
+                int c0 = (int)(std::lower_bound(pre, pre + c0e + 1, amin0) - pre);
+
+                for (; c0 <= c0e; ++c0) {
+                    const ptrdiff_t cell = row + c0;
+                    if (cell_hi1[cell] < amin1) {
+                        continue;
+                    }
+
+                    const ptrdiff_t begin = cellptr[cell];
+                    const ptrdiff_t end = cellptr[cell + 1];
+
+                    for (ptrdiff_t base = begin; base < end; base += SCCD_AABB_DISJOINT_CHUNK_SIZE) {
+                        const int lanes = (int)sccd::min<ptrdiff_t>(SCCD_AABB_DISJOINT_CHUNK_SIZE, end - base);
+                        uint32_t bits = sccd::vaabb_overlap_one_to_many_bits<T>(aminx,
+                                                                               aminy,
+                                                                               aminz,
+                                                                               amaxx,
+                                                                               amaxy,
+                                                                               amaxz,
+                                                                               cellbox[0] + base,
+                                                                               cellbox[1] + base,
+                                                                               cellbox[2] + base,
+                                                                               cellbox[3] + base,
+                                                                               cellbox[4] + base,
+                                                                               cellbox[5] + base,
+                                                                               lanes);
+
+                        while (bits) {
+                            const ptrdiff_t k = base + sccd::ctz32(bits);
+                            bits &= bits - 1;
+
+                            const ptrdiff_t j = (ptrdiff_t)cellidx[k];
+                            const I jidx = second_idx[j];
+
+                            bool share = false;
+                            for (int v = 0; v < S; ++v) {
+                                if (second_elements[v][jidx * second_element_stride] == vidx) {
+                                    share = true;
+                                    break;
+                                }
+                            }
+                            if (share) {
+                                continue;
+                            }
+
+                            visit(j, jidx);
+                        }
+                    }
+                }
+            }
+        }
+
+    }  // namespace detail
+
+    /**
+     * \brief Self-overlap count over a minimum-corner binning, CRS offsets out.
+     *
+     * \tparam sorted The cells were ordered by cell2dmin_sort_cells, and
+     * \p cell_key and \p cell_hi2 hold what it produced. False leaves them
+     * unread, and null is the right thing to pass. It is a template parameter and
+     * not an argument so that neither variant carries a branch the other needs.
+     */
+    template <int nxe, bool sorted, typename T, typename I>
+    bool cell2dmin_count_self_overlaps(const ptrdiff_t element_count,
+                                       T** const SCCD_RESTRICT aabbs,
+                                       I* const SCCD_RESTRICT idx,
+                                       const ptrdiff_t element_stride,
+                                       I** const SCCD_RESTRICT elements,
+                                       const Cell2DGrid<T>& grid,
+                                       const ptrdiff_t* const SCCD_RESTRICT cellptr,
+                                       const I* const SCCD_RESTRICT cellidx,
+                                       T** const SCCD_RESTRICT cellbox,
+                                       const T* const SCCD_RESTRICT row_prefix,
+                                       const T* const SCCD_RESTRICT cell_hi1,
+                                       const T* const SCCD_RESTRICT cell_key,
+                                       const T* const SCCD_RESTRICT cell_hi2,
+                                       ptrdiff_t* const SCCD_RESTRICT ccdptr) {
+        ccdptr[0] = 0;
+
+        // Dynamic, not the usual block schedule: a box spanning many rows walks
+        // far more cells than one inside a single row, and a few of those in a
+        // block would otherwise hold the whole block up.
+        sccd::parallel_for_br_dynamic(0, element_count, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+            for (ptrdiff_t fi = rbegin; fi < rend; ++fi) {
+                const I idxi = idx[fi];
+                I ev[nxe];
+                for (int v = 0; v < nxe; ++v) {
+                    ev[v] = elements[v][idxi * element_stride];
+                }
+
+                ptrdiff_t count = 0;
+                detail::for_each_forward_self_partner<nxe, sorted, T, I>(
+                    aabbs, fi, idx, elements, element_stride, ev, grid, cellptr, cellidx, cellbox, row_prefix,
+                    cell_hi1, cell_key, cell_hi2, [&](const ptrdiff_t, const I) { ++count; });
+                ccdptr[fi + 1] = count;
+            }
+        });
+
+        sccd::parallel_cum_sum_br(ccdptr, ccdptr + element_count + 1);
+        return ccdptr[element_count] > 0;
+    }
+
+    /** \brief Write those pairs, as (min, max) to match the sweep. */
+    template <int nxe, bool sorted, typename T, typename I>
+    void cell2dmin_fill_self_overlaps(const ptrdiff_t element_count,
+                                      T** const SCCD_RESTRICT aabbs,
+                                      I* const SCCD_RESTRICT idx,
+                                      const ptrdiff_t element_stride,
+                                      I** const SCCD_RESTRICT elements,
+                                      const Cell2DGrid<T>& grid,
+                                      const ptrdiff_t* const SCCD_RESTRICT cellptr,
+                                      const I* const SCCD_RESTRICT cellidx,
+                                      T** const SCCD_RESTRICT cellbox,
+                                      const T* const SCCD_RESTRICT row_prefix,
+                                      const T* const SCCD_RESTRICT cell_hi1,
+                                      const T* const SCCD_RESTRICT cell_key,
+                                      const T* const SCCD_RESTRICT cell_hi2,
+                                      const ptrdiff_t* const SCCD_RESTRICT ccdptr,
+                                      I* const SCCD_RESTRICT first_out,
+                                      I* const SCCD_RESTRICT second_out) {
+        sccd::parallel_for_br_dynamic(0, element_count, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+            for (ptrdiff_t fi = rbegin; fi < rend; ++fi) {
+                const I idxi = idx[fi];
+                I ev[nxe];
+                for (int v = 0; v < nxe; ++v) {
+                    ev[v] = elements[v][idxi * element_stride];
+                }
+
+                ptrdiff_t at = ccdptr[fi];
+                detail::for_each_forward_self_partner<nxe, sorted, T, I>(
+                    aabbs, fi, idx, elements, element_stride, ev, grid, cellptr, cellidx, cellbox, row_prefix,
+                    cell_hi1, cell_key, cell_hi2, [&](const ptrdiff_t, const I jidx) {
+                        first_out[at] = sccd::min<I>(idxi, jidx);
+                        second_out[at] = sccd::max<I>(idxi, jidx);
+                        ++at;
+                    });
+            }
+        });
+    }
+
+    /**
+     * \brief Vertex-face count over a minimum-corner binning of the faces.
+     *
+     * The shipped vertex-face query bins the vertices by extent and iterates over
+     * the faces. This one is the other way round, and the cells follow: sized
+     * from the faces, one entry each, so a vertex reads a quarter to a third of
+     * the cells the face walk does. The pair set is identical -- this changes
+     * where a pair is found, not which pairs exist.
+     *
+     * \p krow comes from \ref cell2dmin_max_row_span over the same faces.
+     */
+    template <int nxe, typename T, typename I>
+    bool cell2dmin_count_vf_overlaps(const ptrdiff_t vertex_count,
+                                     T** const SCCD_RESTRICT vaabbs,
+                                     const I* const SCCD_RESTRICT vertex_idx,
+                                     const I* const SCCD_RESTRICT face_idx,
+                                     const ptrdiff_t face_element_stride,
+                                     I** const SCCD_RESTRICT face_elements,
+                                     const Cell2DGrid<T>& grid,
+                                     const ptrdiff_t* const SCCD_RESTRICT cellptr,
+                                     const I* const SCCD_RESTRICT cellidx,
+                                     T** const SCCD_RESTRICT cellbox,
+                                     const T* const SCCD_RESTRICT row_prefix,
+                                     const T* const SCCD_RESTRICT cell_hi1,
+                                     const int krow,
+                                     ptrdiff_t* const SCCD_RESTRICT ccdptr) {
+        ccdptr[0] = 0;
+
+        // Dynamic for the same reason the self walk is: krow rows of a wide
+        // scene cost one search each even where they yield nothing, so the work
+        // per vertex is uneven.
+        sccd::parallel_for_br_dynamic(0, vertex_count, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+            for (ptrdiff_t vi = rbegin; vi < rend; ++vi) {
+                ptrdiff_t count = 0;
+                detail::for_each_min_corner_partner<nxe, T, I>(
+                    vaabbs, vi, vertex_idx[vi], face_idx, face_elements, face_element_stride, grid, cellptr,
+                    cellidx, cellbox, row_prefix, cell_hi1, krow,
+                    [&](const ptrdiff_t, const I) { ++count; });
+                ccdptr[vi + 1] = count;
+            }
+        });
+
+        sccd::parallel_cum_sum_br(ccdptr, ccdptr + vertex_count + 1);
+        return ccdptr[vertex_count] > 0;
+    }
+
+    /** \brief Write those pairs, face first, to match the shipped vertex-face query. */
+    template <int nxe, typename T, typename I>
+    void cell2dmin_fill_vf_overlaps(const ptrdiff_t vertex_count,
+                                    T** const SCCD_RESTRICT vaabbs,
+                                    const I* const SCCD_RESTRICT vertex_idx,
+                                    const I* const SCCD_RESTRICT face_idx,
+                                    const ptrdiff_t face_element_stride,
+                                    I** const SCCD_RESTRICT face_elements,
+                                    const Cell2DGrid<T>& grid,
+                                    const ptrdiff_t* const SCCD_RESTRICT cellptr,
+                                    const I* const SCCD_RESTRICT cellidx,
+                                    T** const SCCD_RESTRICT cellbox,
+                                    const T* const SCCD_RESTRICT row_prefix,
+                                    const T* const SCCD_RESTRICT cell_hi1,
+                                    const int krow,
+                                    const ptrdiff_t* const SCCD_RESTRICT ccdptr,
+                                    I* const SCCD_RESTRICT face_out,
+                                    I* const SCCD_RESTRICT vertex_out) {
+        sccd::parallel_for_br_dynamic(0, vertex_count, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+            for (ptrdiff_t vi = rbegin; vi < rend; ++vi) {
+                const I vidx = vertex_idx[vi];
+                ptrdiff_t at = ccdptr[vi];
+                detail::for_each_min_corner_partner<nxe, T, I>(
+                    vaabbs, vi, vidx, face_idx, face_elements, face_element_stride, grid, cellptr, cellidx,
+                    cellbox, row_prefix, cell_hi1, krow, [&](const ptrdiff_t, const I jidx) {
+                        face_out[at] = jidx;
+                        vertex_out[at] = vidx;
                         ++at;
                     });
             }

@@ -142,7 +142,7 @@ E** upload_table(E* const* rows, const int n) {
 
 // Six device rows -- 0..2 the minimum corner, 3..5 the maximum -- plus the
 // device table pointing at them, and the index array the sort permutes.
-struct DeviceAabbs {
+struct DeviceAABBs {
     T* rows[2 * kDim] = {};
     T** table = nullptr;
     I* idx = nullptr;
@@ -192,7 +192,7 @@ int main() {
     // ---- broad phase, step 1: swept AABBs -----------------------------------
     // One box per node, face and edge, enclosing the whole trajectory over the
     // step: start position and end position together.
-    DeviceAabbs vaabb, faabb, eaabb;
+    DeviceAABBs vaabb, faabb, eaabb;
     vaabb.allocate(n_nodes);
     faabb.allocate(n_faces);
     eaabb.allocate(n_edges);

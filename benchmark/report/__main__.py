@@ -9,7 +9,7 @@ generated without them, and each adds its own tables or figure when given.
 
 Writes, under <out-dir>:
     figures/*.pdf   figures for LaTeX
-    figures/*.png   the same figures for Markdown
+    figures/*.png   the same figures as raster images
     figures.tex     \\includegraphics with a caption and label for each
     tables.tex      booktabs tables
     tables.md       the same tables as Markdown
@@ -110,12 +110,16 @@ def main(argv: list[str]) -> int:
     # A CSV may hold more than one broad-phase strategy. Summarising across them
     # would sum two runs of the same cases into one scene total, so a strategy is
     # chosen for the headline tables and the rest are compared against it in a
-    # table of their own. The cell list is preferred when present because it is
-    # what the shipped default probes first.
+    # table of their own. The choice follows what ships, so that the headline
+    # numbers are the ones a caller gets by setting nothing.
     strategies = data.broadphases(rows)
     primary = None
-    if strategies:
-        primary = "cell2d" if "cell2d" in strategies else strategies[0]
+    for preferred in ("cell2dmin", "cell2d"):
+        if preferred in strategies:
+            primary = preferred
+            break
+    if primary is None and strategies:
+        primary = strategies[0]
     scenes = data.by_scene(rows, primary)
     cases = data.by_case([r for r in rows
                           if primary is None
@@ -147,6 +151,8 @@ def main(argv: list[str]) -> int:
         figures.runtime_breakdown(scenes, figure_dir),
         figures.toi_error_histogram(cases, figure_dir),
     ]
+    if oracle_rows_early:
+        drawn.append(oracle_mod.reference_figure(oracle_rows_early, figure_dir))
     scaling_runs = []
     if scaling_files:
         scaling_runs = [r for r in (scaling_mod.parse(p) for p in scaling_files)
@@ -171,13 +177,15 @@ def main(argv: list[str]) -> int:
         if (any(m == "device-" + pick for _, m in scenes)):
             built.append(tables.processor_table(scenes, pick, source))
     if len(strategies) > 1:
-        built.append(tables.broadphase_table(
-            {n: data.by_scene(rows, n) for n in strategies}, source))
+        per_strategy = {n: data.by_scene(rows, n) for n in strategies}
+        built.append(tables.broadphase_table(per_strategy, source))
+        # The cell-list variants are a separate question, and a host-only one.
+        if len(strategies) > 2:
+            built.append(tables.broadphase_variant_table(per_strategy, source))
     oracle_rows = oracle_rows_early
     if oracle_rows:
         oracle_source = _repo_relative(oracle_csv)
         built.append(oracle_mod.gate_table(oracle_rows, oracle_source))
-        built.append(oracle_mod.reference_table(oracle_rows, oracle_source))
         built.append(oracle_mod.earliness_table(oracle_rows, oracle_source))
     if scaling_runs:
         built.append(scaling_mod.table(
@@ -204,6 +212,12 @@ def main(argv: list[str]) -> int:
                        "geometry, so the exact roots are not a reference for the "
                        "mesh path.")
     }
+    if oracle_rows:
+        # The comparison against TightInclusion as a table: the documents carry
+        # no figures -- those live with the article -- so the speedups are stated
+        # here in numbers.
+        blocks_extra["reference"] = tables.render_markdown(
+            oracle_mod.reference_table(oracle_rows, oracle_source))
 
     late = sum(s.toi_late for s in scenes.values())
     late += oracle_mod.violations(oracle_rows) if oracle_rows else 0

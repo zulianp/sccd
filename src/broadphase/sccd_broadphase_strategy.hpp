@@ -8,6 +8,7 @@
 // ptrdiff_t is used below; the header must not rely on a previous include in
 // the translation unit for it. Including this header first exposed that.
 #include <cstddef>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
@@ -62,35 +63,62 @@
  *    (cloth-ball, where the sweep is 1.36x faster) and the middle one
  *    (armadillo-rollers, 1.59x). See `wip/ASSESSMENT.md`.
  *
- * ## So: Auto measures, it does not guess
+ * ## So: the default is measured, and nothing is raced
  *
- * Four heuristics are refuted above, and so is resolving `Auto` to a fixed
- * choice. Picking the cell list unconditionally is defensible on synthetic
- * box-list benchmarks, where it wins by 4-7x and the worst case for choosing it
- * is 1.8 ms on a broad phase costing 1.3 ms. On real scenes the argument does
- * not hold: the sweep wins two of three, by 1.36x on cloth-ball and 1.59x on
- * armadillo-rollers, which is 13 ms and 78 ms rather than 1.8 ms
- * (`wip/ASSESSMENT.md`).
+ * Four heuristics are refuted above. What settles it is a measurement rather
+ * than a statistic: over the six benchmark scenes, with preparation and query
+ * counted together, `cell2dmin` leads the rest on both processors and on every
+ * scene -- by $1.46\times$ over the extent-binned cell list on the device and
+ * $3.67\times$ on the host, and by far more over the sweep. `Auto` resolves to
+ * it and probes nothing.
  *
- * Neither constant is right and no cheap statistic has separated the cases. But
- * the two produce **identical pair sets**, so they can simply be raced: run one
- * on a step, the other on the next, then keep the winner. A broad phase runs
- * every step of a simulation, so the cost is two probe steps out of thousands,
- * and unlike a heuristic it cannot be wrong about a scene nobody tested.
+ * `BroadPhaseAutoTuner::set_default` is how that is fixed, and the race it also
+ * offers is what a caller falls back on without it: the sweep and `cell2d`
+ * return identical pair sets, so they can simply be run on consecutive steps and
+ * the faster kept, which costs two probe steps out of thousands and cannot be
+ * wrong about a scene nobody tested. `broadphase_stats` is still exposed for a
+ * caller who wants to look at the geometry itself.
  *
- * `BroadPhaseAutoTuner` does that. It re-probes periodically, because a
- * simulation's geometry changes -- cloth that starts flat and ends crumpled is
- * not one workload -- and a verdict reached on frame one should not bind frame
- * ten thousand.
+ * ## The five strategies
  *
- * `SCCD_BROADPHASE=sweep` or `=cell2d` forces one and skips the race entirely,
- * and `broadphase_stats` is still exposed for a caller who wants to look at the
- * geometry itself.
+ * `SCCD_BROADPHASE=sweep`, `=cell2d`, `=cell2dmin`, `=cell2dminsort`,
+ * `=cell2dseg` or `=cell2dminfv` names one and skips both the default and the
+ * race.
+ *
+ * `cell2dmin` is the cell list with a different edge-edge query, and the host
+ * default: one entry per box at its minimum corner, walked forward in linear
+ * cell order with the cell bounds pruning it. `cell2dminsort` adds an ordering
+ * of each cell on the axis the grid does not use, so a cell can be ruled out by
+ * its bound there and the scan inside one can stop early; it buys traversal at
+ * the cost of preparation and over the benchmark does not repay it. Both take
+ * `cell2d`'s face-vertex query.
+ *
+ * `cell2dseg` changes the face-vertex query instead: the cell list holds the
+ * faces, and each vertex queries it with the segment its trajectory is, walking
+ * only the cells that segment crosses and testing the segment against a face box
+ * rather than two boxes against each other. Its edge-edge query is `cell2d`'s.
+ * It hands the narrow phase 2% to 26% fewer pairs, and pays for the larger cell
+ * array it has to build.
+ *
+ * `cell2dminfv` also binds the faces and queries per vertex, and indexes them at
+ * their minimum corner rather than by extent, which is what `cell2dseg` pays for
+ * -- one entry per face instead of about four. The vertex reaches back with the
+ * row prefix maximum on one axis and a bound on the widest face on the other.
+ * The pair set is `cell2d`'s exactly; only where a pair is found changes. Its
+ * edge-edge query is `cell2dmin`'s.
  */
 
 namespace sccd {
 
-    enum class BroadPhaseStrategy : int { Auto = 0, Sweep = 1, Cell2D = 2 };
+    enum class BroadPhaseStrategy : int {
+        Auto = 0,
+        Sweep = 1,
+        Cell2D = 2,
+        Cell2DMin = 3,
+        Cell2DMinSort = 4,
+        Cell2DSeg = 5,
+        Cell2DMinFV = 6
+    };
 
     /**
      * \brief Cheap shape and density statistics for the AABB set.
@@ -145,15 +173,57 @@ namespace sccd {
         return st;
     }
 
+    /** \brief Declared here so the setting's diagnostic can name a strategy. */
+    static inline const char* broadphase_strategy_name(const BroadPhaseStrategy s);
+
+    /**
+     * \brief The strategy the library selects when nothing is asked for.
+     *
+     * Named here so the tuner's default and the value a driver records are the
+     * same constant. They were two, and the recorded column therefore said
+     * `auto` while the shipped strategy ran -- which made a sweep that varied
+     * SCCD_BROADPHASE and mistyped one value produce identical measurements
+     * under different labels.
+     */
+    static constexpr BroadPhaseStrategy kShippedBroadPhase = BroadPhaseStrategy::Cell2DMinFV;
+
     /** \brief The strategy the user asked for, or Auto. */
     static inline BroadPhaseStrategy broadphase_strategy_setting() {
         const char* v = getenv("SCCD_BROADPHASE");
         if (!v) return BroadPhaseStrategy::Auto;
         if (std::strcmp(v, "sweep") == 0) return BroadPhaseStrategy::Sweep;
         if (std::strcmp(v, "cell2d") == 0) return BroadPhaseStrategy::Cell2D;
+        if (std::strcmp(v, "cell2dmin") == 0) return BroadPhaseStrategy::Cell2DMin;
+        if (std::strcmp(v, "cell2dminsort") == 0) return BroadPhaseStrategy::Cell2DMinSort;
+        if (std::strcmp(v, "cell2dseg") == 0) return BroadPhaseStrategy::Cell2DSeg;
+        if (std::strcmp(v, "cell2dminfv") == 0) return BroadPhaseStrategy::Cell2DMinFV;
+        // A name this build does not know is a mistake, not a request to race.
+        // Falling through silently turns an explicit choice into Auto, and the
+        // only trace is the word "auto" in a column nobody reads: a whole
+        // competitor comparison was once measured that way, against a build
+        // predating the strategy its harness asked for.
+        if (*v) {
+            fprintf(stderr,
+                    "sccd: SCCD_BROADPHASE=%s is not a strategy this build knows; "
+                    "running %s. Valid: sweep, cell2d, cell2dmin, cell2dminsort, "
+                    "cell2dseg, cell2dminfv\n",
+                    v, broadphase_strategy_name(kShippedBroadPhase));
+        }
         return BroadPhaseStrategy::Auto;
     }
 
+
+    /**
+     * \brief The strategy that will actually run.
+     *
+     * What a result file has to record. `broadphase_strategy_setting()` reports
+     * the request, so an unset variable recorded `auto` and a typo recorded
+     * `auto` as well, both while \ref kShippedBroadPhase ran.
+     */
+    static inline BroadPhaseStrategy broadphase_strategy_resolved() {
+        const BroadPhaseStrategy asked = broadphase_strategy_setting();
+        return asked == BroadPhaseStrategy::Auto ? kShippedBroadPhase : asked;
+    }
 
     /** \brief Wall clock in milliseconds, for the race below. */
     static inline double broadphase_now_ms() {
@@ -179,10 +249,19 @@ namespace sccd {
      */
     class BroadPhaseAutoTuner {
     public:
+        /**
+         * \brief Fix the strategy, so `next()` hands it out without racing.
+         *
+         * A caller that has measured which strategy wins on its processor sets it
+         * here. The race below stays for a caller that has not.
+         */
+        void set_default(const BroadPhaseStrategy s) { default_ = s; }
+
         /** \brief The strategy to use for the next broad phase. */
         BroadPhaseStrategy next() {
             const BroadPhaseStrategy forced = broadphase_strategy_setting();
             if (forced != BroadPhaseStrategy::Auto) return forced;
+            if (default_ != BroadPhaseStrategy::Auto) return default_;
 
             if (reprobe_now_) {
                 // Start a fresh race rather than defending the old verdict, so a
@@ -255,6 +334,7 @@ namespace sccd {
         // to follow a scene whose character changes over a run.
         static constexpr int kReprobeInterval = 64;
 
+        BroadPhaseStrategy default_ = BroadPhaseStrategy::Auto;
         double sweep_ms_ = -1.0;
         double cell2d_ms_ = -1.0;
         int steps_since_race_ = 0;
@@ -267,6 +347,10 @@ namespace sccd {
         switch (s) {
             case BroadPhaseStrategy::Sweep: return "sweep";
             case BroadPhaseStrategy::Cell2D: return "cell2d";
+            case BroadPhaseStrategy::Cell2DMin: return "cell2dmin";
+            case BroadPhaseStrategy::Cell2DMinSort: return "cell2dminsort";
+            case BroadPhaseStrategy::Cell2DSeg: return "cell2dseg";
+            case BroadPhaseStrategy::Cell2DMinFV: return "cell2dminfv";
             case BroadPhaseStrategy::Auto: return "auto";
         }
         return "?";

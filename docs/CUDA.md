@@ -36,6 +36,52 @@ the same stages, the same exact answer of `t = 0.5`. Reading them side by side
 isolates what is actually different about CUDA. It exits 0 with a message when
 no device is present.
 
+## What an optimised build compiles
+
+A release build compiles device code at the maximum optimisation level, keeps
+IEEE arithmetic exactly as the guarantee requires, and carries no assertions
+inside kernels. The flags that matter are set for you:
+
+| flag | what it does |
+| --- | --- |
+| `-O3` | host half of each `.cu` |
+| `-Xptxas=-O3` | device back end. nvcc's own `-O` is host-only, so this is stated rather than left to a default |
+| `-Xcompiler=-march=native` | host half of each `.cu` builds for this CPU, matching the C++ units |
+| `-DNDEBUG` | assertions compiled out of kernels as well as host code |
+
+Fast math is deliberately absent. `--use_fast_math` implies `-ftz=true`,
+`-prec-div=false` and `-prec-sqrt=false`, and the narrow phase's guarantee rests
+on a certified error bound around exact IEEE arithmetic: flushing subnormals or
+approximating a division would let the search reject a box that holds a root.
+Do not add it.
+
+`SCCD_ENABLE_NATIVE_ARCH=OFF` drops `-march=native` from both languages if you
+need a portable binary.
+
+## Diagnosing a device memory fault
+
+Kernels launch asynchronously, so by default an error is reported at whichever
+call next returns a status, which is usually a stage or two after the launch that
+caused it. Two options turn that into something you can act on, and they work
+best together:
+
+```sh
+cmake -S . -B build-diag -DSCCD_ENABLE_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=90 \
+      -DSCCD_CUDA_SYNC_CHECKS=ON -DSCCD_CUDA_DEVICE_ASSERTS=ON
+```
+
+`SCCD_CUDA_SYNC_CHECKS` puts a device synchronize inside every error check, so
+the message names the launch that faulted. `SCCD_CUDA_DEVICE_ASSERTS` keeps the
+range and two-pass count checks the kernels already carry, so an invariant that
+breaks says which one it was. Between them a fault reports as *this launch broke
+this invariant*.
+
+Both stay off in a normal build, for the same reason: a synchronize per launch
+roughly doubles the narrow phase's drain loop, and an assertion inside a kernel
+holds registers live across a trap path in search kernels that are already close
+to spilling. Build a diagnostic tree beside a release one rather than instead of
+it — the optimisation level is unchanged, so the two remain comparable.
+
 ## The one rule that is easy to get wrong
 
 **A `T**` argument is a device array of device pointers.**
@@ -114,19 +160,22 @@ The GPU is not uniformly faster, and which phase wins is not the same on every
 scene. Measured over six scenes on a GH200 node ([`BENCHMARKS.md`](BENCHMARKS.md)
 has the tables):
 
-- The **broad phase** is the stage whose shape suits a GPU — count, prefix sum,
-  scatter, with no sequential window walk. It runs 2.2× to 4.2× faster than
-  Grace on five of the six scenes, and 1.2× slower on the sixth.
-- The **narrow phase** is usually the slower one on the GPU: 0.27× to 0.76× of
-  Grace on five scenes, and 1.26× on the sixth.
-- **End to end** the GPU wins five of six by 1.5× to 2.9×, and loses one at
-  0.62×.
+- The **broad phase** is count, prefix sum and scatter, with no sequential
+  window walk. It runs at 0.56× to 1.83× of Grace — a narrow range around
+  parity, faster on armadillo-rollers, puffer-ball and rod-twist and slower on
+  the other three.
+- The **narrow phase** is where the GPU earns its place, and it spans a far
+  wider range: 0.44× to 15.80× of Grace, ahead on cloth-ball, n-body,
+  puffer-ball and rod-twist, behind on the two scenes with the smallest
+  candidate lists.
+- **End to end** the GPU wins four of six by 1.43× to 2.05×, and loses
+  armadillo-rollers at 0.75× and cloth-funnel at 0.56×.
 
-The two exceptions are different scenes, which is the point: the phase that
-wins is a property of the geometry, not a fixed property of the processor. And
-the scene the GPU loses outright is the largest in the set by candidate pairs —
-30.5 million per step — so "bigger problem, use the GPU" is not a safe rule.
-Measure the scene you have.
+The two scenes the host takes are the two smallest in the set by candidate
+pairs, 43,661 and 109,214 per step, and the GPU takes every scene above a
+million. The margin within that is not ordered by size — cloth-ball at 2.2
+million pairs gives 1.43× where rod-twist at 847,250 gives 1.89× — so size
+indicates the processor and does not settle it. Measure the scene you have.
 
 One trap when comparing: `Tight` is the host's faster mode and the device's
 slower one, so pinning the same `SCCD_NARROWPHASE_MODE` on both sides races the

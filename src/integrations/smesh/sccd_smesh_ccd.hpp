@@ -16,6 +16,7 @@
 
 #if defined(SCCD_ENABLE_CUDA)
 #include "sccd_broadphase.cuh"
+#include "sccd_cell2d_broadphase.cuh"
 #include "sccd_narrowphase.cuh"
 #include "sccd_narrowphase_vq.cuh"
 #include "sccd_vaabb.cuh"
@@ -24,6 +25,7 @@
 #endif
 
 #include <algorithm>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -151,6 +153,10 @@ namespace sccd {
         smesh::SharedBuffer<scalar_t> scratch_;
         smesh::SharedBuffer<ptrdiff_t> ccdptr_;
 
+        // Sized by the longest of the three lists, so it is reserved once with
+        // the rest and never reallocated by a step.
+        sccd::SortScratch<scalar_t, smesh::idx_t> sort_scratch_;
+
         smesh::SharedBuffer<smesh::idx_t> f_overlap_;
         smesh::SharedBuffer<smesh::idx_t> v_overlap_;
         smesh::SharedBuffer<smesh::idx_t> e0_overlap_;
@@ -165,11 +171,20 @@ namespace sccd {
         // F2V and E2E sorts/scans within the same broad_phase invocation.
         int sort_axis_{0};
 
-        // Which broad phase this call is using. Both are first class: the choice
-        // is made per call from the geometry, because neither wins everywhere and
-        // the same mesh can change character between frames. SCCD_BROADPHASE
-        // forces it to sweep or cell2d for measurement.
+        // Which broad phase this call is using. The first two are first class:
+        // the choice is made per call from the geometry, because neither wins
+        // everywhere and the same mesh can change character between frames.
+        // SCCD_BROADPHASE forces it to sweep, cell2d or cell2dmin for
+        // measurement; cell2dmin is under evaluation and is only ever asked for.
+        //
+        // cell2dmin shares everything with cell2d but the edge-edge query: the
+        // vertex grid and the face-vertex step are the same code on both paths,
+        // and only the edge binning and its query differ.
         bool use_cell2d_{false};
+        bool use_cell2d_min_{false};
+        bool use_cell2d_min_sorted_{false};
+        bool use_cell2d_seg_{false};
+        bool use_cell2d_min_fv_{false};
 
         // Broad-phase strategy race. The tuner decides; these carry the pending
         // measurement from the steps back to the next prep, which is where it is
@@ -189,19 +204,184 @@ namespace sccd {
             broad_phase_pending_ = true;
         }
         sccd::Cell2DGrid<scalar_t> v_grid_;
+        sccd::Cell2DPartition v_part_;
         std::vector<ptrdiff_t> v_cellptr_;
         std::vector<ptrdiff_t> v_cursor_;
         std::vector<smesh::idx_t> v_cellidx_;
+        std::vector<scalar_t> v_cellbox_data_[6];
+        scalar_t* v_cellbox_[6]{};
+
+        sccd::Cell2DGrid<scalar_t> f_grid_;
+        sccd::Cell2DPartition f_part_;
+        std::vector<ptrdiff_t> f_cellptr_;
+        std::vector<ptrdiff_t> f_cursor_;
+        std::vector<smesh::idx_t> f_cellidx_;
+        std::vector<scalar_t> f_cellbox_data_[6];
+        scalar_t* f_cellbox_[6]{};
+        // Only Cell2DMinFV builds these: the face row bounds and the widest
+        // face in rows, which is how a vertex knows how far below itself a
+        // face can still reach.
+        std::vector<scalar_t> f_row_prefix_;
+        std::vector<scalar_t> f_cell_hi1_;
+        int f_krow_{0};
 
         sccd::Cell2DGrid<scalar_t> e_grid_;
+        sccd::Cell2DPartition e_part_;
         std::vector<ptrdiff_t> e_cellptr_;
         std::vector<ptrdiff_t> e_cursor_;
         std::vector<smesh::idx_t> e_cellidx_;
+        std::vector<scalar_t> e_cellbox_data_[6];
+        scalar_t* e_cellbox_[6]{};
+
+        // The bounds the minimum-corner query prunes with, one pair of scalars
+        // per cell. They cost 2 * ncells where the binning they replace saves
+        // about 3n cell entries, so the two roughly cancel; the query is what the
+        // change is for. Held here rather than allocated per step, like
+        // everything else on this path.
+        std::vector<scalar_t> e_row_prefix_;
+        std::vector<scalar_t> e_cell_hi1_;
+
+        // The ordering on the third axis, when it is asked for: one key per cell
+        // entry and one bound per cell.
+        std::vector<scalar_t> e_cell_key_;
+        std::vector<scalar_t> e_cell_hi2_;
+
+        /** \brief Size the grid, bin one list by minimum corner, and take its bounds. */
+        static void bin_min_host_(const ptrdiff_t n,
+                                  scalar_t** const SCCD_RESTRICT aabb,
+                                  sccd::Cell2DGrid<scalar_t>& grid,
+                                  sccd::Cell2DPartition& part,
+                                  std::vector<ptrdiff_t>& cellptr,
+                                  std::vector<smesh::idx_t>& cellidx,
+                                  std::vector<ptrdiff_t>& cursor,
+                                  std::vector<scalar_t>& row_prefix,
+                                  std::vector<scalar_t>& cell_hi1) {
+            sccd::cell2d_setup<scalar_t>(n, aabb, grid);
+            sccd::cell2dmin_partition<scalar_t>(n, aabb, grid, part);
+
+            cellptr.resize((size_t)grid.ncells() + 1);
+            sccd::cell2dmin_count<scalar_t>(n, aabb, grid, part, cellptr.data());
+
+            cellidx.resize((size_t)cellptr[grid.ncells()]);
+            cursor.resize((size_t)grid.ncells());
+            sccd::cell2dmin_fill<scalar_t, smesh::idx_t>(
+                n, aabb, grid, part, cellptr.data(), cellidx.data(), cursor.data());
+
+            row_prefix.resize((size_t)grid.ncells());
+            cell_hi1.resize((size_t)grid.ncells());
+            sccd::cell2dmin_bounds<scalar_t>(n, aabb, grid, part, row_prefix.data(), cell_hi1.data());
+        }
+
+        /** \brief Order the cells on the third axis and take their bound there. */
+        static void sort_cells_host_(scalar_t** const SCCD_RESTRICT aabb,
+                                     const sccd::Cell2DGrid<scalar_t>& grid,
+                                     const std::vector<ptrdiff_t>& cellptr,
+                                     std::vector<smesh::idx_t>& cellidx,
+                                     std::vector<scalar_t>& cell_key,
+                                     std::vector<scalar_t>& cell_hi2) {
+            cell_key.resize(cellidx.size());
+            cell_hi2.resize((size_t)grid.ncells());
+            sccd::cell2dmin_sort_cells<scalar_t, smesh::idx_t>(
+                aabb, grid, cellptr.data(), cellidx.data(), cell_key.data(), cell_hi2.data());
+        }
+
+#if defined(SCCD_ENABLE_CUDA)
+        /**
+         * \brief A plain cudaMalloc array owned by this object.
+         *
+         * The cell list's row pointer, cursor and range arrays are read and
+         * atomically updated by the device, and they have to be real device
+         * allocations for that to be reliable: taken from smesh's buffer
+         * factory they landed outside the device allocator's range, and the
+         * scatter pass then read stale counts and misplaced a few thousand of
+         * three hundred thousand writes, differently on every run. Holding them
+         * here keeps the guarantee local and explicit.
+         */
+        template <typename T>
+        struct DeviceArray {
+            T* ptr{nullptr};
+            ptrdiff_t count{0};
+
+            DeviceArray() = default;
+            DeviceArray(const DeviceArray&) = delete;
+            DeviceArray& operator=(const DeviceArray&) = delete;
+            ~DeviceArray() {
+                if (ptr) cudaFree(ptr);
+            }
+
+            /** \brief At least \p n elements, never shrinking. */
+            T* reserve(const ptrdiff_t n) {
+                if (n > count) {
+                    if (ptr) cudaFree(ptr);
+                    ptr = nullptr;
+                    if (cudaMalloc((void**)&ptr, sizeof(T) * (size_t)(n > 0 ? n : 1)) != cudaSuccess) {
+                        SMESH_ERROR("sccd: out of device memory for %ld cell-list entries\n", (long)n);
+                    }
+                    count = n > 0 ? n : 1;
+                }
+                return ptr;
+            }
+
+            T* get() const { return ptr; }
+            ptrdiff_t size() const { return count; }
+        };
+#endif
+
+#if defined(SCCD_ENABLE_CUDA)
+        // The device cell list, mirroring the five host members above. cellptr
+        // and cursor are sized once from the element count, because the setup
+        // caps the grid at 4n cells, so a step allocates only cellidx, whose
+        // length is the span count the setup reports back.
+        sccd::device::Cell2DGridD<scalar_t> v_grid_d_;
+        DeviceArray<ptrdiff_t> v_cellptr_d_;
+        DeviceArray<ptrdiff_t> v_cursor_d_;
+        DeviceArray<int> v_ranges_d_;
+        DeviceArray<smesh::idx_t> v_cellidx_d_;
+
+        sccd::device::Cell2DGridD<scalar_t> e_grid_d_;
+        DeviceArray<ptrdiff_t> e_cellptr_d_;
+        DeviceArray<ptrdiff_t> e_cursor_d_;
+        DeviceArray<int> e_ranges_d_;
+        DeviceArray<smesh::idx_t> e_cellidx_d_;
+        DeviceArray<scalar_t> e_row_prefix_d_;
+        DeviceArray<scalar_t> e_cell_hi1_d_;
+
+        // Cell2DMinFV bins the faces as well, and queries them per vertex.
+        sccd::device::Cell2DGridD<scalar_t> f_grid_d_;
+        DeviceArray<ptrdiff_t> f_cellptr_d_;
+        DeviceArray<ptrdiff_t> f_cursor_d_;
+        DeviceArray<smesh::idx_t> f_cellidx_d_;
+        DeviceArray<scalar_t> f_row_prefix_d_;
+        DeviceArray<scalar_t> f_cell_hi1_d_;
+        // One int, and it stays on the device: the query kernels read it, so
+        // fetching it to pass it back as a launch argument would put a full
+        // synchronisation in every step.
+        DeviceArray<int> f_krow_d_;
+#endif
 
 
         sccd::BoxRounding rounding_{sccd::BoxRounding::Exact};
 
     public:
+        /**
+         * \brief Build the edge graph and allocate the working buffers.
+         *
+         * Everything here is a function of the mesh: its topology and its
+         * element counts. It happens once for a mesh and never again, however
+         * many steps are simulated, so it is not part of what a step costs.
+         *
+         * A caller never has to call this, because every entry point below does
+         * it on first use. It is public so that a caller who measures the
+         * per-step cost can pay it up front instead of inside the first step it
+         * times, and so that a caller who cares when allocation happens can
+         * choose the moment.
+         */
+        void initialize() {
+            if (!vaabb_) {
+                init();
+            }
+        }
+
         // fv here, vf in the narrow phase, and both are right: the broad phase
         // pairs the face list against the vertex list, in that order, while the
         // narrow phase answers a vertex-against-face query. The core spells the
@@ -325,6 +505,200 @@ namespace sccd {
     private:
         // ---- Host stage helpers ----------------------------------------------
 
+        /** \brief idx[i] = i, in parallel: it is a full pass over the list. */
+        static void fill_identity_(smesh::idx_t* const SCCD_RESTRICT idx, const ptrdiff_t n) {
+            sccd::parallel_for_br(0, n, [&](const ptrdiff_t begin, const ptrdiff_t end) {
+                for (ptrdiff_t i = begin; i < end; ++i) idx[i] = (smesh::idx_t)i;
+            });
+        }
+
+        /**
+         * \brief Size a grid for one list and bin it, count then fill.
+         *
+         * The buffers are members and survive the call, so a steady state
+         * reallocates nothing. cell2d_count writes every entry of cellptr before
+         * reading any, so the resize deliberately does not ask for zeros.
+         */
+        template <bool pack = false>
+        static void bin_host_(const ptrdiff_t n,
+                              scalar_t** const SCCD_RESTRICT aabb,
+                              sccd::Cell2DGrid<scalar_t>& grid,
+                              sccd::Cell2DPartition& part,
+                              std::vector<ptrdiff_t>& cellptr,
+                              std::vector<smesh::idx_t>& cellidx,
+                              std::vector<ptrdiff_t>& cursor,
+                              std::vector<scalar_t>* const boxdata = nullptr,
+                              scalar_t** const cellbox = nullptr) {
+            sccd::cell2d_setup<scalar_t>(n, aabb, grid);
+            sccd::cell2d_partition<scalar_t>(n, aabb, grid, part);
+
+            cellptr.resize((size_t)grid.ncells() + 1);
+            sccd::cell2d_count<scalar_t>(n, aabb, grid, part, cellptr.data());
+
+            cellidx.resize((size_t)cellptr[grid.ncells()]);
+            cursor.resize((size_t)grid.ncells());
+            if constexpr (pack) {
+                for (int d = 0; d < 6; ++d) {
+                    boxdata[d].resize((size_t)cellptr[grid.ncells()]);
+                    cellbox[d] = boxdata[d].data();
+                }
+            }
+            sccd::cell2d_fill<scalar_t, smesh::idx_t>(
+                n, aabb, grid, part, cellptr.data(), cellidx.data(), cursor.data());
+            if constexpr (pack) {
+                sccd::cell2d_pack_boxes<scalar_t, smesh::idx_t>(
+                    grid, aabb, cellptr.data(), cellidx.data(), cellbox);
+            }
+        }
+
+#if defined(SCCD_ENABLE_CUDA)
+        /**
+         * \brief Size a grid for one list on the device and bin it.
+         *
+         * The device counterpart of bin_host_, and the same count-then-fill
+         * shape. cellptr and cursor are already sized for the grid's 4n cell
+         * cap, so only cellidx depends on the step: the setup returns the span
+         * count and the buffer grows to it, never shrinking, so a steady state
+         * allocates nothing.
+         */
+        void bin_device_(const ptrdiff_t n,
+                         scalar_t** const SCCD_RESTRICT aabb,
+                         sccd::device::Cell2DGridD<scalar_t>& grid,
+                         DeviceArray<ptrdiff_t>& cellptr,
+                         DeviceArray<smesh::idx_t>& cellidx,
+                         DeviceArray<ptrdiff_t>& cursor,
+                         DeviceArray<int>& ranges) {
+            ptrdiff_t spans = 0;
+            sccd::device::cell2d_setup_and_count<scalar_t, smesh::idx_t>(
+                n, aabb, grid, cellptr.get(), ranges.get(), &spans);
+
+            ptrdiff_t rejected = 0;
+            sccd::device::cell2d_fill<scalar_t, smesh::idx_t>(
+                n, aabb, grid, cellptr.get(), ranges.get(),
+                cellidx.reserve(spans > 0 ? spans : 1), cellidx.size(),
+                cursor.get(), &rejected);
+            if (rejected) {
+                // The counting pass reserves one slot per span, so this cannot
+                // happen while the two passes agree. Saying so is better than
+                // running the query over a cell list that is quietly missing
+                // entries, which would drop candidate pairs.
+                SMESH_ERROR("sccd: device cell list rejected %ld of %ld spans over %ld boxes "
+                            "(grid %dx%d)\n",
+                            (long)rejected, (long)spans, (long)n, grid.n0, grid.n1);
+            }
+        }
+
+        /**
+         * \brief The edge-edge binning on the device: one entry per box.
+         *
+         * No span count to read back and no range array to agree on, because a
+         * box lands in exactly one cell and both passes compute it the same way.
+         * The two bounds the forward walk prunes with are built here too, since
+         * they are a property of the binning rather than of a query.
+         */
+        void bin_min_device_(const ptrdiff_t n,
+                             scalar_t** const SCCD_RESTRICT aabb,
+                             sccd::device::Cell2DGridD<scalar_t>& grid,
+                             DeviceArray<ptrdiff_t>& cellptr,
+                             DeviceArray<smesh::idx_t>& cellidx,
+                             DeviceArray<ptrdiff_t>& cursor,
+                             DeviceArray<scalar_t>& row_prefix,
+                             DeviceArray<scalar_t>& cell_hi1) {
+            sccd::device::cell2dmin_setup_and_count<scalar_t, smesh::idx_t>(
+                n, aabb, grid, cellptr.get());
+
+            const ptrdiff_t ncells = grid.ncells();
+            sccd::device::cell2dmin_fill<scalar_t, smesh::idx_t>(
+                n, aabb, grid, cellptr.get(), cellidx.reserve(n > 0 ? n : 1), cursor.get());
+
+            sccd::device::cell2dmin_bounds<scalar_t, smesh::idx_t>(
+                grid, aabb, cellptr.get(), cellidx.get(),
+                row_prefix.reserve(ncells > 0 ? ncells : 1),
+                cell_hi1.reserve(ncells > 0 ? ncells : 1));
+        }
+#endif
+
+        /**
+         * \brief Pick the strategy for this call and start the broad-phase clock.
+         *
+         * Both processors run this, because both implement both strategies. The
+         * tuner races the two rather than predicting a winner; see
+         * broadphase_strategy.hpp for the four heuristics that failed and the
+         * constant that failed after them. The clock starts here and stops when
+         * the last of the two steps has run, so what is timed is a whole broad
+         * phase and not just the part that differs.
+         *
+         * A measurement is reported here rather than at the end of a step,
+         * because the steps are separately callable: a caller may run
+         * face-vertex only, edge-edge only, or both in either order, and there
+         * is no step that is reliably "last". Reporting the previous broad phase
+         * when the next one starts covers every case, and the only measurement
+         * lost is the final one of a run.
+         */
+        void choose_strategy_(const ptrdiff_t n_nodes) {
+            // Measured over the six benchmark scenes on both processors, one
+            // binary each, medians over repeats: the minimum-corner walk with
+            // each cell left unordered leads the rest on every one of them, for
+            // both queries. Cell2DMinFV is that walk applied to the vertex-face
+            // query as well as the edge-edge one, so it keeps everything
+            // Cell2DMin won on and indexes the faces instead of the vertices.
+            // The broad phase falls 1.61x on the host and 1.17x on the device
+            // over the six, ahead on every scene of both. Nothing is raced.
+            tuner_.set_default(sccd::kShippedBroadPhase);
+
+            if (broad_phase_pending_) {
+                tuner_.record(timed_strategy_, broad_phase_pending_ms_);
+                broad_phase_pending_ = false;
+            }
+
+            const sccd::BroadPhaseStrategy chosen = tuner_.next();
+            use_cell2d_min_sorted_ = (chosen == sccd::BroadPhaseStrategy::Cell2DMinSort);
+            use_cell2d_seg_ = (chosen == sccd::BroadPhaseStrategy::Cell2DSeg);
+            use_cell2d_min_fv_ = (chosen == sccd::BroadPhaseStrategy::Cell2DMinFV);
+            // Cell2DMinFV keeps cell2dmin's edge-edge query and changes only the
+            // face-vertex one, so it is a cell2dmin that also binds the faces.
+            use_cell2d_min_ = (chosen == sccd::BroadPhaseStrategy::Cell2DMin) ||
+                              use_cell2d_min_sorted_ || use_cell2d_min_fv_;
+            use_cell2d_ = (chosen == sccd::BroadPhaseStrategy::Cell2D) || use_cell2d_min_ ||
+                          use_cell2d_seg_;
+            timed_strategy_ = chosen;
+
+            if (getenv("SCCD_BROADPHASE_VERBOSE")) {
+                // The statistics read the vertex boxes, which live on the device
+                // when that is where the run is, so the shape of the geometry is
+                // only reported for a host run. The choice itself is reported
+                // either way, which is what the diagnostic is mainly for.
+                if (execution_space_ == smesh::EXECUTION_SPACE_HOST) {
+                    sccd::BroadPhaseStats<scalar_t> stats =
+                        sccd::broadphase_stats<scalar_t>(n_nodes, vaabb_->data());
+                    fprintf(stderr,
+                            "sccd broad phase: %s (lambda %.1f/%.1f/%.1f, anisotropy %.2f, n %ld; "
+                            "sweep %.3f ms, cell2d %.3f ms)\n",
+                            sccd::broadphase_strategy_name(chosen),
+                            (double)stats.lambda[0],
+                            (double)stats.lambda[1],
+                            (double)stats.lambda[2],
+                            stats.anisotropy(),
+                            (long)n_nodes,
+                            tuner_.sweep_ms(),
+                            tuner_.cell2d_ms());
+                } else {
+                    fprintf(stderr,
+                            "sccd broad phase: %s (device, n %ld; sweep %.3f ms, cell2d %.3f ms)\n",
+                            sccd::broadphase_strategy_name(chosen),
+                            (long)n_nodes,
+                            tuner_.sweep_ms(),
+                            tuner_.cell2d_ms());
+                }
+            }
+
+            // The clock starts after the logging, not before it. Computing the
+            // statistics and writing an unbuffered line to stderr took about a
+            // millisecond, which on a small mesh was most of the "measurement"
+            // -- a diagnostic that changes the number it is diagnosing.
+            broad_phase_t0_ = sccd::broadphase_now_ms();
+        }
+
         int broad_phase_prep_host_() {
             const int dim = mesh_->spatial_dimension();
             const ptrdiff_t n_nodes = mesh_->n_nodes();
@@ -356,54 +730,7 @@ namespace sccd {
                                     rounding_);
             }
 
-            sort_axis_ = sccd::choose_axis(n_nodes, vaabb_->data());
-
-            {
-                // Decided on the vertex boxes and used for all three lists: they
-                // come from the same geometry, so their anisotropy agrees, and one
-                // decision keeps the passes consistent with each other.
-                // The tuner races the two rather than predicting a winner; see
-                // broadphase_strategy.hpp for the four heuristics that failed and
-                // the constant that failed after them. The clock starts here and
-                // stops when the last of the two steps has run, so what is timed
-                // is a whole broad phase and not just the part that differs.
-                // A measurement is reported here rather than at the end of a step,
-                // because the steps are separately callable: a caller may run
-                // face-vertex only, edge-edge only, or both in either order, and
-                // there is no step that is reliably "last". Reporting the previous
-                // broad phase when the next one starts covers every case, and the
-                // only measurement lost is the final one of a run.
-                if (broad_phase_pending_) {
-                    tuner_.record(timed_strategy_, broad_phase_pending_ms_);
-                    broad_phase_pending_ = false;
-                }
-
-                const sccd::BroadPhaseStrategy chosen = tuner_.next();
-                use_cell2d_ = (chosen == sccd::BroadPhaseStrategy::Cell2D);
-                timed_strategy_ = chosen;
-
-                if (getenv("SCCD_BROADPHASE_VERBOSE")) {
-                    sccd::BroadPhaseStats<scalar_t> stats =
-                        sccd::broadphase_stats<scalar_t>(n_nodes, vaabb_->data());
-                    fprintf(stderr,
-                            "sccd broad phase: %s (lambda %.1f/%.1f/%.1f, anisotropy %.2f, n %ld; "
-                            "sweep %.3f ms, cell2d %.3f ms)\n",
-                            sccd::broadphase_strategy_name(chosen),
-                            (double)stats.lambda[0],
-                            (double)stats.lambda[1],
-                            (double)stats.lambda[2],
-                            stats.anisotropy(),
-                            (long)n_nodes,
-                            tuner_.sweep_ms(),
-                            tuner_.cell2d_ms());
-                }
-
-                // The clock starts after the logging, not before it. Computing the
-                // statistics and writing an unbuffered line to stderr took about a
-                // millisecond, which on a small mesh was most of the "measurement"
-                // -- a diagnostic that changes the number it is diagnosing.
-                broad_phase_t0_ = sccd::broadphase_now_ms();
-            }
+            choose_strategy_(n_nodes);
 
             if (use_cell2d_) {
                 // No sorting at all on this path: vertices, faces and edges are
@@ -412,42 +739,66 @@ namespace sccd {
                 // point of it.
                 SMESH_TRACE_SCOPE("Cell list (host)");
 
-                for (ptrdiff_t i = 0; i < n_nodes; ++i) vidx_->data()[i] = (smesh::idx_t)i;
-                for (ptrdiff_t i = 0; i < n_faces; ++i) fidx_->data()[i] = (smesh::idx_t)i;
+                fill_identity_(vidx_->data(), n_nodes);
+                fill_identity_(fidx_->data(), n_faces);
+                fill_identity_(eidx_->data(), n_edges);
 
-                sccd::cell2d_setup<scalar_t>(n_nodes, vaabb_->data(), v_grid_);
-                v_cellptr_.assign((size_t)v_grid_.ncells() + 1, 0);
-                sccd::cell2d_count<scalar_t>(
-                    n_nodes, vaabb_->data(), v_grid_, v_cellptr_.data());
-                v_cellidx_.resize((size_t)v_cellptr_[v_grid_.ncells()]);
-                v_cursor_.resize((size_t)v_grid_.ncells());
-                sccd::cell2d_fill<scalar_t, smesh::idx_t>(n_nodes,
-                                                          vaabb_->data(),
-                                                          v_grid_,
-                                                          v_cellptr_.data(),
-                                                          v_cellidx_.data(),
-                                                          v_cursor_.data());
-
-                for (ptrdiff_t i = 0; i < n_edges; ++i) eidx_->data()[i] = (smesh::idx_t)i;
-
-                sccd::cell2d_setup<scalar_t>(n_edges, eaabb_->data(), e_grid_);
-                e_cellptr_.assign((size_t)e_grid_.ncells() + 1, 0);
-                sccd::cell2d_count<scalar_t>(
-                    n_edges, eaabb_->data(), e_grid_, e_cellptr_.data());
-                e_cellidx_.resize((size_t)e_cellptr_[e_grid_.ncells()]);
-                e_cursor_.resize((size_t)e_grid_.ncells());
-                sccd::cell2d_fill<scalar_t, smesh::idx_t>(n_edges,
-                                                          eaabb_->data(),
-                                                          e_grid_,
-                                                          e_cellptr_.data(),
-                                                          e_cellidx_.data(),
-                                                          e_cursor_.data());
+                if (use_cell2d_min_fv_) {
+                    // The vertices walk, so the faces are binned -- one entry
+                    // each, which is what this variant is for, and the cells are
+                    // sized from the faces because cell2d_setup follows the list
+                    // it is given.
+                    bin_min_host_(n_faces, faabb_->data(), f_grid_, f_part_, f_cellptr_, f_cellidx_,
+                                  f_cursor_, f_row_prefix_, f_cell_hi1_);
+                    f_krow_ = sccd::cell2dmin_max_row_span<scalar_t>(n_faces, faabb_->data(), f_grid_);
+                    for (int d = 0; d < 6; ++d) {
+                        f_cellbox_data_[d].resize((size_t)f_cellptr_[f_grid_.ncells()]);
+                        f_cellbox_[d] = f_cellbox_data_[d].data();
+                    }
+                    sccd::cell2d_pack_boxes<scalar_t, smesh::idx_t>(
+                        f_grid_, faabb_->data(), f_cellptr_.data(), f_cellidx_.data(), f_cellbox_);
+                } else if (use_cell2d_seg_) {
+                    // The face-vertex query walks the faces, so the faces are what
+                    // the cell array holds and the vertices never enter one.
+                    bin_host_<true>(n_faces, faabb_->data(), f_grid_, f_part_, f_cellptr_, f_cellidx_,
+                                    f_cursor_, f_cellbox_data_, f_cellbox_);
+                } else {
+                    bin_host_<true>(n_nodes, vaabb_->data(), v_grid_, v_part_, v_cellptr_, v_cellidx_,
+                                    v_cursor_, v_cellbox_data_, v_cellbox_);
+                }
+                if (use_cell2d_min_) {
+                    bin_min_host_(n_edges, eaabb_->data(), e_grid_, e_part_, e_cellptr_, e_cellidx_,
+                                  e_cursor_, e_row_prefix_, e_cell_hi1_);
+                    if (use_cell2d_min_sorted_) {
+                        sort_cells_host_(eaabb_->data(), e_grid_, e_cellptr_, e_cellidx_,
+                                         e_cell_key_, e_cell_hi2_);
+                    }
+                    // After the sort, which permutes what each cell holds.
+                    for (int d = 0; d < 6; ++d) {
+                        e_cellbox_data_[d].resize((size_t)e_cellptr_[e_grid_.ncells()]);
+                        e_cellbox_[d] = e_cellbox_data_[d].data();
+                    }
+                    sccd::cell2d_pack_boxes<scalar_t, smesh::idx_t>(
+                        e_grid_, eaabb_->data(), e_cellptr_.data(), e_cellidx_.data(), e_cellbox_);
+                } else {
+                    bin_host_<true>(n_edges, eaabb_->data(), e_grid_, e_part_, e_cellptr_, e_cellidx_,
+                                    e_cursor_, e_cellbox_data_, e_cellbox_);
+                }
             } else {
                 SMESH_TRACE_SCOPE("Sorting AABBs (host)");
 
-                sccd::sort_along_axis(n_nodes, sort_axis_, vaabb_->data(), vidx_->data(), scratch_->data());
-                sccd::sort_along_axis(n_faces, sort_axis_, faabb_->data(), fidx_->data(), scratch_->data());
-                sccd::sort_along_axis(n_edges, sort_axis_, eaabb_->data(), eidx_->data(), scratch_->data());
+                // Decided on the vertex boxes and used for all three lists: they
+                // come from the same geometry, so their anisotropy agrees, and one
+                // decision keeps the passes consistent with each other. The cell
+                // list needs no sort axis, so it does not pay for this pass.
+                sort_axis_ = sccd::choose_axis(n_nodes, vaabb_->data());
+
+                sccd::sort_along_axis(
+                    n_nodes, sort_axis_, vaabb_->data(), vidx_->data(), scratch_->data(), &sort_scratch_);
+                sccd::sort_along_axis(
+                    n_faces, sort_axis_, faabb_->data(), fidx_->data(), scratch_->data(), &sort_scratch_);
+                sccd::sort_along_axis(
+                    n_edges, sort_axis_, eaabb_->data(), eidx_->data(), scratch_->data(), &sort_scratch_);
             }
 
             return SCCD_SUCCESS;
@@ -475,6 +826,7 @@ namespace sccd {
                                                                         v_grid_,
                                                                         v_cellptr_.data(),
                                                                         v_cellidx_.data(),
+                                                                        v_cellbox_,
                                                                         ccdptr_->data());
 
             const ptrdiff_t n_pairs = ccdptr_->data()[n_faces];
@@ -493,9 +845,145 @@ namespace sccd {
                                                                        v_grid_,
                                                                        v_cellptr_.data(),
                                                                        v_cellidx_.data(),
+                                                                       v_cellbox_,
                                                                        ccdptr_->data(),
                                                                        f_overlap_->data(),
                                                                        v_overlap_->data());
+            return SCCD_SUCCESS;
+        }
+
+        /**
+         * \brief The edge-edge step over the minimum-corner binning.
+         *
+         * \tparam sorted Whether the cells were ordered on the third axis. The
+         * one branch that picks it is in the caller, so neither instantiation
+         * carries a test the other needs.
+         */
+        template <bool sorted>
+        int cell2dmin_ee_step_host_(const ptrdiff_t n_edges) {
+            const scalar_t* const key = sorted ? e_cell_key_.data() : nullptr;
+            const scalar_t* const hi2 = sorted ? e_cell_hi2_.data() : nullptr;
+
+            sccd::cell2dmin_count_self_overlaps<2, sorted, scalar_t, smesh::idx_t>(n_edges,
+                                                                                   eaabb_->data(),
+                                                                                   eidx_->data(),
+                                                                                   1,
+                                                                                   edges_->data(),
+                                                                                   e_grid_,
+                                                                                   e_cellptr_.data(),
+                                                                                   e_cellidx_.data(),
+                                                                                   e_cellbox_,
+                                                                                   e_row_prefix_.data(),
+                                                                                   e_cell_hi1_.data(),
+                                                                                   key,
+                                                                                   hi2,
+                                                                                   ccdptr_->data());
+
+            const ptrdiff_t n_pairs = ccdptr_->data()[n_edges];
+            e0_overlap_ = smesh::create_buffer<smesh::idx_t>(n_pairs, execution_space_);
+            e1_overlap_ = smesh::create_buffer<smesh::idx_t>(n_pairs, execution_space_);
+
+            sccd::cell2dmin_fill_self_overlaps<2, sorted, scalar_t, smesh::idx_t>(n_edges,
+                                                                                  eaabb_->data(),
+                                                                                  eidx_->data(),
+                                                                                  1,
+                                                                                  edges_->data(),
+                                                                                  e_grid_,
+                                                                                  e_cellptr_.data(),
+                                                                                  e_cellidx_.data(),
+                                                                                  e_cellbox_,
+                                                                                  e_row_prefix_.data(),
+                                                                                  e_cell_hi1_.data(),
+                                                                                  key,
+                                                                                  hi2,
+                                                                                  ccdptr_->data(),
+                                                                                  e0_overlap_->data(),
+                                                                                  e1_overlap_->data());
+            return SCCD_SUCCESS;
+        }
+
+        /**
+         * \brief The face-vertex step with the vertex kept as a segment.
+         *
+         * The cell list holds the faces, and one vertex per thread walks the
+         * cells its trajectory crosses. The pair it emits is the same shape as
+         * the box query's, so nothing downstream changes; what changes is that a
+         * pair survives only when the segment meets the face box, which is a
+         * stricter condition than the two boxes meeting.
+         */
+        template <int nxe>
+        int cell2dseg_fv_step_host_(const ptrdiff_t n_nodes) {
+            sccd::cell2dseg_count_vf_overlaps<nxe, scalar_t, smesh::idx_t>(n_nodes,
+                                                                          points_t0_->data(),
+                                                                          points_t1_->data(),
+                                                                          vidx_->data(),
+                                                                          fidx_->data(),
+                                                                          1,
+                                                                          faces_->data(),
+                                                                          f_grid_,
+                                                                          f_cellptr_.data(),
+                                                                          f_cellidx_.data(),
+                                                                          f_cellbox_,
+                                                                          ccdptr_->data());
+
+            const ptrdiff_t n_pairs = ccdptr_->data()[n_nodes];
+            f_overlap_ = smesh::create_buffer<smesh::idx_t>(n_pairs, execution_space_);
+            v_overlap_ = smesh::create_buffer<smesh::idx_t>(n_pairs, execution_space_);
+
+            sccd::cell2dseg_fill_vf_overlaps<nxe, scalar_t, smesh::idx_t>(n_nodes,
+                                                                          points_t0_->data(),
+                                                                          points_t1_->data(),
+                                                                          vidx_->data(),
+                                                                          fidx_->data(),
+                                                                          1,
+                                                                          faces_->data(),
+                                                                          f_grid_,
+                                                                          f_cellptr_.data(),
+                                                                          f_cellidx_.data(),
+                                                                          f_cellbox_,
+                                                                          ccdptr_->data(),
+                                                                          f_overlap_->data(),
+                                                                          v_overlap_->data());
+            return SCCD_SUCCESS;
+        }
+
+        template <int nxe>
+        int cell2dmin_fv_step_host_(const ptrdiff_t n_nodes) {
+            sccd::cell2dmin_count_vf_overlaps<nxe, scalar_t, smesh::idx_t>(n_nodes,
+                                                                          vaabb_->data(),
+                                                                          vidx_->data(),
+                                                                          fidx_->data(),
+                                                                          1,
+                                                                          faces_->data(),
+                                                                          f_grid_,
+                                                                          f_cellptr_.data(),
+                                                                          f_cellidx_.data(),
+                                                                          f_cellbox_,
+                                                                          f_row_prefix_.data(),
+                                                                          f_cell_hi1_.data(),
+                                                                          f_krow_,
+                                                                          ccdptr_->data());
+
+            const ptrdiff_t n_pairs = ccdptr_->data()[n_nodes];
+            f_overlap_ = smesh::create_buffer<smesh::idx_t>(n_pairs, execution_space_);
+            v_overlap_ = smesh::create_buffer<smesh::idx_t>(n_pairs, execution_space_);
+
+            sccd::cell2dmin_fill_vf_overlaps<nxe, scalar_t, smesh::idx_t>(n_nodes,
+                                                                         vaabb_->data(),
+                                                                         vidx_->data(),
+                                                                         fidx_->data(),
+                                                                         1,
+                                                                         faces_->data(),
+                                                                         f_grid_,
+                                                                         f_cellptr_.data(),
+                                                                         f_cellidx_.data(),
+                                                                         f_cellbox_,
+                                                                         f_row_prefix_.data(),
+                                                                         f_cell_hi1_.data(),
+                                                                         f_krow_,
+                                                                         ccdptr_->data(),
+                                                                         f_overlap_->data(),
+                                                                         v_overlap_->data());
             return SCCD_SUCCESS;
         }
 
@@ -510,9 +998,13 @@ namespace sccd {
             if (use_cell2d_) {
                 SMESH_TRACE_SCOPE("cell2d f2v");
                 if (element_type == smesh::TRISHELL3) {
-                    return cell2d_fv_step_host_<3>(n_faces);
+                    if (use_cell2d_min_fv_) return cell2dmin_fv_step_host_<3>(n_nodes);
+                    return use_cell2d_seg_ ? cell2dseg_fv_step_host_<3>(n_nodes)
+                                           : cell2d_fv_step_host_<3>(n_faces);
                 } else if (element_type == smesh::QUADSHELL4) {
-                    return cell2d_fv_step_host_<4>(n_faces);
+                    if (use_cell2d_min_fv_) return cell2dmin_fv_step_host_<4>(n_nodes);
+                    return use_cell2d_seg_ ? cell2dseg_fv_step_host_<4>(n_nodes)
+                                           : cell2d_fv_step_host_<4>(n_faces);
                 } else {
                     SMESH_ERROR("Unsupported CCD face element type: %s\n", smesh::type_to_string(element_type));
                     return SCCD_FAILURE;
@@ -612,6 +1104,12 @@ namespace sccd {
 
             const ptrdiff_t n_edges = e0_->size();
 
+            if (use_cell2d_min_) {
+                SMESH_TRACE_SCOPE("cell2dmin e2e");
+                return use_cell2d_min_sorted_ ? cell2dmin_ee_step_host_<true>(n_edges)
+                                              : cell2dmin_ee_step_host_<false>(n_edges);
+            }
+
             if (use_cell2d_) {
                 SMESH_TRACE_SCOPE("cell2d e2e");
 
@@ -623,6 +1121,7 @@ namespace sccd {
                                                                             e_grid_,
                                                                             e_cellptr_.data(),
                                                                             e_cellidx_.data(),
+                                                                            e_cellbox_,
                                                                             ccdptr_->data());
 
                 const ptrdiff_t n_pairs = ccdptr_->data()[n_edges];
@@ -637,6 +1136,7 @@ namespace sccd {
                                                                            e_grid_,
                                                                            e_cellptr_.data(),
                                                                            e_cellidx_.data(),
+                                                                           e_cellbox_,
                                                                            ccdptr_->data(),
                                                                            e0_overlap_->data(),
                                                                            e1_overlap_->data());
@@ -754,6 +1254,22 @@ namespace sccd {
 
         // ---- Device stage helpers --------------------------------------------
 
+#if defined(SCCD_ENABLE_CUDA)
+        // The device broad phase launches asynchronously and synchronises only at
+        // its read-backs, so a read-back is where a fault from any kernel since
+        // the last one actually lands. Its status has to be checked: dropping it
+        // leaves the destination at whatever it held before -- zero, for an
+        // overlap count -- which then sizes an empty output buffer that the
+        // collect kernel is launched over anyway, scattering through null at the
+        // offsets the count kernel wrote. The original fault is then invisible and
+        // the sticky error is reported against whichever call comes next.
+        static void check_read_back(const cudaError_t err, const char* what) {
+            if (err != cudaSuccess) {
+                SMESH_ERROR("sccd: device read-back of %s failed: %s\n", what, cudaGetErrorString(err));
+            }
+        }
+#endif
+
         int broad_phase_prep_device_() {
 #if defined(SCCD_ENABLE_CUDA)
             SMESH_TRACE_SCOPE("AABBs");
@@ -784,7 +1300,54 @@ namespace sccd {
                                             rounding_);
             }
 
-            {
+            choose_strategy_(n_nodes);
+
+            if (use_cell2d_min_sorted_ || use_cell2d_seg_) {
+                // Ordering each cell is a host kernel so far, and it loses to
+                // the unordered walk on every scene of the benchmark anyway.
+                // The segment query is a host kernel too: the device path has no
+                // branch for it, so it used to fall through to cell2d and report
+                // cell2d's pair count under the cell2dseg label -- which makes
+                // the one property that strategy exists to show, 2% to 26% fewer
+                // pairs, read as exactly none.
+                // Saying so beats running another under its name, which would
+                // put a timing against a label that did not produce it.
+                SMESH_ERROR("sccd: SCCD_BROADPHASE=%s has no device implementation yet\n",
+                            sccd::broadphase_strategy_name(timed_strategy_));
+                return SCCD_FAILURE;
+            }
+
+            if (use_cell2d_) {
+                // No sorting at all on this path, as on the host: vertices and
+                // edges are binned and faces are queried against the vertex
+                // grid. The index arrays carry the sweep's permutation if the
+                // previous step took the other strategy, so they are reset.
+                SMESH_TRACE_SCOPE("Cell list (device)");
+
+                sccd::device::fill_identity<smesh::idx_t>(n_nodes, vidx_->data());
+                sccd::device::fill_identity<smesh::idx_t>(n_faces, fidx_->data());
+                sccd::device::fill_identity<smesh::idx_t>(n_edges, eidx_->data());
+
+                // The vertex grid is what the shipped face-vertex query walks.
+                // Cell2DMinFV queries the faces instead, so it needs neither
+                // that grid nor the extent binning that builds it.
+                if (!use_cell2d_min_fv_) {
+                    bin_device_(n_nodes, vaabb_->data(), v_grid_d_, v_cellptr_d_, v_cellidx_d_,
+                                v_cursor_d_, v_ranges_d_);
+                } else {
+                    bin_min_device_(n_faces, faabb_->data(), f_grid_d_, f_cellptr_d_,
+                                    f_cellidx_d_, f_cursor_d_, f_row_prefix_d_, f_cell_hi1_d_);
+                    sccd::device::cell2dmin_max_row_span<scalar_t>(
+                        n_faces, faabb_->data(), f_grid_d_, f_krow_d_.get());
+                }
+                if (use_cell2d_min_) {
+                    bin_min_device_(n_edges, eaabb_->data(), e_grid_d_, e_cellptr_d_,
+                                    e_cellidx_d_, e_cursor_d_, e_row_prefix_d_, e_cell_hi1_d_);
+                } else {
+                    bin_device_(n_edges, eaabb_->data(), e_grid_d_, e_cellptr_d_, e_cellidx_d_,
+                                e_cursor_d_, e_ranges_d_);
+                }
+            } else {
                 SMESH_TRACE_SCOPE("Sorting AABBs (device)");
 
                 sort_axis_ = sccd::device::choose_axis(n_nodes, vaabb_->data());
@@ -805,6 +1368,99 @@ namespace sccd {
 #endif
         }
 
+#if defined(SCCD_ENABLE_CUDA)
+        /** \brief The device cell list's face-vertex step, the counterpart of
+         *         cell2d_fv_step_host_. Faces are queried against the vertex grid. */
+        template <int nxe>
+        int cell2d_fv_step_device_(const ptrdiff_t n_faces) {
+            {
+                SMESH_TRACE_SCOPE("cell2d count_overlaps");
+                sccd::device::cell2d_count_overlaps<nxe, 1, scalar_t, smesh::idx_t>(n_faces,
+                                                                                    faabb_->data(),
+                                                                                    fidx_->data(),
+                                                                                    1,
+                                                                                    faces_->data(),
+                                                                                    vaabb_->data(),
+                                                                                    vidx_->data(),
+                                                                                    0,
+                                                                                    (smesh::idx_t**)nullptr,
+                                                                                    v_grid_d_,
+                                                                                    v_cellptr_d_.get(),
+                                                                                    v_cellidx_d_.get(),
+                                                                                    ccdptr_->data());
+            }
+
+            ptrdiff_t n_pairs = 0;
+            check_read_back(
+                cudaMemcpy(&n_pairs, ccdptr_->data() + n_faces, sizeof(n_pairs), cudaMemcpyDeviceToHost),
+                "the face-vertex overlap count");
+
+            {
+                SMESH_TRACE_SCOPE("f2v allocations");
+                f_overlap_ = smesh::create_buffer<smesh::idx_t>(n_pairs, execution_space_);
+                v_overlap_ = smesh::create_buffer<smesh::idx_t>(n_pairs, execution_space_);
+            }
+
+            // An empty output buffer has a null data pointer, so the collect is
+            // only safe to launch when there is something to write.
+            if (n_pairs > 0) {
+                SMESH_TRACE_SCOPE("cell2d collect_overlaps");
+                sccd::device::cell2d_collect_overlaps<nxe, 1, scalar_t, smesh::idx_t>(n_faces,
+                                                                                      faabb_->data(),
+                                                                                      fidx_->data(),
+                                                                                      1,
+                                                                                      faces_->data(),
+                                                                                      vaabb_->data(),
+                                                                                      vidx_->data(),
+                                                                                      0,
+                                                                                      (smesh::idx_t**)nullptr,
+                                                                                      v_grid_d_,
+                                                                                      v_cellptr_d_.get(),
+                                                                                      v_cellidx_d_.get(),
+                                                                                      ccdptr_->data(),
+                                                                                      f_overlap_->data(),
+                                                                                      v_overlap_->data());
+            }
+            return SCCD_SUCCESS;
+        }
+
+        /** \brief The minimum-corner face-vertex step: the faces are binned and
+         *         the vertices walk them, one warp to a vertex. */
+        template <int nxe>
+        int cell2dmin_fv_step_device_(const ptrdiff_t n_nodes) {
+            {
+                SMESH_TRACE_SCOPE("cell2dmin count_vf_overlaps");
+                sccd::device::cell2dmin_count_vf_overlaps<nxe, scalar_t, smesh::idx_t>(
+                    n_nodes, vaabb_->data(), vidx_->data(), faabb_->data(), fidx_->data(), 1,
+                    faces_->data(), f_grid_d_, f_cellptr_d_.get(), f_cellidx_d_.get(),
+                    f_row_prefix_d_.get(), f_cell_hi1_d_.get(), f_krow_d_.get(), ccdptr_->data());
+            }
+
+            ptrdiff_t n_pairs = 0;
+            check_read_back(
+                cudaMemcpy(&n_pairs, ccdptr_->data() + n_nodes, sizeof(n_pairs), cudaMemcpyDeviceToHost),
+                "the face-vertex overlap count");
+
+            {
+                SMESH_TRACE_SCOPE("f2v allocations");
+                f_overlap_ = smesh::create_buffer<smesh::idx_t>(n_pairs, execution_space_);
+                v_overlap_ = smesh::create_buffer<smesh::idx_t>(n_pairs, execution_space_);
+            }
+
+            // An empty output buffer has a null data pointer, so the collect is
+            // only safe to launch when there is something to write.
+            if (n_pairs > 0) {
+                SMESH_TRACE_SCOPE("cell2dmin collect_vf_overlaps");
+                sccd::device::cell2dmin_collect_vf_overlaps<nxe, scalar_t, smesh::idx_t>(
+                    n_nodes, vaabb_->data(), vidx_->data(), faabb_->data(), fidx_->data(), 1,
+                    faces_->data(), f_grid_d_, f_cellptr_d_.get(), f_cellidx_d_.get(),
+                    f_row_prefix_d_.get(), f_cell_hi1_d_.get(), f_krow_d_.get(), ccdptr_->data(),
+                    f_overlap_->data(), v_overlap_->data());
+            }
+            return SCCD_SUCCESS;
+        }
+#endif
+
         int broad_phase_fv_step_device_() {
 #if defined(SCCD_ENABLE_CUDA)
             SMESH_TRACE_SCOPE("Broad_phase: F2V");
@@ -814,9 +1470,26 @@ namespace sccd {
             const ptrdiff_t n_faces = mesh_->block(0)->n_elements();
             const auto element_type = face_element_type_;
 
+            if (use_cell2d_) {
+                SMESH_TRACE_SCOPE("cell2d f2v");
+                if (element_type == smesh::TRISHELL3) {
+                    if (use_cell2d_min_fv_) return cell2dmin_fv_step_device_<3>(n_nodes);
+                    return cell2d_fv_step_device_<3>(n_faces);
+                } else if (element_type == smesh::QUADSHELL4) {
+                    if (use_cell2d_min_fv_) return cell2dmin_fv_step_device_<4>(n_nodes);
+                    return cell2d_fv_step_device_<4>(n_faces);
+                } else {
+                    SMESH_ERROR("Unsupported CCD face element type: %s\n", smesh::type_to_string(element_type));
+                    return SCCD_FAILURE;
+                }
+            }
+
             scalar_t* vaabb_max_axis = nullptr;
-            cudaMemcpy(
-                &vaabb_max_axis, vaabb_->data() + dim + sort_axis_, sizeof(vaabb_max_axis), cudaMemcpyDeviceToHost);
+            check_read_back(cudaMemcpy(&vaabb_max_axis,
+                                       vaabb_->data() + dim + sort_axis_,
+                                       sizeof(vaabb_max_axis),
+                                       cudaMemcpyDeviceToHost),
+                            "the vertex AABB row pointer");
 
             {
                 SMESH_TRACE_SCOPE("cummax");
@@ -859,10 +1532,11 @@ namespace sccd {
             }
 
             ptrdiff_t n_vertex_face_overlaps = 0;
-            cudaMemcpy(&n_vertex_face_overlaps,
-                       ccdptr_->data() + n_faces,
-                       sizeof(n_vertex_face_overlaps),
-                       cudaMemcpyDeviceToHost);
+            check_read_back(cudaMemcpy(&n_vertex_face_overlaps,
+                                       ccdptr_->data() + n_faces,
+                                       sizeof(n_vertex_face_overlaps),
+                                       cudaMemcpyDeviceToHost),
+                            "the face-vertex overlap count");
 
             {
                 SMESH_TRACE_SCOPE("f2v allocations");
@@ -870,7 +1544,9 @@ namespace sccd {
                 v_overlap_ = smesh::create_buffer<smesh::idx_t>(n_vertex_face_overlaps, execution_space_);
             }
 
-            {
+            // An empty output buffer has a null data pointer, so launching the
+            // collect over it is only safe when there is nothing to write.
+            if (n_vertex_face_overlaps > 0) {
                 SMESH_TRACE_SCOPE("collect_overlaps");
                 if (element_type == smesh::TRISHELL3) {
                     sccd::device::collect_overlaps<3, 1>(sort_axis_,
@@ -920,14 +1596,34 @@ namespace sccd {
 
             const ptrdiff_t n_edges = e0_->size();
 
-            {
+            if (use_cell2d_min_) {
+                SMESH_TRACE_SCOPE("cell2dmin count_self_overlaps");
+                sccd::device::cell2dmin_count_self_overlaps<2, scalar_t, smesh::idx_t>(
+                    n_edges, eaabb_->data(), eidx_->data(), 1, edges_->data(), e_grid_d_,
+                    e_cellptr_d_.get(), e_cellidx_d_.get(), e_row_prefix_d_.get(),
+                    e_cell_hi1_d_.get(), ccdptr_->data());
+            } else if (use_cell2d_) {
+                SMESH_TRACE_SCOPE("cell2d count_self_overlaps");
+                sccd::device::cell2d_count_self_overlaps<2, scalar_t, smesh::idx_t>(n_edges,
+                                                                                    eaabb_->data(),
+                                                                                    eidx_->data(),
+                                                                                    1,
+                                                                                    edges_->data(),
+                                                                                    e_grid_d_,
+                                                                                    e_cellptr_d_.get(),
+                                                                                    e_cellidx_d_.get(),
+                                                                                    ccdptr_->data());
+            } else {
                 SMESH_TRACE_SCOPE("count_self_overlaps");
                 sccd::device::count_self_overlaps<2>(
                     sort_axis_, n_edges, eaabb_->data(), eidx_->data(), 1, edges_->data(), ccdptr_->data());
             }
 
             ptrdiff_t n_edge_overlaps = 0;
-            cudaMemcpy(&n_edge_overlaps, ccdptr_->data() + n_edges, sizeof(n_edge_overlaps), cudaMemcpyDeviceToHost);
+            check_read_back(
+                cudaMemcpy(
+                    &n_edge_overlaps, ccdptr_->data() + n_edges, sizeof(n_edge_overlaps), cudaMemcpyDeviceToHost),
+                "the edge-edge overlap count");
 
             {
                 SMESH_TRACE_SCOPE("e2e allocations");
@@ -935,17 +1631,39 @@ namespace sccd {
                 e1_overlap_ = smesh::create_buffer<smesh::idx_t>(n_edge_overlaps, execution_space_);
             }
 
-            {
-                SMESH_TRACE_SCOPE("collect_self_overlaps");
-                sccd::device::collect_self_overlaps<2>(sort_axis_,
-                                                       n_edges,
-                                                       eaabb_->data(),
-                                                       eidx_->data(),
-                                                       1,
-                                                       edges_->data(),
-                                                       ccdptr_->data(),
-                                                       e0_overlap_->data(),
-                                                       e1_overlap_->data());
+            if (n_edge_overlaps > 0) {
+                if (use_cell2d_min_) {
+                    SMESH_TRACE_SCOPE("cell2dmin collect_self_overlaps");
+                    sccd::device::cell2dmin_collect_self_overlaps<2, scalar_t, smesh::idx_t>(
+                        n_edges, eaabb_->data(), eidx_->data(), 1, edges_->data(), e_grid_d_,
+                        e_cellptr_d_.get(), e_cellidx_d_.get(), e_row_prefix_d_.get(),
+                        e_cell_hi1_d_.get(), ccdptr_->data(), e0_overlap_->data(),
+                        e1_overlap_->data());
+                } else if (use_cell2d_) {
+                    SMESH_TRACE_SCOPE("cell2d collect_self_overlaps");
+                    sccd::device::cell2d_collect_self_overlaps<2, scalar_t, smesh::idx_t>(n_edges,
+                                                                                          eaabb_->data(),
+                                                                                          eidx_->data(),
+                                                                                          1,
+                                                                                          edges_->data(),
+                                                                                          e_grid_d_,
+                                                                                          e_cellptr_d_.get(),
+                                                                                          e_cellidx_d_.get(),
+                                                                                          ccdptr_->data(),
+                                                                                          e0_overlap_->data(),
+                                                                                          e1_overlap_->data());
+                } else {
+                    SMESH_TRACE_SCOPE("collect_self_overlaps");
+                    sccd::device::collect_self_overlaps<2>(sort_axis_,
+                                                           n_edges,
+                                                           eaabb_->data(),
+                                                           eidx_->data(),
+                                                           1,
+                                                           edges_->data(),
+                                                           ccdptr_->data(),
+                                                           e0_overlap_->data(),
+                                                           e1_overlap_->data());
+                }
             }
 
             return SCCD_SUCCESS;
@@ -1189,7 +1907,43 @@ namespace sccd {
             fidx_ = smesh::create_buffer<smesh::idx_t>(n_faces, execution_space_);
             eidx_ = smesh::create_buffer<smesh::idx_t>(n_edges, execution_space_);
             scratch_ = smesh::create_buffer<scalar_t>(std::max(n_nodes, std::max(n_faces, n_edges)), execution_space_);
-            ccdptr_ = smesh::create_buffer<ptrdiff_t>(std::max(n_faces, n_edges) + 1, execution_space_);
+            ccdptr_ = smesh::create_buffer<ptrdiff_t>(
+                std::max(n_nodes, std::max(n_faces, n_edges)) + 1, execution_space_);
+            if (execution_space_ == smesh::EXECUTION_SPACE_HOST) {
+                sort_scratch_.reserve(std::max(n_nodes, std::max(n_faces, n_edges)));
+            }
+#if defined(SCCD_ENABLE_CUDA)
+            else {
+                // The cell list's row pointer and cursor, sized for the 4n cell
+                // cap the grid setup enforces so that no step reallocates them.
+                // One-time per mesh, like everything else here, and so outside
+                // what a step is timed for.
+                // Sized for the grid's 4n cell cap, so a step reallocates
+                // nothing. One-time per mesh, and so outside what a step is
+                // timed for.
+                v_cellptr_d_.reserve(4 * n_nodes + 2);
+                v_cursor_d_.reserve(4 * n_nodes + 2);
+                v_ranges_d_.reserve(4 * n_nodes + 4);
+                e_cellptr_d_.reserve(4 * n_edges + 2);
+                e_cursor_d_.reserve(4 * n_edges + 2);
+                e_ranges_d_.reserve(4 * n_edges + 4);
+                // The minimum-corner binning holds one entry per box and two
+                // bounds per cell, and the grid is capped at four cells per box.
+                e_cellidx_d_.reserve(n_edges > 0 ? n_edges : 1);
+                e_row_prefix_d_.reserve(4 * n_edges + 1);
+                e_cell_hi1_d_.reserve(4 * n_edges + 1);
+
+                // The same again over the faces, for the vertex-face query that
+                // bins them. The vertices keep their extent binning, so nothing
+                // here replaces what is above.
+                f_cellptr_d_.reserve(4 * n_faces + 2);
+                f_cursor_d_.reserve(4 * n_faces + 2);
+                f_cellidx_d_.reserve(n_faces > 0 ? n_faces : 1);
+                f_row_prefix_d_.reserve(4 * n_faces + 1);
+                f_cell_hi1_d_.reserve(4 * n_faces + 1);
+                f_krow_d_.reserve(1);
+            }
+#endif
         }
     };
 }  // namespace sccd
