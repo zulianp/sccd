@@ -1267,13 +1267,18 @@ int main(int argc, char** argv) {
             // TightInclusion comparison only where it does not.
             const std::size_t bad = s.gt_checked ? (s.gt_missed + s.gt_late)
                                                  : (s.false_negative + s.late);
+            const bool gated = (opt.gate == "all") || (opt.gate == mode_name(mode_of(m)));
+            // Every gated query counts as examined, clean or not: counting only the
+            // violating ones made a run with no violations report that it had
+            // examined nothing, and fail.
+            if (gated) {
+                gated_queries += s.gt_checked ? s.gt_checked : s.n;
+            }
             if (bad == 0) {
                 continue;
             }
-            const bool gated = (opt.gate == "all") || (opt.gate == mode_name(mode_of(m)));
             if (gated) {
                 violations_total += bad;
-                gated_queries += s.gt_checked ? s.gt_checked : s.queries;
             }
             std::printf("  %s %s violates conservativeness on %zu queries "
                         "(%zu missed, %zu late). First few:\n",
