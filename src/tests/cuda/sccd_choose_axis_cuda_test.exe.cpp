@@ -24,7 +24,7 @@
 
 #include "sccd_broadphase.cuh"
 
-#include <cuda_runtime.h>
+#include "sccd_gpu_runtime.h"
 
 #include <cstdio>
 #include <cstdlib>

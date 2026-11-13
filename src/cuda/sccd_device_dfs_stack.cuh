@@ -3,7 +3,7 @@
 
 #include "sccd_base.hpp"
 
-#include <cuda_runtime.h>
+#include "sccd_gpu_runtime.h"
 
 /**
  * \file

@@ -36,6 +36,25 @@ the same stages, the same exact answer of `t = 0.5`. Reading them side by side
 isolates what is actually different about CUDA. It exits 0 with a message when
 no device is present.
 
+### AMD GPUs
+
+The same device sources build with HIP for AMD GPUs. Keep `SCCD_ENABLE_CUDA`,
+which turns the device path on, and add `SCCD_ENABLE_HIP`:
+
+```sh
+cmake -S . -B build -DSCCD_ENABLE_CUDA=ON -DSCCD_ENABLE_HIP=ON \
+      -DSCCD_HIP_ARCHITECTURES=gfx942 -DSCCD_HIP_WAVEFRONT_SIZE=64
+cmake --build build -j
+```
+
+`gfx942` is MI300A and MI300X. `SCCD_HIP_WAVEFRONT_SIZE` is the target's lanes
+per wavefront — 64 on CDNA (MI200, MI300), 32 on RDNA — and the build stops if it
+does not match the architecture. It needs HIP, hipCUB and rocThrust. The entry
+points and their arguments are the ones this document describes; `cuda*` calls
+in your own code map to `hip*` as usual. The smesh interface needs smesh built
+the same way, with `-DSMESH_ENABLE_CUDA=ON -DSMESH_ENABLE_HIP=ON`; configuring
+SCCD against an smesh of the other backend stops with an error.
+
 ## What an optimised build compiles
 
 A release build compiles device code at the maximum optimisation level, keeps

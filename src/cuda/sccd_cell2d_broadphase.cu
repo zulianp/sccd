@@ -8,8 +8,7 @@
 #include <cstdint>
 #include <cstdio>
 
-#include <cub/device/device_reduce.cuh>
-#include <cub/device/device_scan.cuh>
+#include "sccd_gpu_cub.cuh"
 
 #include "sccd_base.hpp"
 #include "sccd_cuda_base.cuh"
@@ -767,7 +766,7 @@ namespace sccd {
                 warp_forward_self_partner<nxe, T, I>(
                     aabbs, fi, idx, elements, element_stride, ev, grid, cellptr, cellidx,
                     row_prefix, cell_hi1, [&](const bool keep, const I) {
-                        count += __popc(__ballot_sync(0xffffffffu, keep));
+                        count += device::warp_popc(device::warp_ballot(keep));
                     });
                 // Every lane accumulated the same total, so one writes it.
                 if ((threadIdx.x & (SCCD_WARP_SIZE - 1)) == 0) ccdptr[fi + 1] = count;
@@ -792,7 +791,7 @@ namespace sccd {
                 if (fi >= element_count) return;
 
                 const unsigned lane = threadIdx.x & (SCCD_WARP_SIZE - 1);
-                const unsigned below = (1u << lane) - 1u;
+                const device::lane_mask_t below = device::lanes_below(lane);
 
                 const I idxi = idx[fi];
                 I ev[nxe];
@@ -804,13 +803,13 @@ namespace sccd {
                 warp_forward_self_partner<nxe, T, I>(
                     aabbs, fi, idx, elements, element_stride, ev, grid, cellptr, cellidx,
                     row_prefix, cell_hi1, [&](const bool keep, const I jidx) {
-                        const unsigned mask = __ballot_sync(0xffffffffu, keep);
+                        const device::lane_mask_t mask = device::warp_ballot(keep);
                         if (keep) {
-                            const ptrdiff_t w = at + (ptrdiff_t)__popc(mask & below);
+                            const ptrdiff_t w = at + (ptrdiff_t)device::warp_popc(mask & below);
                             first_out[w] = idxi < jidx ? idxi : jidx;
                             second_out[w] = idxi < jidx ? jidx : idxi;
                         }
-                        at += (ptrdiff_t)__popc(mask);
+                        at += (ptrdiff_t)device::warp_popc(mask);
                     });
             }
 
@@ -837,7 +836,7 @@ namespace sccd {
                 // One atomic per warp rather than per thread: the maximum is a
                 // single number and the whole grid contends for it.
                 for (int off = SCCD_WARP_SIZE / 2; off > 0; off >>= 1) {
-                    const int other = __shfl_down_sync(0xffffffffu, span, off);
+                    const int other = device::warp_shfl_down(span, off);
                     span = other > span ? other : span;
                 }
                 if ((threadIdx.x & (SCCD_WARP_SIZE - 1)) == 0 && span > 0) {
@@ -971,7 +970,7 @@ namespace sccd {
                     vaabbs, vi, vertex_idx[vi], faabbs, face_idx, face_elements,
                     face_element_stride, grid, cellptr, cellidx, row_prefix, cell_hi1, krow,
                     [&](const bool keep, const I) {
-                        count += __popc(__ballot_sync(0xffffffffu, keep));
+                        count += device::warp_popc(device::warp_ballot(keep));
                     });
                 // Every lane accumulated the same total, so one writes it.
                 if ((threadIdx.x & (SCCD_WARP_SIZE - 1)) == 0) ccdptr[vi + 1] = count;
@@ -999,7 +998,7 @@ namespace sccd {
                 if (vi >= vertex_count) return;
 
                 const unsigned lane = threadIdx.x & (SCCD_WARP_SIZE - 1);
-                const unsigned below = (1u << lane) - 1u;
+                const device::lane_mask_t below = device::lanes_below(lane);
 
                 const I vidx = vertex_idx[vi];
 
@@ -1010,13 +1009,13 @@ namespace sccd {
                     vaabbs, vi, vidx, faabbs, face_idx, face_elements, face_element_stride,
                     grid, cellptr, cellidx, row_prefix, cell_hi1, krow,
                     [&](const bool keep, const I jidx) {
-                        const unsigned mask = __ballot_sync(0xffffffffu, keep);
+                        const device::lane_mask_t mask = device::warp_ballot(keep);
                         if (keep) {
-                            const ptrdiff_t w = at + (ptrdiff_t)__popc(mask & below);
+                            const ptrdiff_t w = at + (ptrdiff_t)device::warp_popc(mask & below);
                             face_out[w] = jidx;
                             vertex_out[w] = vidx;
                         }
-                        at += (ptrdiff_t)__popc(mask);
+                        at += (ptrdiff_t)device::warp_popc(mask);
                     });
             }
 

@@ -51,7 +51,12 @@
 // function optimization attribute, and mixing those with always_inline makes it
 // refuse the inline outright, so there the macros stay empty and the warning
 // below is the whole defence.
-#if defined(__clang__)
+//
+// Device code is in the GCC position on both GPU backends: nvcc is not clang, and
+// clang does not support float_control when targeting AMD GPUs, so the HIP device
+// pass leaves the macros empty too. There the defence is the build itself, which
+// never passes fast-math to device compilation (see CMakeLists.txt).
+#if defined(__clang__) && !defined(__HIP_DEVICE_COMPILE__)
 #define SCCD_FP_STRICT_BEGIN         \
     _Pragma("float_control(push)")   \
     _Pragma("float_control(precise, on)")

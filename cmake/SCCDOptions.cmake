@@ -7,6 +7,14 @@ option(SCCD_ENABLE_CUDA "Enable CUDA" OFF)
 # so a kernel tuned against the default is tuned against the wrong machine.
 # 90 is GH200 (Alps), the benchmark target.
 set(SCCD_CUDA_ARCHITECTURES "90" CACHE STRING "CUDA architectures to build for")
+# AMD GPUs. With SCCD_ENABLE_CUDA, which turns the device path on, this compiles
+# the same device sources with HIP instead of CUDA. gfx942 is MI300A (Nibi).
+option(SCCD_ENABLE_HIP "Build the device path with HIP, for AMD GPUs" OFF)
+set(SCCD_HIP_ARCHITECTURES "gfx942" CACHE STRING "HIP (AMD GPU) architectures to build for")
+# Lanes per wavefront on those architectures, which launch grids are sized by on
+# the host: 64 on CDNA (gfx9: MI200, MI300), 32 on RDNA. The device compilation
+# checks it against the target.
+set(SCCD_HIP_WAVEFRONT_SIZE "64" CACHE STRING "Wavefront size of SCCD_HIP_ARCHITECTURES")
 option(SCCD_BUILD_SHARED_LIBS "Build SCCD as a shared library" ON)
 option(SCCD_ENABLE_NATIVE_ARCH "Build for the host CPU (-march=native); required for the AVX2/AVX-512 kernels" ON)
 option(SCCD_ENABLE_SPIKES "Build demoted code under spikes/ (not installed, not tested)" OFF)

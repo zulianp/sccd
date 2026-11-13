@@ -84,7 +84,7 @@
 #include "sccd_narrowphase_quad.hpp"
 #include "sccd_narrowphase_mode.hpp"
 
-#include <cuda_runtime.h>
+#include "sccd_gpu_runtime.h"
 
 #include <cmath>
 #include <cstdint>

@@ -6,5 +6,6 @@
 #cmakedefine SCCD_ENABLE_TIGHT_INCLUSION
 #cmakedefine SCCD_ENABLE_SMESH
 #cmakedefine SCCD_ENABLE_CUDA
+#cmakedefine SCCD_ENABLE_HIP
 
 #endif

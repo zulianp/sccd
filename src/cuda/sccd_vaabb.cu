@@ -1,5 +1,7 @@
 #include "sccd_vaabb.cuh"
 
+#include "sccd_gpu_runtime.h"
+
 #include <float.h>
 #include <math.h>
 #include <stdio.h>

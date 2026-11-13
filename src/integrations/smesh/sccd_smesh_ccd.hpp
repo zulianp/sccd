@@ -21,7 +21,7 @@
 #include "sccd_narrowphase_vq.cuh"
 #include "sccd_vaabb.cuh"
 
-#include <cuda_runtime_api.h>
+#include "sccd_gpu_runtime.h"
 #endif
 
 #include <algorithm>
