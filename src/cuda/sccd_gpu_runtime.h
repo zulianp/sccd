@@ -31,8 +31,10 @@
 #define cudaMemcpyHostToDevice hipMemcpyHostToDevice
 #define cudaMemcpyDeviceToHost hipMemcpyDeviceToHost
 #define cudaMemcpyDeviceToDevice hipMemcpyDeviceToDevice
-#define cudaMemcpyToSymbol hipMemcpyToSymbol
-#define cudaMemcpyFromSymbol hipMemcpyFromSymbol
+// The symbol copies take the symbol's address: with the per-thread default stream
+// (HIP_API_PER_THREAD_DEFAULT_STREAM) HIP's take nothing else, and without it they take it too.
+#define cudaMemcpyToSymbol(symbol, ...) hipMemcpyToSymbol((const void *)&(symbol), __VA_ARGS__)
+#define cudaMemcpyFromSymbol(dst, symbol, ...) hipMemcpyFromSymbol(dst, (const void *)&(symbol), __VA_ARGS__)
 #define cudaMemset hipMemset
 #define cudaMemsetAsync hipMemsetAsync
 
