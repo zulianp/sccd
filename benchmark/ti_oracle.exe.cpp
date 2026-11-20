@@ -86,6 +86,14 @@ namespace {
         // which is both slower here and the only one of the two that ignores a
         // time bound.
         bool ti_breadth_first = false;
+        // --ti-method none: run no reference. Allowed only on a set that ships
+        // its exact answers, which the gate then uses, because TightInclusion's
+        // depth-first search does not finish on some degenerate handcrafted
+        // queries of 2451/61518 (erleben-cube-cliff-edges, edge-edge).
+        bool ti_skip = false;
+        // --bench-device-only: time the device modes only. The host rows of a
+        // degenerate set (handcrafted edge-edge) take tens of minutes.
+        bool bench_device_only = false;
         // > 0 selects throughput mode: merge every query file into one batch and
         // time the device kernels with CUDA events instead of scoring accuracy.
         int bench_repeats = 0;
@@ -298,7 +306,8 @@ namespace {
                         const int max_depth,
                         const scalar_t tol,
                         const int repeats,
-                        const sccd::ToiOutput toi_output) {
+                        const sccd::ToiOutput toi_output,
+                        double* earliest_toi = nullptr) {
         DeviceQuerySet<T> dev(qs);
         cudaEvent_t beg, end;
         ORACLE_CUDA_CHECK(cudaEventCreate(&beg));
@@ -331,6 +340,14 @@ namespace {
         }
         cudaEventDestroy(beg);
         cudaEventDestroy(end);
+        // The earliest time of impact the timed runs found, so the cost can be
+        // read next to another library's: a batch whose minimum reaches 0 lets
+        // either side stop early.
+        if (earliest_toi && toi_output == sccd::ToiOutput::Earliest) {
+            T h = T(1);
+            ORACLE_CUDA_CHECK(cudaMemcpy(&h, dev.d_toi, sizeof(T), cudaMemcpyDeviceToHost));
+            *earliest_toi = static_cast<double>(h);
+        }
         return best;
     }
 #endif
@@ -497,6 +514,7 @@ namespace {
         std::size_t gt_late = 0;         // toi later than the TRUE toi -- UNSAFE
         std::size_t gt_missed = 0;       // exact root exists, mode found none -- UNSAFE
         std::size_t gt_checked = 0;      // queries with an exact root available
+        std::size_t gt_answered = 0;     // queries with only the exact yes/no answer
         double gt_worst_overshoot = 0;   // largest amount by which we ran late
         std::size_t near_zero_ref = 0;   // TI toi below REL_ERR_FLOOR
         std::size_t gt_false_negative = 0;
@@ -654,10 +672,14 @@ int main(int argc, char** argv) {
                 opt.ti_breadth_first = true;
             } else if (m == "dfs") {
                 opt.ti_breadth_first = false;
+            } else if (m == "none") {
+                opt.ti_skip = true;
             } else {
-                std::cerr << "error: --ti-method takes bfs or dfs\n";
+                std::cerr << "error: --ti-method takes bfs, dfs or none\n";
                 return 1;
             }
+        } else if (a == "--bench-device-only") {
+            opt.bench_device_only = true;
         } else if (a == "--file-begin") {
             opt.file_begin = static_cast<std::size_t>(std::stoul(next()));
         } else if (a == "--tol") {
@@ -702,7 +724,7 @@ int main(int argc, char** argv) {
 
     if (opt.dataset_dir.empty()) {
         std::cerr << "usage: ti_oracle <dataset-dir> [--phase vf|ee|both] [--max-files N]\n"
-                     "                 [--file-begin N] [--ti-method bfs|dfs]\n"
+                     "                 [--file-begin N] [--ti-method bfs|dfs|none] [--bench-device-only]\n"
                      "                 [--tol T] [--max-depth N] [--csv out.csv]\n"
                      "                 [--violations-csv out.csv] [--no-strict] [--gate MODE]\n"
 #ifdef SCCD_ENABLE_CUDA
@@ -828,7 +850,7 @@ int main(int argc, char** argv) {
             //
             // The per-query column runs TightInclusion as the accuracy table
             // does; the earliest column carries the running minimum forward.
-            {
+            if (!opt.ti_skip) {
                 struct TiConfig {
                     const char* name;
                     bool breadth_first;
@@ -908,6 +930,7 @@ int main(int argc, char** argv) {
             for (int m = 0; m < N_MODES; ++m) {
                 const Mode mode = mode_of(m);
                 const bool is_device = (mode == Mode::DeviceRelaxed || mode == Mode::DeviceTight);
+                if (opt.bench_device_only && !is_device) continue;
                 // Every mode, host and device, at both strides. The host rows are
                 // what make a device row readable: `tight` and `device-tight` run
                 // the identical search, and `relaxed` is the host counterpart of
@@ -921,17 +944,18 @@ int main(int argc, char** argv) {
 #ifdef SCCD_ENABLE_CUDA
                 if (is_device) {
                     double ms_s[2] = {0.0, 0.0};
+                    double earliest = 1.0;
                     for (int k = 0; k < 2; ++k) {
                         const sccd::ToiOutput toi_output =
                             (k == 0) ? sccd::ToiOutput::PerPair : sccd::ToiOutput::Earliest;
                         ms_s[k] = opt.device_float
                                       ? bench_device<float>(batch, phase.is_vf, opt.max_depth, opt.tol,
-                                                            opt.bench_repeats, toi_output)
+                                                            opt.bench_repeats, toi_output, &earliest)
                                       : bench_device<double>(batch, phase.is_vf, opt.max_depth, opt.tol,
-                                                             opt.bench_repeats, toi_output);
+                                                             opt.bench_repeats, toi_output, &earliest);
                     }
-                    std::printf("%-12s %12.3f %12.3f %9.2fx\n", mode_name(mode), ms_s[0], ms_s[1],
-                                ms_s[1] > 0 ? ms_s[0] / ms_s[1] : 0.0);
+                    std::printf("%-12s %12.3f %12.3f %9.2fx   earliest toi %.17g\n", mode_name(mode), ms_s[0],
+                                ms_s[1], ms_s[1] > 0 ? ms_s[0] / ms_s[1] : 0.0, earliest);
                     continue;
                 }
 #else
@@ -1016,8 +1040,15 @@ int main(int argc, char** argv) {
             // and an unused timer constant. Each query writes only its own slot.
             std::vector<double> ti_toi(qs.n_queries, 1.0);
             std::vector<std::uint8_t> ti_hit(qs.n_queries, 0);
+            if (opt.ti_skip && !have_gt) {
+                // Without a reference and without the answer nothing would be
+                // checked, and the gate would pass on an empty comparison.
+                std::cerr << "error: --ti-method none needs the dataset's exact answers, and "
+                          << key << " has none\n";
+                return 1;
+            }
             const double t_ti0 = now_seconds();
-            sccd::parallel_for_br_dynamic(0, (ptrdiff_t)qs.n_queries,
+            if (!opt.ti_skip) sccd::parallel_for_br_dynamic(0, (ptrdiff_t)qs.n_queries,
                                           [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
             for (std::size_t i = (std::size_t)rbegin; i < (std::size_t)rend; ++i) {
                 const idx_t b = static_cast<idx_t>(4 * i);
@@ -1059,7 +1090,7 @@ int main(int argc, char** argv) {
             for (std::size_t i = 0; i < qs.n_queries; ++i) {
                 ti_stats.hits += ti_hit[i] ? 1 : 0;
             }
-            if (have_gt_toi) {
+            if (have_gt_toi && !opt.ti_skip) {
                 std::vector<double> ti_early;
                 ti_early.reserve(qs.n_queries);
                 for (std::size_t i = 0; i < qs.n_queries; ++i) {
@@ -1168,6 +1199,16 @@ int main(int argc, char** argv) {
                     }
                     if (have_gt && gt[i] && !hit) stats[m].gt_false_negative += 1;
 
+                    // A dataset with the exact yes/no answer but no roots (the
+                    // handcrafted and simulation sets of 2451/61518): a collision the
+                    // answer says happens and the mode does not report is missed.
+                    if (have_gt && !have_gt_toi) {
+                        stats[m].gt_answered += 1;
+                        if (gt[i] && !hit && stats[m].violations.size() < MAX_RECORDED_VIOLATIONS) {
+                            stats[m].violations.push_back({key, i, "missed(answer)", 1.0, double(toi[i])});
+                        }
+                    }
+
                     // --- the real invariant check, against the exact root ---
                     if (have_gt_toi) {
                         const double truth = gt_toi[i];
@@ -1212,9 +1253,29 @@ int main(int argc, char** argv) {
             const double rel_p95 = Stats::quantile_of(s.rel_err, 0.95);
             const double abs_p95 = Stats::quantile_of(s.abs_err, 0.95);
             const double abs_max = Stats::max_of(s.abs_err);
-            std::printf("%-8s %9zu %8zu %6zu %6zu %6zu %8zu %8zu   %10.3e %10.3e %9.1f\n",
-                        name, s.n, s.hits, s.false_negative, s.false_positive, s.late,
-                        s.gt_missed, s.gt_late, rel_med, abs_max, s.seconds * 1e3);
+            // Against the yes/no answer alone, a miss is checkable and lateness is not.
+            const bool answer_only = !s.gt_checked && s.gt_answered;
+            char gt_late_col[24];
+            if (answer_only) {
+                std::snprintf(gt_late_col, sizeof(gt_late_col), "%s", "-");
+            } else {
+                std::snprintf(gt_late_col, sizeof(gt_late_col), "%zu", s.gt_late);
+            }
+            // Without a reference run the columns that compare with it say nothing.
+            char fn_col[24], fp_col[24], late_col[24];
+            if (opt.ti_skip) {
+                std::snprintf(fn_col, sizeof(fn_col), "-");
+                std::snprintf(fp_col, sizeof(fp_col), "-");
+                std::snprintf(late_col, sizeof(late_col), "-");
+            } else {
+                std::snprintf(fn_col, sizeof(fn_col), "%zu", s.false_negative);
+                std::snprintf(fp_col, sizeof(fp_col), "%zu", s.false_positive);
+                std::snprintf(late_col, sizeof(late_col), "%zu", s.late);
+            }
+            std::printf("%-8s %9zu %8zu %6s %6s %6s %8zu %8s   %10.3e %10.3e %9.1f\n",
+                        name, s.n, s.hits, fn_col, fp_col, late_col,
+                        answer_only ? s.gt_false_negative : s.gt_missed, gt_late_col,
+                        rel_med, abs_max, s.seconds * 1e3);
             (void)rel_p95;
             (void)abs_p95;
             char row[640];
@@ -1228,9 +1289,13 @@ int main(int argc, char** argv) {
                           s.gt_worst_overshoot, s.med_early(), s.max_early);
             csv_rows.push_back(row);
         }
-        std::printf("%-8s %9zu %8zu %6s %6s %6s   %10s %10s   %10s %10s %9.1f\n",
-                    "TI(ref)", total_queries, ti_hits, "-", "-", "-", "-", "-", "-", "-",
-                    ti_seconds * 1e3);
+        if (opt.ti_skip) {
+            std::printf("%-8s %9zu %8s   (not run: --ti-method none)\n", "TI(ref)", total_queries, "-");
+        } else {
+            std::printf("%-8s %9zu %8zu %6s %6s %6s   %10s %10s   %10s %10s %9.1f\n",
+                        "TI(ref)", total_queries, ti_hits, "-", "-", "-", "-", "-", "-", "-",
+                        ti_seconds * 1e3);
+        }
 
         // The reference goes in the CSV too: "how fast is this mode" is only
         // meaningful next to the implementation it reproduces.
@@ -1239,17 +1304,29 @@ int main(int argc, char** argv) {
             std::snprintf(row, sizeof(row),
                           "%s,%s,%s,%zu,%zu,0,0,0,0,0,0,0,0,0,0,%.6f,"
                           "%zu,%zu,%zu,%.17g,%.17g,%.17g",
-                          dataset.c_str(), phase.name, "ti-reference", total_queries, ti_hits,
+                          dataset.c_str(), phase.name, opt.ti_skip ? "ti-not-run" : "ti-reference",
+                          total_queries, ti_hits,
                           ti_seconds * 1e3, ti_stats.gt_checked, ti_stats.gt_missed,
                           ti_stats.gt_late, ti_stats.gt_worst_overshoot,
                           ti_stats.med_early(), ti_stats.max_early);
             csv_rows.push_back(row);
         }
-        std::printf("  gtMISS!/gtLATE! are measured against the dataset's exact roots and are the\n"
-                    "  real conservativeness test. FN!/lateTI compare with TightInclusion, whose\n"
-                    "  own answer is a lower bound on the truth, so lateTI over-reports.\n"
-                    "  relerr over the %zu/%zu queries with TI toi >= %g; the rest are covered by abserr.\n",
-                    stats[0].rel_err.size(), stats[0].rel_err.size() + stats[0].near_zero_ref, REL_ERR_FLOOR);
+        if (opt.ti_skip) {
+            std::printf("  gtMISS!/gtLATE! are measured against the dataset's exact answers. No\n"
+                        "  TightInclusion reference was run, so FN!/FP/lateTI and the error columns\n"
+                        "  are empty.\n");
+        } else {
+            std::printf("  gtMISS!/gtLATE! are measured against the dataset's exact roots and are the\n"
+                        "  real conservativeness test. FN!/lateTI compare with TightInclusion, whose\n"
+                        "  own answer is a lower bound on the truth, so lateTI over-reports.\n"
+                        "  relerr over the %zu/%zu queries with TI toi >= %g; the rest are covered by abserr.\n",
+                        stats[0].rel_err.size(), stats[0].rel_err.size() + stats[0].near_zero_ref, REL_ERR_FLOOR);
+        }
+        if (!stats[0].gt_checked && stats[0].gt_answered) {
+            std::printf("  This set ships the exact yes/no answer and no roots: gtMISS! counts the\n"
+                        "  collisions the answer says happen and a mode did not report, and\n"
+                        "  lateness cannot be checked (gtLATE! '-').\n");
+        }
 #ifdef SCCD_ENABLE_CUDA
         std::printf("  device rows: CUDA narrow phase in %s. 'device-relaxed' is the\n"
                     "  mode-0 kernel; 'device-tight' is mode 2, with TightInclusion's\n"
@@ -1265,14 +1342,19 @@ int main(int argc, char** argv) {
             Stats& s = stats[m];
             // Gate on the exact roots when the dataset ships them; fall back to the
             // TightInclusion comparison only where it does not.
+            // Gate on the exact roots when the dataset ships them, on the exact
+            // yes/no answer when that is all it ships, and on the TightInclusion
+            // comparison only where it has neither.
+            const bool answer_only = !s.gt_checked && s.gt_answered;
             const std::size_t bad = s.gt_checked ? (s.gt_missed + s.gt_late)
-                                                 : (s.false_negative + s.late);
+                                    : answer_only ? s.gt_false_negative
+                                                  : (s.false_negative + s.late);
             const bool gated = (opt.gate == "all") || (opt.gate == mode_name(mode_of(m)));
             // Every gated query counts as examined, clean or not: counting only the
             // violating ones made a run with no violations report that it had
             // examined nothing, and fail.
             if (gated) {
-                gated_queries += s.gt_checked ? s.gt_checked : s.n;
+                gated_queries += s.gt_checked ? s.gt_checked : answer_only ? s.gt_answered : s.n;
             }
             if (bad == 0) {
                 continue;
@@ -1283,8 +1365,8 @@ int main(int argc, char** argv) {
             std::printf("  %s %s violates conservativeness on %zu queries "
                         "(%zu missed, %zu late). First few:\n",
                         gated ? "!!" : "  ", mode_name(mode_of(m)), bad,
-                        s.gt_checked ? s.gt_missed : s.false_negative,
-                        s.gt_checked ? s.gt_late : s.late);
+                        s.gt_checked ? s.gt_missed : answer_only ? s.gt_false_negative : s.false_negative,
+                        s.gt_checked ? s.gt_late : answer_only ? 0 : s.late);
             std::size_t shown = 0;
             for (const Violation& v : s.violations) {
                 if (shown++ >= 5) break;

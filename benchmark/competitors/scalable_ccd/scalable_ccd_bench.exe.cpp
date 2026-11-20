@@ -14,6 +14,8 @@
 //     --their-ccd    <data-dir> <scene> <step>   their `cuda::ccd` on one step
 //     --buffer-probe <data-dir> <scene> <step> [<pad>]
 //                                                the curated queries, bare and padded
+//     --queries      <scene-dir>                 the narrow phase alone on a set of
+//                                                bare queries (handcrafted, cow-heads)
 //
 // Three things about the library shape the harness.
 //
@@ -54,6 +56,7 @@
 #include <Eigen/Core>
 
 #include <scalable_ccd/config.hpp>
+#include <scalable_ccd/utils/logger.hpp>
 #include <scalable_ccd/broad_phase/aabb.hpp>
 #include <scalable_ccd/broad_phase/sort_and_sweep.hpp>
 
@@ -68,10 +71,12 @@
 #include <thrust/copy.h>
 #endif
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <iostream>
 #include <limits>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -97,10 +102,13 @@ namespace {
     // makes the search non-conservative and measures a starved search.
     constexpr int kMaxIterations = -1;
 
-    // Their tolerance is a co-domain tolerance, on the inclusion function's
-    // value; SCCD's 3e-8 is a domain tolerance on (t, u, v). Different
-    // quantities with no exact conversion, so each library runs at the accuracy
-    // target its authors chose. 1e-6 is the value their tests use.
+    // Their tolerance is a co-domain tolerance on the inclusion function's
+    // value, turned into per-axis domain tolerances by TightInclusion's formula
+    // (root_finder.cu, compute_*_tolerance); SCCD's 3e-8 is the same quantity
+    // through the same formula (sccd_tolerance_ti_parity_test). Each library
+    // runs at the accuracy target its authors chose, which makes theirs 33x
+    // coarser than ours, and the article says so. 1e-6 is the value their tests
+    // use.
     constexpr double kDefaultTolerance = 1e-6;
 
     /// Overridable, so a dependence of the result on the tolerance can be tested
@@ -432,6 +440,282 @@ namespace {
         return shown ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
+    /// The narrow phase alone on a set of bare queries: the Handcrafted and
+    /// Simulation (e.g. cow-heads) sets of NYU 2451/61518, converted by
+    /// benchmark/ccd_queries_to_scene.py. They have no meshes and no broad phase,
+    /// only `queries/<key>{vf,ee}.csv` and the exact yes/no answer in
+    /// `mma_bool/<key>/mma_bool.uint8`, so each query becomes its own four
+    /// vertices and the candidate list is the queries themselves.
+    ///
+    /// One row per query file, in its own schema (there are no broad-phase or
+    /// mesh columns to fill). In the per-query build the row scores every query
+    /// against the answer -- misses are the column that matters; these sets ship
+    /// no times of impact, so lateness cannot be checked. In the default build,
+    /// the one the comparison times, the row carries the file's earliest time of
+    /// impact and the median over SCCD_COMPETITOR_REPEATS (default 5) of one
+    /// narrow-phase call on the whole file, after one warm-up. The default build
+    /// then also times each kind's queries, every file together, in one call:
+    /// the batch `ti_oracle --bench` times SCCD on, reported as best and median
+    /// of the repeats (ti_oracle reports the best) on stderr.
+    int run_queries(const fs::path& scene_dir) {
+        const fs::path qdir = scene_dir / "queries";
+        if (!fs::is_directory(qdir)) {
+            std::cerr << "error: no queries/ under " << scene_dir << "\n";
+            return EXIT_FAILURE;
+        }
+        std::vector<fs::path> files;
+        for (const auto& e : fs::directory_iterator(qdir)) {
+            const std::string n = e.path().filename().string();
+            if (n.size() > 6 && (n.rfind("vf.csv") == n.size() - 6 || n.rfind("ee.csv") == n.size() - 6)) {
+                files.push_back(e.path());
+            }
+        }
+        std::sort(files.begin(), files.end());
+
+        int repeats = 5;
+        if (const char* r = std::getenv("SCCD_COMPETITOR_REPEATS")) repeats = std::max(1, std::atoi(r));
+
+        const std::string scene = scene_dir.filename().string();
+        std::printf("dataset,mode,case,type,queries,colliding,fp,fn,s0_toi,narrow_ms\n");
+        std::uint64_t total_fn = 0, total_colliding = 0;
+        // Every file's points, per kind (0: vertex-face, 1: edge-edge), for the batch.
+        std::array<std::vector<std::array<double, 3>>, 2> all_rows;
+        for (const fs::path& file : files) {
+            const std::string key = file.stem().string();
+            const bool is_vf = key.size() >= 2 && key.compare(key.size() - 2, 2, "vf") == 0;
+
+            // Rows are num,den,num,den,num,den[,answer]; eight per query, the four
+            // points at t=0 then at t=1. Same reading as ti_oracle's.
+            std::ifstream in(file);
+            std::vector<std::array<double, 3>> rows;
+            for (std::string line; std::getline(in, line);) {
+                if (line.empty()) continue;
+                double v[6];
+                std::size_t at = 0;
+                for (int i = 0; i < 6; ++i) {
+                    const std::size_t end = line.find(',', at);
+                    v[i] = std::stod(line.substr(at, end - at));
+                    at = end + 1;
+                }
+                rows.push_back({v[0] / v[1], v[2] / v[3], v[4] / v[5]});
+            }
+            if (rows.empty() || rows.size() % 8) {
+                std::cerr << "error: " << file << " has " << rows.size() << " rows\n";
+                return EXIT_FAILURE;
+            }
+            const int n = static_cast<int>(rows.size() / 8);
+            {
+                // Both builds time the whole set as one batch per kind: the
+                // default build answers "earliest time of impact", the
+                // per-query build "a time of impact per query".
+                auto& acc = all_rows[is_vf ? 0 : 1];
+                acc.insert(acc.end(), rows.begin(), rows.end());
+            }
+
+            MeshArrays m;
+            m.V0.resize(4 * n, 3);
+            m.V1.resize(4 * n, 3);
+            for (int q = 0; q < n; ++q) {
+                for (int k = 0; k < 4; ++k) {
+                    for (int d = 0; d < 3; ++d) {
+                        m.V0(4 * q + k, d) = rows[8 * q + k][d];
+                        m.V1(4 * q + k, d) = rows[8 * q + 4 + k][d];
+                    }
+                }
+            }
+            // Vertex-face: (vertex, face) with the face's corners next. Edge-edge:
+            // two edges per query. The other index array is unused by that kind of
+            // narrow phase and gets one valid row.
+            CaseTruth truth;
+            truth.c0.resize(n);
+            truth.c1.resize(n);
+            if (is_vf) {
+                m.F.resize(n, 3);
+                m.E.resize(1, 2);
+                m.E << 0, 1;
+                for (int q = 0; q < n; ++q) {
+                    m.F.row(q) << 4 * q + 1, 4 * q + 2, 4 * q + 3;
+                    truth.c0[q] = 4 * q;
+                    truth.c1[q] = q;
+                }
+            } else {
+                m.E.resize(2 * n, 2);
+                m.F.resize(1, 3);
+                m.F << 0, 1, 2;
+                for (int q = 0; q < n; ++q) {
+                    m.E.row(2 * q) << 4 * q, 4 * q + 1;
+                    m.E.row(2 * q + 1) << 4 * q + 2, 4 * q + 3;
+                    truth.c0[q] = 2 * q;
+                    truth.c1[q] = 2 * q + 1;
+                }
+            }
+            read_raw(scene_dir / "mma_bool" / key / "mma_bool.uint8", truth.mma);
+            read_raw(scene_dir / "roots" / key / "toi.float64", truth.root_toi);
+            if (truth.mma.size() != static_cast<std::size_t>(n) && truth.root_toi.size() != static_cast<std::size_t>(n)) {
+                std::cerr << "error: no answer for every query of " << key << "\n";
+                return EXIT_FAILURE;
+            }
+
+            const DeviceMesh d(m);
+            std::vector<int2> host(n);
+            for (int q = 0; q < n; ++q) host[q] = make_int2(truth.c0[q], truth.c1[q]);
+            const thrust::device_vector<int2> pairs(host.begin(), host.end());
+
+            std::uint64_t colliding = 0;
+            for (int q = 0; q < n; ++q) {
+                colliding += (static_cast<std::size_t>(q) < truth.mma.size())
+                                 ? (truth.mma[q] != 0)
+                                 : sccd::is_finite_bits(truth.root_toi[q]);
+            }
+
+            Collisions collisions;
+            scalable_ccd::Scalar toi = 1;
+            std::vector<double> times;
+            for (int r = 0; r <= (kPerQueryBuild ? 0 : repeats); ++r) {
+                collisions.clear();
+                toi = 1;
+                auto mh = std::make_shared<scalable_ccd::cuda::MemoryHandler>();
+                cudaDeviceSynchronize();
+                const auto t = Clock::now();
+                call_narrow_phase(d, is_vf, pairs, mh, collisions, toi);
+                cudaDeviceSynchronize();
+                if (r > 0 || kPerQueryBuild) times.push_back(ms_since(t));
+            }
+            std::nth_element(times.begin(), times.begin() + times.size() / 2, times.end());
+
+            std::uint64_t fp = 0, fn = 0;
+            if (kPerQueryBuild) {
+                const Accuracy a = score(truth, scatter_to_queries(truth, collisions));
+                fp = a.fp;
+                fn = a.fn;
+            }
+            total_fn += fn;
+            total_colliding += colliding;
+            std::printf("%s,%s,%s,%s,%d,%llu,%s,%s,%.17g,%.6f\n", scene.c_str(),
+                        kPerQueryBuild ? "scalable-ccd-perquery" : "scalable-ccd", key.c_str(), is_vf ? "vf" : "ee",
+                        n, static_cast<unsigned long long>(colliding),
+                        kPerQueryBuild ? std::to_string(fp).c_str() : "",
+                        kPerQueryBuild ? std::to_string(fn).c_str() : "", static_cast<double>(toi),
+                        times[times.size() / 2]);
+            std::fflush(stdout);
+        }
+        {
+            for (int kind = 0; kind < 2; ++kind) {
+                const auto& rows = all_rows[kind];
+                if (rows.empty()) continue;
+                const bool vf = kind == 0;
+                const int n = static_cast<int>(rows.size() / 8);
+                MeshArrays m;
+                m.V0.resize(4 * n, 3);
+                m.V1.resize(4 * n, 3);
+                for (int q = 0; q < n; ++q)
+                    for (int k = 0; k < 4; ++k)
+                        for (int d = 0; d < 3; ++d) {
+                            m.V0(4 * q + k, d) = rows[8 * q + k][d];
+                            m.V1(4 * q + k, d) = rows[8 * q + 4 + k][d];
+                        }
+                std::vector<int2> host(n);
+                if (vf) {
+                    m.F.resize(n, 3);
+                    m.E.resize(1, 2);
+                    m.E << 0, 1;
+                    for (int q = 0; q < n; ++q) {
+                        m.F.row(q) << 4 * q + 1, 4 * q + 2, 4 * q + 3;
+                        host[q] = make_int2(4 * q, q);
+                    }
+                } else {
+                    m.E.resize(2 * n, 2);
+                    m.F.resize(1, 3);
+                    m.F << 0, 1, 2;
+                    for (int q = 0; q < n; ++q) {
+                        m.E.row(2 * q) << 4 * q, 4 * q + 1;
+                        m.E.row(2 * q + 1) << 4 * q + 2, 4 * q + 3;
+                        host[q] = make_int2(2 * q, 2 * q + 1);
+                    }
+                }
+                const DeviceMesh d(m);
+                // Their pipeline never hands the narrow phase more candidates
+                // than its broad phase emits per partial batch, which
+                // MemoryHandler sizes to free memory exactly this way (cuda::ccd
+                // calls these two before the broad phase). Handing it a whole
+                // set at once is not how it runs, and on cow-heads' 11.6M
+                // edge-edge queries it fails to allocate.
+                std::size_t chunk = 0;
+                {
+                    scalable_ccd::cuda::MemoryHandler probe;
+                    probe.setMemoryLimitForNarrowAndBroadPhase();
+                    probe.setOverlapSize();
+                    chunk = std::max<std::size_t>(1, probe.MAX_OVERLAP_SIZE);
+                }
+                // Their narrow phase can still fail to allocate inside one call:
+                // on overflow it checks that twice its unit buffer fits and then
+                // quadruples it (MemoryHandler::handleOverflow), which on
+                // cow-heads' edge-edge set asks for 83 GB of an 80 GB H100. That
+                // failure is reported, and the batch is retried in calls half the
+                // size until it runs, so the cost of the set is still measured.
+                std::vector<double> times;
+                scalable_ccd::Scalar toi = 1;
+                std::size_t n_collisions = 0;
+                std::size_t n_calls = 0;
+                std::size_t first_failed = 0;
+                for (;;) {
+                    std::vector<thrust::device_vector<int2>> chunks;
+                    for (std::size_t b = 0; b < host.size(); b += chunk) {
+                        const std::size_t e = std::min(host.size(), b + chunk);
+                        chunks.emplace_back(host.begin() + b, host.begin() + e);
+                    }
+                    times.clear();
+                    try {
+                        for (int r = 0; r <= repeats; ++r) {
+                            Collisions collisions;
+                            toi = 1;
+                            auto mh = std::make_shared<scalable_ccd::cuda::MemoryHandler>();
+                            cudaDeviceSynchronize();
+                            const auto t = Clock::now();
+                            // The running earliest time of impact carries from
+                            // chunk to chunk, as it does across their partial batches.
+                            for (const auto& pairs : chunks) call_narrow_phase(d, vf, pairs, mh, collisions, toi);
+                            cudaDeviceSynchronize();
+                            if (r > 0) times.push_back(ms_since(t));
+#if defined(SCALABLE_CCD_TOI_PER_QUERY)
+                            n_collisions = collisions.size();
+#endif
+                        }
+                        n_calls = chunks.size();
+                        break;
+                    } catch (const std::runtime_error& e) {
+                        cudaGetLastError();  // an allocation failure is not sticky; clear it
+                        const std::size_t largest = std::min(chunk, host.size());
+                        if (first_failed == 0) first_failed = largest;
+                        std::fprintf(stderr, "%s / %s batch: their narrow phase failed (%s) on a call of %zu queries\n",
+                                     scene.c_str(), vf ? "VF" : "EE", e.what(), largest);
+                        if (largest <= 1) throw;
+                        chunk = (largest + 1) / 2;
+                    }
+                }
+                std::sort(times.begin(), times.end());
+                char note[96] = "";
+                if (first_failed) std::snprintf(note, sizeof(note), " (after failing on calls of %zu)", first_failed);
+                char answer[96];
+                if (kPerQueryBuild) {
+                    std::snprintf(answer, sizeof(answer), "per-query build, %zu collisions returned", n_collisions);
+                } else {
+                    std::snprintf(answer, sizeof(answer), "earliest build, earliest toi %.17g",
+                                  static_cast<double>(toi));
+                }
+                std::fprintf(stderr, "%s / %s batch: %d queries in %zu call(s) of at most %zu%s, %s, "
+                             "best %.3f ms, median %.3f ms over %d repeats\n",
+                             scene.c_str(), vf ? "VF" : "EE", n, n_calls, std::min(chunk, host.size()), note,
+                             answer, times.front(), times[times.size() / 2], repeats);
+            }
+        }
+        if (kPerQueryBuild) {
+            std::fprintf(stderr, "%s: %llu of %llu colliding queries missed\n", scene.c_str(),
+                         static_cast<unsigned long long>(total_fn), static_cast<unsigned long long>(total_colliding));
+        }
+        return EXIT_SUCCESS;
+    }
+
     /// Their own entry point, called as their narrow-phase test calls it, on
     /// the same frame pair. It carries one bound from the vertex-face pass into
     /// the edge-edge pass and returns the step's earliest time of impact, which
@@ -481,6 +765,12 @@ namespace {
 int main(int argc, char** argv) {
     auto ctx = smesh::initialize(argc, argv);
 
+    // Their own log, at a level named by SCCD_COMPETITOR_LOG (trace, debug,
+    // info, warn ...), shows how their memory handler sizes each call.
+    if (const char* level = std::getenv("SCCD_COMPETITOR_LOG")) {
+        scalable_ccd::logger().set_level(spdlog::level::from_str(level));
+    }
+
     if (argc == 2 && std::string(argv[1]) == "--header") {
         std::cout << kCsvHeader << "\n";
         return EXIT_SUCCESS;
@@ -492,6 +782,15 @@ int main(int argc, char** argv) {
         return run_buffer_probe(fs::path(argv[2]), argv[3], std::atoi(argv[4]), pad, ctx->communicator());
 #else
         std::cerr << "error: --buffer-probe needs a CUDA build\n";
+        return EXIT_FAILURE;
+#endif
+    }
+
+    if (argc == 3 && std::string(argv[1]) == "--queries") {
+#if defined(SCCD_COMPETITOR_WITH_CUDA)
+        return run_queries(fs::path(argv[2]));
+#else
+        std::cerr << "error: --queries needs a CUDA build\n";
         return EXIT_FAILURE;
 #endif
     }
@@ -508,7 +807,8 @@ int main(int argc, char** argv) {
     if (argc < 3) {
         std::cerr << "usage: " << argv[0] << " <data-dir> <scene> [<scene> ...]\n"
                   << "       " << argv[0] << " --their-ccd <data-dir> <scene> <step>\n"
-                  << "       " << argv[0] << " --buffer-probe <data-dir> <scene> <step> [<pad>]\n";
+                  << "       " << argv[0] << " --buffer-probe <data-dir> <scene> <step> [<pad>]\n"
+                  << "       " << argv[0] << " --queries <scene-dir>\n";
         return EXIT_FAILURE;
     }
 
