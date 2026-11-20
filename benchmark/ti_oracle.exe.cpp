@@ -1047,7 +1047,7 @@ int main(int argc, char** argv) {
                           << key << " has none\n";
                 return 1;
             }
-                        // TightInclusion is timed first in the process; without this its first
+            // TightInclusion is timed first in the process; without this its first
             // file would pay for creating the thread team, in SCCD's favour.
             static bool thread_team_warm = false;
             if (!thread_team_warm) {

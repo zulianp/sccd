@@ -52,7 +52,7 @@ namespace {
         return type == smesh::TRI3 || type == smesh::TRISHELL3 || type == smesh::QUAD4;
     }
 
-        // steady_clock, not smesh::time_seconds: that reads high_resolution_clock,
+    // steady_clock, not smesh::time_seconds: that reads high_resolution_clock,
     // which GCC aliases to system_clock, and a wall clock can jump.
     double now_ms() {
         return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -211,7 +211,7 @@ int main(int argc, char** argv) {
     smesh::ExecutionSpace space = smesh::EXECUTION_SPACE_HOST;
     if (const char* s = getenv("SCCD_BENCH_EXECUTION_SPACE")) {
         const std::string v(s);
-                if (v == "device" || v == "cuda" || v == "gpu") {
+        if (v == "device" || v == "cuda" || v == "gpu") {
 #if defined(SCCD_ENABLE_CUDA)
             space = smesh::EXECUTION_SPACE_DEVICE;
 #else

@@ -722,7 +722,7 @@ namespace {
             return static_cast<char>(std::tolower(c));
         });
 
-                if (value == "host" || value == "cpu") {
+        if (value == "host" || value == "cpu") {
             return smesh::EXECUTION_SPACE_HOST;
         }
         if (value == "cuda" || value == "gpu" || value == "device") {
@@ -787,7 +787,7 @@ namespace {
      */
     void finish_device_work() {
 #if defined(SCCD_ENABLE_CUDA)
-                if (benchmark_execution_space() != smesh::EXECUTION_SPACE_HOST) {
+        if (benchmark_execution_space() != smesh::EXECUTION_SPACE_HOST) {
             const cudaError_t err = cudaDeviceSynchronize();
             if (err != cudaSuccess) {
                 std::cerr << "error: device work failed: " << cudaGetErrorString(err) << "\n";
@@ -1473,7 +1473,7 @@ namespace {
         const double broad_ms = broadphase.elapsed_ms;
         int narrow_err = SCCD_SUCCESS;
         if (warmup_first_case) {
-                        time_narrowphase_zero_stride(case_file.is_vf, ccd_run, narrow_err);
+            time_narrowphase_zero_stride(case_file.is_vf, ccd_run, narrow_err);
             if (narrow_err == SCCD_SUCCESS) {
                 time_narrowphase_per_query(case_file.is_vf, ccd_run, narrow_err);
             }
