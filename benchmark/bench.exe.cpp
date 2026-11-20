@@ -722,19 +722,23 @@ namespace {
             return static_cast<char>(std::tolower(c));
         });
 
+                if (value == "host" || value == "cpu") {
+            return smesh::EXECUTION_SPACE_HOST;
+        }
         if (value == "cuda" || value == "gpu" || value == "device") {
 #if defined(SCCD_ENABLE_CUDA)
             return smesh::EXECUTION_SPACE_DEVICE;
 #else
-            static bool warned = false;
-            if (!warned) {
-                std::cerr << "warning: SCCD_BENCH_EXECUTION_SPACE=" << env
-                          << " requested but SCCD was built without CUDA; using host\n";
-                warned = true;
-            }
+            // A host run under a device label would merge into the results as
+            // another host repeat, so refuse rather than fall back.
+            std::cerr << "error: SCCD_BENCH_EXECUTION_SPACE=" << env
+                      << " requested but SCCD was built without CUDA\n";
+            std::exit(2);
 #endif
         }
-        return smesh::EXECUTION_SPACE_HOST;
+        std::cerr << "error: SCCD_BENCH_EXECUTION_SPACE=" << env
+                  << " is not one of host, cpu, device, gpu, cuda\n";
+        std::exit(2);
     }
 
     // The mode name a row carries has to say which processor produced it, or a
@@ -783,8 +787,12 @@ namespace {
      */
     void finish_device_work() {
 #if defined(SCCD_ENABLE_CUDA)
-        if (benchmark_execution_space() != smesh::EXECUTION_SPACE_HOST) {
-            cudaDeviceSynchronize();
+                if (benchmark_execution_space() != smesh::EXECUTION_SPACE_HOST) {
+            const cudaError_t err = cudaDeviceSynchronize();
+            if (err != cudaSuccess) {
+                std::cerr << "error: device work failed: " << cudaGetErrorString(err) << "\n";
+                std::exit(3);
+            }
         }
 #endif
     }
@@ -1248,6 +1256,142 @@ namespace {
         return wrote;
     }
 
+    /**
+     * \brief The broad phase over the sub-steps Newton's detector is given.
+     *
+     * SCCD_BENCH_SUBSTEP_RADIUS=r splits the step's linear motion into
+     * K = ceil(d / (0.425 r)) sub-intervals, d the largest vertex displacement of
+     * the step: the count newton_bench.py --substep gives Newton at radius r, by
+     * the same formula and the same rounding slack. A radius larger than the
+     * motion gives K = 1, the whole step in one call.
+     *
+     * Each sub-interval gets what one Newton detection does: the structure is
+     * built once (broad_phase_prep) and both queries are run on it, face-vertex
+     * then edge-edge, whatever the type of the curated case, since Newton's
+     * detection answers both at every step. The three are timed apart and the row
+     * carries their sums over the K sub-intervals. Interpolating and uploading a
+     * sub-interval's positions is not timed, as Newton's position upload is not.
+     *
+     * The case's own type is checked: a colliding pair (finite exact root, or
+     * mma_bool without roots) counts as returned if any sub-interval returns it;
+     * curated pairs that do not collide need not be returned, since a
+     * sub-interval's boxes are tighter than the whole step's.
+     */
+    double substep_radius() {
+        const char* env = std::getenv("SCCD_BENCH_SUBSTEP_RADIUS");
+        return (env && env[0] != '\0') ? std::atof(env) : 0.0;
+    }
+
+    /// One detection on the current positions: prep, then both queries, each timed.
+    BroadphaseResult run_broadphase_both(CCDRun& ccd_run, double& prep_ms, double& fv_ms, double& ee_ms) {
+        BroadphaseResult result;
+        const auto timed = [&](auto&& call, double& ms) {
+            finish_device_work();
+            const auto start = std::chrono::steady_clock::now();
+            result.err = call();
+            finish_device_work();
+            ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+            return result.err == SCCD_SUCCESS;
+        };
+        timed([&] { return ccd_run.ccd->broad_phase_prep(ccd_run.points0, ccd_run.points1); }, prep_ms) &&
+            timed([&] { return ccd_run.ccd->broad_phase_fv_step(result.v_overlap, result.f_overlap); }, fv_ms) &&
+            timed([&] { return ccd_run.ccd->broad_phase_ee_step(result.e0_overlap, result.e1_overlap); }, ee_ms);
+        return result;
+    }
+
+    bool run_case_substepped(const fs::path& dataset_dir,
+                             const std::string& dataset,
+                             const CaseFile& case_file,
+                             const MeshPair& meshes,
+                             const std::vector<std::int32_t>& c0,
+                             const std::vector<std::int32_t>& c1,
+                             const std::vector<idx_t>& edge_id_map,
+                             const ExpectedPairs& expected,
+                             const smesh::ExecutionSpace execution_space,
+                             CCDRun& ccd_run,
+                             const double radius) {
+        auto x0 = smesh::astype<scalar_t>(meshes.t0->points());
+        auto x1 = smesh::astype<scalar_t>(meshes.t1->points());
+        const ptrdiff_t n = meshes.t0->n_nodes();
+        double d = 0.0;
+        for (ptrdiff_t i = 0; i < n; ++i) {
+            double s = 0.0;
+            for (int c = 0; c < 3; ++c) {
+                const double u = x1->data()[c][i] - x0->data()[c][i];
+                s += u * u;
+            }
+            d = std::max(d, std::sqrt(s));
+        }
+        const double cap = 0.85 * 0.5;  // VBD's displacement cap per detection, in units of r
+        const int K = std::max(1, (int)std::ceil(d / (cap * radius) * (1.0 - 1e-9)));
+
+        std::vector<std::uint8_t> found(expected.slots, 0);
+        double prep_ms = 0.0, fv_ms = 0.0, ee_ms = 0.0;
+        std::uint64_t returned_fv = 0, returned_ee = 0;
+        for (int k = 0; k < K; ++k) {
+            const scalar_t a = scalar_t(k) / scalar_t(K), b = scalar_t(k + 1) / scalar_t(K);
+            auto p0 = smesh::create_host_buffer<scalar_t>(3, n);
+            auto p1 = smesh::create_host_buffer<scalar_t>(3, n);
+            for (int c = 0; c < 3; ++c) {
+                const scalar_t* u = x0->data()[c];
+                const scalar_t* v = x1->data()[c];
+                for (ptrdiff_t i = 0; i < n; ++i) {
+                    p0->data()[c][i] = u[i] + a * (v[i] - u[i]);
+                    p1->data()[c][i] = (k + 1 == K) ? v[i] : u[i] + b * (v[i] - u[i]);
+                }
+            }
+            if (execution_space == smesh::EXECUTION_SPACE_DEVICE) {
+                ccd_run.points0 = smesh::to_device(p0);
+                ccd_run.points1 = smesh::to_device(p1);
+            } else {
+                ccd_run.points0 = p0;
+                ccd_run.points1 = p1;
+            }
+            double p = 0.0, f = 0.0, e = 0.0;
+            BroadphaseResult r = run_broadphase_both(ccd_run, p, f, e);
+            if (r.err != SCCD_SUCCESS) {
+                std::cerr << "error: CCD broadphase failed for " << dataset << "/" << case_file.key
+                          << " sub-step " << k << "\n";
+                return false;
+            }
+            prep_ms += p;
+            fv_ms += f;
+            ee_ms += e;
+            returned_fv += r.v_overlap->size();
+            returned_ee += r.e0_overlap->size();
+            populate_broadphase_pairs(meshes, case_file.is_vf, expected, edge_id_map, r);
+            for (std::size_t s = 0; s < found.size(); ++s) found[s] |= r.expected_found[s];
+        }
+
+        std::vector<std::uint8_t> mma;
+        const fs::path mma_path = dataset_dir / "mma_bool" / case_file.key / "mma_bool.uint8";
+        if (fs::exists(mma_path) && !read_raw(mma_path, mma)) return false;
+        std::vector<scalar_t> root_toi;
+        const fs::path root_path = dataset_dir / "roots" / case_file.key / "toi.float64";
+        if (fs::exists(root_path) && !read_raw(root_path, root_toi)) return false;
+
+        std::uint64_t colliding = 0, missed = 0;
+        for (std::size_t i = 0; i < c0.size(); ++i) {
+            const bool collides = (i < root_toi.size()) ? sccd::is_finite_bits(root_toi[i])
+                                                        : (i < mma.size() && mma[i] != 0);
+            if (!collides) continue;
+            ++colliding;
+            const std::int64_t slot = expected.index_of(pair_key(c0[i], c1[i]));
+            if (slot < 0 || !found[(std::size_t)slot]) ++missed;
+        }
+        if (missed != 0) {
+            std::cerr << "error: " << dataset << "/" << case_file.key << ": " << missed << " of " << colliding
+                      << " colliding pairs not returned in any sub-step\n";
+            g_missed_collision = true;
+        }
+        std::cout << dataset << ',' << benchmark_mode_name(execution_space) << ','
+                  << sccd::broadphase_strategy_name(sccd::broadphase_strategy_resolved()) << ',' << case_file.key
+                  << ',' << (case_file.is_vf ? "vf" : "ee") << ',' << radius << ',' << d << ',' << K << ','
+                  << prep_ms << ',' << fv_ms << ',' << ee_ms << ',' << returned_fv << ',' << returned_ee << ','
+                  << colliding << ',' << missed << '\n';
+        return true;
+    }
+
     bool run_case(const std::shared_ptr<smesh::Communicator>& comm,
                   const fs::path& dataset_dir,
                   const std::string& dataset,
@@ -1302,12 +1446,23 @@ namespace {
         ExpectedPairs broad_expected;
         broad_expected.build(c0, c1);
         const bool warmup_first_case = timings_ms.empty();
-        if (warmup_first_case) {
+        if (warmup_first_case && substep_radius() > 0.0) {
+            double p, f, e;  // both queries run on every sub-step, so both are warmed up
+            if (run_broadphase_both(ccd_run, p, f, e).err != SCCD_SUCCESS) {
+                std::cerr << "error: CCD broadphase warmup failed for " << dataset << "/" << case_file.key << "\n";
+                return false;
+            }
+        } else if (warmup_first_case) {
             BroadphaseResult warmup = run_broadphase(case_file.is_vf, ccd_run);
             if (warmup.err != SCCD_SUCCESS) {
                 std::cerr << "error: CCD broadphase warmup failed for " << dataset << "/" << case_file.key << "\n";
                 return false;
             }
+        }
+        if (const double radius = substep_radius(); radius > 0.0) {
+            timings_ms.push_back(0.0);  // marks the warm-up as done
+            return run_case_substepped(dataset_dir, dataset, case_file, meshes, c0, c1, edge_id_map,
+                                       broad_expected, execution_space, ccd_run, radius);
         }
         BroadphaseResult broadphase = run_broadphase(case_file.is_vf, ccd_run);
         if (broadphase.err != SCCD_SUCCESS) {
@@ -1318,7 +1473,10 @@ namespace {
         const double broad_ms = broadphase.elapsed_ms;
         int narrow_err = SCCD_SUCCESS;
         if (warmup_first_case) {
-            time_narrowphase_zero_stride(case_file.is_vf, ccd_run, narrow_err);
+                        time_narrowphase_zero_stride(case_file.is_vf, ccd_run, narrow_err);
+            if (narrow_err == SCCD_SUCCESS) {
+                time_narrowphase_per_query(case_file.is_vf, ccd_run, narrow_err);
+            }
             if (narrow_err != SCCD_SUCCESS) {
                 std::cerr << "error: CCD narrowphase warmup failed for " << dataset << "/" << case_file.key << "\n";
                 return false;
@@ -1400,7 +1558,12 @@ int main(int argc, char** argv) {
     if (using_global_missing_pairs_report) {
         ok = initialize_missing_pairs_report(data_dir) && ok;
     }
-    std::cout << kCsvHeader << "\n";
+    if (substep_radius() > 0.0) {
+        std::cout << "dataset,mode,broadphase,case,type,radius,max_disp,substeps,prep_ms,fv_ms,ee_ms,"
+                     "returned_fv,returned_ee,colliding,missed\n";
+    } else {
+        std::cout << kCsvHeader << "\n";
+    }
     for (int i = 2; i < argc; ++i) {
         const std::string dataset = argv[i];
         const fs::path dataset_dir = data_dir / dataset;
@@ -1416,6 +1579,9 @@ int main(int argc, char** argv) {
                  ok;
         }
 
+        if (substep_radius() > 0.0) {
+            continue;  // the per-step timing files belong to the whole-step run
+        }
         const fs::path out_dir = dataset_dir / "benchmark";
         ok = write_raw(out_dir / (dataset + "-vf.float64"), vf_timings) && ok;
         ok = write_raw(out_dir / (dataset + "-ee.float64"), ee_timings) && ok;

@@ -40,7 +40,7 @@ whose roots were computed symbolically.
 
 <!-- sccd:begin dataset -->
 
-| scene             | cases | candidate pairs/step |   queries | with a root |
+| scene             | cases | candidate pairs/case |   queries | with a root |
 |-------------------|------:|---------------------:|----------:|------------:|
 | armadillo-rollers |   781 |              109,214 |   131,441 |     130,859 |
 | cloth-ball        |    79 |            2,217,099 |   664,940 |     664,919 |

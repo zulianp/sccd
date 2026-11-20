@@ -152,7 +152,10 @@ def main(argv: list[str]) -> int:
               f"<data-dir> <scene> [scene ...]", file=sys.stderr)
         return 2
     if workers <= 0:
-        workers = os.cpu_count() or 1
+        # The CPUs this process may run on: inside a Slurm job that is the
+        # allocation, where os.cpu_count() would count the whole node.
+        workers = (len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity")
+                   else os.cpu_count()) or 1
 
     data_dir = Path(args[0])
     failures = 0
