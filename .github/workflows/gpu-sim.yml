@@ -1,0 +1,120 @@
+name: GPU Simulator
+
+# Optional, non-required check. The hosted runners have no GPU, so this builds
+# the device path and runs the CUDA tests on a simulated NVIDIA H100, and the
+# same sources built with HIP on a simulated AMD MI300X (gfx942), using
+# PantheonSim (https://github.com/pantheongpu/pantheonsim). A simulator cannot
+# reproduce hardware-specific behavior or timing, so it complements real-GPU
+# testing and does not replace it.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "src/**"
+      - "demo/cuda/**"
+      - "cmake/**"
+      - "CMakeLists.txt"
+      - ".github/workflows/gpu-sim.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  cuda-tests:
+    name: CUDA tests (CUDA 13.0 and simulated H100)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+
+      - name: Set up the simulated GPU and CUDA toolkit
+        uses: pantheongpu/setup-pantheonsim@deff5781e8adfd83dec98dd5242dcbc96a564773 # v0.1.10
+        with:
+          gpu: nvidia/h100
+          cuda-toolkit: "13.0"
+
+      # 90-virtual embeds PTX only, which the simulator runs. The simulator
+      # needs a shared CUDA runtime. -march=native is off so the build does not
+      # depend on the runner's CPU.
+      - name: Configure
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSCCD_ENABLE_CUDA=ON \
+            -DSCCD_CUDA_ARCHITECTURES=90-virtual \
+            -DCMAKE_CUDA_RUNTIME_LIBRARY=Shared \
+            -DSCCD_ENABLE_NATIVE_ARCH=OFF
+
+      - name: Build
+        run: cmake --build build -j3
+
+      # These tests print a message and exit 0 when no device is found, so a
+      # broken simulator setup would pass. Fail on that, on a simulator error
+      # and on skipped tests. ctest -V keeps the test output in the log for the check.
+      - name: Test
+        run: |
+          set -o pipefail
+          vgpu run ctest --test-dir build -V --no-tests=error \
+            -R 'cuda' 2>&1 | tee ctest.log
+          if grep -i -E 'VirtualGPU error|no (CUDA )?device|skipping|\*\*\*Skipped|Not Run' ctest.log; then
+            echo "::error::a test was skipped or no simulated device was found"
+            exit 1
+          fi
+
+  hip-tests:
+    name: HIP tests (ROCm 6.4 and simulated MI300X)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+
+      # ROCm 6.4 rather than 7.x: sccd_cuda_base.cuh checks __AMDGCN_WAVEFRONT_SIZE,
+      # which the ROCm 7 compiler no longer defines.
+      - name: Set up the simulated GPU and ROCm
+        uses: pantheongpu/setup-pantheonsim@deff5781e8adfd83dec98dd5242dcbc96a564773 # v0.1.10
+        with:
+          gpu: amd/mi300x
+          cuda-toolkit: none
+          rocm: "6.4"
+
+      # The action installs only the compiler side.
+      - name: Install the ROCm libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y hsa-rocr comgr rocm-cmake hiprand-dev rocrand-dev \
+            hipcub-dev rocprim-dev rocthrust-dev
+
+      - name: Configure
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSCCD_ENABLE_CUDA=ON \
+            -DSCCD_ENABLE_HIP=ON \
+            -DSCCD_HIP_ARCHITECTURES=gfx942 \
+            -DSCCD_ENABLE_NATIVE_ARCH=OFF \
+            -DCMAKE_HIP_COMPILER=/opt/rocm/lib/llvm/bin/clang++ \
+            -DCMAKE_PREFIX_PATH=/opt/rocm
+
+      - name: Build
+        run: cmake --build build -j3
+
+      - name: Test
+        run: |
+          set -o pipefail
+          vgpu run ctest --test-dir build -V --no-tests=error \
+            -R 'cuda' 2>&1 | tee ctest.log
+          if grep -i -E 'VirtualGPU error|no (CUDA |HIP )?device|skipping|\*\*\*Skipped|Not Run' ctest.log; then
+            echo "::error::a test was skipped or no simulated device was found"
+            exit 1
+          fi
