@@ -722,19 +722,23 @@ namespace {
             return static_cast<char>(std::tolower(c));
         });
 
+                if (value == "host" || value == "cpu") {
+            return smesh::EXECUTION_SPACE_HOST;
+        }
         if (value == "cuda" || value == "gpu" || value == "device") {
 #if defined(SCCD_ENABLE_CUDA)
             return smesh::EXECUTION_SPACE_DEVICE;
 #else
-            static bool warned = false;
-            if (!warned) {
-                std::cerr << "warning: SCCD_BENCH_EXECUTION_SPACE=" << env
-                          << " requested but SCCD was built without CUDA; using host\n";
-                warned = true;
-            }
+            // A host run under a device label would merge into the results as
+            // another host repeat, so refuse rather than fall back.
+            std::cerr << "error: SCCD_BENCH_EXECUTION_SPACE=" << env
+                      << " requested but SCCD was built without CUDA\n";
+            std::exit(2);
 #endif
         }
-        return smesh::EXECUTION_SPACE_HOST;
+        std::cerr << "error: SCCD_BENCH_EXECUTION_SPACE=" << env
+                  << " is not one of host, cpu, device, gpu, cuda\n";
+        std::exit(2);
     }
 
     // The mode name a row carries has to say which processor produced it, or a
@@ -783,8 +787,12 @@ namespace {
      */
     void finish_device_work() {
 #if defined(SCCD_ENABLE_CUDA)
-        if (benchmark_execution_space() != smesh::EXECUTION_SPACE_HOST) {
-            cudaDeviceSynchronize();
+                if (benchmark_execution_space() != smesh::EXECUTION_SPACE_HOST) {
+            const cudaError_t err = cudaDeviceSynchronize();
+            if (err != cudaSuccess) {
+                std::cerr << "error: device work failed: " << cudaGetErrorString(err) << "\n";
+                std::exit(3);
+            }
         }
 #endif
     }
@@ -1465,7 +1473,10 @@ namespace {
         const double broad_ms = broadphase.elapsed_ms;
         int narrow_err = SCCD_SUCCESS;
         if (warmup_first_case) {
-            time_narrowphase_zero_stride(case_file.is_vf, ccd_run, narrow_err);
+                        time_narrowphase_zero_stride(case_file.is_vf, ccd_run, narrow_err);
+            if (narrow_err == SCCD_SUCCESS) {
+                time_narrowphase_per_query(case_file.is_vf, ccd_run, narrow_err);
+            }
             if (narrow_err != SCCD_SUCCESS) {
                 std::cerr << "error: CCD narrowphase warmup failed for " << dataset << "/" << case_file.key << "\n";
                 return false;

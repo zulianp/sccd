@@ -1047,6 +1047,13 @@ int main(int argc, char** argv) {
                           << key << " has none\n";
                 return 1;
             }
+                        // TightInclusion is timed first in the process; without this its first
+            // file would pay for creating the thread team, in SCCD's favour.
+            static bool thread_team_warm = false;
+            if (!thread_team_warm) {
+                sccd::parallel_for_br_dynamic(0, (ptrdiff_t)qs.n_queries, [](const ptrdiff_t, const ptrdiff_t) {});
+                thread_team_warm = true;
+            }
             const double t_ti0 = now_seconds();
             if (!opt.ti_skip) sccd::parallel_for_br_dynamic(0, (ptrdiff_t)qs.n_queries,
                                           [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
