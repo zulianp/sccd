@@ -14,7 +14,7 @@ endif()
 if(SCCD_ENABLE_CUDA AND SCCD_ENABLE_HIP)
     # The device sources are compiled as HIP. Like the CUDA architectures below,
     # this must precede enable_language.
-    if(NOT DEFINED CMAKE_HIP_ARCHITECTURES)
+    if(NOT DEFINED CMAKE_HIP_ARCHITECTURES AND NOT CMAKE_HIP_PLATFORM STREQUAL "spirv")  # chipStar (Intel GPUs): none
       set(CMAKE_HIP_ARCHITECTURES "${SCCD_HIP_ARCHITECTURES}")
     endif()
 

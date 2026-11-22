@@ -3133,6 +3133,15 @@ namespace sccd {
             return 0;
         }
 
+#if defined(__HIP_PLATFORM_SPIRV__)
+        // The traversal stacks are this file's (persistent_dfs_stack is file-local): released for
+        // release_cached_memory (sccd_broadphase.cu).
+        void release_dfs_stacks() {
+            persistent_dfs_stack<float>().release();
+            persistent_dfs_stack<double>().release();
+        }
+#endif
+
     }  // namespace device
 }  // namespace sccd
 

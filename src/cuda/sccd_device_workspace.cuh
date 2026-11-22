@@ -5,6 +5,10 @@
 
 #include "sccd_cuda_base.cuh"
 
+#if defined(__HIP_PLATFORM_SPIRV__) && defined(SCCD_ENABLE_SMESH)
+#include "smesh_context.hpp"
+#endif
+
 namespace sccd {
     namespace device {
 
@@ -84,7 +88,16 @@ namespace sccd {
          */
         enum class WorkspaceSlot { TempStorage = 0, SortIndex, Scratch, Count };
 
+#if defined(__HIP_PLATFORM_SPIRV__)
+        void release_cached_memory();  // sccd_broadphase.cuh
+#endif
+
         inline DeviceWorkspace& workspace(const WorkspaceSlot slot) {
+#if defined(__HIP_PLATFORM_SPIRV__) && defined(SCCD_ENABLE_SMESH)
+            // Released at smesh::Context's teardown under chipStar (sccd_broadphase.cuh), not at exit.
+            static const bool released_at_teardown = (smesh::at_context_teardown(&release_cached_memory), true);
+            (void)released_at_teardown;
+#endif
             static DeviceWorkspace slots[static_cast<int>(WorkspaceSlot::Count)];
             return slots[static_cast<int>(slot)];
         }

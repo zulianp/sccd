@@ -617,6 +617,12 @@ namespace {
 }  // namespace
 
 int main(int argc, char** argv) {
+#if defined(__HIP_PLATFORM_SPIRV__)
+    // chipStar: the pipeline's cached device memory is freed before main returns (sccd_broadphase.cuh).
+    struct ReleaseCachedMemory {
+        ~ReleaseCachedMemory() { sccd::device::release_cached_memory(); }
+    } release_cached_memory_at_return;
+#endif
     if (const char* dump = std::getenv("SCCD_CELL2D_BOXES")) {
         const char* reps = std::getenv("SCCD_CELL2D_REPS");
         return run_from_dump(dump, reps ? std::atoi(reps) : 5);

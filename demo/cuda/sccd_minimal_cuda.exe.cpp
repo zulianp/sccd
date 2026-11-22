@@ -164,6 +164,12 @@ std::ptrdiff_t read_total(const std::ptrdiff_t* d_offsets, const std::ptrdiff_t 
 }  // namespace
 
 int main() {
+#if defined(__HIP_PLATFORM_SPIRV__)
+    // chipStar: the pipeline's cached device memory is freed before main returns (sccd_broadphase.cuh).
+    struct ReleaseCachedMemory {
+        ~ReleaseCachedMemory() { sccd::device::release_cached_memory(); }
+    } release_cached_memory_at_return;
+#endif
     int device_count = 0;
     if (cudaGetDeviceCount(&device_count) != cudaSuccess || device_count == 0) {
         std::printf("no CUDA device available; nothing to demonstrate\n");

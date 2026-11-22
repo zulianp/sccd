@@ -78,6 +78,9 @@
 // trying to construct the case.
 
 #include "sccd_narrowphase.cuh"
+#if defined(__HIP_PLATFORM_SPIRV__)
+#include "sccd_broadphase.cuh"
+#endif
 #include "sccd_narrowphase_vq.cuh"
 
 #include "sccd_narrowphase.hpp"
@@ -655,6 +658,12 @@ namespace {
 }  // namespace
 
 int main() {
+#if defined(__HIP_PLATFORM_SPIRV__)
+    // chipStar: the pipeline's cached device memory is freed before main returns (sccd_broadphase.cuh).
+    struct ReleaseCachedMemory {
+        ~ReleaseCachedMemory() { sccd::device::release_cached_memory(); }
+    } release_cached_memory_at_return;
+#endif
     // Unbuffered: this runs under ctest with stdout redirected, and a crash with
     // a full buffer loses exactly the line that says where it happened.
     setvbuf(stdout, nullptr, _IONBF, 0);

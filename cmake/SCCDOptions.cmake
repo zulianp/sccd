@@ -13,8 +13,13 @@ option(SCCD_ENABLE_HIP "Build the device path with HIP, for AMD GPUs" OFF)
 set(SCCD_HIP_ARCHITECTURES "gfx942" CACHE STRING "HIP (AMD GPU) architectures to build for")
 # Lanes per wavefront on those architectures, which launch grids are sized by on
 # the host: 64 on CDNA (gfx9: MI200, MI300), 32 on RDNA. The device compilation
-# checks it against the target.
-set(SCCD_HIP_WAVEFRONT_SIZE "64" CACHE STRING "Wavefront size of SCCD_HIP_ARCHITECTURES")
+# checks it against the target. chipStar's SPIR-V (CMAKE_HIP_PLATFORM spirv, Intel
+# GPUs) runs warps of 32.
+if(CMAKE_HIP_PLATFORM STREQUAL "spirv")
+    set(SCCD_HIP_WAVEFRONT_SIZE "32" CACHE STRING "Wavefront size of SCCD_HIP_ARCHITECTURES")
+else()
+    set(SCCD_HIP_WAVEFRONT_SIZE "64" CACHE STRING "Wavefront size of SCCD_HIP_ARCHITECTURES")
+endif()
 option(SCCD_BUILD_SHARED_LIBS "Build SCCD as a shared library" ON)
 option(SCCD_ENABLE_NATIVE_ARCH "Build for the host CPU (-march=native); required for the AVX2/AVX-512 kernels" ON)
 option(SCCD_ENABLE_SPIKES "Build demoted code under spikes/ (not installed, not tested)" OFF)

@@ -96,6 +96,12 @@ namespace {
 }  // namespace
 
 int main() {
+#if defined(__HIP_PLATFORM_SPIRV__)
+    // chipStar: the pipeline's cached device memory is freed before main returns (sccd_broadphase.cuh).
+    struct ReleaseCachedMemory {
+        ~ReleaseCachedMemory() { sccd::device::release_cached_memory(); }
+    } release_cached_memory_at_return;
+#endif
     // The probe. 200 elements against a 256-thread block leaves the last warp
     // wholly out of range, so one shared slot belongs to no active lane. The
     // spread is far wider on z than on x or y, so the answer is 2 and nothing

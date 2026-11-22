@@ -5,6 +5,10 @@
 
 #include "sccd_gpu_runtime.h"
 
+#if defined(__HIP_PLATFORM_SPIRV__) && defined(SCCD_ENABLE_SMESH)
+#include "smesh_context.hpp"
+#endif
+
 /**
  * \file
  * \brief The branch-and-bound work stack shared by the device narrow phases.
@@ -209,6 +213,14 @@ namespace sccd {
             ~PersistentDfsStack() { release(); }
 
             void release() {
+#if defined(__HIP_PLATFORM_SPIRV__)
+                // chipStar's free synchronises the device even for a null pointer, which faults after
+                // main returns: a stack released at teardown (release_cached_memory) frees nothing more.
+                if (!tlower && !tupper && !ulower && !uupper && !vlower && !vupper && !level && !qid && !counters &&
+                    !host_counters) {
+                    return;
+                }
+#endif
                 cudaFree(tlower);
                 cudaFree(tupper);
                 cudaFree(ulower);
@@ -226,8 +238,17 @@ namespace sccd {
             }
         };
 
+#if defined(__HIP_PLATFORM_SPIRV__)
+        void release_cached_memory();  // sccd_broadphase.cuh
+#endif
+
         template <typename T>
         static PersistentDfsStack<T>& persistent_dfs_stack() {
+#if defined(__HIP_PLATFORM_SPIRV__) && defined(SCCD_ENABLE_SMESH)
+            // Released at smesh::Context's teardown under chipStar (sccd_broadphase.cuh), not at exit.
+            static const bool released_at_teardown = (smesh::at_context_teardown(&release_cached_memory), true);
+            (void)released_at_teardown;
+#endif
             static PersistentDfsStack<T> stack;
             return stack;
         }
