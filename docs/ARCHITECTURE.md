@@ -56,8 +56,8 @@ speed by 2.19×, `Tight` wins cloth-ball by 1.62×, and `Tight` is 14× tighter 
 the median earliness.
 They differ in accuracy and speed, never in safety — every mode is conservative.
 
-`SCCD_NARROWPHASE_MODE` selects between them and takes `0` or `2`; any other
-value warns and runs `0`. The gap in the numbering is deliberate — the enum
+`SCCD_NARROWPHASE_MODE` selects between them and takes `0` or `2`; unset, it is
+`2` (`Tight`). `1` and `3` warn and run `0`; any other value warns and runs `2`. The gap in the numbering is deliberate — the enum
 reserves it rather than renumbering, so a value recorded in an old CSV or script
 never silently means a different kernel.
 

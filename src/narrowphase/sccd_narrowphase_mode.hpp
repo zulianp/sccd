@@ -117,7 +117,12 @@ namespace sccd {
      * Read per call rather than cached, because harnesses switch modes between
      * calls in the same process.
      *
-     * SCCD_NARROWPHASE_MODE is the one knob, and the only one.
+     * SCCD_NARROWPHASE_MODE is the one knob, and the only one. Unset, it is
+     * Tight: the mode the article measures and the tighter of the two, so a
+     * caller who sets nothing gets the accurate kernel. Relaxed accepts a box
+     * whose codomain lies within the distance tolerance, so it can report a
+     * near miss closer than about twice that tolerance as a contact; it is
+     * still conservative, but it has to be asked for.
      */
     /**
      * \brief Resolve the requested narrow-phase kernel, saying so when it cannot
@@ -166,12 +171,12 @@ namespace sccd {
                 warned_invalid = true;
                 fprintf(stderr,
                         "SCCD: ignoring SCCD_NARROWPHASE_MODE=\"%s\" -- expected 0 (Relaxed) or "
-                        "2 (Tight).\n",
+                        "2 (Tight); running the default, 2 (Tight).\n",
                         explicit_mode);
             }
         }
 
-        return NarrowPhaseMode::Relaxed;
+        return NarrowPhaseMode::Tight;
     }
 
     /**
@@ -183,8 +188,8 @@ namespace sccd {
      * comparing modes on a quad mesh would have measured the same kernel twice and
      * concluded the modes were equivalent.
      *
-     * Only a request for a non-default mode is worth a line: asking for mode 0 and
-     * getting the one kernel there is is not a surprise. A malformed value is left
+     * Only a request for a non-default mode is worth a line: asking for the
+     * default, 2, and getting the one kernel there is is not a surprise. A malformed value is left
      * alone here, since `narrow_phase_mode` has already reported it.
      */
     static inline void narrow_phase_mode_note_quads_ignore() {
@@ -194,7 +199,7 @@ namespace sccd {
         char* end = nullptr;
         const long value = strtol(explicit_mode, &end, 10);
         if (end == explicit_mode || end == nullptr || *end != '\0') return;
-        if (value <= 0 || value > 3) return;
+        if (value < 0 || value > 3 || value == static_cast<long>(NarrowPhaseMode::Tight)) return;
 
         static bool warned = false;
         if (warned) return;
