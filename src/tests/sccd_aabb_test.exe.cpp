@@ -109,6 +109,30 @@ namespace {
             }
         }
 
+        // Every call length from 1 to a full chunk, so each partial group the
+        // vector loops leave (and the AVX-512 masked tail takes) is checked, not
+        // only whatever remainder n happens to leave.
+        for (ptrdiff_t i = 0; i < std::min<ptrdiff_t>(a.n, 64); ++i) {
+            for (int len = 1; len <= SCCD_AABB_DISJOINT_CHUNK_SIZE && len <= b.n; ++len) {
+                const std::uint32_t bits = sccd::vaabb_overlap_one_to_many_bits<T>(
+                    a.lo[0][i], a.lo[1][i], a.lo[2][i], a.hi[0][i], a.hi[1][i], a.hi[2][i],
+                    b.lo[0].data(), b.lo[1].data(), b.lo[2].data(),
+                    b.hi[0].data(), b.hi[1].data(), b.hi[2].data(), len);
+                if (len < 32 && (bits >> len) != 0u) {
+                    ++mismatches;  // a lane past the call length reported
+                }
+                for (int lane = 0; lane < len; ++lane) {
+                    const bool scalar_says = sccd::disjoint<T>(
+                        a.lo[0][i], a.lo[1][i], a.lo[2][i], a.hi[0][i], a.hi[1][i], a.hi[2][i],
+                        b.lo[0][lane], b.lo[1][lane], b.lo[2][lane],
+                        b.hi[0][lane], b.hi[1][lane], b.hi[2][lane]) == 0;
+                    if ((((bits >> lane) & 1u) != 0) != scalar_says) {
+                        ++mismatches;
+                    }
+                }
+            }
+        }
+
         std::printf("  %-30s n=%-6ld overlaps=%-9lld touching=%-8lld %s\n",
                     name, (long)n, overlaps, touching,
                     mismatches ? "MISMATCH" : "ok");

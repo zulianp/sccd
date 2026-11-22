@@ -18,6 +18,16 @@
 #endif
 
 #define SCCD_AABB_DISJOINT_CHUNK_SIZE 32
+
+// AVX-512 only: test the last partial group of a one-to-many call under a lane
+// mask instead of lane by lane. Set to 0 to compare against the scalar tail.
+#ifndef SCCD_AABB_AVX512_MASKED_TAIL
+#if defined(__AVX512F__)
+#define SCCD_AABB_AVX512_MASKED_TAIL 1
+#else
+#define SCCD_AABB_AVX512_MASKED_TAIL 0
+#endif
+#endif
 #define SCCD_AABB_DISJOINT_NOVECTORIZE_THRESHOLD 16
 
 namespace sccd {
@@ -121,6 +131,24 @@ namespace sccd {
                                    _mm512_cmp_pd_mask(_mm512_loadu_pd(bminz + i), a_maxz, _CMP_GT_OQ);
                 disjoint_bits |= static_cast<uint32_t>(k) << i;
             }
+#if SCCD_AABB_AVX512_MASKED_TAIL
+            // The last partial group under a lane mask rather than one lane at a
+            // time below. A cell holds a few boxes, so on most calls this is the
+            // whole call: the loop above needs eight. Masked lanes load nothing
+            // and compare to 0, so the bits are the scalar test's.
+            if (i < count) {
+                const __mmask8 v = static_cast<__mmask8>((1u << (count - i)) - 1u);
+                const __mmask8 k =
+                    _mm512_mask_cmp_pd_mask(v, a_minx, _mm512_maskz_loadu_pd(v, bmaxx + i), _CMP_GT_OQ) |
+                    _mm512_mask_cmp_pd_mask(v, a_miny, _mm512_maskz_loadu_pd(v, bmaxy + i), _CMP_GT_OQ) |
+                    _mm512_mask_cmp_pd_mask(v, a_minz, _mm512_maskz_loadu_pd(v, bmaxz + i), _CMP_GT_OQ) |
+                    _mm512_mask_cmp_pd_mask(v, _mm512_maskz_loadu_pd(v, bminx + i), a_maxx, _CMP_GT_OQ) |
+                    _mm512_mask_cmp_pd_mask(v, _mm512_maskz_loadu_pd(v, bminy + i), a_maxy, _CMP_GT_OQ) |
+                    _mm512_mask_cmp_pd_mask(v, _mm512_maskz_loadu_pd(v, bminz + i), a_maxz, _CMP_GT_OQ);
+                disjoint_bits |= static_cast<uint32_t>(k) << i;
+                i = count;
+            }
+#endif
 #elif defined(__AVX2__)
             const __m256d a_minx = _mm256_set1_pd(aminx);
             const __m256d a_miny = _mm256_set1_pd(aminy);

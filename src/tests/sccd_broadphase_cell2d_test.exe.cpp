@@ -25,6 +25,13 @@ using idx_t = std::int32_t;
 
 namespace {
 
+#if SCCD_CELL2D_PACKED_IDS
+    // Every minimum-corner query below is run a second time with the ids packed
+    // in cell order (cell2d_pack_ids); the two must produce the same offsets and
+    // the same pairs in the same order.
+    int g_packed_mismatch = 0;
+#endif
+
     struct Boxes {
         std::vector<scalar_t> data[6];
         std::vector<idx_t> idx;
@@ -263,6 +270,32 @@ namespace {
             verts.n, verts.ptr, verts.idx.data(), faces.idx.data(), 1, faces.elem_ptr, grid,
             cellptr.data(), cellidx.data(), cellbox, row_prefix.data(), cell_hi1.data(), krow,
             ccdptr.data(), a.data(), b.data());
+#if SCCD_CELL2D_PACKED_IDS
+        {
+            std::vector<idx_t> evdata[nxe + 1];
+            idx_t* ev[nxe + 1];
+            for (int v = 0; v <= nxe; ++v) {
+                evdata[v].resize((size_t)cellptr[grid.ncells()]);
+                ev[v] = evdata[v].data();
+            }
+            sccd::cell2d_pack_ids<scalar_t, idx_t>(
+                grid, cellptr.data(), cellidx.data(), faces.idx.data(), faces.elem_ptr, 1, nxe, ev);
+            std::vector<ptrdiff_t> p2(verts.n + 1, 0);
+            sccd::cell2dmin_count_vf_overlaps<nxe, scalar_t, idx_t>(
+                verts.n, verts.ptr, verts.idx.data(), faces.idx.data(), 1, faces.elem_ptr, grid,
+                cellptr.data(), cellidx.data(), cellbox, row_prefix.data(), cell_hi1.data(), krow,
+                p2.data(), ev);
+            std::vector<idx_t> a2(p2[verts.n]), b2(p2[verts.n]);
+            sccd::cell2dmin_fill_vf_overlaps<nxe, scalar_t, idx_t>(
+                verts.n, verts.ptr, verts.idx.data(), faces.idx.data(), 1, faces.elem_ptr, grid,
+                cellptr.data(), cellidx.data(), cellbox, row_prefix.data(), cell_hi1.data(), krow,
+                p2.data(), a2.data(), b2.data(), ev);
+            if (p2 != ccdptr || a2 != a || b2 != b) {
+                std::printf("  packed ids: vertex-face pairs differ from the indirect reads\n");
+                ++g_packed_mismatch;
+            }
+        }
+#endif
         for (size_t i = 0; i < a.size(); ++i) out.insert({a[i], b[i]});
         return out;
     }
@@ -414,6 +447,30 @@ namespace {
                                                                ccdptr.data(),
                                                                a.data(),
                                                                b.data());
+#if SCCD_CELL2D_PACKED_IDS
+        {
+            std::vector<idx_t> evdata[3];
+            idx_t* ev[3];
+            for (int v = 0; v <= 2; ++v) {
+                evdata[v].resize((size_t)cellptr[grid.ncells()]);
+                ev[v] = evdata[v].data();
+            }
+            sccd::cell2d_pack_ids<scalar_t, idx_t>(
+                grid, cellptr.data(), cellidx.data(), e.idx.data(), e.elem_ptr, 1, 2, ev);
+            std::vector<ptrdiff_t> p2(e.n + 1, 0);
+            sccd::cell2dmin_count_self_overlaps<2, sorted, scalar_t, idx_t>(
+                e.n, e.ptr, e.idx.data(), 1, e.elem_ptr, grid, cellptr.data(), cellidx.data(), cellbox,
+                row_prefix.data(), cell_hi1.data(), key, hi2, p2.data(), ev);
+            std::vector<idx_t> a2(p2[e.n]), b2(p2[e.n]);
+            sccd::cell2dmin_fill_self_overlaps<2, sorted, scalar_t, idx_t>(
+                e.n, e.ptr, e.idx.data(), 1, e.elem_ptr, grid, cellptr.data(), cellidx.data(), cellbox,
+                row_prefix.data(), cell_hi1.data(), key, hi2, p2.data(), a2.data(), b2.data(), ev);
+            if (p2 != ccdptr || a2 != a || b2 != b) {
+                std::printf("  packed ids: edge-edge pairs differ from the indirect reads\n");
+                ++g_packed_mismatch;
+            }
+        }
+#endif
         for (size_t i = 0; i < a.size(); ++i) out.insert({a[i], b[i]});
         if (emitted) *emitted = (ptrdiff_t)a.size();
         return out;
@@ -1128,6 +1185,14 @@ int main() {
     bad |= run_segment_case<3>("segment: dense", 800, 1200, 4.0, 1.0, 4.0);
     bad |= run_spread_case("spread: wide queries", 700, 1800, 40.0, 0.5, 25.0, 120);
 
+#if SCCD_CELL2D_PACKED_IDS
+    if (g_packed_mismatch) {
+        std::printf("packed ids disagree with the indirect reads in %d queries\n", g_packed_mismatch);
+        bad = 1;
+    } else {
+        std::printf("packed ids agree with the indirect reads on every minimum-corner query\n");
+    }
+#endif
     std::printf("%s\n", bad ? "FAIL" : "OK: cell list and sweep agree on every case");
     return bad;
 }
