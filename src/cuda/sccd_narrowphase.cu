@@ -74,6 +74,21 @@
 #define SCCD_NP_MAX_RETRY_ROUNDS 32
 #endif
 
+// The drain loop reads its write cursor back after every launch, and once the
+// queue is empty reads the overflow counter with a second blocking copy. The
+// three counters are adjacent words, so one 12-byte copy can serve both: the
+// last cursor read already follows the last launch. On MI300A a blocking copy
+// costs tens of microseconds of host latency, paid twice per narrow-phase call
+// (vertex-face and edge-edge), so it is on by default for HIP. CUDA keeps the
+// two copies it was measured with; set it to 1 there to try it.
+#ifndef SCCD_NP_FUSED_COUNTER_READ
+#if defined(SCCD_ENABLE_HIP)
+#define SCCD_NP_FUSED_COUNTER_READ 1
+#else
+#define SCCD_NP_FUSED_COUNTER_READ 0
+#endif
+#endif
+
 // Without a bound, nvcc budgets registers for the largest block it must support
 // rather than the 128 threads these kernels are always launched with, and it is
 // free to let the register count drift between toolkit versions. Stating the
@@ -2782,12 +2797,26 @@ namespace sccd {
                     }
                     SCCD_CUDA_LAST_ERROR();
 
+#if SCCD_NP_FUSED_COUNTER_READ
+                    // The three counters are adjacent, so each read takes all of
+                    // them and the deficit check after the drain uses the copy
+                    // the last read already made. Nothing is launched between
+                    // that read and the check, so the value is the same one the
+                    // separate copy would return -- minus one blocking copy.
+                    auto read_cursor = [&](const int half) {
+                        SCCD_CHECK_CUDA(cudaMemcpy(
+                            gstack.host_counters, gstack.counters, 3 * sizeof(int), cudaMemcpyDeviceToHost));
+                        const int n = gstack.host_counters[half];
+                        return n > gstack_cap ? gstack_cap : n;
+                    };
+#else
                     auto read_cursor = [&](const int half) {
                         SCCD_CHECK_CUDA(cudaMemcpy(
                             gstack.host_counters, g_cursor[half], sizeof(int), cudaMemcpyDeviceToHost));
                         const int n = gstack.host_counters[0];
                         return n > gstack_cap ? gstack_cap : n;
                     };
+#endif
 
                     int h_g_top = read_cursor(write_half);
 
@@ -2855,9 +2884,13 @@ namespace sccd {
                     // Grow and retry the entire batch from seeds; the
                     // tighter TOIs from this attempt cut the work tree
                     // on the next pass.
+#if SCCD_NP_FUSED_COUNTER_READ
+                    const int h_g_request = gstack.host_counters[2];
+#else
                     SCCD_CHECK_CUDA(
                         cudaMemcpy(gstack.host_counters + 1, g_request, sizeof(int), cudaMemcpyDeviceToHost));
                     const int h_g_request = gstack.host_counters[1];
+#endif
                     if (h_g_request <= 0) break;
 
                     // Bound the grow-and-retry. Each round reruns the whole batch,
