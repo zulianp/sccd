@@ -29,6 +29,9 @@ struct CandidateData {
     std::vector<pair_t> ee_pairs;
     std::vector<scalar_t> vf_toi;
     std::vector<scalar_t> ee_toi;
+    // Edge endpoints as the host CCD numbers them, so a mismatching edge-edge
+    // pair can be printed with its coordinates. Host runs only.
+    std::vector<std::pair<smesh::idx_t, smesh::idx_t>> edges;
 };
 
 static std::vector<toi_pair_t> zip_and_sort(const std::vector<pair_t>& pairs, const std::vector<scalar_t>& toi) {
@@ -95,6 +98,11 @@ static CandidateData run_ccd(const std::shared_ptr<smesh::Mesh>& t0,
     copy_pairs(e0_overlap, e1_overlap, out.ee_pairs);
     copy_values(vf_toi, out.vf_toi);
     copy_values(ee_toi, out.ee_toi);
+    if (execution_space == smesh::EXECUTION_SPACE_HOST) {
+        const auto& e = ccd->edges();
+        out.edges.resize(e->extent(1));
+        for (size_t i = 0; i < out.edges.size(); ++i) out.edges[i] = {e->data()[0][i], e->data()[1][i]};
+    }
     return out;
 }
 
@@ -138,6 +146,18 @@ static int test_cuda_broadphase_matches_cpu() {
     return SMESH_TEST_SUCCESS;
 }
 
+// A mismatching pair is only useful with its geometry: print each node's position
+// at t0 and t1 in full precision so the pair can be checked offline.
+static void print_nodes(const char* label, const std::vector<smesh::idx_t>& nodes) {
+    auto p0 = g_t0->points();
+    auto p1 = g_t1->points();
+    for (const auto n : nodes) {
+        fprintf(stderr, "  %s node %lld t0 %.17g %.17g %.17g t1 %.17g %.17g %.17g\n", label, (long long)n,
+                (double)p0->data()[0][n], (double)p0->data()[1][n], (double)p0->data()[2][n],
+                (double)p1->data()[0][n], (double)p1->data()[1][n], (double)p1->data()[2][n]);
+    }
+}
+
 static int test_cuda_narrowphase_stride_one_matches_cpu() {
     SMESH_TEST_ASSERT(g_t0 != nullptr);
     SMESH_TEST_ASSERT(g_t1 != nullptr);
@@ -170,16 +190,25 @@ static int test_cuda_narrowphase_stride_one_matches_cpu() {
         SMESH_TEST_EQ(std::get<0>(cpu_vf[i]), std::get<0>(gpu_vf[i]));
         SMESH_TEST_EQ(std::get<1>(cpu_vf[i]), std::get<1>(gpu_vf[i]));
         if (std::abs(std::get<2>(cpu_vf[i]) - std::get<2>(gpu_vf[i])) > toi_tol) {
-            fprintf(
-                stderr, "VF toi mismatch at index %zu: %g vs %g\n", i, std::get<2>(cpu_vf[i]), std::get<2>(gpu_vf[i]));
+            const auto v = std::get<0>(cpu_vf[i]);
+            const auto f = std::get<1>(cpu_vf[i]);
+            fprintf(stderr, "VF toi mismatch at index %zu (vertex %lld, face %lld): CPU %.17g GPU %.17g\n", i,
+                    (long long)v, (long long)f, (double)std::get<2>(cpu_vf[i]), (double)std::get<2>(gpu_vf[i]));
+            auto faces = g_t0->block(0)->elements();
+            print_nodes("vertex", {v});
+            print_nodes("face", {faces->data()[0][f], faces->data()[1][f], faces->data()[2][f]});
         }
     }
     for (size_t i = 0; i < cpu_ee.size(); ++i) {
         SMESH_TEST_EQ(std::get<0>(cpu_ee[i]), std::get<0>(gpu_ee[i]));
         SMESH_TEST_EQ(std::get<1>(cpu_ee[i]), std::get<1>(gpu_ee[i]));
         if (std::abs(std::get<2>(cpu_ee[i]) - std::get<2>(gpu_ee[i])) > toi_tol) {
-            fprintf(
-                stderr, "EE toi mismatch at index %zu: %g vs %g\n", i, std::get<2>(cpu_ee[i]), std::get<2>(gpu_ee[i]));
+            const auto a = std::get<0>(cpu_ee[i]);
+            const auto b = std::get<1>(cpu_ee[i]);
+            fprintf(stderr, "EE toi mismatch at index %zu (edge %lld, edge %lld): CPU %.17g GPU %.17g\n", i,
+                    (long long)a, (long long)b, (double)std::get<2>(cpu_ee[i]), (double)std::get<2>(gpu_ee[i]));
+            print_nodes("edge0", {cpu.edges[a].first, cpu.edges[a].second});
+            print_nodes("edge1", {cpu.edges[b].first, cpu.edges[b].second});
         }
     }
 
