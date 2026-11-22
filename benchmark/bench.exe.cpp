@@ -797,10 +797,34 @@ namespace {
 #endif
     }
 
+    /**
+     * SCCD_BENCH_PREP_WARMUP=1 builds the broad-phase structure once, untimed,
+     * before the timed build of every case.
+     *
+     * This driver creates a CCD per case, so without it the timed prep is the
+     * first write to that CCD's buffers and pays a page fault per page of them.
+     * A simulation keeps one CCD and pays that once. On 4 KB pages (x86) this
+     * was most of the measured prep: puffer-ball on one EPYC 9655 NUMA domain
+     * took 6.8-11.7 s with 34-46 million faults, and 4.7 s once the memory was
+     * already mapped. Grace runs 64 KB pages and pays a sixteenth of the faults.
+     * Off by default so earlier measurements keep their meaning; the article's
+     * harness turns it on.
+     */
+    bool prep_warmup() {
+        const char* env = std::getenv("SCCD_BENCH_PREP_WARMUP");
+        return env != nullptr && env[0] != '\0' && env[0] != '0';
+    }
+
     BroadphaseResult run_broadphase(const bool is_vf, CCDRun& ccd_run) {
         SMESH_TRACE_SCOPE("benchmark broadphase");
 
         BroadphaseResult result;
+        if (prep_warmup()) {
+            result.err = ccd_run.ccd->broad_phase_prep(ccd_run.points0, ccd_run.points1);
+            if (result.err != SCCD_SUCCESS) {
+                return result;
+            }
+        }
         finish_device_work();
         auto start = std::chrono::steady_clock::now();
         result.err = ccd_run.ccd->broad_phase_prep(ccd_run.points0, ccd_run.points1);
@@ -1293,6 +1317,9 @@ namespace {
             ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
             return result.err == SCCD_SUCCESS;
         };
+        if (prep_warmup() && (result.err = ccd_run.ccd->broad_phase_prep(ccd_run.points0, ccd_run.points1)) != SCCD_SUCCESS) {
+            return result;
+        }
         timed([&] { return ccd_run.ccd->broad_phase_prep(ccd_run.points0, ccd_run.points1); }, prep_ms) &&
             timed([&] { return ccd_run.ccd->broad_phase_fv_step(result.v_overlap, result.f_overlap); }, fv_ms) &&
             timed([&] { return ccd_run.ccd->broad_phase_ee_step(result.e0_overlap, result.e1_overlap); }, ee_ms);
