@@ -16,6 +16,45 @@
 
 #define SCCD_C2D_N_WARPS_PER_BLOCK 8
 
+// The four warp-per-box launches (self count and collect, vertex-face count and
+// collect) give every box a whole warp, so their grid holds 32 or 64 times as
+// many threads as there are boxes. HIP bounds a grid dimension by its
+// work-items, gridDim.x * blockDim.x < 2^32, and a 64-wide wavefront crosses it
+// past 2^32 / 64 = 67M boxes: cloth-ball refined to level 5 (94M faces, 141M
+// edges) failed its self-overlap count with "invalid configuration argument" on an
+// MI300A. Set, such a launch spills into gridDim.y and those kernels number
+// their warps over both dimensions. CUDA bounds blocks instead (2^31 - 1 in x),
+// which a warp-per-box launch reaches only past 17 billion boxes, so the CUDA
+// build keeps its one-dimensional launch and the H100's kernels are unchanged.
+#ifndef SCCD_C2D_WARP_GRID_2D
+#if defined(SCCD_ENABLE_HIP)
+#define SCCD_C2D_WARP_GRID_2D 1
+#else
+#define SCCD_C2D_WARP_GRID_2D 0
+#endif
+#endif
+#if SCCD_C2D_WARP_GRID_2D
+// The most work-items a launch puts in x. Only a test lowers it, so that small
+// inputs take the two-dimensional path.
+#ifndef SCCD_C2D_WARP_GRID_MAX_ITEMS
+#define SCCD_C2D_WARP_GRID_MAX_ITEMS ((((ptrdiff_t)1) << 32) - 1)
+#endif
+// A warp-per-box kernel's thread index over both grid dimensions.
+#define SCCD_C2D_WARP_TID() \
+    (((ptrdiff_t)blockIdx.y * gridDim.x + blockIdx.x) * (ptrdiff_t)blockDim.x + threadIdx.x)
+// The grid of a warp-per-box launch over n boxes: one dimension while it fits,
+// else as many rows of the widest x as it takes. The kernels return for a warp
+// past n, so the last row's surplus does nothing.
+static inline dim3 sccd_c2d_warp_grid(const ptrdiff_t n, const unsigned block) {
+    const ptrdiff_t blocks = (n * SCCD_WARP_SIZE + block - 1) / block;
+    const ptrdiff_t max_x = SCCD_C2D_WARP_GRID_MAX_ITEMS / block;
+    if (blocks <= max_x) return dim3((unsigned)blocks);
+    return dim3((unsigned)max_x, (unsigned)((blocks + max_x - 1) / max_x));
+}
+#else
+#define SCCD_C2D_WARP_TID() ((ptrdiff_t)blockIdx.x * blockDim.x + threadIdx.x)
+#endif
+
 // The box arrays reach this file as a device table of row pointers (T** in
 // device memory), and soa_device_row copies that table back to the host for
 // every row it is asked for: a blocking 48-byte device-to-host copy, two to six
@@ -873,7 +912,7 @@ namespace sccd {
                                                   const T* const SCCD_RESTRICT row_prefix,
                                                   const T* const SCCD_RESTRICT cell_hi1,
                                                   ptrdiff_t* const SCCD_RESTRICT ccdptr) {
-                const ptrdiff_t tid = (ptrdiff_t)blockIdx.x * blockDim.x + threadIdx.x;
+                const ptrdiff_t tid = SCCD_C2D_WARP_TID();
                 const ptrdiff_t fi = tid / SCCD_WARP_SIZE;
                 if (tid == 0) ccdptr[0] = 0;
                 // Uniform over the warp, so the whole warp leaves together and
@@ -907,7 +946,7 @@ namespace sccd {
                                                     const ptrdiff_t* const SCCD_RESTRICT ccdptr,
                                                     I* const SCCD_RESTRICT first_out,
                                                     I* const SCCD_RESTRICT second_out) {
-                const ptrdiff_t tid = (ptrdiff_t)blockIdx.x * blockDim.x + threadIdx.x;
+                const ptrdiff_t tid = SCCD_C2D_WARP_TID();
                 const ptrdiff_t fi = tid / SCCD_WARP_SIZE;
                 if (fi >= element_count) return;
 
@@ -1079,7 +1118,7 @@ namespace sccd {
                                                 const T* const SCCD_RESTRICT cell_hi1,
                                                 const int* const SCCD_RESTRICT krow,
                                                 ptrdiff_t* const SCCD_RESTRICT ccdptr) {
-                const ptrdiff_t tid = (ptrdiff_t)blockIdx.x * blockDim.x + threadIdx.x;
+                const ptrdiff_t tid = SCCD_C2D_WARP_TID();
                 const ptrdiff_t vi = tid / SCCD_WARP_SIZE;
                 if (tid == 0) ccdptr[0] = 0;
                 // Uniform over the warp, so the whole warp leaves together and
@@ -1114,7 +1153,7 @@ namespace sccd {
                                                   const ptrdiff_t* const SCCD_RESTRICT ccdptr,
                                                   I* const SCCD_RESTRICT face_out,
                                                   I* const SCCD_RESTRICT vertex_out) {
-                const ptrdiff_t tid = (ptrdiff_t)blockIdx.x * blockDim.x + threadIdx.x;
+                const ptrdiff_t tid = SCCD_C2D_WARP_TID();
                 const ptrdiff_t vi = tid / SCCD_WARP_SIZE;
                 if (vi >= vertex_count) return;
 
@@ -1565,7 +1604,11 @@ namespace sccd {
             }
             dim3 block(SCCD_C2D_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
             // One warp to a box, so the launch is sized in warps.
+#if SCCD_C2D_WARP_GRID_2D
+            const dim3 gridsz = sccd_c2d_warp_grid(element_count, block.x);
+#else
             dim3 gridsz((element_count * SCCD_WARP_SIZE + block.x - 1) / block.x);
+#endif
             detail::min_count_self_kernel<nxe, T, I><<<gridsz, block>>>(
                 element_count, aabbs, idx, element_stride, elements, grid, cellptr, cellidx,
                 row_prefix, cell_hi1, ccdptr);
@@ -1589,7 +1632,11 @@ namespace sccd {
                                              I* const SCCD_RESTRICT second_out) {
             if (element_count <= 0) return;
             dim3 block(SCCD_C2D_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
+#if SCCD_C2D_WARP_GRID_2D
+            const dim3 gridsz = sccd_c2d_warp_grid(element_count, block.x);
+#else
             dim3 gridsz((element_count * SCCD_WARP_SIZE + block.x - 1) / block.x);
+#endif
             detail::min_collect_self_kernel<nxe, T, I><<<gridsz, block>>>(
                 element_count, aabbs, idx, element_stride, elements, grid, cellptr, cellidx,
                 row_prefix, cell_hi1, ccdptr, first_out, second_out);
@@ -1637,7 +1684,11 @@ namespace sccd {
             }
             dim3 block(SCCD_C2D_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
             // One warp to a vertex, so the launch is sized in warps.
+#if SCCD_C2D_WARP_GRID_2D
+            const dim3 gridsz = sccd_c2d_warp_grid(vertex_count, block.x);
+#else
             dim3 gridsz((vertex_count * SCCD_WARP_SIZE + block.x - 1) / block.x);
+#endif
             detail::min_count_vf_kernel<S, T, I><<<gridsz, block>>>(
                 vertex_count, vaabbs, vertex_idx, faabbs, face_idx, face_element_stride,
                 face_elements, grid, cellptr, cellidx, row_prefix, cell_hi1, krow, ccdptr);
@@ -1664,7 +1715,11 @@ namespace sccd {
                                            I* const SCCD_RESTRICT vertex_out) {
             if (vertex_count <= 0) return;
             dim3 block(SCCD_C2D_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
+#if SCCD_C2D_WARP_GRID_2D
+            const dim3 gridsz = sccd_c2d_warp_grid(vertex_count, block.x);
+#else
             dim3 gridsz((vertex_count * SCCD_WARP_SIZE + block.x - 1) / block.x);
+#endif
             detail::min_collect_vf_kernel<S, T, I><<<gridsz, block>>>(
                 vertex_count, vaabbs, vertex_idx, faabbs, face_idx, face_element_stride,
                 face_elements, grid, cellptr, cellidx, row_prefix, cell_hi1, krow, ccdptr,
