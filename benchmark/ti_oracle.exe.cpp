@@ -148,6 +148,49 @@ namespace {
     }
 
     /**
+     * SCCD_BENCH_PREP_WARMUP=1, as in sccd_bench: the device buffers of a query
+     * set come from a grow-only pool instead of a cudaMalloc and cudaFree each
+     * per file, as a simulation that keeps its buffers has them. The upload
+     * itself is still timed. The fourteen allocations and frees per file cost
+     * about 0.8 ms on a GH200, against files of a few hundred queries. Off by
+     * default, so earlier measurements keep their meaning.
+     */
+    inline bool reuse_device_buffers() {
+        static const bool on = [] {
+            const char* s = std::getenv("SCCD_BENCH_PREP_WARMUP");
+            return s != nullptr && s[0] != '\0' && s[0] != '0';
+        }();
+        return on;
+    }
+
+    /** \brief Pooled device buffer `slot`, grown to at least `bytes` and kept for the process. */
+    inline void* device_slot(const int slot, const std::size_t bytes) {
+        struct Slot {
+            void* ptr = nullptr;
+            std::size_t bytes = 0;
+        };
+        static Slot slots[16];
+        Slot& s = slots[slot];
+        if (s.bytes < bytes) {
+            if (s.ptr) ORACLE_CUDA_CHECK(cudaFree(s.ptr));
+            s.ptr = nullptr;
+            ORACLE_CUDA_CHECK(cudaMalloc(&s.ptr, bytes));
+            s.bytes = bytes;
+        }
+        return s.ptr;
+    }
+
+    /** \brief device_dup, or a copy into pooled slot `slot` when buffers are reused. */
+    template <typename T>
+    T* device_put(const int slot, const T* host, const std::size_t n) {
+        if (!reuse_device_buffers()) return device_dup(host, n);
+        if (n == 0) return nullptr;
+        T* dev = static_cast<T*>(device_slot(slot, n * sizeof(T)));
+        ORACLE_CUDA_CHECK(cudaMemcpy(dev, host, n * sizeof(T), cudaMemcpyHostToDevice));
+        return dev;
+    }
+
+    /**
      * \brief A QuerySet mirrored into device memory, in the layout the kernels want.
      *
      * The device narrow phase takes the coordinate and connectivity arrays as
@@ -177,26 +220,32 @@ namespace {
             // run cannot separate "the kernel rejected a box it should have kept"
             // from "the rounded geometry genuinely moved the root".
             std::vector<T> tmp;
-            auto upload = [&](const std::vector<scalar_t>& src) {
+            auto upload = [&](const int slot, const std::vector<scalar_t>& src) {
                 tmp.assign(src.begin(), src.end());
-                return device_dup(tmp.data(), tmp.size());
+                return device_put(slot, tmp.data(), tmp.size());
             };
             for (int d = 0; d < 3; ++d) {
-                p0[d] = upload(qs.p0[d]);
-                p1[d] = upload(qs.p1[d]);
+                p0[d] = upload(d, qs.p0[d]);
+                p1[d] = upload(3 + d, qs.p1[d]);
                 // Edge-edge leaves the third slot empty; it is never read, but the
                 // outer array still has to be three wide.
-                prim[d] = qs.prim[d].empty() ? nullptr : device_dup(qs.prim[d].data(), qs.prim[d].size());
+                prim[d] = qs.prim[d].empty() ? nullptr : device_put(6 + d, qs.prim[d].data(), qs.prim[d].size());
             }
-            d_p0 = device_dup(p0, 3);
-            d_p1 = device_dup(p1, 3);
-            d_prim = device_dup(prim, 3);
-            d_q0 = device_dup(qs.q0.data(), qs.q0.size());
-            d_q1 = device_dup(qs.q1.data(), qs.q1.size());
-            ORACLE_CUDA_CHECK(cudaMalloc(&d_toi, sccd::max<std::size_t>(n_queries, 1) * sizeof(T)));
+            d_p0 = device_put(9, p0, 3);
+            d_p1 = device_put(10, p1, 3);
+            d_prim = device_put(11, prim, 3);
+            d_q0 = device_put(12, qs.q0.data(), qs.q0.size());
+            d_q1 = device_put(13, qs.q1.data(), qs.q1.size());
+            const std::size_t toi_bytes = sccd::max<std::size_t>(n_queries, 1) * sizeof(T);
+            if (reuse_device_buffers()) {
+                d_toi = static_cast<T*>(device_slot(14, toi_bytes));
+            } else {
+                ORACLE_CUDA_CHECK(cudaMalloc(&d_toi, toi_bytes));
+            }
         }
 
         ~DeviceQuerySet() {
+            if (reuse_device_buffers()) return;  // the pool owns them
             for (int d = 0; d < 3; ++d) {
                 cudaFree(p0[d]);
                 cudaFree(p1[d]);
