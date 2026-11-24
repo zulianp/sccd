@@ -2476,10 +2476,8 @@ namespace sccd {
             //
             // Any of these can be overridden via the matching env var.
             // ----------------------------------------------------------------
-            int dev = 0;
-            cudaGetDevice(&dev);
-            cudaDeviceProp prop{};
-            cudaGetDeviceProperties(&prop, dev);
+            // Cached: see device_properties() for why it is not queried per call.
+            const cudaDeviceProp& prop = device_properties();
 
             constexpr int N = SCCD_NP_THREADS_PER_BLOCK;
 #ifdef SCCD_NP_COUNT_BOXES
