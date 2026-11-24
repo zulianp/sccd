@@ -79,14 +79,10 @@
 // three counters are adjacent words, so one 12-byte copy can serve both: the
 // last cursor read already follows the last launch. On MI300A a blocking copy
 // costs tens of microseconds of host latency, paid twice per narrow-phase call
-// (vertex-face and edge-edge), so it is on by default for HIP. CUDA keeps the
-// two copies it was measured with; set it to 1 there to try it.
+// (vertex-face and edge-edge). On by default for HIP and CUDA alike; 0 restores
+// the two copies.
 #ifndef SCCD_NP_FUSED_COUNTER_READ
-#if defined(SCCD_ENABLE_HIP)
 #define SCCD_NP_FUSED_COUNTER_READ 1
-#else
-#define SCCD_NP_FUSED_COUNTER_READ 0
-#endif
 #endif
 
 // Without a bound, nvcc budgets registers for the largest block it must support
