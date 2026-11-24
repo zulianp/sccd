@@ -116,10 +116,15 @@
 // worker has about SCCD_NARROWPHASE_TIGHT_TASKS_PER_WORKER of them, up to
 // SCCD_NARROWPHASE_TIGHT_MAX_TASK queries, the size the shared schedule used.
 //
-// NEON keeps the shared schedule (its narrower lanes make tasks of 128 and 256
-// queries), so the GH200 measurements stand as they were taken.
+// NEON takes the same schedule. Its lanes are narrow too (2 vertex-face, 4
+// edge-edge), so the shared schedule's tasks of 128 and 256 queries left most of
+// a Grace idle in the same way. Measured on one GH200's Grace (72 cores, GCC
+// 13.3), ti_oracle on the six scenes, two repeats, spread under 1%: one block
+// per task is 1.4-5.8x faster per scene than the shared schedule, 5.0x on
+// rod-twist (223 s to 44.5 s, nearly all of it edge-edge), with the same hits
+// and earliness and none missed or late.
 #ifndef SCCD_NARROWPHASE_TIGHT_GRAIN
-#if defined(__AVX512F__) || defined(__AVX2__)
+#if defined(__AVX512F__) || defined(__AVX2__) || defined(__ARM_NEON)
 #define SCCD_NARROWPHASE_TIGHT_GRAIN 1
 #else
 #define SCCD_NARROWPHASE_TIGHT_GRAIN 0
