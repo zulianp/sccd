@@ -5,7 +5,7 @@
 
 #include "sccd_gpu_runtime.h"
 
-#if defined(__HIP_PLATFORM_SPIRV__) && defined(SCCD_ENABLE_SMESH)
+#if defined(__HIP_PLATFORM_SPIRV__) && defined(SCCD_SMESH_HAS_AT_CONTEXT_TEARDOWN)
 #include "smesh_context.hpp"
 #endif
 
@@ -246,7 +246,7 @@ namespace sccd {
         // from whichever translation unit uses it.
         template <typename T>
         inline PersistentDfsStack<T>& persistent_dfs_stack() {
-#if defined(__HIP_PLATFORM_SPIRV__) && defined(SCCD_ENABLE_SMESH)
+#if defined(__HIP_PLATFORM_SPIRV__) && defined(SCCD_SMESH_HAS_AT_CONTEXT_TEARDOWN)
             // Released at smesh::Context's teardown under chipStar (sccd_broadphase.cuh), not at exit.
             static const bool released_at_teardown = (smesh::at_context_teardown(&release_cached_memory), true);
             (void)released_at_teardown;

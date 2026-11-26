@@ -5,7 +5,7 @@
 
 #include "sccd_cuda_base.cuh"
 
-#if defined(__HIP_PLATFORM_SPIRV__) && defined(SCCD_ENABLE_SMESH)
+#if defined(__HIP_PLATFORM_SPIRV__) && defined(SCCD_SMESH_HAS_AT_CONTEXT_TEARDOWN)
 #include "smesh_context.hpp"
 #endif
 
@@ -93,7 +93,7 @@ namespace sccd {
 #endif
 
         inline DeviceWorkspace& workspace(const WorkspaceSlot slot) {
-#if defined(__HIP_PLATFORM_SPIRV__) && defined(SCCD_ENABLE_SMESH)
+#if defined(__HIP_PLATFORM_SPIRV__) && defined(SCCD_SMESH_HAS_AT_CONTEXT_TEARDOWN)
             // Released at smesh::Context's teardown under chipStar (sccd_broadphase.cuh), not at exit.
             static const bool released_at_teardown = (smesh::at_context_teardown(&release_cached_memory), true);
             (void)released_at_teardown;

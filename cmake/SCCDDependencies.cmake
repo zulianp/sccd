@@ -155,6 +155,36 @@ if(SCCD_ENABLE_SMESH)
     message(FATAL_ERROR "smesh was built with HIP: configure SCCD with "
                         "SCCD_ENABLE_CUDA=ON and SCCD_ENABLE_HIP=ON.")
   endif()
+
+  # chipStar faults when device memory is freed after main returns. An smesh that
+  # declares smesh::at_context_teardown (smesh_context.hpp) releases SCCD's cached
+  # device memory when its context is destroyed; with an older smesh a program calls
+  # sccd::device::release_cached_memory() itself (docs/CUDA.md). The header is found
+  # on smesh's include path, an installed one's or, built in this tree, its
+  # $<BUILD_INTERFACE:...> entries; sccd_config.hpp carries the answer.
+  set(SCCD_SMESH_HAS_AT_CONTEXT_TEARDOWN OFF)
+  get_target_property(_sccd_smesh_include_dirs smesh::smesh INTERFACE_INCLUDE_DIRECTORIES)
+  if(_sccd_smesh_include_dirs)
+    string(REGEX REPLACE "\\$<BUILD_INTERFACE:([^>]*)>" "\\1" _sccd_smesh_include_dirs "${_sccd_smesh_include_dirs}")
+    string(REGEX REPLACE "\\$<INSTALL_INTERFACE:[^>]*>" "" _sccd_smesh_include_dirs "${_sccd_smesh_include_dirs}")
+    foreach(_sccd_dir IN LISTS _sccd_smesh_include_dirs)
+      if(EXISTS "${_sccd_dir}/smesh_context.hpp")
+        file(READ "${_sccd_dir}/smesh_context.hpp" _sccd_smesh_context)
+        if(_sccd_smesh_context MATCHES "void at_context_teardown\\(")
+          set(SCCD_SMESH_HAS_AT_CONTEXT_TEARDOWN ON)
+        endif()
+        break()
+      endif()
+    endforeach()
+  endif()
+  if(SCCD_ENABLE_HIP AND CMAKE_HIP_PLATFORM STREQUAL "spirv")
+    if(SCCD_SMESH_HAS_AT_CONTEXT_TEARDOWN)
+      message(STATUS "SCCD: smesh::Context releases SCCD's cached device memory at teardown")
+    else()
+      message(STATUS "SCCD: this smesh has no smesh::at_context_teardown: a program calls "
+                     "sccd::device::release_cached_memory() before main returns")
+    endif()
+  endif()
 endif()
 
 
