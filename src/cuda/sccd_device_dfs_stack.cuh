@@ -210,7 +210,15 @@ namespace sccd {
             int* host_counters{nullptr};  // pinned staging for reading them back
             int cap{0};
 
-            ~PersistentDfsStack() { release(); }
+            // Under chipStar the destructor frees nothing: the cache is a static, destroyed at exit
+            // after chipStar's per-thread queue, through which its free synchronises, so a free
+            // there faults. The memory goes back with the process; release() and
+            // release_cached_memory() (sccd_broadphase.cuh) still free it while the runtime is whole.
+            ~PersistentDfsStack() {
+#if !defined(__HIP_PLATFORM_SPIRV__)
+                release();
+#endif
+            }
 
             void release() {
                 // Nothing allocated, no runtime call: cudaFree(nullptr) creates the CUDA context (HIP's

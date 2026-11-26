@@ -70,15 +70,17 @@ There is no architecture list, and the warp is 32 lanes, the default of
 stops; so does a build directory configured for AMD before (wavefront size 64,
 `gfx` architectures in the cache), and the device headers check the warp size.
 
-chipStar faults when device memory is freed after `main` returns, which is where
-the destructors of SCCD's cached device memory (scratch workspaces, the narrow
-phase's traversal stacks) would free it. Call
-`sccd::device::release_cached_memory()` (`sccd_broadphase.cuh`) before `main`
-returns and before any `std::exit`; the next call into SCCD allocates again. With
-smesh, an smesh that has `smesh::at_context_teardown` does this when its context
-is destroyed (`SCCD_SMESH_HAS_AT_CONTEXT_TEARDOWN` in `sccd_config.hpp`); with an
-older smesh, call it before the context goes. On CUDA and AMD the call is
-harmless and not needed.
+chipStar faults when device memory is freed after `main` returns: its per-thread
+queue, through which a free synchronises, is destroyed before static destructors
+and `atexit` handlers run. So under chipStar the destructors of SCCD's cached
+device memory (scratch workspaces, the narrow phase's traversal stacks) free
+nothing, and the memory goes back with the process. To free it while the runtime
+is whole, call `sccd::device::release_cached_memory()` (`sccd_broadphase.cuh`),
+for example before `main` returns or before `std::exit`; the next call into SCCD
+allocates again. SCCD's drivers do so. With smesh, an smesh that has
+`smesh::at_context_teardown` calls it when its context is destroyed
+(`SCCD_SMESH_HAS_AT_CONTEXT_TEARDOWN` in `sccd_config.hpp`). On CUDA and AMD the
+destructors free at exit as before, and the call is harmless.
 
 chipStar knows only the memory it allocated. Device arrays passed to SCCD come
 from `hipMalloc` (or `hipMallocManaged`): chipStar's copies refuse any other

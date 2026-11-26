@@ -31,7 +31,15 @@ namespace sccd {
             DeviceWorkspace(const DeviceWorkspace&) = delete;
             DeviceWorkspace& operator=(const DeviceWorkspace&) = delete;
 
-            ~DeviceWorkspace() { release(); }
+            // Under chipStar the destructor frees nothing: the cache is a static, destroyed at exit
+            // after chipStar's per-thread queue, through which its free synchronises, so a free
+            // there faults. The memory goes back with the process; release() and
+            // release_cached_memory() (sccd_broadphase.cuh) still free it while the runtime is whole.
+            ~DeviceWorkspace() {
+#if !defined(__HIP_PLATFORM_SPIRV__)
+                release();
+#endif
+            }
 
             /**
              * \brief Pointer to at least \p bytes of device scratch.
