@@ -78,6 +78,7 @@
 // trying to construct the case.
 
 #include "sccd_narrowphase.cuh"
+#include "sccd_broadphase.cuh"
 #include "sccd_narrowphase_vq.cuh"
 
 #include "sccd_narrowphase.hpp"
@@ -105,6 +106,7 @@ namespace {
         if (err_ != cudaSuccess) {                                                                   \
             std::fprintf(                                                                            \
                 stderr, "CUDA %s at %s:%d\n", cudaGetErrorString(err_), __FILE__, __LINE__);         \
+            sccd::device::release_cached_memory();                                                   \
             std::exit(2);                                                                            \
         }                                                                                            \
     } while (0)
@@ -655,6 +657,11 @@ namespace {
 }  // namespace
 
 int main() {
+    // The pipeline's cached device memory is freed before main returns, as chipStar needs
+    // (sccd_broadphase.cuh); the failure paths release it before std::exit.
+    struct ReleaseCachedMemory {
+        ~ReleaseCachedMemory() { sccd::device::release_cached_memory(); }
+    } release_cached_memory_at_return;
     // Unbuffered: this runs under ctest with stdout redirected, and a crash with
     // a full buffer loses exactly the line that says where it happened.
     setvbuf(stdout, nullptr, _IONBF, 0);

@@ -5,6 +5,10 @@
 
 #include "sccd_gpu_runtime.h"
 
+#if defined(__HIP_PLATFORM_SPIRV__) && defined(SCCD_SMESH_HAS_AT_CONTEXT_TEARDOWN)
+#include "smesh_context.hpp"
+#endif
+
 /**
  * \file
  * \brief The branch-and-bound work stack shared by the device narrow phases.
@@ -212,9 +216,24 @@ namespace sccd {
             int* host_counters{nullptr};  // pinned staging for reading them back
             int cap{0};
 
-            ~PersistentDfsStack() { release(); }
+            // Under chipStar the destructor frees nothing: the cache is a static, destroyed at exit
+            // after chipStar's per-thread queue, through which its free synchronises, so a free
+            // there faults. The memory goes back with the process; release() and
+            // release_cached_memory() (sccd_broadphase.cuh) still free it while the runtime is whole.
+            ~PersistentDfsStack() {
+#if !defined(__HIP_PLATFORM_SPIRV__)
+                release();
+#endif
+            }
 
             void release() {
+                // Nothing allocated, no runtime call: cudaFree(nullptr) creates the CUDA context (HIP's
+                // initialises the runtime), which a host-only run releasing at exit must not do, and
+                // chipStar's synchronises the device, which faults after main returns.
+                if (!tlower && !tupper && !ulower && !uupper && !vlower && !vupper && !level && !qid && !counters &&
+                    !host_counters) {
+                    return;
+                }
                 cudaFree(tlower);
                 cudaFree(tupper);
                 cudaFree(ulower);
@@ -232,8 +251,19 @@ namespace sccd {
             }
         };
 
+#if defined(__HIP_PLATFORM_SPIRV__)
+        void release_cached_memory();  // sccd_broadphase.cuh
+#endif
+
+        // inline, not static: one stack per type for the program, which release_dfs_stacks reaches
+        // from whichever translation unit uses it.
         template <typename T>
-        static PersistentDfsStack<T>& persistent_dfs_stack() {
+        inline PersistentDfsStack<T>& persistent_dfs_stack() {
+#if defined(__HIP_PLATFORM_SPIRV__) && defined(SCCD_SMESH_HAS_AT_CONTEXT_TEARDOWN)
+            // Released at smesh::Context's teardown under chipStar (sccd_broadphase.cuh), not at exit.
+            static const bool released_at_teardown = (smesh::at_context_teardown(&release_cached_memory), true);
+            (void)released_at_teardown;
+#endif
             static PersistentDfsStack<T> stack;
             return stack;
         }

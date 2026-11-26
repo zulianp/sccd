@@ -24,7 +24,12 @@
 #error "SCCD_HIP_WAVEFRONT_SIZE must be set for a HIP build (CMake sets it from SCCD_HIP_WAVEFRONT_SIZE)"
 #endif
 #define SCCD_WARP_SIZE SCCD_HIP_WAVEFRONT_SIZE
-#if defined(__HIP_DEVICE_COMPILE__)
+#if defined(__HIP_PLATFORM_SPIRV__)
+// chipStar (HIP on SPIR-V, Intel GPUs) has no wavefront-size macro: it fixes its warp at 32 lanes
+// when it is built (DEFAULT_WARP_SIZE), the same for every device the SPIR-V runs on.
+static_assert(SCCD_WARP_SIZE == 32,
+              "SCCD_HIP_WAVEFRONT_SIZE must be 32 on SPIR-V (chipStar): configure with -DCMAKE_HIP_PLATFORM=spirv");
+#elif defined(__HIP_DEVICE_COMPILE__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-pragma"
 static_assert(__AMDGCN_WAVEFRONT_SIZE == SCCD_WARP_SIZE,

@@ -34,6 +34,7 @@ namespace {
         const cudaError_t err_ = (call);                                                     \
         if (err_ != cudaSuccess) {                                                           \
             std::fprintf(stderr, "CUDA %s at %s:%d\n", cudaGetErrorString(err_), __FILE__, __LINE__); \
+            sccd::device::release_cached_memory();                                           \
             std::exit(2);                                                                    \
         }                                                                                    \
     } while (0)
@@ -321,6 +322,7 @@ namespace {
             e.n, e.aabbs, grid, cellptr, ranges, cellidx, spans > 0 ? spans : 1, cursor, &rejected);
         if (rejected) {
             fprintf(stderr, "cell2d_fill rejected %ld of %ld spans\n", (long)rejected, (long)spans);
+            sccd::device::release_cached_memory();
             std::exit(1);
         }
 
@@ -374,6 +376,7 @@ namespace {
                                                    cellidx, spans > 0 ? spans : 1, cursor, &rejected);
         if (rejected) {
             std::fprintf(stderr, "cell2d_fill rejected %ld spans\n", (long)rejected);
+            sccd::device::release_cached_memory();
             std::exit(1);
         }
 
@@ -617,6 +620,11 @@ namespace {
 }  // namespace
 
 int main(int argc, char** argv) {
+    // The pipeline's cached device memory is freed before main returns, as chipStar needs
+    // (sccd_broadphase.cuh); the failure paths release it before std::exit.
+    struct ReleaseCachedMemory {
+        ~ReleaseCachedMemory() { sccd::device::release_cached_memory(); }
+    } release_cached_memory_at_return;
     if (const char* dump = std::getenv("SCCD_CELL2D_BOXES")) {
         const char* reps = std::getenv("SCCD_CELL2D_REPS");
         return run_from_dump(dump, reps ? std::atoi(reps) : 5);

@@ -3179,6 +3179,12 @@ namespace sccd {
             return 0;
         }
 
+        // The narrow phase's traversal stacks, released for release_cached_memory (sccd_broadphase.cu).
+        void release_dfs_stacks() {
+            persistent_dfs_stack<float>().release();
+            persistent_dfs_stack<double>().release();
+        }
+
     }  // namespace device
 }  // namespace sccd
 

@@ -5,6 +5,10 @@
 
 #include "sccd_cuda_base.cuh"
 
+#if defined(__HIP_PLATFORM_SPIRV__) && defined(SCCD_SMESH_HAS_AT_CONTEXT_TEARDOWN)
+#include "smesh_context.hpp"
+#endif
+
 namespace sccd {
     namespace device {
 
@@ -27,7 +31,15 @@ namespace sccd {
             DeviceWorkspace(const DeviceWorkspace&) = delete;
             DeviceWorkspace& operator=(const DeviceWorkspace&) = delete;
 
-            ~DeviceWorkspace() { release(); }
+            // Under chipStar the destructor frees nothing: the cache is a static, destroyed at exit
+            // after chipStar's per-thread queue, through which its free synchronises, so a free
+            // there faults. The memory goes back with the process; release() and
+            // release_cached_memory() (sccd_broadphase.cuh) still free it while the runtime is whole.
+            ~DeviceWorkspace() {
+#if !defined(__HIP_PLATFORM_SPIRV__)
+                release();
+#endif
+            }
 
             /**
              * \brief Pointer to at least \p bytes of device scratch.
@@ -84,7 +96,16 @@ namespace sccd {
          */
         enum class WorkspaceSlot { TempStorage = 0, SortIndex, Scratch, Count };
 
+#if defined(__HIP_PLATFORM_SPIRV__)
+        void release_cached_memory();  // sccd_broadphase.cuh
+#endif
+
         inline DeviceWorkspace& workspace(const WorkspaceSlot slot) {
+#if defined(__HIP_PLATFORM_SPIRV__) && defined(SCCD_SMESH_HAS_AT_CONTEXT_TEARDOWN)
+            // Released at smesh::Context's teardown under chipStar (sccd_broadphase.cuh), not at exit.
+            static const bool released_at_teardown = (smesh::at_context_teardown(&release_cached_memory), true);
+            (void)released_at_teardown;
+#endif
             static DeviceWorkspace slots[static_cast<int>(WorkspaceSlot::Count)];
             return slots[static_cast<int>(slot)];
         }
