@@ -39,6 +39,7 @@ namespace {
         const cudaError_t err_ = (call);                                                              \
         if (err_ != cudaSuccess) {                                                                    \
             std::fprintf(stderr, "CUDA %s at %s:%d\n", cudaGetErrorString(err_), __FILE__, __LINE__); \
+            sccd::device::release_cached_memory();                                                    \
             std::exit(2);                                                                             \
         }                                                                                             \
     } while (0)
@@ -96,12 +97,11 @@ namespace {
 }  // namespace
 
 int main() {
-#if defined(__HIP_PLATFORM_SPIRV__)
-    // chipStar: the pipeline's cached device memory is freed before main returns (sccd_broadphase.cuh).
+    // The pipeline's cached device memory is freed before main returns, as chipStar needs
+    // (sccd_broadphase.cuh); the failure paths release it before std::exit.
     struct ReleaseCachedMemory {
         ~ReleaseCachedMemory() { sccd::device::release_cached_memory(); }
     } release_cached_memory_at_return;
-#endif
     // The probe. 200 elements against a 256-thread block leaves the last warp
     // wholly out of range, so one shared slot belongs to no active lane. The
     // spread is far wider on z than on x or y, so the answer is 2 and nothing

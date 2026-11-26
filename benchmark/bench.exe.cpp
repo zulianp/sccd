@@ -1,6 +1,9 @@
 #include "sccd_broadphase_strategy.hpp"
 #include "sccd_narrowphase_mode.hpp"
 #include "sccd_smesh_ccd.hpp"
+#if defined(SCCD_ENABLE_CUDA)
+#include "sccd_broadphase.cuh"
+#endif
 #include "smesh_buffer.hpp"
 #include "smesh_context.hpp"
 #include "smesh_device_buffer.hpp"
@@ -1371,6 +1374,13 @@ static constexpr const char* kCsvHeader =
 
 int main(int argc, char** argv) {
     auto ctx = smesh::initialize(argc, argv);
+#if defined(SCCD_ENABLE_CUDA)
+    // The pipeline's cached device memory is freed before the context, as chipStar needs: an
+    // smesh without smesh::at_context_teardown does not do it (sccd_broadphase.cuh).
+    struct ReleaseCachedMemory {
+        ~ReleaseCachedMemory() { sccd::device::release_cached_memory(); }
+    } release_cached_memory_before_context;
+#endif
     // --header prints the CSV schema and exits. A consumer that has to know the
     // column names should ask for them rather than keep its own copy: this file
     // and benchmark/scripts/bench.sh disagreed for long enough that every toi_*

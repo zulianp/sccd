@@ -27,6 +27,7 @@
 #include "sccd_rootfinder.hpp"
 
 #ifdef SCCD_ENABLE_CUDA
+#include "sccd_broadphase.cuh"
 #include "sccd_narrowphase.cuh"
 
 #include "sccd_gpu_runtime.h"
@@ -126,6 +127,7 @@ namespace {
             /* 3, not 2: 2 is the conservativeness gate's failure code, and CI has */              \
             /* to be able to tell "the GPU broke the invariant" from "the GPU was  */              \
             /* not there". */                                                                      \
+            sccd::device::release_cached_memory();                                                 \
             std::exit(3);                                                                          \
         }                                                                                         \
     } while (0)
@@ -631,6 +633,13 @@ namespace {
 }  // namespace
 
 int main(int argc, char** argv) {
+#ifdef SCCD_ENABLE_CUDA
+    // The pipeline's cached device memory is freed before main returns, as chipStar needs
+    // (sccd_broadphase.cuh); the failure paths release it before std::exit.
+    struct ReleaseCachedMemory {
+        ~ReleaseCachedMemory() { sccd::device::release_cached_memory(); }
+    } release_cached_memory_at_return;
+#endif
     Options opt;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];

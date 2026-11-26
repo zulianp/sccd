@@ -3133,13 +3133,11 @@ namespace sccd {
             return 0;
         }
 
-#if defined(__HIP_PLATFORM_SPIRV__)
         // The narrow phase's traversal stacks, released for release_cached_memory (sccd_broadphase.cu).
         void release_dfs_stacks() {
             persistent_dfs_stack<float>().release();
             persistent_dfs_stack<double>().release();
         }
-#endif
 
     }  // namespace device
 }  // namespace sccd

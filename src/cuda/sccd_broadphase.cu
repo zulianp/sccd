@@ -964,14 +964,12 @@ namespace sccd {
             SCCD_CUDA_LAST_ERROR();
         }
 
-#if defined(__HIP_PLATFORM_SPIRV__)
         void release_dfs_stacks();  // sccd_narrowphase.cu
 
         void release_cached_memory() {
             for (int s = 0; s < static_cast<int>(WorkspaceSlot::Count); ++s) workspace(static_cast<WorkspaceSlot>(s)).release();
             release_dfs_stacks();
         }
-#endif
 
     }  // namespace device
 }  // namespace sccd

@@ -82,13 +82,14 @@ namespace sccd {
 
 
 
-#if defined(__HIP_PLATFORM_SPIRV__)
         /// Frees the device memory the pipeline keeps between calls (its scratch workspaces and the
-        /// narrow phase's traversal stacks). chipStar (HIP on SPIR-V, Intel GPUs) faults when device
-        /// memory is freed after main returns, where the caches' destructors would: a program calls
-        /// this before then. With smesh, smesh::Context's destructor calls it.
+        /// narrow phase's traversal stacks); the next call allocates it again. chipStar (HIP on
+        /// SPIR-V, Intel GPUs) faults when device memory is freed after main returns, where the
+        /// caches' destructors would: there a program calls this before main returns and before any
+        /// std::exit. With an smesh that has smesh::at_context_teardown
+        /// (SCCD_SMESH_HAS_AT_CONTEXT_TEARDOWN in sccd_config.hpp), smesh::Context's destructor calls
+        /// it. CUDA and AMD need no call; one is harmless.
         void release_cached_memory();
-#endif
     }  // namespace device
 }  // namespace sccd
 

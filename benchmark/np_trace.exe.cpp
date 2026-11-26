@@ -53,6 +53,7 @@
 #include "sccd_narrowphase_mode.hpp"
 
 #ifdef SCCD_ENABLE_CUDA
+#include "sccd_broadphase.cuh"
 #include "sccd_narrowphase.cuh"
 #include "sccd_gpu_runtime.h"
 #endif
@@ -202,6 +203,7 @@ struct BatchScene {
         if (err_ != cudaSuccess) {                                                         \
             std::fprintf(stderr, "cuda error %s at %s:%d\n", cudaGetErrorString(err_),     \
                          __FILE__, __LINE__);                                              \
+            sccd::device::release_cached_memory();                                         \
             std::exit(2);                                                                  \
         }                                                                                  \
     } while (0)
@@ -281,6 +283,13 @@ void usage(const char* argv0) {
 }  // namespace
 
 int main(int argc, char** argv) {
+#ifdef SCCD_ENABLE_CUDA
+    // The pipeline's cached device memory is freed before main returns, as chipStar needs
+    // (sccd_broadphase.cuh); the failure paths release it before std::exit.
+    struct ReleaseCachedMemory {
+        ~ReleaseCachedMemory() { sccd::device::release_cached_memory(); }
+    } release_cached_memory_at_return;
+#endif
     if (argc < 3) {
         usage(argv[0]);
         return 1;

@@ -9,6 +9,7 @@
 #include "sccd_base.hpp"
 #include "sccd_config.hpp"
 #include "sccd_smesh_ccd.hpp"
+#include "sccd_broadphase.cuh"
 
 #include <algorithm>
 #include <filesystem>
@@ -40,6 +41,11 @@ static scalar_t buffer_min_or(const smesh::SharedBuffer<scalar_t>& values, const
 
 int main(int argc, char** argv) {
     auto ctx = smesh::initialize(argc, argv);
+    // The pipeline's cached device memory is freed before the context, as chipStar needs: an
+    // smesh without smesh::at_context_teardown does not do it (sccd_broadphase.cuh).
+    struct ReleaseCachedMemory {
+        ~ReleaseCachedMemory() { sccd::device::release_cached_memory(); }
+    } release_cached_memory_before_context;
     SMESH_TRACE_SCOPE("mesh_sccd_cuda.exe");
 
     if (argc != 3) {

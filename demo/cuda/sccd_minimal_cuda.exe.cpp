@@ -62,6 +62,7 @@ constexpr int kDim = 3;
         if (err_ != cudaSuccess) {                                                        \
             std::printf("CUDA error %s at %s:%d\n", cudaGetErrorString(err_), __FILE__,    \
                         __LINE__);                                                        \
+            sccd::device::release_cached_memory();                                        \
             std::exit(1);                                                                 \
         }                                                                                 \
     } while (0)
@@ -164,12 +165,11 @@ std::ptrdiff_t read_total(const std::ptrdiff_t* d_offsets, const std::ptrdiff_t 
 }  // namespace
 
 int main() {
-#if defined(__HIP_PLATFORM_SPIRV__)
-    // chipStar: the pipeline's cached device memory is freed before main returns (sccd_broadphase.cuh).
+    // The pipeline's cached device memory is freed before main returns, as chipStar needs
+    // (sccd_broadphase.cuh); the failure paths release it before std::exit.
     struct ReleaseCachedMemory {
         ~ReleaseCachedMemory() { sccd::device::release_cached_memory(); }
     } release_cached_memory_at_return;
-#endif
     int device_count = 0;
     if (cudaGetDeviceCount(&device_count) != cudaSuccess || device_count == 0) {
         std::printf("no CUDA device available; nothing to demonstrate\n");
