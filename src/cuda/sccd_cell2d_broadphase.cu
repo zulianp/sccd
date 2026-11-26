@@ -160,10 +160,18 @@ namespace sccd {
                             // registered by its owner: nothing to copy
                         } else
 #endif
-                        if (is_ptr_device(arrays_)) {
-                            SCCD_CHECK_CUDA(cudaMemcpy(rows_, arrays_, sizeof(rows_), cudaMemcpyDeviceToHost));
-                        } else {
-                            for (int d = 0; d < 2 * SCCD_DIM; ++d) rows_[d] = arrays_[d];
+                        {
+#if defined(__HIP_PLATFORM_SPIRV__)
+                            // chipStar cannot say where a table it did not allocate lives, so it is
+                            // read through the runtime's copy, as soa_rows_to_host does (sccd_broadphase.cu).
+                            SCCD_CHECK_CUDA(hipMemcpy(rows_, arrays_, sizeof(rows_), hipMemcpyDefault));
+#else
+                            if (is_ptr_device(arrays_)) {
+                                SCCD_CHECK_CUDA(cudaMemcpy(rows_, arrays_, sizeof(rows_), cudaMemcpyDeviceToHost));
+                            } else {
+                                for (int d = 0; d < 2 * SCCD_DIM; ++d) rows_[d] = arrays_[d];
+                            }
+#endif
                         }
                         fetched_ = true;
                     }

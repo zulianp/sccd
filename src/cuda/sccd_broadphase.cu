@@ -196,9 +196,9 @@ namespace sccd {
             // interop), so such a table cannot be read on the host. The runtime's copy reads either:
             // with hipMemcpyDefault chipStar hands a pointer it does not know to the backend's copy
             // (Level Zero's takes host and USM memory) where the other kinds refuse it as device memory.
-            // The copy is blocking (chipStar's hipMemcpy finishes the queue), on every call: the cell2d
-            // broad phase reads rows 2-4 times per launch. If that shows in profiles, read the table
-            // once per entry point and pass the rows down.
+            // The copy is blocking (chipStar's hipMemcpy finishes the queue). The cell2d broad phase
+            // reads a table once per host function under HIP, or not at all once its owner registered
+            // it (SoaRows, SCCD_DEVICE_SOA_ROWS_ONCE in sccd_cell2d_broadphase.cu).
             SCCD_CHECK_CUDA(hipMemcpy(rows, arrays, 2 * SCCD_DIM * sizeof(T*), hipMemcpyDefault));
 #else
             if (is_ptr_device(arrays)) {
