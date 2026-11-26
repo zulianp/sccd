@@ -8,6 +8,7 @@
 #include "sccd_base.hpp"
 #include "sccd_config.hpp"
 #include "sccd_smesh_ccd.hpp"
+#include "sccd_broadphase.cuh"
 
 #include <algorithm>
 #include <cmath>
@@ -188,6 +189,11 @@ static int test_cuda_narrowphase_stride_one_matches_cpu() {
 
 int main(int argc, char** argv) {
     SMESH_UNIT_TEST_INIT(argc, argv);
+    // The pipeline's cached device memory is freed before the context, as chipStar needs: an
+    // smesh without smesh::at_context_teardown does not do it (sccd_broadphase.cuh).
+    struct ReleaseCachedMemory {
+        ~ReleaseCachedMemory() { sccd::device::release_cached_memory(); }
+    } release_cached_memory_before_context;
 
     {
         if (argc != 3) {
