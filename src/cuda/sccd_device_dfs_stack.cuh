@@ -242,8 +242,10 @@ namespace sccd {
         void release_cached_memory();  // sccd_broadphase.cuh
 #endif
 
+        // inline, not static: one stack per type for the program, which release_dfs_stacks reaches
+        // from whichever translation unit uses it.
         template <typename T>
-        static PersistentDfsStack<T>& persistent_dfs_stack() {
+        inline PersistentDfsStack<T>& persistent_dfs_stack() {
 #if defined(__HIP_PLATFORM_SPIRV__) && defined(SCCD_ENABLE_SMESH)
             // Released at smesh::Context's teardown under chipStar (sccd_broadphase.cuh), not at exit.
             static const bool released_at_teardown = (smesh::at_context_teardown(&release_cached_memory), true);
