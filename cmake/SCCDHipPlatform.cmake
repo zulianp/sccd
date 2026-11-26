@@ -2,9 +2,10 @@
 # Intel GPUs) runs warps of 32 lanes where the AMD default is 64, and builds for no
 # architecture list, and both are fixed before the language is enabled. Given, it is
 # CMAKE_HIP_PLATFORM. Not given, enable_language takes it from `hipconfig --platform`
-# (CMake's CMakeDetermineHIPCompiler.cmake), which answers from the HIP_PLATFORM
-# environment variable when that is set. If either says spirv the configure stops
-# here, before the AMD defaults are taken, and asks for the platform. SFEM does the same.
+# (CMake's CMakeDetermineHIPCompiler.cmake, spirv from CMake 4.3), which ROCm's hipconfig
+# answers from the HIP_PLATFORM environment variable when that is set. If either says
+# spirv the configure stops here, before the AMD defaults are taken, and asks for the
+# platform. SFEM does the same.
 if(SCCD_ENABLE_HIP AND NOT CMAKE_HIP_PLATFORM)
     set(_sccd_hipconfig_platform "")
     execute_process(COMMAND hipconfig --platform
