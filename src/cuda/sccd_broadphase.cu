@@ -172,7 +172,7 @@ namespace sccd {
                 // SCCD_CUDA_LAST_ERROR would report as the kernel's: cleared here.
                 (void)cudaGetLastError();
 #if defined(__HIP_PLATFORM_SPIRV__)
-                // chipStar fails so for every pointer it did not allocate: expected, not reported.
+                // chipStar fails so for every pointer it did not allocate (soa_rows_to_host): expected.
                 if (err == hipErrorInvalidValue) {
                     return false;
                 }
@@ -189,16 +189,31 @@ namespace sccd {
 #endif
         }
 
+        // The 2 * SCCD_DIM row pointers of an SoA table, which lives in host or device memory, into rows.
+        template <typename T>
+        void soa_rows_to_host(T** const SCCD_RESTRICT arrays, T** const SCCD_RESTRICT rows) {
+#if defined(__HIP_PLATFORM_SPIRV__)
+            // chipStar knows only the memory it allocated: hipPointerGetAttributes fails alike for host
+            // memory and for device memory of another runtime (Level Zero, SYCL or OpenCL USM, through
+            // interop), so such a table cannot be read on the host. The runtime's copy reads either:
+            // with hipMemcpyDefault chipStar hands a pointer it does not know to the backend's copy
+            // (Level Zero's takes host and USM memory) where the other kinds refuse it as device memory.
+            SCCD_CHECK_CUDA(hipMemcpy(rows, arrays, 2 * SCCD_DIM * sizeof(T*), hipMemcpyDefault));
+#else
+            if (is_ptr_device(arrays)) {
+                SCCD_CHECK_CUDA(cudaMemcpy(rows, arrays, 2 * SCCD_DIM * sizeof(T*), cudaMemcpyDeviceToHost));
+            } else {
+                for (int d = 0; d < 2 * SCCD_DIM; d++) {
+                    rows[d] = arrays[d];
+                }
+            }
+#endif
+        }
+
         template <typename T>
         T* soa_device_row(T** const SCCD_RESTRICT arrays, const int row) {
             T* host_rows[6] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
-            if (is_ptr_device(arrays)) {
-                SCCD_CHECK_CUDA(cudaMemcpy(host_rows, arrays, 2 * SCCD_DIM * sizeof(T*), cudaMemcpyDeviceToHost));
-            } else {
-                for (int d = 0; d < 2 * SCCD_DIM; d++) {
-                    host_rows[d] = arrays[d];
-                }
-            }
+            soa_rows_to_host(arrays, host_rows);
             return host_rows[row];
         }
 
@@ -219,14 +234,7 @@ namespace sccd {
             }
 
             T* host_arrays[6] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
-
-            if (is_ptr_device(arrays)) {
-                SCCD_CHECK_CUDA(cudaMemcpy(host_arrays, arrays, 2 * SCCD_DIM * sizeof(T*), cudaMemcpyDeviceToHost));
-            } else {
-                for (int d = 0; d < 2 * SCCD_DIM; d++) {
-                    host_arrays[d] = arrays[d];
-                }
-            }
+            soa_rows_to_host(arrays, host_arrays);
 
             const T* const SCCD_RESTRICT x = host_arrays[sort_axis];
 
