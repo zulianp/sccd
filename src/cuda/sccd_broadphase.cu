@@ -167,19 +167,17 @@ namespace sccd {
             cudaPointerAttributes attributes = {};
             const cudaError_t err = cudaPointerGetAttributes(&attributes, ptr);
 
-            if (err != cudaSuccess) {
-                // The failed query is also the runtime's last error, which the next
-                // SCCD_CUDA_LAST_ERROR would report as the kernel's: cleared here.
+            if (err == cudaErrorInvalidValue) {
+                // Memory the runtime does not know, which older ROCm answers for unregistered host
+                // memory (and chipStar for anything it did not allocate, though soa_rows_to_host does
+                // not ask there): not device memory. The failed query is also the runtime's last error,
+                // which the next SCCD_CUDA_LAST_ERROR would report as a kernel's: cleared here.
                 (void)cudaGetLastError();
-#if defined(__HIP_PLATFORM_SPIRV__)
-                // chipStar fails so for every pointer it did not allocate (soa_rows_to_host): expected.
-                if (err == hipErrorInvalidValue) {
-                    return false;
-                }
-#endif
-                fprintf(stderr, "cudaPointerGetAttributes failed: %s\n", cudaGetErrorString(err));
                 return false;
             }
+            // Any other failure is a real error -- CUDA answers a plain host pointer with success --
+            // such as a sticky one from an earlier kernel: reported, not taken as host memory.
+            SCCD_CHECK_CUDA(err);
 
 #if defined(SCCD_ENABLE_HIP) || CUDART_VERSION >= 10000
             // CUDA 10.0 and newer, and HIP

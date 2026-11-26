@@ -17,6 +17,7 @@
 
 #define cudaError_t hipError_t
 #define cudaSuccess hipSuccess
+#define cudaErrorInvalidValue hipErrorInvalidValue
 #define cudaGetErrorString hipGetErrorString
 #define cudaGetLastError hipGetLastError
 
