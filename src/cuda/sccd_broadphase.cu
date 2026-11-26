@@ -164,18 +164,21 @@ namespace sccd {
         }
 
         bool is_ptr_device(const void* ptr) {
-            cudaPointerAttributes attributes;
-            cudaError_t err = cudaPointerGetAttributes(&attributes, ptr);
+            cudaPointerAttributes attributes = {};
+            const cudaError_t err = cudaPointerGetAttributes(&attributes, ptr);
 
-#if defined(__HIP_PLATFORM_SPIRV__)
-            // chipStar (HIP on SPIR-V) does not know memory it did not allocate, a plain host pointer: not device memory.
-            if (err == hipErrorInvalidValue) {
-                (void)hipGetLastError();
-                return false;
-            }
-#endif
             if (err != cudaSuccess) {
+                // The failed query is also the runtime's last error, which the next
+                // SCCD_CUDA_LAST_ERROR would report as the kernel's: cleared here.
+                (void)cudaGetLastError();
+#if defined(__HIP_PLATFORM_SPIRV__)
+                // chipStar fails so for every pointer it did not allocate: expected, not reported.
+                if (err == hipErrorInvalidValue) {
+                    return false;
+                }
+#endif
                 fprintf(stderr, "cudaPointerGetAttributes failed: %s\n", cudaGetErrorString(err));
+                return false;
             }
 
 #if defined(SCCD_ENABLE_HIP) || CUDART_VERSION >= 10000
