@@ -169,6 +169,8 @@ if(SCCD_ENABLE_SMESH)
     string(REGEX REPLACE "\\$<INSTALL_INTERFACE:[^>]*>" "" _sccd_smesh_include_dirs "${_sccd_smesh_include_dirs}")
     foreach(_sccd_dir IN LISTS _sccd_smesh_include_dirs)
       if(EXISTS "${_sccd_dir}/smesh_context.hpp")
+        # A changed or replaced smesh reconfigures SCCD, so the answer does not go stale.
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_sccd_dir}/smesh_context.hpp")
         file(READ "${_sccd_dir}/smesh_context.hpp" _sccd_smesh_context)
         if(_sccd_smesh_context MATCHES "void at_context_teardown\\(")
           set(SCCD_SMESH_HAS_AT_CONTEXT_TEARDOWN ON)
