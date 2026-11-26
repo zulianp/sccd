@@ -197,6 +197,16 @@ static int test_broadphase_vertex_quad() {
     return SMESH_TEST_SUCCESS;
 }
 
+// The narrow phase is conservative in every mode: it never reports a time of impact
+// after the true one. When a search reaches max_depth it accepts the box it holds and
+// reports that box's t lower bound. Tight (the default since 4059942) gets there at
+// depth 40 on these queries and reports 0.5 - 2^-14 for the triangle; Relaxed accepts
+// earlier and reports 0.5 to within 1e-6. So the check is the conservative bound plus
+// one box of slack: a report after 0.5, or more than 2^-13 before it, is a regression.
+static bool toi_conservative_near(const double toi, const double exact) {
+    return toi <= exact && toi >= exact - std::ldexp(1.0, -13);
+}
+
 static int test_smesh_ccd_triangle_surface_types() {
     constexpr std::size_t n_points = 4;
     const std::array<std::array<double, n_points>, 3> points_t0 = {{
@@ -236,8 +246,8 @@ static int test_smesh_ccd_triangle_surface_types() {
         smesh::SharedBuffer<double> vf_tois;
         err = ccd->narrow_phase_vf(max_toi, vf_tois, 40, 1e-8, sccd::ToiOutput::Earliest);
         SMESH_TEST_EQ(err, SCCD_SUCCESS);
-        SMESH_TEST_APPROXEQ(max_toi, 0.5, 1e-6);
-        SMESH_TEST_APPROXEQ(vf_tois->data()[0], 0.5, 1e-6);
+        SMESH_TEST_ASSERT(toi_conservative_near(max_toi, 0.5));
+        SMESH_TEST_ASSERT(toi_conservative_near(vf_tois->data()[0], 0.5));
     }
     return SMESH_TEST_SUCCESS;
 }
@@ -282,8 +292,8 @@ static int test_smesh_ccd_quad_surface_types() {
         smesh::SharedBuffer<double> vf_tois;
         err = ccd->narrow_phase_vf(max_toi, vf_tois, 40, 1e-8, sccd::ToiOutput::Earliest);
         SMESH_TEST_EQ(err, SCCD_SUCCESS);
-        SMESH_TEST_APPROXEQ(max_toi, 0.5, 1e-6);
-        SMESH_TEST_APPROXEQ(vf_tois->data()[0], 0.5, 1e-6);
+        SMESH_TEST_ASSERT(toi_conservative_near(max_toi, 0.5));
+        SMESH_TEST_ASSERT(toi_conservative_near(vf_tois->data()[0], 0.5));
     }
     return SMESH_TEST_SUCCESS;
 }
