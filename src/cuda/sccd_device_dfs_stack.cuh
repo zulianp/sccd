@@ -213,14 +213,13 @@ namespace sccd {
             ~PersistentDfsStack() { release(); }
 
             void release() {
-#if defined(__HIP_PLATFORM_SPIRV__)
-                // chipStar's free synchronises the device even for a null pointer, which faults after
-                // main returns: a stack released at teardown (release_cached_memory) frees nothing more.
+                // Nothing allocated, no runtime call: cudaFree(nullptr) creates the CUDA context (HIP's
+                // initialises the runtime), which a host-only run releasing at exit must not do, and
+                // chipStar's synchronises the device, which faults after main returns.
                 if (!tlower && !tupper && !ulower && !uupper && !vlower && !vupper && !level && !qid && !counters &&
                     !host_counters) {
                     return;
                 }
-#endif
                 cudaFree(tlower);
                 cudaFree(tupper);
                 cudaFree(ulower);
