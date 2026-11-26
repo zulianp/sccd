@@ -794,6 +794,7 @@ namespace {
             const cudaError_t err = cudaDeviceSynchronize();
             if (err != cudaSuccess) {
                 std::cerr << "error: device work failed: " << cudaGetErrorString(err) << "\n";
+                sccd::device::release_cached_memory();
                 std::exit(3);
             }
         }

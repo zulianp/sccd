@@ -91,7 +91,9 @@ namespace sccd {
         /// drivers call it before main returns and before std::exit, and with an smesh that has
         /// smesh::at_context_teardown (SCCD_SMESH_HAS_AT_CONTEXT_TEARDOWN in sccd_config.hpp)
         /// smesh::Context's destructor does. On CUDA and AMD the destructors free at exit as before;
-        /// the call is harmless there.
+        /// the call is harmless there. The smesh integration's pool of step outputs (HIP builds,
+        /// SCCD_DEVICE_OUTPUT_POOL in sccd_smesh_ccd.hpp) is not a cache this frees: it is never
+        /// destroyed and goes with the process.
         void release_cached_memory();
     }  // namespace device
 }  // namespace sccd

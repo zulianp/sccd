@@ -78,7 +78,10 @@ namespace sccd {
         };
 
         // Never destroyed: freeing device memory from a static destructor
-        // would run after the GPU runtime has been torn down at exit.
+        // would run after the GPU runtime has been torn down at exit (under
+        // chipStar it faults). sccd::device::release_cached_memory() does not
+        // reach it either: its blocks are held by the output buffers handed out,
+        // and go when a larger one replaces them or with the process.
         inline DeviceOutputPool& device_output_pool() {
             static DeviceOutputPool* pool = new DeviceOutputPool();
             return *pool;
