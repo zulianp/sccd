@@ -74,6 +74,21 @@
 #define SCCD_NP_MAX_RETRY_ROUNDS 32
 #endif
 
+// The drain loop reads its write cursor back after every launch, and once the
+// queue is empty reads the overflow counter with a second blocking copy. The
+// three counters are adjacent words, so one 12-byte copy can serve both: the
+// last cursor read already follows the last launch. On MI300A a blocking copy
+// costs tens of microseconds of host latency, paid twice per narrow-phase call
+// (vertex-face and edge-edge), so it is on by default for HIP. CUDA keeps the
+// two copies it was measured with; set it to 1 there to try it.
+#ifndef SCCD_NP_FUSED_COUNTER_READ
+#if defined(SCCD_ENABLE_HIP)
+#define SCCD_NP_FUSED_COUNTER_READ 1
+#else
+#define SCCD_NP_FUSED_COUNTER_READ 0
+#endif
+#endif
+
 // Without a bound, nvcc budgets registers for the largest block it must support
 // rather than the 128 threads these kernels are always launched with, and it is
 // free to let the register count drift between toolkit versions. Stating the
@@ -1739,8 +1754,8 @@ namespace sccd {
                         s_stack.vupper[slot] = push_box.vupper;
                         s_stack.level[slot] = push_level;
                         s_stack.qid[slot] = qid;
-                    } else {
-                        push_global<TC>(g_out, push_box, push_level, qid);
+                    } else if (!push_global<TC>(g_out, push_box, push_level, qid) && g_out.accept_overflow) {
+                        atomic_min_toi<T>(&toi[per_query ? qid : 0], push_box.tlower);
                     }
                 }
 
@@ -2139,7 +2154,10 @@ namespace sccd {
                 if (active_seed && s_defer_base >= 0) {
                     const int rank = atomicAdd(&s_defer_cursor, 1);
                     const int slot = s_defer_base + rank;
-                    if (slot >= 0 && slot < g_out.capacity) {
+                    if (!(slot >= 0 && slot < g_out.capacity)) {
+                        // Did not fit: dropped, or accepted in the host's last round.
+                        if (g_out.accept_overflow) atomic_min_toi<T>(&toi[toi_idx], cur.tlower);
+                    } else {
                         g_out.tlower[slot] = cur.tlower;
                         g_out.tupper[slot] = device::min<TC>(cur.tupper, s_toi);
                         g_out.ulower[slot] = cur.ulower;
@@ -2254,8 +2272,8 @@ namespace sccd {
                         s_stack.vupper[slot] = push_box.vupper;
                         s_stack.level[slot] = push_level;
                         s_stack.qid[slot] = qid;
-                    } else {
-                        push_global<TC>(g_out, push_box, push_level, qid);
+                    } else if (!push_global<TC>(g_out, push_box, push_level, qid) && g_out.accept_overflow) {
+                        atomic_min_toi<T>(&toi[toi_idx], push_box.tlower);
                     }
                 }
 
@@ -2580,9 +2598,9 @@ namespace sccd {
                                 cudaMalloc(&n_qid, nint) == cudaSuccess;
 
                 if (!ok) {
-                    // Keep the stack that already works. The caller retries a
-                    // bounded number of rounds and then gives up, which is safe:
-                    // a dropped box can only leave the time of impact too early.
+                    // Keep the stack that already works. The caller sees that the
+                    // capacity did not change and runs one last round that accepts
+                    // what does not fit, which keeps the result conservative.
                     cudaFree(n_tlower);
                     cudaFree(n_tupper);
                     cudaFree(n_ulower);
@@ -2663,7 +2681,11 @@ namespace sccd {
                 const int this_batch = (int)(end - begin);
 
                 int retry_rounds = 0;
+                bool stalled = false;  // the last grow could not add capacity
                 while (true) {
+                    // The last round the host will run, by count or because the
+                    // queue cannot grow: overflowing boxes are accepted, not dropped.
+                    const bool last_chance = stalled || retry_rounds + 1 >= SCCD_NP_MAX_RETRY_ROUNDS;
                     // g_top and g_request are adjacent ints, so one memset
                     // replaces what was a full kernel launch to zero two words.
                     SCCD_CHECK_CUDA(cudaMemsetAsync(gstack.counters, 0, 3 * sizeof(int)));
@@ -2693,7 +2715,8 @@ namespace sccd {
                                        g_cursor[half],
                                        g_request,
                                        gstack_cap,
-                                       count};
+                                       count,
+                                       last_chance ? 1 : 0};
                         return b;
                     };
 
@@ -2774,12 +2797,26 @@ namespace sccd {
                     }
                     SCCD_CUDA_LAST_ERROR();
 
+#if SCCD_NP_FUSED_COUNTER_READ
+                    // The three counters are adjacent, so each read takes all of
+                    // them and the deficit check after the drain uses the copy
+                    // the last read already made. Nothing is launched between
+                    // that read and the check, so the value is the same one the
+                    // separate copy would return -- minus one blocking copy.
+                    auto read_cursor = [&](const int half) {
+                        SCCD_CHECK_CUDA(cudaMemcpy(
+                            gstack.host_counters, gstack.counters, 3 * sizeof(int), cudaMemcpyDeviceToHost));
+                        const int n = gstack.host_counters[half];
+                        return n > gstack_cap ? gstack_cap : n;
+                    };
+#else
                     auto read_cursor = [&](const int half) {
                         SCCD_CHECK_CUDA(cudaMemcpy(
                             gstack.host_counters, g_cursor[half], sizeof(int), cudaMemcpyDeviceToHost));
                         const int n = gstack.host_counters[0];
                         return n > gstack_cap ? gstack_cap : n;
                     };
+#endif
 
                     int h_g_top = read_cursor(write_half);
 
@@ -2847,9 +2884,13 @@ namespace sccd {
                     // Grow and retry the entire batch from seeds; the
                     // tighter TOIs from this attempt cut the work tree
                     // on the next pass.
+#if SCCD_NP_FUSED_COUNTER_READ
+                    const int h_g_request = gstack.host_counters[2];
+#else
                     SCCD_CHECK_CUDA(
                         cudaMemcpy(gstack.host_counters + 1, g_request, sizeof(int), cudaMemcpyDeviceToHost));
                     const int h_g_request = gstack.host_counters[1];
+#endif
                     if (h_g_request <= 0) break;
 
                     // Bound the grow-and-retry. Each round reruns the whole batch,
@@ -2857,20 +2898,23 @@ namespace sccd {
                     // round happened to report, so a search that keeps overflowing
                     // can spin here for an unbounded number of full-batch reruns --
                     // which is how a kernel that produced too many boxes showed up
-                    // as a hang rather than as a slow run. Giving up is safe: boxes
-                    // dropped on overflow can only leave the time of impact too
-                    // large, never too small, and the toi carried over from the
-                    // rounds already done is kept.
-                    if (++retry_rounds >= SCCD_NP_MAX_RETRY_ROUNDS) {
+                    // as a hang rather than as a slow run. A dropped box can hold
+                    // the earliest root, so a round with drops can answer late; the
+                    // last round therefore accepted its overflow at the boxes'
+                    // lower bounds in t, which is early, never late, and stopping
+                    // after it is safe. The toi carried over from earlier rounds are
+                    // lower bounds of accepted boxes and are kept.
+                    if (last_chance) {
                         fprintf(stderr,
-                                "sccd: narrow phase gave up growing the global stack after %d rounds "
-                                "(deficit %d, capacity %d). The result is still conservative, but this "
-                                "batch did more work than the stack can hold.\n",
-                                retry_rounds,
+                                "sccd: narrow phase stopped growing the global stack after %d rounds "
+                                "(deficit %d, capacity %d); boxes that did not fit were accepted, so "
+                                "the result is conservative but may be early.\n",
+                                retry_rounds + 1,
                                 h_g_request,
                                 gstack_cap);
                         break;
                     }
+                    ++retry_rounds;
 
                     // printf("Overflowed: %d\n", h_g_request);
 
@@ -2888,7 +2932,9 @@ namespace sccd {
                     if (grow_by > SCCD_GSTACK_CAP_MAX) grow_by = SCCD_GSTACK_CAP_MAX;
                     const long long target_ll = (long long)gstack_cap + (long long)grow_by;
                     const int new_cap = (target_ll > (long long)INT_MAX) ? INT_MAX : (int)target_ll;
+                    const int cap_before = gstack_cap;
                     grow_stack(new_cap);
+                    stalled = (gstack_cap == cap_before);
                 }
             }
 

@@ -117,6 +117,10 @@ namespace sccd {
             int* request;  // boxes that did not fit, for the host to size the retry
             int capacity;
             int count;     // entries available to readers; 0 for a write buffer
+            // Set by the host for the last round it will run: a box that does not
+            // fit is then accepted at its lower bound in t instead of dropped, so
+            // the result stays conservative when the host stops retrying.
+            int accept_overflow;
         };
 
         /**
@@ -124,12 +128,13 @@ namespace sccd {
          *
          * The index comes from a bump allocator, so it belongs to this thread
          * alone and nobody reads the buffer until the launch ends. A box that does
-         * not fit is counted in `request` and dropped, which is safe -- dropping
-         * can only leave the time of impact earlier than the truth, never later --
-         * and the host grows the queue and retries.
+         * not fit is counted in `request` and dropped, and false is returned. A
+         * dropped box can hold the earliest root, so its round's answer can be
+         * late: the host grows the queue and reruns the batch, and in the last
+         * round it runs (`accept_overflow`) the caller accepts the box instead.
          */
         template <typename T>
-        static inline __device__ void push_global(const Stack<T>& out,
+        static inline __device__ bool push_global(const Stack<T>& out,
                                                   const Domain<T>& box,
                                                   const int level,
                                                   const int qid) {
@@ -140,7 +145,7 @@ namespace sccd {
             // one is rejected: both are outside the buffer.
             if (slot < 0 || slot >= out.capacity) {
                 atomicAdd(out.request, 1);
-                return;
+                return false;
             }
             out.tlower[slot] = box.tlower;
             out.tupper[slot] = box.tupper;
@@ -150,6 +155,7 @@ namespace sccd {
             out.vupper[slot] = box.vupper;
             out.level[slot] = level;
             out.qid[slot] = qid;
+            return true;
         }
 
         /**

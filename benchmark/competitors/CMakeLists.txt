@@ -32,12 +32,24 @@ endif()
 # paper describes. The broad and narrow phases only became separately callable
 # afterwards, and calling them apart is what lets the phase split here match the
 # article's. A commit hash pins just as firmly as a tag.
-set(SCCD_SCALABLE_CCD_TAG "ccf4bc19aba432b9d5abdd41ae55d15ea166a0a5"
+#
+# 049d8af (2026-10-28) restores the narrow-phase level-abort guard, fixing
+# upstream issue #12: at the previous pin, ccf4bc19, the queue could overrun and
+# return a time of impact after the earliest contact, and different values on
+# identical input. Results measured at ccf4bc19 predate the fix.
+set(SCCD_SCALABLE_CCD_TAG "049d8af986c9cc115e013df7c8af791c2a513dcc"
     CACHE STRING "Scalable CCD commit to compare against")
 
 # Its CUDA support follows ours, so a CUDA build of SCCD is compared against a
 # CUDA build of Scalable CCD and a host build against a host build.
 set(SCALABLE_CCD_WITH_CUDA ${SCCD_ENABLE_CUDA} CACHE BOOL "" FORCE)
+# Without this, Scalable CCD compiles for CMAKE_CUDA_ARCHITECTURES "native" --
+# whatever GPU the build machine has, and nothing on a login node without one --
+# overriding the architecture SCCD is built for. Its other CUDA flags
+# (--use_fast_math, separable compilation) are its authors' and are kept.
+if(SCCD_ENABLE_CUDA)
+  set(SCALABLE_CCD_CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}" CACHE STRING "" FORCE)
+endif()
 # Off is the library as its authors ship it: the narrow phase prunes every box
 # against the step's running earliest time of impact and returns that one
 # number. On, each query keeps its own bound and reports its own time of impact,
@@ -82,6 +94,21 @@ if(SCCD_ENABLE_CUDA)
     PROPERTIES LANGUAGE CUDA)
   target_compile_definitions(scalable_ccd_bench PRIVATE SCCD_COMPETITOR_WITH_CUDA)
   set_target_properties(scalable_ccd_bench PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+endif()
+
+# Scalable CCD's CMake compiles it as relocatable device code, which leaves the
+# device compiler no inlining across its translation units; its code needs that
+# mode, since device functions defined in one file are called from others. This
+# option adds device link-time optimisation to the library and the harness, to
+# measure what that costs it. nvlink requires the same -ftz in every object it
+# optimises, and the library is built with --use_fast_math, so the harness, whose
+# device code is the library's kernels instantiated from its headers, gets the
+# library's flag too. Off by default: the default is the build as shipped.
+option(SCCD_SCALABLE_CCD_LTO
+  "Build Scalable CCD and its harness with device link-time optimisation" OFF)
+if(SCCD_SCALABLE_CCD_LTO AND TARGET scalable_ccd)
+  set_target_properties(scalable_ccd scalable_ccd_bench PROPERTIES INTERPROCEDURAL_OPTIMIZATION ON)
+  target_compile_options(scalable_ccd_bench PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--use_fast_math>)
 endif()
 
 # ---------------------------------------------------------------------------

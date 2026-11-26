@@ -11,6 +11,19 @@
 #include <limits>
 #include <vector>
 
+// x86 (AVX2 / AVX-512): the count and fill passes read a candidate's element id
+// and vertex ids from arrays packed in cell order (cell2d_pack_ids) rather than
+// through idx[cellidx[k]] and the element table. The passes and the pairs they
+// produce are unchanged; only where the shared-vertex test reads its ids from.
+// Other targets keep the indirect reads.
+#ifndef SCCD_CELL2D_PACKED_IDS
+#if defined(__AVX512F__) || defined(__AVX2__)
+#define SCCD_CELL2D_PACKED_IDS 1
+#else
+#define SCCD_CELL2D_PACKED_IDS 0
+#endif
+#endif
+
 /**
  * \file
  * \brief Broad phase over a two-dimensional cell list, with no sorting.
@@ -519,6 +532,40 @@ namespace sccd {
             }
         });
     }
+
+#if SCCD_CELL2D_PACKED_IDS
+    /**
+     * \brief Copy each cell entry's element id and vertex ids into cell order.
+     *
+     * The ids counterpart of cell2d_pack_boxes. A box that passes the overlap
+     * test is next checked for a shared vertex, which otherwise reads
+     * idx[cellidx[k]] and then the element's \p nv vertex ids, two dependent
+     * random loads per candidate in both the count and the fill pass. Laid out
+     * here they are read in the order the cell holds them.
+     *
+     * \p out has nv + 1 arrays of cellptr[ncells] entries: out[v][k] is vertex v
+     * of the element in slot k, and out[nv][k] is that element's id.
+     */
+    template <typename T, typename I>
+    static void cell2d_pack_ids(const Cell2DGrid<T>& grid,
+                                const ptrdiff_t* const SCCD_RESTRICT cellptr,
+                                const I* const SCCD_RESTRICT cellidx,
+                                const I* const SCCD_RESTRICT idx,
+                                I** const SCCD_RESTRICT elements,
+                                const ptrdiff_t element_stride,
+                                const int nv,
+                                I** const SCCD_RESTRICT out) {
+        sccd::parallel_for_br(0, cellptr[grid.ncells()], [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+            for (ptrdiff_t k = rbegin; k < rend; ++k) {
+                const I jidx = idx[(ptrdiff_t)cellidx[k]];
+                for (int v = 0; v < nv; ++v) {
+                    out[v][k] = elements[v][(ptrdiff_t)jidx * element_stride];
+                }
+                out[nv][k] = jidx;
+            }
+        });
+    }
+#endif
 
     namespace detail {
 
@@ -1516,6 +1563,9 @@ namespace sccd {
                                           const T amaxy,
                                           const T amaxz,
                                           const T amax2,
+#if SCCD_CELL2D_PACKED_IDS
+                                          I* const* const SCCD_RESTRICT cellev,
+#endif
                                           Visit&& visit) {
             (void)fi;
             (void)cell_key;
@@ -1562,6 +1612,19 @@ namespace sccd {
                         }
                     }
 
+#if SCCD_CELL2D_PACKED_IDS
+                    if (cellev != nullptr) {
+                        I pev[NXE];
+                        for (int v = 0; v < NXE; ++v) {
+                            pev[v] = cellev[v][k];
+                        }
+                        if (sccd::detail::shares_vertex<NXE, NXE>(ev, pev)) {
+                            continue;
+                        }
+                        visit(j, cellev[NXE][k]);
+                        continue;
+                    }
+#endif
                     const I jidx = idx[j];
                     I sev[NXE];
                     for (int v = 0; v < NXE; ++v) {
@@ -1615,6 +1678,9 @@ namespace sccd {
                                                          const T* const SCCD_RESTRICT cell_hi1,
                                                          const T* const SCCD_RESTRICT cell_key,
                                                          const T* const SCCD_RESTRICT cell_hi2,
+#if SCCD_CELL2D_PACKED_IDS
+                                                         I* const* const SCCD_RESTRICT cellev,
+#endif
                                                          Visit&& visit) {
             const T aminx = aabbs[0][fi], aminy = aabbs[1][fi], aminz = aabbs[2][fi];
             const T amaxx = aabbs[3][fi], amaxy = aabbs[4][fi], amaxz = aabbs[5][fi];
@@ -1652,6 +1718,9 @@ namespace sccd {
                                                     amaxy,
                                                     amaxz,
                                                     amax2,
+#if SCCD_CELL2D_PACKED_IDS
+                                                    cellev,
+#endif
                                                     visit);
 
             for (int c1 = c1b; c1 <= c1e; ++c1) {
@@ -1696,6 +1765,9 @@ namespace sccd {
                                                              amaxy,
                                                              amaxz,
                                                              amax2,
+#if SCCD_CELL2D_PACKED_IDS
+                                                             cellev,
+#endif
                                                              visit);
                 }
             }
@@ -1741,6 +1813,9 @@ namespace sccd {
                                                        const T* const SCCD_RESTRICT row_prefix,
                                                        const T* const SCCD_RESTRICT cell_hi1,
                                                        const int krow,
+#if SCCD_CELL2D_PACKED_IDS
+                                                       I* const* const SCCD_RESTRICT cellev,
+#endif
                                                        Visit&& visit) {
             const T aminx = aabbs[0][fi], aminy = aabbs[1][fi], aminz = aabbs[2][fi];
             const T amaxx = aabbs[3][fi], amaxy = aabbs[4][fi], amaxz = aabbs[5][fi];
@@ -1790,6 +1865,18 @@ namespace sccd {
                             bits &= bits - 1;
 
                             const ptrdiff_t j = (ptrdiff_t)cellidx[k];
+#if SCCD_CELL2D_PACKED_IDS
+                            if (cellev != nullptr) {
+                                bool pshare = false;
+                                for (int v = 0; v < S; ++v) {
+                                    pshare |= (cellev[v][k] == vidx);
+                                }
+                                if (!pshare) {
+                                    visit(j, cellev[S][k]);
+                                }
+                                continue;
+                            }
+#endif
                             const I jidx = second_idx[j];
 
                             bool share = false;
@@ -1834,7 +1921,12 @@ namespace sccd {
                                        const T* const SCCD_RESTRICT cell_hi1,
                                        const T* const SCCD_RESTRICT cell_key,
                                        const T* const SCCD_RESTRICT cell_hi2,
-                                       ptrdiff_t* const SCCD_RESTRICT ccdptr) {
+                                       ptrdiff_t* const SCCD_RESTRICT ccdptr
+#if SCCD_CELL2D_PACKED_IDS
+                                       ,
+                                       I* const* const SCCD_RESTRICT cellev = nullptr
+#endif
+                                       ) {
         ccdptr[0] = 0;
 
         // Dynamic, not the usual block schedule: a box spanning many rows walks
@@ -1851,7 +1943,11 @@ namespace sccd {
                 ptrdiff_t count = 0;
                 detail::for_each_forward_self_partner<nxe, sorted, T, I>(
                     aabbs, fi, idx, elements, element_stride, ev, grid, cellptr, cellidx, cellbox, row_prefix,
-                    cell_hi1, cell_key, cell_hi2, [&](const ptrdiff_t, const I) { ++count; });
+                    cell_hi1, cell_key, cell_hi2,
+#if SCCD_CELL2D_PACKED_IDS
+                    cellev,
+#endif
+                    [&](const ptrdiff_t, const I) { ++count; });
                 ccdptr[fi + 1] = count;
             }
         });
@@ -1877,7 +1973,12 @@ namespace sccd {
                                       const T* const SCCD_RESTRICT cell_hi2,
                                       const ptrdiff_t* const SCCD_RESTRICT ccdptr,
                                       I* const SCCD_RESTRICT first_out,
-                                      I* const SCCD_RESTRICT second_out) {
+                                      I* const SCCD_RESTRICT second_out
+#if SCCD_CELL2D_PACKED_IDS
+                                      ,
+                                      I* const* const SCCD_RESTRICT cellev = nullptr
+#endif
+                                      ) {
         sccd::parallel_for_br_dynamic(0, element_count, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
             for (ptrdiff_t fi = rbegin; fi < rend; ++fi) {
                 const I idxi = idx[fi];
@@ -1889,7 +1990,11 @@ namespace sccd {
                 ptrdiff_t at = ccdptr[fi];
                 detail::for_each_forward_self_partner<nxe, sorted, T, I>(
                     aabbs, fi, idx, elements, element_stride, ev, grid, cellptr, cellidx, cellbox, row_prefix,
-                    cell_hi1, cell_key, cell_hi2, [&](const ptrdiff_t, const I jidx) {
+                    cell_hi1, cell_key, cell_hi2,
+#if SCCD_CELL2D_PACKED_IDS
+                    cellev,
+#endif
+                    [&](const ptrdiff_t, const I jidx) {
                         first_out[at] = sccd::min<I>(idxi, jidx);
                         second_out[at] = sccd::max<I>(idxi, jidx);
                         ++at;
@@ -1923,7 +2028,12 @@ namespace sccd {
                                      const T* const SCCD_RESTRICT row_prefix,
                                      const T* const SCCD_RESTRICT cell_hi1,
                                      const int krow,
-                                     ptrdiff_t* const SCCD_RESTRICT ccdptr) {
+                                     ptrdiff_t* const SCCD_RESTRICT ccdptr
+#if SCCD_CELL2D_PACKED_IDS
+                                     ,
+                                     I* const* const SCCD_RESTRICT cellev = nullptr
+#endif
+                                     ) {
         ccdptr[0] = 0;
 
         // Dynamic for the same reason the self walk is: krow rows of a wide
@@ -1935,6 +2045,9 @@ namespace sccd {
                 detail::for_each_min_corner_partner<nxe, T, I>(
                     vaabbs, vi, vertex_idx[vi], face_idx, face_elements, face_element_stride, grid, cellptr,
                     cellidx, cellbox, row_prefix, cell_hi1, krow,
+#if SCCD_CELL2D_PACKED_IDS
+                    cellev,
+#endif
                     [&](const ptrdiff_t, const I) { ++count; });
                 ccdptr[vi + 1] = count;
             }
@@ -1961,14 +2074,23 @@ namespace sccd {
                                     const int krow,
                                     const ptrdiff_t* const SCCD_RESTRICT ccdptr,
                                     I* const SCCD_RESTRICT face_out,
-                                    I* const SCCD_RESTRICT vertex_out) {
+                                    I* const SCCD_RESTRICT vertex_out
+#if SCCD_CELL2D_PACKED_IDS
+                                    ,
+                                    I* const* const SCCD_RESTRICT cellev = nullptr
+#endif
+                                    ) {
         sccd::parallel_for_br_dynamic(0, vertex_count, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
             for (ptrdiff_t vi = rbegin; vi < rend; ++vi) {
                 const I vidx = vertex_idx[vi];
                 ptrdiff_t at = ccdptr[vi];
                 detail::for_each_min_corner_partner<nxe, T, I>(
                     vaabbs, vi, vidx, face_idx, face_elements, face_element_stride, grid, cellptr, cellidx,
-                    cellbox, row_prefix, cell_hi1, krow, [&](const ptrdiff_t, const I jidx) {
+                    cellbox, row_prefix, cell_hi1, krow,
+#if SCCD_CELL2D_PACKED_IDS
+                    cellev,
+#endif
+                    [&](const ptrdiff_t, const I jidx) {
                         face_out[at] = jidx;
                         vertex_out[at] = vidx;
                         ++at;

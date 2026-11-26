@@ -160,14 +160,15 @@ def dataset_table(summaries: dict[tuple[str, str], SceneSummary],
     """
     table = Table(
         label="tab:dataset",
-        caption=("The benchmark problems. \\emph{cases} is simulation steps with "
-                 "a runnable query set, \\emph{candidate pairs} the mean number "
-                 "the broad phase produces per step, and \\emph{queries} the "
-                 "curated per-step query sets that carry exact symbolic roots. Cases and "
+        caption=("The benchmark problems. A \\emph{case} is one query type, "
+                 "vertex-face or edge-edge, on one simulation step; \\emph{candidate "
+                 "pairs} is the mean number the broad phase produces per case, and "
+                 "\\emph{queries} the curated queries, which carry exact answers, "
+                 "\\emph{w/ root} those whose answer is a time of impact. Cases and "
                  "queries are counts over the whole scene; candidate pairs is a "
-                 "per-step mean."),
+                 "per-case mean."),
         columns=[Column("scene", "l"), Column("cases"),
-                 Column("candidate pairs/step", tex_header=r"pairs/step"),
+                 Column("candidate pairs/case", tex_header=r"pairs/case"),
                  Column("queries"), Column("with a root", tex_header=r"w/ root")],
         source=source,
     )

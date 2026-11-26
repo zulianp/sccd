@@ -16,10 +16,170 @@
 
 #define SCCD_C2D_N_WARPS_PER_BLOCK 8
 
+// The four warp-per-box launches (self count and collect, vertex-face count and
+// collect) give every box a whole warp, so their grid holds 32 or 64 times as
+// many threads as there are boxes. HIP bounds a grid dimension by its
+// work-items, gridDim.x * blockDim.x < 2^32, and a 64-wide wavefront crosses it
+// past 2^32 / 64 = 67M boxes: cloth-ball refined to level 5 (94M faces, 141M
+// edges) failed its self-overlap count with "invalid configuration argument" on an
+// MI300A. Set, such a launch spills into gridDim.y and those kernels number
+// their warps over both dimensions. CUDA bounds blocks instead (2^31 - 1 in x),
+// which a warp-per-box launch reaches only past 17 billion boxes, so the CUDA
+// build keeps its one-dimensional launch and the H100's kernels are unchanged.
+#ifndef SCCD_C2D_WARP_GRID_2D
+#if defined(SCCD_ENABLE_HIP)
+#define SCCD_C2D_WARP_GRID_2D 1
+#else
+#define SCCD_C2D_WARP_GRID_2D 0
+#endif
+#endif
+#if SCCD_C2D_WARP_GRID_2D
+// The most work-items a launch puts in x. Only a test lowers it, so that small
+// inputs take the two-dimensional path.
+#ifndef SCCD_C2D_WARP_GRID_MAX_ITEMS
+#define SCCD_C2D_WARP_GRID_MAX_ITEMS ((((ptrdiff_t)1) << 32) - 1)
+#endif
+// A warp-per-box kernel's thread index over both grid dimensions.
+#define SCCD_C2D_WARP_TID() \
+    (((ptrdiff_t)blockIdx.y * gridDim.x + blockIdx.x) * (ptrdiff_t)blockDim.x + threadIdx.x)
+// The grid of a warp-per-box launch over n boxes: one dimension while it fits,
+// else as many rows of the widest x as it takes. The kernels return for a warp
+// past n, so the last row's surplus does nothing.
+static inline dim3 sccd_c2d_warp_grid(const ptrdiff_t n, const unsigned block) {
+    const ptrdiff_t blocks = (n * SCCD_WARP_SIZE + block - 1) / block;
+    const ptrdiff_t max_x = SCCD_C2D_WARP_GRID_MAX_ITEMS / block;
+    if (blocks <= max_x) return dim3((unsigned)blocks);
+    return dim3((unsigned)max_x, (unsigned)((blocks + max_x - 1) / max_x));
+}
+#else
+#define SCCD_C2D_WARP_TID() ((ptrdiff_t)blockIdx.x * blockDim.x + threadIdx.x)
+#endif
+
+// The box arrays reach this file as a device table of row pointers (T** in
+// device memory), and soa_device_row copies that table back to the host for
+// every row it is asked for: a blocking 48-byte device-to-host copy, two to six
+// per kernel launch, 26 per device broad-phase prep. On MI300A (ROCm 6.4) each
+// costs tens of microseconds, and together they were most of the prep's gap to
+// GH200 (cloth-funnel median 1.05 ms against 0.69 ms per case). With this set,
+// each host function copies the table once and reads every row it needs from
+// that copy: the same pointers, 9 copies per prep instead of 26 (MI300A,
+// cloth-funnel median prep 1.20 -> 0.88 ms). A table its owner registered
+// (register_soa_rows) is not copied at all, which takes the remaining 9 away
+// for the smesh CCD's three box tables.
+//
+// The CUDA build keeps one copy per row unless this is set explicitly, so the
+// H100 numbers stay those of the code that produced them. The macro itself is
+// in sccd_cell2d_broadphase.cuh.
+
+#if SCCD_DEVICE_SOA_ROWS_ONCE
+#include <cstring>
+#include <mutex>
+#endif
+
 namespace sccd {
     namespace device {
 
+#if SCCD_DEVICE_SOA_ROWS_ONCE
+        // Defined in sccd_broadphase.cu next to soa_device_row.
+        bool is_ptr_device(const void* ptr);
+#endif
+
+#if SCCD_DEVICE_SOA_ROWS_ONCE && SCCD_DEVICE_SOA_ROWS_REGISTRY
+        namespace {
+            // A handful of tables at most -- three per live CCD -- so a short
+            // array searched linearly under a lock.
+            struct SoaRowsRegistry {
+                static constexpr int kMax = 32;
+                std::mutex mutex;
+                int n = 0;
+                const void* table[kMax];
+                void* rows[kMax][2 * SCCD_DIM];
+            };
+
+            SoaRowsRegistry& soa_rows_registry() {
+                static SoaRowsRegistry* r = new SoaRowsRegistry();  // never destroyed, like the runtime it outlives
+                return *r;
+            }
+
+            bool lookup_soa_rows(const void* device_table, void** out) {
+                SoaRowsRegistry& r = soa_rows_registry();
+                std::lock_guard<std::mutex> lock(r.mutex);
+                for (int i = 0; i < r.n; ++i) {
+                    if (r.table[i] == device_table) {
+                        std::memcpy(out, r.rows[i], sizeof(r.rows[i]));
+                        return true;
+                    }
+                }
+                return false;
+            }
+        }  // namespace
+
+        void register_soa_rows(const void* device_table, void* const* host_rows) {
+            SoaRowsRegistry& r = soa_rows_registry();
+            std::lock_guard<std::mutex> lock(r.mutex);
+            int i = 0;
+            while (i < r.n && r.table[i] != device_table) ++i;
+            if (i == r.n) {
+                if (r.n == SoaRowsRegistry::kMax) return;  // full: the table is simply copied back
+                ++r.n;
+            }
+            r.table[i] = device_table;
+            std::memcpy(r.rows[i], host_rows, sizeof(r.rows[i]));
+        }
+
+        void unregister_soa_rows(const void* device_table) {
+            SoaRowsRegistry& r = soa_rows_registry();
+            std::lock_guard<std::mutex> lock(r.mutex);
+            for (int i = 0; i < r.n; ++i) {
+                if (r.table[i] == device_table) {
+                    --r.n;
+                    r.table[i] = r.table[r.n];
+                    std::memcpy(r.rows[i], r.rows[r.n], sizeof(r.rows[i]));
+                    return;
+                }
+            }
+        }
+#endif
+
         namespace detail {
+
+            // The rows of one SoA box table, read the way SCCD_DEVICE_SOA_ROWS_ONCE
+            // says: the whole table on the first access, or one row per access
+            // through soa_device_row as before. It lives for one host function,
+            // so it cannot outlast the table it copied.
+            template <typename T>
+            class SoaRows {
+            public:
+                explicit SoaRows(T** const arrays) : arrays_(arrays) {}
+
+                T* operator[](const int row) {
+#if SCCD_DEVICE_SOA_ROWS_ONCE
+                    if (!fetched_) {
+#if SCCD_DEVICE_SOA_ROWS_REGISTRY
+                        if (lookup_soa_rows(arrays_, reinterpret_cast<void**>(rows_))) {
+                            // registered by its owner: nothing to copy
+                        } else
+#endif
+                        if (is_ptr_device(arrays_)) {
+                            SCCD_CHECK_CUDA(cudaMemcpy(rows_, arrays_, sizeof(rows_), cudaMemcpyDeviceToHost));
+                        } else {
+                            for (int d = 0; d < 2 * SCCD_DIM; ++d) rows_[d] = arrays_[d];
+                        }
+                        fetched_ = true;
+                    }
+                    return rows_[row];
+#else
+                    return soa_device_row<T>(arrays_, row);
+#endif
+                }
+
+            private:
+                T** arrays_;
+#if SCCD_DEVICE_SOA_ROWS_ONCE
+                T* rows_[2 * SCCD_DIM] = {};
+                bool fetched_ = false;
+#endif
+            };
 
             template <typename T>
             static __device__ __forceinline__ int clamp_cell(const T v, const T lo, const T inv, const int n) {
@@ -752,7 +912,7 @@ namespace sccd {
                                                   const T* const SCCD_RESTRICT row_prefix,
                                                   const T* const SCCD_RESTRICT cell_hi1,
                                                   ptrdiff_t* const SCCD_RESTRICT ccdptr) {
-                const ptrdiff_t tid = (ptrdiff_t)blockIdx.x * blockDim.x + threadIdx.x;
+                const ptrdiff_t tid = SCCD_C2D_WARP_TID();
                 const ptrdiff_t fi = tid / SCCD_WARP_SIZE;
                 if (tid == 0) ccdptr[0] = 0;
                 // Uniform over the warp, so the whole warp leaves together and
@@ -786,7 +946,7 @@ namespace sccd {
                                                     const ptrdiff_t* const SCCD_RESTRICT ccdptr,
                                                     I* const SCCD_RESTRICT first_out,
                                                     I* const SCCD_RESTRICT second_out) {
-                const ptrdiff_t tid = (ptrdiff_t)blockIdx.x * blockDim.x + threadIdx.x;
+                const ptrdiff_t tid = SCCD_C2D_WARP_TID();
                 const ptrdiff_t fi = tid / SCCD_WARP_SIZE;
                 if (fi >= element_count) return;
 
@@ -958,7 +1118,7 @@ namespace sccd {
                                                 const T* const SCCD_RESTRICT cell_hi1,
                                                 const int* const SCCD_RESTRICT krow,
                                                 ptrdiff_t* const SCCD_RESTRICT ccdptr) {
-                const ptrdiff_t tid = (ptrdiff_t)blockIdx.x * blockDim.x + threadIdx.x;
+                const ptrdiff_t tid = SCCD_C2D_WARP_TID();
                 const ptrdiff_t vi = tid / SCCD_WARP_SIZE;
                 if (tid == 0) ccdptr[0] = 0;
                 // Uniform over the warp, so the whole warp leaves together and
@@ -993,7 +1153,7 @@ namespace sccd {
                                                   const ptrdiff_t* const SCCD_RESTRICT ccdptr,
                                                   I* const SCCD_RESTRICT face_out,
                                                   I* const SCCD_RESTRICT vertex_out) {
-                const ptrdiff_t tid = (ptrdiff_t)blockIdx.x * blockDim.x + threadIdx.x;
+                const ptrdiff_t tid = SCCD_C2D_WARP_TID();
                 const ptrdiff_t vi = tid / SCCD_WARP_SIZE;
                 if (vi >= vertex_count) return;
 
@@ -1064,6 +1224,7 @@ namespace sccd {
         static void size_grid_device(const ptrdiff_t n,
                                      T** const SCCD_RESTRICT aabbs,
                                      Cell2DGridD<T>& grid) {
+            detail::SoaRows<T> rows(aabbs);
             // Axis choice is on the host: it needs three reductions and then a
             // decision, and the arrays are small enough that a kernel per axis is
             // cheaper than the launch overhead of doing it any other way.
@@ -1087,8 +1248,8 @@ namespace sccd {
                 T* const psum = parts + (ptrdiff_t)(3 * d + 2) * kG;
                 detail::grid_stats_partial_kernel<T><<<nparts, kB, shmem>>>(
                     n,
-                    soa_device_row<T>(aabbs, d),
-                    soa_device_row<T>(aabbs, SCCD_DIM + d),
+                    rows[d],
+                    rows[SCCD_DIM + d],
                     pmin, pmax, psum);
                 detail::grid_stats_final_kernel<T><<<1, kB, shmem>>>(
                     nparts, pmin, pmax, psum, stats + 3 * d, stats + 3 * d + 1, stats + 3 * d + 2);
@@ -1164,6 +1325,7 @@ namespace sccd {
                                     ptrdiff_t* const SCCD_RESTRICT cellptr,
                                     int* const SCCD_RESTRICT ranges,
                                     ptrdiff_t* const SCCD_RESTRICT span_count) {
+            detail::SoaRows<T> rows(aabbs);
             SCCD_CUDA_LAST_ERROR();
             if (n <= 0) {
                 *span_count = 0;
@@ -1178,10 +1340,10 @@ namespace sccd {
             dim3 block(SCCD_C2D_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
             dim3 gridsz((n + block.x - 1) / block.x);
             detail::bin_count_kernel<T><<<gridsz, block>>>(n,
-                                                        soa_device_row<T>(aabbs, grid.axis0),
-                                                        soa_device_row<T>(aabbs, SCCD_DIM + grid.axis0),
-                                                        soa_device_row<T>(aabbs, grid.axis1),
-                                                        soa_device_row<T>(aabbs, SCCD_DIM + grid.axis1),
+                                                        rows[grid.axis0],
+                                                        rows[SCCD_DIM + grid.axis0],
+                                                        rows[grid.axis1],
+                                                        rows[SCCD_DIM + grid.axis1],
                                                         grid,
                                                         cellptr,
                                                         ranges);
@@ -1358,6 +1520,7 @@ namespace sccd {
                                        T** const SCCD_RESTRICT aabbs,
                                        Cell2DGridD<T>& grid,
                                        ptrdiff_t* const SCCD_RESTRICT cellptr) {
+            detail::SoaRows<T> rows(aabbs);
             SCCD_CUDA_LAST_ERROR();
             if (n <= 0) return;
 
@@ -1369,7 +1532,7 @@ namespace sccd {
             dim3 block(SCCD_C2D_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
             dim3 gridsz((n + block.x - 1) / block.x);
             detail::min_bin_count_kernel<T><<<gridsz, block>>>(
-                n, soa_device_row<T>(aabbs, grid.axis0), soa_device_row<T>(aabbs, grid.axis1),
+                n, rows[grid.axis0], rows[grid.axis1],
                 grid, cellptr);
             SCCD_CUDA_LAST_ERROR();
 
@@ -1383,13 +1546,14 @@ namespace sccd {
                             const ptrdiff_t* const SCCD_RESTRICT cellptr,
                             I* const SCCD_RESTRICT cellidx,
                             ptrdiff_t* const SCCD_RESTRICT cursor) {
+            detail::SoaRows<T> rows(aabbs);
             if (n <= 0) return;
             SCCD_CHECK_CUDA(cudaMemset(cursor, 0, sizeof(ptrdiff_t) * (size_t)grid.ncells()));
 
             dim3 block(SCCD_C2D_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
             dim3 gridsz((n + block.x - 1) / block.x);
             detail::min_bin_fill_kernel<T, I><<<gridsz, block>>>(
-                n, soa_device_row<T>(aabbs, grid.axis0), soa_device_row<T>(aabbs, grid.axis1),
+                n, rows[grid.axis0], rows[grid.axis1],
                 grid, cellptr, cellidx, cursor);
             SCCD_CUDA_LAST_ERROR();
         }
@@ -1401,6 +1565,7 @@ namespace sccd {
                               const I* const SCCD_RESTRICT cellidx,
                               T* const SCCD_RESTRICT row_prefix,
                               T* const SCCD_RESTRICT cell_hi1) {
+            detail::SoaRows<T> rows(aabbs);
             const ptrdiff_t ncells = grid.ncells();
             if (ncells <= 0) return;
 
@@ -1411,8 +1576,8 @@ namespace sccd {
             dim3 gridsz((ncells + block.x - 1) / block.x);
             detail::min_cell_bounds_kernel<T, I><<<gridsz, block>>>(
                 ncells, cellptr, cellidx,
-                soa_device_row<T>(aabbs, SCCD_DIM + grid.axis0),
-                soa_device_row<T>(aabbs, SCCD_DIM + grid.axis1),
+                rows[SCCD_DIM + grid.axis0],
+                rows[SCCD_DIM + grid.axis1],
                 row_prefix, cell_hi1);
             SCCD_CUDA_LAST_ERROR();
 
@@ -1439,7 +1604,11 @@ namespace sccd {
             }
             dim3 block(SCCD_C2D_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
             // One warp to a box, so the launch is sized in warps.
+#if SCCD_C2D_WARP_GRID_2D
+            const dim3 gridsz = sccd_c2d_warp_grid(element_count, block.x);
+#else
             dim3 gridsz((element_count * SCCD_WARP_SIZE + block.x - 1) / block.x);
+#endif
             detail::min_count_self_kernel<nxe, T, I><<<gridsz, block>>>(
                 element_count, aabbs, idx, element_stride, elements, grid, cellptr, cellidx,
                 row_prefix, cell_hi1, ccdptr);
@@ -1463,7 +1632,11 @@ namespace sccd {
                                              I* const SCCD_RESTRICT second_out) {
             if (element_count <= 0) return;
             dim3 block(SCCD_C2D_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
+#if SCCD_C2D_WARP_GRID_2D
+            const dim3 gridsz = sccd_c2d_warp_grid(element_count, block.x);
+#else
             dim3 gridsz((element_count * SCCD_WARP_SIZE + block.x - 1) / block.x);
+#endif
             detail::min_collect_self_kernel<nxe, T, I><<<gridsz, block>>>(
                 element_count, aabbs, idx, element_stride, elements, grid, cellptr, cellidx,
                 row_prefix, cell_hi1, ccdptr, first_out, second_out);
@@ -1475,6 +1648,7 @@ namespace sccd {
                                     T** const SCCD_RESTRICT aabbs,
                                     const Cell2DGridD<T>& grid,
                                     int* const SCCD_RESTRICT krow) {
+            detail::SoaRows<T> rows(aabbs);
             SCCD_CHECK_CUDA(cudaMemset(krow, 0, sizeof(int)));
             if (n <= 0) return;
 
@@ -1482,8 +1656,8 @@ namespace sccd {
             dim3 gridsz((n + block.x - 1) / block.x);
             detail::min_row_span_kernel<T><<<gridsz, block>>>(
                 n,
-                soa_device_row<T>(aabbs, grid.axis1),
-                soa_device_row<T>(aabbs, SCCD_DIM + grid.axis1),
+                rows[grid.axis1],
+                rows[SCCD_DIM + grid.axis1],
                 grid,
                 krow);
             SCCD_CUDA_LAST_ERROR();
@@ -1510,7 +1684,11 @@ namespace sccd {
             }
             dim3 block(SCCD_C2D_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
             // One warp to a vertex, so the launch is sized in warps.
+#if SCCD_C2D_WARP_GRID_2D
+            const dim3 gridsz = sccd_c2d_warp_grid(vertex_count, block.x);
+#else
             dim3 gridsz((vertex_count * SCCD_WARP_SIZE + block.x - 1) / block.x);
+#endif
             detail::min_count_vf_kernel<S, T, I><<<gridsz, block>>>(
                 vertex_count, vaabbs, vertex_idx, faabbs, face_idx, face_element_stride,
                 face_elements, grid, cellptr, cellidx, row_prefix, cell_hi1, krow, ccdptr);
@@ -1537,7 +1715,11 @@ namespace sccd {
                                            I* const SCCD_RESTRICT vertex_out) {
             if (vertex_count <= 0) return;
             dim3 block(SCCD_C2D_N_WARPS_PER_BLOCK * SCCD_WARP_SIZE);
+#if SCCD_C2D_WARP_GRID_2D
+            const dim3 gridsz = sccd_c2d_warp_grid(vertex_count, block.x);
+#else
             dim3 gridsz((vertex_count * SCCD_WARP_SIZE + block.x - 1) / block.x);
+#endif
             detail::min_collect_vf_kernel<S, T, I><<<gridsz, block>>>(
                 vertex_count, vaabbs, vertex_idx, faabbs, face_idx, face_element_stride,
                 face_elements, grid, cellptr, cellidx, row_prefix, cell_hi1, krow, ccdptr,

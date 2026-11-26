@@ -29,6 +29,110 @@
 #include <utility>
 #include <vector>
 
+// The device steps size their outputs -- the two candidate lists of each query
+// and the two time-of-impact arrays -- from a count read back that step, and
+// smesh's create_buffer gives each one a fresh allocation and a blocking
+// zero-fill, freed again when the step after replaces it. On MI300A every
+// hipMalloc/hipMemset pair holds the host for tens of microseconds, six times
+// per collision query, inside the timed broad and narrow phase. With this on,
+// each of those six outputs draws from a process-wide grow-only block instead,
+// zero-filled asynchronously on the same (default) stream, so the buffer the
+// caller sees holds exactly what it did before. A block is handed out again
+// only when nothing outside the pool still holds a buffer on it, so a caller
+// keeping last step's candidates never sees them overwritten. On by default
+// for HIP; CUDA keeps smesh's allocations, as measured. 0 restores them.
+#ifndef SCCD_DEVICE_OUTPUT_POOL
+#if defined(SCCD_ENABLE_HIP)
+#define SCCD_DEVICE_OUTPUT_POOL 1
+#else
+#define SCCD_DEVICE_OUTPUT_POOL 0
+#endif
+#endif
+
+#if defined(SCCD_ENABLE_CUDA)
+namespace sccd {
+    namespace detail {
+        /** \brief The outputs a device step allocates, one pool slot each. */
+        enum DeviceOutputSlot { kFOverlap = 0, kVOverlap, kE0Overlap, kE1Overlap, kVfTois, kEeTois, kNumDeviceOutputSlots };
+    }  // namespace detail
+}  // namespace sccd
+#endif
+
+#if defined(SCCD_ENABLE_CUDA) && SCCD_DEVICE_OUTPUT_POOL
+#include <memory>
+#include <mutex>
+
+namespace sccd {
+    namespace detail {
+        struct DeviceBlock {
+            void* ptr{nullptr};
+            size_t bytes{0};
+            ~DeviceBlock() {
+                if (ptr) (void)cudaFree(ptr);
+            }
+        };
+
+        struct DeviceOutputPool {
+            std::mutex mutex;
+            std::shared_ptr<DeviceBlock> slots[kNumDeviceOutputSlots];
+        };
+
+        // Never destroyed: freeing device memory from a static destructor
+        // would run after the GPU runtime has been torn down at exit.
+        inline DeviceOutputPool& device_output_pool() {
+            static DeviceOutputPool* pool = new DeviceOutputPool();
+            return *pool;
+        }
+
+        /**
+         * \brief A zero-filled device buffer of \p n elements on \p slot's block.
+         *
+         * The block is reused when it is large enough and no buffer still holds
+         * it; otherwise it is replaced by one with a quarter of headroom, so a
+         * count that creeps up from case to case does not reallocate every time.
+         * n == 0 returns what smesh does, a buffer with a null data pointer,
+         * which the callers test for.
+         */
+        template <typename T>
+        smesh::SharedBuffer<T> pooled_device_buffer(const DeviceOutputSlot slot, const ptrdiff_t n) {
+            if (n <= 0) return smesh::create_buffer<T>(0, smesh::EXECUTION_SPACE_DEVICE);
+            const size_t bytes = (size_t)n * sizeof(T);
+
+            DeviceOutputPool& pool = device_output_pool();
+            std::shared_ptr<DeviceBlock> block;
+            {
+                std::lock_guard<std::mutex> lock(pool.mutex);
+                std::shared_ptr<DeviceBlock>& s = pool.slots[slot];
+                if (!s || s.use_count() > 1 || s->bytes < bytes) {
+                    size_t want = bytes + bytes / 4;
+                    want = (want + 4095) & ~(size_t)4095;
+                    auto fresh = std::make_shared<DeviceBlock>();
+                    if (cudaMalloc(&fresh->ptr, want) != cudaSuccess) {
+                        (void)cudaGetLastError();  // clear the sticky allocation error
+                        fresh->ptr = nullptr;
+                        // Fall back to the exact size smesh would have taken.
+                        return smesh::create_buffer<T>(n, smesh::EXECUTION_SPACE_DEVICE);
+                    }
+                    fresh->bytes = want;
+                    s = fresh;
+                }
+                block = s;
+            }
+
+            // Same stream as every kernel that writes or reads these buffers, so
+            // the fill is ordered after the last use of the block's old contents.
+            if (cudaMemsetAsync(block->ptr, 0, bytes) != cudaSuccess) {
+                SMESH_ERROR("sccd: cudaMemsetAsync of a pooled step output failed: %s\n",
+                            cudaGetErrorString(cudaGetLastError()));
+            }
+            T* const data = static_cast<T*>(block->ptr);
+            return std::make_shared<smesh::Buffer<T>>(
+                (size_t)n, data, [keep_alive = block](void*) { (void)keep_alive; }, smesh::MEMORY_SPACE_DEVICE);
+        }
+    }  // namespace detail
+}  // namespace sccd
+#endif
+
 namespace sccd {
     template <typename scalar_t>
     class CCD {
@@ -232,6 +336,15 @@ namespace sccd {
         std::vector<smesh::idx_t> e_cellidx_;
         std::vector<scalar_t> e_cellbox_data_[6];
         scalar_t* e_cellbox_[6]{};
+#if SCCD_CELL2D_PACKED_IDS
+        // The element ids and vertex ids of each cell entry, in cell order (see
+        // sccd::cell2d_pack_ids): up to four face vertices plus the face id, and
+        // two edge vertices plus the edge id.
+        std::vector<smesh::idx_t> f_cellev_data_[5];
+        smesh::idx_t* f_cellev_[5]{};
+        std::vector<smesh::idx_t> e_cellev_data_[3];
+        smesh::idx_t* e_cellev_[3]{};
+#endif
 
         // The bounds the minimum-corner query prunes with, one pair of scalars
         // per cell. They cost 2 * ncells where the binning they replace saves
@@ -757,6 +870,18 @@ namespace sccd {
                     }
                     sccd::cell2d_pack_boxes<scalar_t, smesh::idx_t>(
                         f_grid_, faabb_->data(), f_cellptr_.data(), f_cellidx_.data(), f_cellbox_);
+#if SCCD_CELL2D_PACKED_IDS
+                    {
+                        const int nv = mesh_->block(0)->n_nodes_per_element();
+                        for (int v = 0; v <= nv; ++v) {
+                            f_cellev_data_[v].resize((size_t)f_cellptr_[f_grid_.ncells()]);
+                            f_cellev_[v] = f_cellev_data_[v].data();
+                        }
+                        sccd::cell2d_pack_ids<scalar_t, smesh::idx_t>(
+                            f_grid_, f_cellptr_.data(), f_cellidx_.data(), fidx_->data(), faces_->data(), 1, nv,
+                            f_cellev_);
+                    }
+#endif
                 } else if (use_cell2d_seg_) {
                     // The face-vertex query walks the faces, so the faces are what
                     // the cell array holds and the vertices never enter one.
@@ -780,6 +905,14 @@ namespace sccd {
                     }
                     sccd::cell2d_pack_boxes<scalar_t, smesh::idx_t>(
                         e_grid_, eaabb_->data(), e_cellptr_.data(), e_cellidx_.data(), e_cellbox_);
+#if SCCD_CELL2D_PACKED_IDS
+                    for (int v = 0; v <= 2; ++v) {
+                        e_cellev_data_[v].resize((size_t)e_cellptr_[e_grid_.ncells()]);
+                        e_cellev_[v] = e_cellev_data_[v].data();
+                    }
+                    sccd::cell2d_pack_ids<scalar_t, smesh::idx_t>(
+                        e_grid_, e_cellptr_.data(), e_cellidx_.data(), eidx_->data(), edges_->data(), 1, 2, e_cellev_);
+#endif
                 } else {
                     bin_host_<true>(n_edges, eaabb_->data(), e_grid_, e_part_, e_cellptr_, e_cellidx_,
                                     e_cursor_, e_cellbox_data_, e_cellbox_);
@@ -877,7 +1010,12 @@ namespace sccd {
                                                                                    e_cell_hi1_.data(),
                                                                                    key,
                                                                                    hi2,
-                                                                                   ccdptr_->data());
+                                                                                   ccdptr_->data()
+#if SCCD_CELL2D_PACKED_IDS
+                                                                                   ,
+                                                                                   e_cellev_
+#endif
+                                                                                   );
 
             const ptrdiff_t n_pairs = ccdptr_->data()[n_edges];
             e0_overlap_ = smesh::create_buffer<smesh::idx_t>(n_pairs, execution_space_);
@@ -898,7 +1036,12 @@ namespace sccd {
                                                                                   hi2,
                                                                                   ccdptr_->data(),
                                                                                   e0_overlap_->data(),
-                                                                                  e1_overlap_->data());
+                                                                                  e1_overlap_->data()
+#if SCCD_CELL2D_PACKED_IDS
+                                                                                  ,
+                                                                                  e_cellev_
+#endif
+                                                                                  );
             return SCCD_SUCCESS;
         }
 
@@ -962,7 +1105,12 @@ namespace sccd {
                                                                           f_row_prefix_.data(),
                                                                           f_cell_hi1_.data(),
                                                                           f_krow_,
-                                                                          ccdptr_->data());
+                                                                          ccdptr_->data()
+#if SCCD_CELL2D_PACKED_IDS
+                                                                          ,
+                                                                          f_cellev_
+#endif
+                                                                          );
 
             const ptrdiff_t n_pairs = ccdptr_->data()[n_nodes];
             f_overlap_ = smesh::create_buffer<smesh::idx_t>(n_pairs, execution_space_);
@@ -983,7 +1131,12 @@ namespace sccd {
                                                                          f_krow_,
                                                                          ccdptr_->data(),
                                                                          f_overlap_->data(),
-                                                                         v_overlap_->data());
+                                                                         v_overlap_->data()
+#if SCCD_CELL2D_PACKED_IDS
+                                                                         ,
+                                                                         f_cellev_
+#endif
+                                                                         );
             return SCCD_SUCCESS;
         }
 
@@ -1268,6 +1421,24 @@ namespace sccd {
                 SMESH_ERROR("sccd: device read-back of %s failed: %s\n", what, cudaGetErrorString(err));
             }
         }
+
+        /** \brief The output buffer a device step replaces \p member with.
+         *
+         * With SCCD_DEVICE_OUTPUT_POOL the member lets go of its buffer first, so
+         * the pool sees its block free and hands it back instead of allocating;
+         * the previous contents are dead by then, as they were when the
+         * assignment dropped them. Without it, smesh's create_buffer as before. */
+        template <typename T>
+        smesh::SharedBuffer<T> device_output_(smesh::SharedBuffer<T>& member, const int slot, const ptrdiff_t n) {
+#if SCCD_DEVICE_OUTPUT_POOL
+            member.reset();
+            return detail::pooled_device_buffer<T>((detail::DeviceOutputSlot)slot, n);
+#else
+            SMESH_UNUSED(member);
+            SMESH_UNUSED(slot);
+            return smesh::create_buffer<T>(n, execution_space_);
+#endif
+        }
 #endif
 
         int broad_phase_prep_device_() {
@@ -1397,8 +1568,8 @@ namespace sccd {
 
             {
                 SMESH_TRACE_SCOPE("f2v allocations");
-                f_overlap_ = smesh::create_buffer<smesh::idx_t>(n_pairs, execution_space_);
-                v_overlap_ = smesh::create_buffer<smesh::idx_t>(n_pairs, execution_space_);
+                f_overlap_ = device_output_(f_overlap_, detail::kFOverlap, n_pairs);
+                v_overlap_ = device_output_(v_overlap_, detail::kVOverlap, n_pairs);
             }
 
             // An empty output buffer has a null data pointer, so the collect is
@@ -1443,8 +1614,8 @@ namespace sccd {
 
             {
                 SMESH_TRACE_SCOPE("f2v allocations");
-                f_overlap_ = smesh::create_buffer<smesh::idx_t>(n_pairs, execution_space_);
-                v_overlap_ = smesh::create_buffer<smesh::idx_t>(n_pairs, execution_space_);
+                f_overlap_ = device_output_(f_overlap_, detail::kFOverlap, n_pairs);
+                v_overlap_ = device_output_(v_overlap_, detail::kVOverlap, n_pairs);
             }
 
             // An empty output buffer has a null data pointer, so the collect is
@@ -1540,8 +1711,8 @@ namespace sccd {
 
             {
                 SMESH_TRACE_SCOPE("f2v allocations");
-                f_overlap_ = smesh::create_buffer<smesh::idx_t>(n_vertex_face_overlaps, execution_space_);
-                v_overlap_ = smesh::create_buffer<smesh::idx_t>(n_vertex_face_overlaps, execution_space_);
+                f_overlap_ = device_output_(f_overlap_, detail::kFOverlap, n_vertex_face_overlaps);
+                v_overlap_ = device_output_(v_overlap_, detail::kVOverlap, n_vertex_face_overlaps);
             }
 
             // An empty output buffer has a null data pointer, so launching the
@@ -1627,8 +1798,8 @@ namespace sccd {
 
             {
                 SMESH_TRACE_SCOPE("e2e allocations");
-                e0_overlap_ = smesh::create_buffer<smesh::idx_t>(n_edge_overlaps, execution_space_);
-                e1_overlap_ = smesh::create_buffer<smesh::idx_t>(n_edge_overlaps, execution_space_);
+                e0_overlap_ = device_output_(e0_overlap_, detail::kE0Overlap, n_edge_overlaps);
+                e1_overlap_ = device_output_(e1_overlap_, detail::kE1Overlap, n_edge_overlaps);
             }
 
             if (n_edge_overlaps > 0) {
@@ -1684,7 +1855,7 @@ namespace sccd {
                 return toi_output == sccd::ToiOutput::Earliest ? size_t(1) : noverlaps;
             };
 
-            vf_tois_ = smesh::create_buffer<scalar_t>(toi_storage_size(v_overlap_->size()), execution_space_);
+            vf_tois_ = device_output_(vf_tois_, detail::kVfTois, (ptrdiff_t)toi_storage_size(v_overlap_->size()));
             const auto element_type = face_element_type_;
             if (element_type == smesh::QUADSHELL4) {
                 // Quads have their own device kernel: the triangle one is built
@@ -1752,7 +1923,7 @@ namespace sccd {
                 return toi_output == sccd::ToiOutput::Earliest ? size_t(1) : noverlaps;
             };
 
-            ee_tois_ = smesh::create_buffer<scalar_t>(toi_storage_size(e0_overlap_->size()), execution_space_);
+            ee_tois_ = device_output_(ee_tois_, detail::kEeTois, (ptrdiff_t)toi_storage_size(e0_overlap_->size()));
             sccd::device::narrow_phase_ee(e0_overlap_->size(),
                                           e0_overlap_->data(),
                                           e1_overlap_->data(),
@@ -1942,9 +2113,40 @@ namespace sccd {
                 f_row_prefix_d_.reserve(4 * n_faces + 1);
                 f_cell_hi1_d_.reserve(4 * n_faces + 1);
                 f_krow_d_.reserve(1);
+#if SCCD_DEVICE_SOA_ROWS_ONCE && SCCD_DEVICE_SOA_ROWS_REGISTRY
+                register_box_rows_();
+#endif
             }
 #endif
         }
+
+#if defined(SCCD_ENABLE_CUDA) && SCCD_DEVICE_SOA_ROWS_ONCE && SCCD_DEVICE_SOA_ROWS_REGISTRY
+        // The three box tables are created once in init() and their rows never
+        // change, so their row pointers are read back here, once and untimed,
+        // and registered: the device cell list then reads them from the host
+        // instead of copying each table back in every function of every prep.
+        // Unregistered before the buffers go, in the destructor below.
+        void register_box_rows_() {
+            const smesh::SharedBuffer<scalar_t*> tables[3] = {vaabb_, faabb_, eaabb_};
+            for (const auto& t : tables) {
+                if (!t || t->extent(0) != 2 * SCCD_DIM) continue;
+                scalar_t* rows[2 * SCCD_DIM];
+                if (cudaMemcpy(rows, t->data(), sizeof(rows), cudaMemcpyDeviceToHost) != cudaSuccess) {
+                    cudaGetLastError();
+                    continue;  // unregistered tables are copied back as before
+                }
+                sccd::device::register_soa_rows(t->data(), reinterpret_cast<void* const*>(rows));
+                registered_tables_.push_back(t->data());
+            }
+        }
+
+        std::vector<const void*> registered_tables_;
+
+    public:
+        ~CCD() {
+            for (const void* t : registered_tables_) sccd::device::unregister_soa_rows(t);
+        }
+#endif
     };
 }  // namespace sccd
 

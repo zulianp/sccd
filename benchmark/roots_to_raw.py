@@ -130,7 +130,10 @@ def main(argv: list[str]) -> int:
     sys.path.insert(0, python_dir)
 
     if workers <= 0:
-        workers = os.cpu_count() or 1
+        # The CPUs this process may run on: inside a Slurm job that is the
+        # allocation, where os.cpu_count() would count the whole node.
+        workers = (len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity")
+                   else os.cpu_count()) or 1
 
     # sccd_read_roots pulls in sympy, and is only needed for an archive that is
     # actually stale. Check for it once, and only once there is work to do:

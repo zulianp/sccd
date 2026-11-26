@@ -20,8 +20,40 @@
  * thread with no dependence on a sorted order it has to march along.
  */
 
+// How the host functions below get at the rows of a box table that lives in
+// device memory; the reasoning and the measurement are in
+// sccd_cell2d_broadphase.cu. Defined here so the table's owner can register it.
+#ifndef SCCD_DEVICE_SOA_ROWS_ONCE
+#if defined(SCCD_ENABLE_HIP)
+#define SCCD_DEVICE_SOA_ROWS_ONCE 1
+#else
+#define SCCD_DEVICE_SOA_ROWS_ONCE 0
+#endif
+#endif
+
+// Whether a table's owner may register its rows (below). Needs ROWS_ONCE; 0
+// leaves every table copied back once per function.
+#ifndef SCCD_DEVICE_SOA_ROWS_REGISTRY
+#define SCCD_DEVICE_SOA_ROWS_REGISTRY SCCD_DEVICE_SOA_ROWS_ONCE
+#endif
+
 namespace sccd {
     namespace device {
+
+#if SCCD_DEVICE_SOA_ROWS_ONCE && SCCD_DEVICE_SOA_ROWS_REGISTRY
+        /**
+         * \brief Tell the host functions below what a device row table holds.
+         *
+         * \p device_table is a T** in device memory with 2 * SCCD_DIM rows and
+         * \p host_rows the same pointers on the host. While it is registered,
+         * the functions read the rows from here instead of copying the table
+         * back, which is a blocking copy per function. The owner registers a
+         * table whose rows it never changes and unregisters it before freeing
+         * it; anything unregistered is copied back as before.
+         */
+        void register_soa_rows(const void* device_table, void* const* host_rows);
+        void unregister_soa_rows(const void* device_table);
+#endif
 
         /** \brief A uniform 2D cell list over two of the three coordinate axes. */
         template <typename T>

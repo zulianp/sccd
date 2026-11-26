@@ -30,6 +30,7 @@
 #endif
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <string>
 #include <cstdlib>
@@ -54,7 +55,11 @@ namespace {
         return type == smesh::TRI3 || type == smesh::TRISHELL3 || type == smesh::QUAD4;
     }
 
-    double now_ms() { return smesh::time_seconds() * 1e3; }
+    // steady_clock, not smesh::time_seconds: that reads high_resolution_clock,
+    // which GCC aliases to system_clock, and a wall clock can jump.
+    double now_ms() {
+        return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
 
     /**
      * \brief Wait for the device, so a clock brackets device work rather than
@@ -220,8 +225,12 @@ int main(int argc, char** argv) {
 #if defined(SCCD_ENABLE_CUDA)
             space = smesh::EXECUTION_SPACE_DEVICE;
 #else
-            fprintf(stderr, "warn: built without CUDA, running on the host\n");
+            fprintf(stderr, "error: SCCD_BENCH_EXECUTION_SPACE=%s but built without CUDA\n", s);
+            return 2;
 #endif
+        } else if (!v.empty() && v != "host" && v != "cpu") {
+            fprintf(stderr, "error: SCCD_BENCH_EXECUTION_SPACE=%s is not host or device\n", s);
+            return 2;
         }
     }
 

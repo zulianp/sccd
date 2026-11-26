@@ -54,11 +54,15 @@
 // lanes beat 8 by 19% on vertex-face and 27% on edge-edge; 16 and 32 were worse
 // still. The rule below is "two vector operations per corner evaluation".
 //
-// The x86 values are the prior, not a measurement -- re-run
-// benchmark/ti_oracle and the cloth-funnel probe there before trusting them.
+// x86 (AVX2 / AVX-512) peaks narrower still, at 2 lanes for both phases.
+// Measured on one NUMA domain of an EPYC 9655 (24 cores, GCC 12.3,
+// -march=native), ti_oracle per phase in its own process, armadillo-rollers
+// and cloth-funnel, one block per task (SCCD_NARROWPHASE_TIGHT_GRAIN below):
+// one thread, 2 lanes run 1.6-2.0x faster than 8 and 1.15-1.25x faster than 4;
+// 16 is slower than 8. -mprefer-vector-width=512 changes nothing.
 #ifndef SCCD_NARROWPHASE_TIGHT_VSIZE
 #if defined(__AVX512F__) || defined(__AVX2__)
-#define SCCD_NARROWPHASE_TIGHT_VSIZE 8
+#define SCCD_NARROWPHASE_TIGHT_VSIZE 2
 #else
 #define SCCD_NARROWPHASE_TIGHT_VSIZE 4
 #endif
@@ -80,8 +84,7 @@
 // executes vertex-face code at all. That is code layout, not work, and it is
 // large enough to invent or hide a result of this size.
 //
-// x86 is left on the single value: it has never been measured, and guessing a
-// split there would repeat the mistake this comment block already warns about.
+// x86 needs no split: 2 lanes is the fastest measured width for both phases.
 #ifndef SCCD_NARROWPHASE_TIGHT_VSIZE_VF
 #if defined(__ARM_NEON) && SCCD_NARROWPHASE_TIGHT_VSIZE > 2
 #define SCCD_NARROWPHASE_TIGHT_VSIZE_VF (SCCD_NARROWPHASE_TIGHT_VSIZE / 2)
@@ -92,6 +95,41 @@
 
 #ifndef SCCD_NARROWPHASE_TIGHT_VSIZE_EE
 #define SCCD_NARROWPHASE_TIGHT_VSIZE_EE SCCD_NARROWPHASE_TIGHT_VSIZE
+#endif
+
+// How many blocks of lanes one parallel task takes, or 0 for the shared
+// parallel_for_br_dynamic schedule.
+//
+// That schedule hands out 64 indices per task, and an index here is a block of
+// VSIZE queries, so a task is 64 * VSIZE queries: 512 at the former x86 width
+// of 8. A call over a few hundred queries -- one simulation step of
+// armadillo-rollers is about 250 edge-edge queries -- then runs on one thread
+// while the others wait. Measured on one NUMA domain of an EPYC 9655 (24
+// cores): 76% of the cycles of the vertex-face oracle run were libgomp waiting,
+// 6% this kernel. At 2 lanes, 1 block per task beats 4 by 1.2-1.5x and 16 by
+// 1.5-2.6x (three repeats, spread under 1%).
+//
+// The value is a minimum, not a constant. One block per task is wrong for one
+// large call: over the 25.8 million pairs of cloth-ball refined to 94.4 million
+// elements it makes 13 million tasks, and the narrow phase took 1.06-1.18 s
+// against 0.31 s on the shared schedule. A task therefore grows until each
+// worker has about SCCD_NARROWPHASE_TIGHT_TASKS_PER_WORKER of them, up to
+// SCCD_NARROWPHASE_TIGHT_MAX_TASK queries, the size the shared schedule used.
+//
+// NEON keeps the shared schedule (its narrower lanes make tasks of 128 and 256
+// queries), so the GH200 measurements stand as they were taken.
+#ifndef SCCD_NARROWPHASE_TIGHT_GRAIN
+#if defined(__AVX512F__) || defined(__AVX2__)
+#define SCCD_NARROWPHASE_TIGHT_GRAIN 1
+#else
+#define SCCD_NARROWPHASE_TIGHT_GRAIN 0
+#endif
+#endif
+#ifndef SCCD_NARROWPHASE_TIGHT_TASKS_PER_WORKER
+#define SCCD_NARROWPHASE_TIGHT_TASKS_PER_WORKER 16
+#endif
+#ifndef SCCD_NARROWPHASE_TIGHT_MAX_TASK
+#define SCCD_NARROWPHASE_TIGHT_MAX_TASK 512
 #endif
 
 #include <cstdio>
@@ -474,6 +512,29 @@ namespace sccd {
 
     }  // namespace detail
 
+#if SCCD_NARROWPHASE_TIGHT_GRAIN > 0
+    namespace detail {
+        /**
+         * \brief fun(begin, end) over [0, n) blocks, one task per worker at a time.
+         *
+         * A task takes at least SCCD_NARROWPHASE_TIGHT_GRAIN blocks, more when
+         * there are enough for SCCD_NARROWPHASE_TIGHT_TASKS_PER_WORKER tasks per
+         * worker, but never more than SCCD_NARROWPHASE_TIGHT_MAX_TASK queries.
+         */
+        template <int VSIZE, typename F>
+        static void tight_parallel_for_grain(const ptrdiff_t n, F fun) {
+            const ptrdiff_t max_grain = sccd::max<ptrdiff_t>(1, SCCD_NARROWPHASE_TIGHT_MAX_TASK / VSIZE);
+            const ptrdiff_t balanced =
+                n / (ptrdiff_t(SCCD_NARROWPHASE_TIGHT_TASKS_PER_WORKER) * sccd::max_concurrency());
+            const ptrdiff_t grain = sccd::max<ptrdiff_t>(SCCD_NARROWPHASE_TIGHT_GRAIN,
+                                                         sccd::min<ptrdiff_t>(max_grain, balanced));
+            sccd::parallel_for_chunks(0, (n + grain - 1) / grain, [&](const ptrdiff_t k) {
+                fun(k * grain, sccd::min<ptrdiff_t>(n, (k + 1) * grain));
+            });
+        }
+    }  // namespace detail
+#endif
+
     /**
      * \brief TightInclusion-equivalent vectorized narrow phase.
      *
@@ -516,7 +577,11 @@ namespace sccd {
         // so the counters are disjoint per thread and need no synchronisation.
         std::vector<unsigned long long> perq_(noverlaps, 0ull);
 #endif
+#if SCCD_NARROWPHASE_TIGHT_GRAIN > 0
+        detail::tight_parallel_for_grain<VSIZE>(nblocks, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+#else
         sccd::parallel_for_br_dynamic(0, nblocks, [&](const ptrdiff_t rbegin, const ptrdiff_t rend) {
+#endif
             // Deliberately a plain local, not thread_local. The per-chunk
             // reserve looks like allocation churn, but measured on NEON over
             // armadillo-rollers it is worth nothing at all (-1.5% VF, -0.2% EE,

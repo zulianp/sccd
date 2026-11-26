@@ -8,7 +8,7 @@ supported configuration.
 
 | Variable | Values | Default | Effect |
 |---|---|---|---|
-| `SCCD_NARROWPHASE_MODE` | `0`, `2` | `0` | Narrow-phase kernel: `0` `Relaxed`, `2` `Tight`. Any other value warns and runs `0`. **Ignored for quads**, which have one root-finder variant. |
+| `SCCD_NARROWPHASE_MODE` | `0`, `2` | `2` | Narrow-phase kernel: `0` `Relaxed`, `2` `Tight`. `Relaxed` can report a near miss within about twice the distance tolerance as a contact, so it has to be asked for. `1` and `3` warn and run `0`; any other value warns and runs `2`. **Ignored for quads**, which have one root-finder variant. |
 | `SCCD_BROADPHASE` | `sweep`, `cell2d`, `cell2dmin`, `cell2dminsort`, `cell2dseg`, `cell2dminfv` | auto | Names the broad phase. Unset, both processors run `cell2dminfv`, which is the fastest over the benchmark on every scene of it. Every choice produces the same pair set except `cell2dseg`, which emits fewer face-vertex pairs and is equally conservative, so this only changes speed. `cell2dminsort` and `cell2dseg` are host only and report an error on the device. A name this build does not know is reported on stderr and the shipped strategy runs. |
 | `SCCD_USE_TI` | `0`, `1` | `0` | Calls TightInclusion directly. Requires a TightInclusion build. Oracle use only. |
 
@@ -29,10 +29,10 @@ else:
 | What you set | What runs | What it says |
 |---|---|---|
 | `SCCD_NARROWPHASE_MODE=1` or `3` | `Relaxed` | that the value selects no kernel, and to use `SCCD_USE_TI=1` for the reference |
-| `SCCD_NARROWPHASE_MODE=20`, or any non-number | `Relaxed` | that the value was ignored, and what the valid ones are |
+| `SCCD_NARROWPHASE_MODE=20`, or any non-number | `Tight` | that the value was ignored, and what the valid ones are |
 | any mode on a quad mesh | the one quad kernel | that the mode does not reach the quad path |
 
-An unset variable, or `SCCD_NARROWPHASE_MODE=0`, says nothing: there is no
+An unset variable, or `SCCD_NARROWPHASE_MODE=2`, says nothing: there is no
 surprise to report. The mode is re-read from the environment on every call, so a
 caller that switches it between calls keeps working -- the warnings are one-shot
 flags rather than a resolved-once decision.
