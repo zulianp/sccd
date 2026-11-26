@@ -12,15 +12,39 @@ if(SCCD_ENABLE_HIP AND NOT SCCD_ENABLE_CUDA)
 endif()
 
 if(SCCD_ENABLE_CUDA AND SCCD_ENABLE_HIP)
-    # The device sources are compiled as HIP. Like the CUDA architectures below,
-    # this must precede enable_language.
-    if(NOT DEFINED CMAKE_HIP_ARCHITECTURES AND NOT CMAKE_HIP_PLATFORM STREQUAL "spirv")  # chipStar (Intel GPUs): none
+    # The platform as given (SCCDHipPlatform.cmake stopped if it would be detected as spirv).
+    set(_sccd_hip_platform_given "${CMAKE_HIP_PLATFORM}")
+    if(CMAKE_HIP_PLATFORM STREQUAL "spirv")
+      # chipStar (Intel GPUs): one portable SPIR-V binary, no architecture list, warps of 32.
+      # A build directory configured for AMD before keeps its values in the cache.
+      if(NOT SCCD_HIP_WAVEFRONT_SIZE EQUAL 32)
+        message(FATAL_ERROR "SCCD_HIP_WAVEFRONT_SIZE is ${SCCD_HIP_WAVEFRONT_SIZE}, but chipStar's warps (CMAKE_HIP_PLATFORM "
+                            "spirv) are 32 lanes: set -DSCCD_HIP_WAVEFRONT_SIZE=32 or configure a new build directory")
+      endif()
+      if(CMAKE_HIP_ARCHITECTURES MATCHES "gfx")
+        message(FATAL_ERROR "CMAKE_HIP_ARCHITECTURES (${CMAKE_HIP_ARCHITECTURES}) are AMD targets, but CMAKE_HIP_PLATFORM "
+                            "is spirv: configure a new build directory with -DCMAKE_HIP_PLATFORM=spirv")
+      endif()
+    elseif(NOT DEFINED CMAKE_HIP_ARCHITECTURES)
+      # The device sources are compiled as HIP. Like the CUDA architectures below,
+      # this must precede enable_language.
       set(CMAKE_HIP_ARCHITECTURES "${SCCD_HIP_ARCHITECTURES}")
     endif()
 
     enable_language(HIP)
-    message(STATUS "SCCD: building the device path with HIP for ${CMAKE_HIP_ARCHITECTURES}, "
-                   "wavefront size ${SCCD_HIP_WAVEFRONT_SIZE}")
+    if(CMAKE_HIP_PLATFORM STREQUAL "spirv" AND NOT _sccd_hip_platform_given STREQUAL "spirv")
+      # Detected by enable_language after the AMD set-up above. SCCDHipPlatform.cmake catches
+      # this first; this stays for a CMake that detects the platform by other means.
+      message(FATAL_ERROR "The HIP compiler is chipStar's (CMAKE_HIP_PLATFORM detected as spirv), but the "
+                          "platform was not given: configure a new build directory with -DCMAKE_HIP_PLATFORM=spirv")
+    endif()
+    if(CMAKE_HIP_PLATFORM STREQUAL "spirv")
+      message(STATUS "SCCD: building the device path with HIP for SPIR-V (chipStar), "
+                     "warp size ${SCCD_HIP_WAVEFRONT_SIZE}")
+    else()
+      message(STATUS "SCCD: building the device path with HIP for ${CMAKE_HIP_ARCHITECTURES}, "
+                     "wavefront size ${SCCD_HIP_WAVEFRONT_SIZE}")
+    endif()
 
     if(NOT DEFINED CMAKE_HIP_STANDARD)
       set(CMAKE_HIP_STANDARD 17)

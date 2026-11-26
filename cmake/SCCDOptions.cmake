@@ -14,7 +14,8 @@ set(SCCD_HIP_ARCHITECTURES "gfx942" CACHE STRING "HIP (AMD GPU) architectures to
 # Lanes per wavefront on those architectures, which launch grids are sized by on
 # the host: 64 on CDNA (gfx9: MI200, MI300), 32 on RDNA. The device compilation
 # checks it against the target. chipStar's SPIR-V (CMAKE_HIP_PLATFORM spirv, Intel
-# GPUs) runs warps of 32.
+# GPUs) runs warps of 32; SCCDHipPlatform stops if the platform is spirv but not given.
+include(SCCDHipPlatform)
 if(CMAKE_HIP_PLATFORM STREQUAL "spirv")
     set(SCCD_HIP_WAVEFRONT_SIZE "32" CACHE STRING "Wavefront size of SCCD_HIP_ARCHITECTURES")
 else()
