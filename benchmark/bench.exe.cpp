@@ -18,7 +18,9 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -1296,6 +1298,17 @@ namespace {
      * carries their sums over the K sub-intervals. Interpolating and uploading a
      * sub-interval's positions is not timed, as Newton's position upload is not.
      *
+     * The narrow phase then runs on the sub-interval's candidates of both types,
+     * as one call to the CCD's narrow_phase with the shared earliest time of
+     * impact (NP EToI), and is timed apart as np_ms, summed over the K
+     * sub-intervals. All K run, as Newton's K detections do; a solver would stop
+     * at the first sub-interval with an impact. The step's time of impact is the
+     * first sub-interval's that is below one, mapped to the step, and is checked
+     * against the case's earliest exact root when the case ships roots: a later
+     * one is reported as late and fails the run, as a missed pair does. After it,
+     * the same candidates are answered once more with one time of impact per pair
+     * (NP per-pair, no shared bound), timed apart as np_pair_ms.
+     *
      * The case's own type is checked: a colliding pair (finite exact root, or
      * mma_bool without roots) counts as returned if any sub-interval returns it;
      * curated pairs that do not collide need not be returned, since a
@@ -1326,6 +1339,42 @@ namespace {
         return result;
     }
 
+    /// NP EToI over the latest candidates of both types; the earliest time of impact, from the buffers.
+    int run_narrowphase_both(CCDRun& ccd_run, double& np_ms, scalar_t& toi) {
+        scalar_t max_toi = scalar_t(1);
+        smesh::SharedBuffer<scalar_t> vf_tois;
+        smesh::SharedBuffer<scalar_t> ee_tois;
+        finish_device_work();
+        const auto start = std::chrono::steady_clock::now();
+        const int err = ccd_run.ccd->narrow_phase(max_toi, vf_tois, ee_tois, narrowphase_max_depth, narrowphase_tol,
+                                                  sccd::ToiOutput::Earliest);
+        finish_device_work();
+        np_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+        // From the buffers, as time_narrowphase_zero_stride reads it: not every entry point writes
+        // max_toi back.
+        toi = std::min(max_toi, scalar_t(1));
+        for (const auto* buf : {&vf_tois, &ee_tois}) {
+            if (*buf && (*buf)->size() > 0) {
+                toi = std::min(toi, smesh::to_host(*buf)->data()[0]);
+            }
+        }
+        return err;
+    }
+
+    /// NP per-pair over the latest candidates of both types: one time of impact per candidate.
+    int run_narrowphase_per_pair(CCDRun& ccd_run, double& ms) {
+        scalar_t max_toi = scalar_t(1);
+        smesh::SharedBuffer<scalar_t> vf_tois;
+        smesh::SharedBuffer<scalar_t> ee_tois;
+        finish_device_work();
+        const auto start = std::chrono::steady_clock::now();
+        const int err = ccd_run.ccd->narrow_phase(max_toi, vf_tois, ee_tois, narrowphase_max_depth, narrowphase_tol,
+                                                  sccd::ToiOutput::PerPair);
+        finish_device_work();
+        ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+        return err;
+    }
+
     bool run_case_substepped(const fs::path& dataset_dir,
                              const std::string& dataset,
                              const CaseFile& case_file,
@@ -1353,7 +1402,8 @@ namespace {
         const int K = std::max(1, (int)std::ceil(d / (cap * radius) * (1.0 - 1e-9)));
 
         std::vector<std::uint8_t> found(expected.slots, 0);
-        double prep_ms = 0.0, fv_ms = 0.0, ee_ms = 0.0;
+        double prep_ms = 0.0, fv_ms = 0.0, ee_ms = 0.0, np_ms = 0.0, np_pair_ms = 0.0;
+        double step_toi = 1.0;  // the step's earliest time of impact, in units of the step
         std::uint64_t returned_fv = 0, returned_ee = 0;
         for (int k = 0; k < K; ++k) {
             const scalar_t a = scalar_t(k) / scalar_t(K), b = scalar_t(k + 1) / scalar_t(K);
@@ -1381,9 +1431,27 @@ namespace {
                           << " sub-step " << k << "\n";
                 return false;
             }
+            double q = 0.0;
+            scalar_t toi = scalar_t(1);
+            if (run_narrowphase_both(ccd_run, q, toi) != SCCD_SUCCESS) {
+                std::cerr << "error: CCD narrowphase failed for " << dataset << "/" << case_file.key
+                          << " sub-step " << k << "\n";
+                return false;
+            }
+            double qp = 0.0;
+            if (run_narrowphase_per_pair(ccd_run, qp) != SCCD_SUCCESS) {
+                std::cerr << "error: CCD per-pair narrowphase failed for " << dataset << "/" << case_file.key
+                          << " sub-step " << k << "\n";
+                return false;
+            }
+            np_pair_ms += qp;
+            if (step_toi >= 1.0 && toi < scalar_t(1)) {
+                step_toi = (double(k) + double(toi)) / double(K);
+            }
             prep_ms += p;
             fv_ms += f;
             ee_ms += e;
+            np_ms += q;
             returned_fv += r.v_overlap->size();
             returned_ee += r.e0_overlap->size();
             populate_broadphase_pairs(meshes, case_file.is_vf, expected, edge_id_map, r);
@@ -1398,11 +1466,15 @@ namespace {
         if (fs::exists(root_path) && !read_raw(root_path, root_toi)) return false;
 
         std::uint64_t colliding = 0, missed = 0;
+        double gt_earliest = std::numeric_limits<double>::quiet_NaN();
         for (std::size_t i = 0; i < c0.size(); ++i) {
             const bool collides = (i < root_toi.size()) ? sccd::is_finite_bits(root_toi[i])
                                                         : (i < mma.size() && mma[i] != 0);
             if (!collides) continue;
             ++colliding;
+            if (i < root_toi.size() && !(double(root_toi[i]) >= gt_earliest)) {
+                gt_earliest = double(root_toi[i]);
+            }
             const std::int64_t slot = expected.index_of(pair_key(c0[i], c1[i]));
             if (slot < 0 || !found[(std::size_t)slot]) ++missed;
         }
@@ -1411,11 +1483,19 @@ namespace {
                       << " colliding pairs not returned in any sub-step\n";
             g_missed_collision = true;
         }
+        // Both query types answer the step, so their earliest bounds this case's earliest root.
+        const bool late = std::isfinite(gt_earliest) && step_toi > gt_earliest;
+        if (late) {
+            std::cerr << "error: " << dataset << "/" << case_file.key << ": time of impact " << step_toi
+                      << " after the earliest exact root " << gt_earliest << "\n";
+            g_missed_collision = true;
+        }
         std::cout << dataset << ',' << benchmark_mode_name(execution_space) << ','
                   << sccd::broadphase_strategy_name(sccd::broadphase_strategy_resolved()) << ',' << case_file.key
                   << ',' << (case_file.is_vf ? "vf" : "ee") << ',' << radius << ',' << d << ',' << K << ','
                   << prep_ms << ',' << fv_ms << ',' << ee_ms << ',' << returned_fv << ',' << returned_ee << ','
-                  << colliding << ',' << missed << '\n';
+                  << colliding << ',' << missed << ',' << np_ms << ',' << std::setprecision(17) << step_toi << ','
+                  << gt_earliest << std::setprecision(6) << ',' << (late ? 1 : 0) << ',' << np_pair_ms << '\n';
         return true;
     }
 
@@ -1474,9 +1554,15 @@ namespace {
         broad_expected.build(c0, c1);
         const bool warmup_first_case = timings_ms.empty();
         if (warmup_first_case && substep_radius() > 0.0) {
-            double p, f, e;  // both queries run on every sub-step, so both are warmed up
+            double p, f, e, q;  // both queries and the narrow phase run on every sub-step: all are warmed up
+            scalar_t toi;
             if (run_broadphase_both(ccd_run, p, f, e).err != SCCD_SUCCESS) {
                 std::cerr << "error: CCD broadphase warmup failed for " << dataset << "/" << case_file.key << "\n";
+                return false;
+            }
+            if (run_narrowphase_both(ccd_run, q, toi) != SCCD_SUCCESS ||
+                run_narrowphase_per_pair(ccd_run, q) != SCCD_SUCCESS) {
+                std::cerr << "error: CCD narrowphase warmup failed for " << dataset << "/" << case_file.key << "\n";
                 return false;
             }
         } else if (warmup_first_case) {
@@ -1587,7 +1673,7 @@ int main(int argc, char** argv) {
     }
     if (substep_radius() > 0.0) {
         std::cout << "dataset,mode,broadphase,case,type,radius,max_disp,substeps,prep_ms,fv_ms,ee_ms,"
-                     "returned_fv,returned_ee,colliding,missed\n";
+                     "returned_fv,returned_ee,colliding,missed,np_ms,toi,gt_earliest,late,np_pair_ms\n";
     } else {
         std::cout << kCsvHeader << "\n";
     }
