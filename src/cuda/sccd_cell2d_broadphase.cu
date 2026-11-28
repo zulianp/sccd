@@ -76,6 +76,25 @@ static inline dim3 sccd_c2d_warp_grid(const ptrdiff_t n, const unsigned block) {
 #include <mutex>
 #endif
 
+// The forward walks test SCCD_WARP_SIZE cells of a row at once, one per lane, and then scan the
+// survivors in ascending order -- the order the serial test visits them in, so the pairs and their
+// order are unchanged. Tested one at a time, a box spanning many cells kept its warp running long
+// after the rest of the launch had finished: Nsight Compute had cloth-funnel's edge-edge kernels
+// active on 16-18% of the elapsed SM cycles. On a GH200 the broad-phase queries fall 26% on
+// cloth-funnel, 12% on armadillo-rollers, 14% on n-body, 13% on puffer-ball and 7% on rod-twist, with
+// the same candidate pairs on every case.
+#ifndef SCCD_C2D_WARP_CELL_BALLOT
+#define SCCD_C2D_WARP_CELL_BALLOT 1
+#endif
+
+// Grid sizing reduces all three axes in two launches instead of six; each block does the same
+// arithmetic in the same order, so the grid it chooses is bit-identical. Four fewer launches per
+// binning take 8% off the device prep on cloth-funnel and 12% on armadillo-rollers, the scenes made
+// of many small steps (GH200), and nothing measurable on the large ones.
+#ifndef SCCD_DEVICE_FUSED_GRID_STATS
+#define SCCD_DEVICE_FUSED_GRID_STATS 1
+#endif
+
 namespace sccd {
     namespace device {
 
@@ -271,12 +290,12 @@ namespace sccd {
              * this kernel charges by length.
              */
             template <typename T>
-            __global__ void grid_stats_partial_kernel(const ptrdiff_t n,
-                                                      const T* const SCCD_RESTRICT lo,
-                                                      const T* const SCCD_RESTRICT hi,
-                                                      T* const SCCD_RESTRICT part_min,
-                                                      T* const SCCD_RESTRICT part_max,
-                                                      T* const SCCD_RESTRICT part_sum) {
+            static __device__ __forceinline__ void grid_stats_partial_block(const ptrdiff_t n,
+                                                                            const T* const SCCD_RESTRICT lo,
+                                                                            const T* const SCCD_RESTRICT hi,
+                                                                            T* const SCCD_RESTRICT part_min,
+                                                                            T* const SCCD_RESTRICT part_max,
+                                                                            T* const SCCD_RESTRICT part_sum) {
                 extern __shared__ char s_raw[];
                 T* const s_min = (T*)s_raw;
                 T* const s_max = s_min + blockDim.x;
@@ -314,6 +333,35 @@ namespace sccd {
                 }
             }
 
+            template <typename T>
+            __global__ void grid_stats_partial_kernel(const ptrdiff_t n,
+                                                      const T* const SCCD_RESTRICT lo,
+                                                      const T* const SCCD_RESTRICT hi,
+                                                      T* const SCCD_RESTRICT part_min,
+                                                      T* const SCCD_RESTRICT part_max,
+                                                      T* const SCCD_RESTRICT part_sum) {
+                grid_stats_partial_block<T>(n, lo, hi, part_min, part_max, part_sum);
+            }
+
+            /** \brief The three axes' rows and partial arrays, for the fused launches. */
+            template <typename T>
+            struct GridStatsAxes {
+                const T* lo[3];
+                const T* hi[3];
+                T* parts;  // 9 arrays of nslots: (min, max, sum) per axis
+                T* out;    // 9 values: (min, max, sum) per axis
+                int nslots;
+            };
+
+            /** \brief All three axes' partial reductions in one launch, one axis per
+             *         grid row (blockIdx.y); each block does what the per-axis kernel does. */
+            template <typename T>
+            __global__ void grid_stats_partial3_kernel(const ptrdiff_t n, const GridStatsAxes<T> ax) {
+                const int d = blockIdx.y;
+                T* const p = ax.parts + (ptrdiff_t)(3 * d) * ax.nslots;
+                grid_stats_partial_block<T>(n, ax.lo[d], ax.hi[d], p, p + ax.nslots, p + 2 * (ptrdiff_t)ax.nslots);
+            }
+
             /**
              * \brief Combine the per-block partials into the axis's three values.
              *
@@ -326,13 +374,13 @@ namespace sccd {
              * cannot share a kernel.
              */
             template <typename T>
-            __global__ void grid_stats_final_kernel(const int nparts,
-                                                    const T* const SCCD_RESTRICT part_min,
-                                                    const T* const SCCD_RESTRICT part_max,
-                                                    const T* const SCCD_RESTRICT part_sum,
-                                                    T* const SCCD_RESTRICT out_min,
-                                                    T* const SCCD_RESTRICT out_max,
-                                                    T* const SCCD_RESTRICT out_sum) {
+            static __device__ __forceinline__ void grid_stats_final_block(const int nparts,
+                                                                          const T* const SCCD_RESTRICT part_min,
+                                                                          const T* const SCCD_RESTRICT part_max,
+                                                                          const T* const SCCD_RESTRICT part_sum,
+                                                                          T* const SCCD_RESTRICT out_min,
+                                                                          T* const SCCD_RESTRICT out_max,
+                                                                          T* const SCCD_RESTRICT out_sum) {
                 extern __shared__ char s_raw[];
                 T* const s_min = (T*)s_raw;
                 T* const s_max = s_min + blockDim.x;
@@ -364,6 +412,26 @@ namespace sccd {
                     *out_max = s_max[0];
                     *out_sum = s_sum[0];
                 }
+            }
+
+            template <typename T>
+            __global__ void grid_stats_final_kernel(const int nparts,
+                                                    const T* const SCCD_RESTRICT part_min,
+                                                    const T* const SCCD_RESTRICT part_max,
+                                                    const T* const SCCD_RESTRICT part_sum,
+                                                    T* const SCCD_RESTRICT out_min,
+                                                    T* const SCCD_RESTRICT out_max,
+                                                    T* const SCCD_RESTRICT out_sum) {
+                grid_stats_final_block<T>(nparts, part_min, part_max, part_sum, out_min, out_max, out_sum);
+            }
+
+            /** \brief All three axes' final combines in one launch, one block per axis. */
+            template <typename T>
+            __global__ void grid_stats_final3_kernel(const int nparts, const GridStatsAxes<T> ax) {
+                const int d = blockIdx.y;
+                const T* const p = ax.parts + (ptrdiff_t)(3 * d) * ax.nslots;
+                grid_stats_final_block<T>(nparts, p, p + ax.nslots, p + 2 * (ptrdiff_t)ax.nslots,
+                                          ax.out + 3 * d, ax.out + 3 * d + 1, ax.out + 3 * d + 2);
             }
 
             template <typename T>
@@ -796,6 +864,39 @@ namespace sccd {
                 }
             }
 
+            /** \brief Index of the lowest set lane of \p m (which must be non-zero). */
+            static __device__ __forceinline__ int lowest_lane(const device::lane_mask_t m) {
+                if constexpr (sizeof(device::lane_mask_t) == 8) {
+                    return __ffsll((long long)m) - 1;
+                } else {
+                    return __ffs((int)m) - 1;
+                }
+            }
+
+            /**
+             * \brief Visit the cells \p c0 .. \p c0e of row \p row whose bound reaches
+             *        \p amin1, in ascending order, testing a warp's width of them at once.
+             */
+            template <typename T, typename Visit>
+            static __device__ __forceinline__ void warp_row_cells(const ptrdiff_t row,
+                                                                  int c0,
+                                                                  const int c0e,
+                                                                  const T amin1,
+                                                                  const T* const SCCD_RESTRICT cell_hi1,
+                                                                  Visit&& visit) {
+                const int lane = (int)(threadIdx.x & (SCCD_WARP_SIZE - 1));
+                for (; c0 <= c0e; c0 += SCCD_WARP_SIZE) {
+                    const int mine = c0 + lane;
+                    const bool ok = mine <= c0e && !(cell_hi1[row + mine] < amin1);
+                    device::lane_mask_t m = device::warp_ballot(ok);
+                    while (m) {
+                        const int b = lowest_lane(m);
+                        m &= m - 1;
+                        visit(row + c0 + b);
+                    }
+                }
+            }
+
             /** \brief First column of a row whose running maximum reaches \p v. */
             template <typename T>
             static __device__ __forceinline__ int lower_bound_row(const T* const SCCD_RESTRICT p,
@@ -900,11 +1001,16 @@ namespace sccd {
                     } else {
                         c0 = lower_bound_row<T>(row_prefix + row, c0e + 1, amin0);
                     }
+#if SCCD_C2D_WARP_CELL_BALLOT
+                    warp_row_cells<T>(row, c0, c0e, amin1, cell_hi1,
+                                      [&](const ptrdiff_t cell) { scan(cell, false); });
+#else
                     for (; c0 <= c0e; ++c0) {
                         const ptrdiff_t cell = row + c0;
                         if (cell_hi1[cell] < amin1) continue;
                         scan(cell, false);
                     }
+#endif
                 }
             }
 
@@ -1073,10 +1179,7 @@ namespace sccd {
                     const ptrdiff_t row = (ptrdiff_t)c1 * grid.n0;
                     int c0 = lower_bound_row<T>(row_prefix + row, c0e + 1, amin0);
 
-                    for (; c0 <= c0e; ++c0) {
-                        const ptrdiff_t cell = row + c0;
-                        if (cell_hi1[cell] < amin1) continue;
-
+                    const auto scan = [&](const ptrdiff_t cell) {
                         const ptrdiff_t begin = cellptr[cell];
                         const ptrdiff_t end = cellptr[cell + 1];
                         // Every lane runs the same trip count, so the warp is
@@ -1107,7 +1210,16 @@ namespace sccd {
                             }
                             combine(keep, jidx);
                         }
+                    };
+#if SCCD_C2D_WARP_CELL_BALLOT
+                    warp_row_cells<T>(row, c0, c0e, amin1, cell_hi1, scan);
+#else
+                    for (; c0 <= c0e; ++c0) {
+                        const ptrdiff_t cell = row + c0;
+                        if (cell_hi1[cell] < amin1) continue;
+                        scan(cell);
                     }
+#endif
                 }
             }
 
@@ -1248,6 +1360,20 @@ namespace sccd {
             T* const parts = stats + 9;
             T h_min[3], h_max[3], h_sum[3];
             const size_t shmem = 3 * kB * sizeof(T);
+#if SCCD_DEVICE_FUSED_GRID_STATS
+            {
+                detail::GridStatsAxes<T> ax;
+                for (int d = 0; d < 3; ++d) {
+                    ax.lo[d] = rows[d];
+                    ax.hi[d] = rows[SCCD_DIM + d];
+                }
+                ax.parts = parts;
+                ax.out = stats;
+                ax.nslots = kG;
+                detail::grid_stats_partial3_kernel<T><<<dim3(nparts, 3), kB, shmem>>>(n, ax);
+                detail::grid_stats_final3_kernel<T><<<dim3(1, 3), kB, shmem>>>(nparts, ax);
+            }
+#else
             for (int d = 0; d < 3; ++d) {
                 // Each axis gets its own third of the partial space, so the
                 // three reductions stay independent.
@@ -1262,6 +1388,7 @@ namespace sccd {
                 detail::grid_stats_final_kernel<T><<<1, kB, shmem>>>(
                     nparts, pmin, pmax, psum, stats + 3 * d, stats + 3 * d + 1, stats + 3 * d + 2);
             }
+#endif
             SCCD_CUDA_LAST_ERROR();
             T host_stats[9];
             SCCD_CHECK_CUDA(cudaMemcpy(host_stats, stats, sizeof(T) * 9, cudaMemcpyDeviceToHost));

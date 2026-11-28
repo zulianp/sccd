@@ -23,12 +23,11 @@
 // How the host functions below get at the rows of a box table that lives in
 // device memory; the reasoning and the measurement are in
 // sccd_cell2d_broadphase.cu. Defined here so the table's owner can register it.
+// On by default for HIP and CUDA alike: on a GH200 it halves the device prep
+// (armadillo-rollers 356 -> 146 ms, cloth-funnel 320 -> 165 ms over the scene)
+// with the same pairs and times of impact. 0 restores the copy per function.
 #ifndef SCCD_DEVICE_SOA_ROWS_ONCE
-#if defined(SCCD_ENABLE_HIP)
 #define SCCD_DEVICE_SOA_ROWS_ONCE 1
-#else
-#define SCCD_DEVICE_SOA_ROWS_ONCE 0
-#endif
 #endif
 
 // Whether a table's owner may register its rows (below). Needs ROWS_ONCE; 0

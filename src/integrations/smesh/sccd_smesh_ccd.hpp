@@ -40,13 +40,11 @@
 // caller sees holds exactly what it did before. A block is handed out again
 // only when nothing outside the pool still holds a buffer on it, so a caller
 // keeping last step's candidates never sees them overwritten. On by default
-// for HIP; CUDA keeps smesh's allocations, as measured. 0 restores them.
+// for HIP and CUDA alike (measured on a GH200 together with
+// SCCD_DEVICE_SOA_ROWS_ONCE: same pairs and times of impact). 0 restores
+// smesh's allocations.
 #ifndef SCCD_DEVICE_OUTPUT_POOL
-#if defined(SCCD_ENABLE_HIP)
 #define SCCD_DEVICE_OUTPUT_POOL 1
-#else
-#define SCCD_DEVICE_OUTPUT_POOL 0
-#endif
 #endif
 
 #if defined(SCCD_ENABLE_CUDA)

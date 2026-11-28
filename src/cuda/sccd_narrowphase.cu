@@ -79,14 +79,10 @@
 // three counters are adjacent words, so one 12-byte copy can serve both: the
 // last cursor read already follows the last launch. On MI300A a blocking copy
 // costs tens of microseconds of host latency, paid twice per narrow-phase call
-// (vertex-face and edge-edge), so it is on by default for HIP. CUDA keeps the
-// two copies it was measured with; set it to 1 there to try it.
+// (vertex-face and edge-edge). On by default for HIP and CUDA alike; 0 restores
+// the two copies.
 #ifndef SCCD_NP_FUSED_COUNTER_READ
-#if defined(SCCD_ENABLE_HIP)
 #define SCCD_NP_FUSED_COUNTER_READ 1
-#else
-#define SCCD_NP_FUSED_COUNTER_READ 0
-#endif
 #endif
 
 // Without a bound, nvcc budgets registers for the largest block it must support
@@ -2476,10 +2472,8 @@ namespace sccd {
             //
             // Any of these can be overridden via the matching env var.
             // ----------------------------------------------------------------
-            int dev = 0;
-            cudaGetDevice(&dev);
-            cudaDeviceProp prop{};
-            cudaGetDeviceProperties(&prop, dev);
+            // Cached: see device_properties() for why it is not queried per call.
+            const cudaDeviceProp& prop = device_properties();
 
             constexpr int N = SCCD_NP_THREADS_PER_BLOCK;
 #ifdef SCCD_NP_COUNT_BOXES

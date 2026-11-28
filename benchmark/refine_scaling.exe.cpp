@@ -345,6 +345,22 @@ int main(int argc, char** argv) {
             ccd->narrow_phase(warm_toi, warm_vf, warm_ee, SCCD_MAX_DEPTH, SCCD_TOL);
         }
 
+        // SCCD_BENCH_PREP_WARMUP=1, as in sccd_bench: build the structure once,
+        // untimed, at every level, so the timed prep finds its buffers already
+        // touched, as a simulation that keeps one CCD does. This study makes a
+        // CCD per level, so without it every level after the first times the
+        // first touch of its buffers, which grows with the level: on a GH200's
+        // Grace the prep took 360 instead of 183 ms at 23.6 million elements and
+        // about 1,550 instead of 809 ms at 94.4 million. Off by default, so
+        // earlier measurements keep their meaning.
+        static const bool prep_warmup = [] {
+            const char* s = getenv("SCCD_BENCH_PREP_WARMUP");
+            return s != nullptr && s[0] != '\0' && s[0] != '0';
+        }();
+        if (prep_warmup && level != first_level) {
+            ccd->broad_phase_prep(points0, points1);
+        }
+
         // Broken out rather than timed as one call: the prep (the swept boxes
         // and the grid built over them) scales with elements, while the two
         // queries scale with how much those boxes overlap. Those are different

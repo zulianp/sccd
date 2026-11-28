@@ -3,8 +3,10 @@
 
 #include "sccd_base.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstdio>
+#include <mutex>
 
 #include "sccd_gpu_runtime.h"
 
@@ -43,6 +45,32 @@ static_assert(__AMDGCN_WAVEFRONT_SIZE == SCCD_WARP_SIZE,
 
 namespace sccd {
     namespace device {
+
+        /**
+         * \brief The current device's properties, queried once per device and cached.
+         *
+         * cudaGetDeviceProperties fills in every attribute and is slow: on a GH200
+         * (driver 13.2, runtime 12.6) it takes 1.72 ms per call. The narrow phase
+         * used to call it on every call, which was most of the ~2 ms the device
+         * path paid per step on small steps. The properties of a device do not
+         * change during a process, so the first call pays and every later call
+         * reads the cache.
+         */
+        inline const cudaDeviceProp& device_properties() {
+            constexpr int kMaxDevices = 64;
+            static std::array<std::once_flag, kMaxDevices> once;
+            static std::array<cudaDeviceProp, kMaxDevices> props{};
+            int dev = 0;
+            cudaGetDevice(&dev);
+            if (dev < 0 || dev >= kMaxDevices) {
+                // More devices than the cache holds: answer correctly, uncached.
+                thread_local cudaDeviceProp uncached{};
+                cudaGetDeviceProperties(&uncached, dev);
+                return uncached;
+            }
+            std::call_once(once[dev], [dev] { cudaGetDeviceProperties(&props[dev], dev); });
+            return props[dev];
+        }
 
         // One bit per lane of a warp.
 #if defined(SCCD_ENABLE_HIP)
